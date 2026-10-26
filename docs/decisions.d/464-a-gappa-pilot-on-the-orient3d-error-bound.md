@@ -15154,3 +15154,677 @@ And what is not a row: the zero branches (Q2801, Q2825), the products below
 normal (Q2802) and the route through `From<na::Isometry3<f64>>` (Q2803), which
 these scripts share with `point.g` and `vector.g`; and Q2700, which moves these
 scripts into `proofs/gappa/` with the rest of 464's.
+
+### 464.22 EVALUATION_ROUNDOFF's one stage
+
+Q2692 proved `EVALUATION_ROUNDOFF`'s one-stage recurrence in Gappa on
+2026-10-26 at `812503ed`. One coordinate of one de Boor stage, as `de_boor`
+and `blended` compute it in `f64`, is within `(1 + 9u)·E + 9u·M` of the stage
+worked without rounding on the true running values. That holds for every `E`
+from 0 to `2⁻⁴⁰ M` and for each of the three things the computed coefficient
+can be (2). Gappa's count of the `M` part is `8.5u`, so the doc's `9u` holds
+with `0.5u` to spare, but by another split than the doc's (3, 4). Coq checks
+five of the six scripts, modulo their hints, and `stage_e0_1.g` is proved by
+Gappa and not checked by Coq (7). The sum over fifteen stages is not here: it
+stays Lean's (464.9).
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, unchanged, against `de_boor.rs` and `knot_vector.rs` at
+`812503ed`. `u` is `2⁻⁵³`.
+
+**1. What the proof guards.** `EVALUATION_ROUNDOFF` (`de_boor.rs:29-114`)
+bounds how far each homogeneous coordinate of one de Boor pass lands from the
+true one, as a fraction of `M`, the largest control coordinate the evaluation
+touches. Its doc gets there from a recurrence for one stage, `E_r ≤
+E_{r−1}·(1 + 9u) + 9u·M` (`de_boor.rs:41-64`), and that recurrence is what
+this proves. One stage is `de_boor`'s inner loop (`de_boor.rs:216-227`): the
+coefficient `share` at line 225, then `blended` at 226, which is `rest·before
++ share·after` on each coordinate (`de_boor.rs:594-596`). `Coefficient for
+f64` (`de_boor.rs:141-157`) is plain `f64` arithmetic, so one coordinate of a
+stage rounds seven times: the two subtractions, the divide, `1 − share`, the
+two products and the sum.
+
+**2. The scripts, and how they are cut.** In the scripts `t0` and `t1` are the
+true running values, `d0` and `d1` the computed ones, `A` the true coefficient
+`(at − below) / (above − below)`, and `Ex = (1 − A)·t0 + A·t1` the stage
+worked without rounding. `out − Ex` is exactly `XE + XM`, with `XE = rest·(d0
+− t0) + share·(d1 − t1)` the incoming errors carried through, and `XM = (out −
+S) + (P0 − z0) + (P1 − z1) + (rest − (1 − share))·t0 + (share − A)·(t1 − t0)`
+what this stage rounds. That is an identity of real numbers, checked by hand.
+
+`E` is cut in two:
+
+- `stage.g` takes `E / M` in `[2⁻⁶⁰, 2⁻⁴⁰]` and proves `|out − Ex| ≤ (1 +
+  9u)·E + 9u·M`.
+- `stage_e0.g` takes each incoming error within `2⁻⁶⁰ M` and proves `|out −
+  Ex| ≤ 9u·M`, which is at most `(1 + 9u)·E + 9u·M` for every `E ≥ 0`. Stage
+  1 starts from the control points themselves, `E = 0`, and is one of these.
+
+No stage gets past `2⁻⁴⁰ M`: while the stages before it hold the recurrence,
+`E_{r−1} ≤ EVALUATION_ROUNDOFF · M = 1.4988e-14 M`, which is `2⁻⁴⁵·⁹² M`. The
+cut is needed. `r_stage_e_from_0.g`, `stage.g` with `E / M` from 0, leaves
+`XE / V` and `XE / cE` unproved and fails with best `±1.61714e+631`.
+
+`share` is cut in three. `0 ≤ at − below ≤ above − below`, and rounding keeps
+order, so the computed `share` is an `f64` in `[0, 1]`: 0, or in `[2⁻¹⁰⁷⁴, 1
+− 2⁻⁵³]`, or 1. The two main scripts take the middle range, and `controls.py`
+(8) writes the edges from them: `stage_0.g`, `stage_1.g`, `stage_e0_0.g` and
+`stage_e0_1.g`, with `share` at `[0, 0]` and at `[1, 1]`. The cut is needed
+too. `r_e0_whole.g`, `stage_e0.g` with `share` over all of `[0, 1]`, fails with
+best `±1.0005e-15`, `9.01u`, in 51.41 s.
+
+The hints. `(out − Ex) / D`, with `D = cE + cM`, `cE = (1 + 9u)·E` and `cM =
+9u·M`, is the average of `XE / cE` and `XM / cM` weighted by `cE` and `cM`, so
+it is within one when both are. `XE / cE` goes through `XE / V`, the average
+of the two incoming errors over twice their weights, `cR = 2·rest·E` and `cS =
+2·share·E`, which Gappa bounds by `0.5`. `r_stage_plain.g`, averaging over the
+weights themselves, bounds `XE / V` by `1.5` and fails with best
+`±1.10213e+619`; why it is `1.5` was not traced. `XM / cM` is `XMM / 9u`, with
+`XMM` the five shares of `XM` per unit of `M`, and each rounding is taken
+relative to what it rounds. `$ share in (0.5)` splits where `1 − share` starts
+to be exact, by Sterbenz's lemma, and `z0`, `z1` and `S` split at `±2⁻¹⁰²²`,
+below which their rounding is absolute. The edges need no average: with
+`share` at 0 or 1 one incoming error has no weight, and `controls.py` puts one
+hint in place of the eight.
+
+**3. The shares.** `stage.g`'s, as it printed them, over the middle range of
+`share`:
+
+- `share − A` within `±2.77556e-16`, `2.5u`;
+- `rest − (1 − share)` within `±5.55112e-17`, `0.5u`;
+- `(out − S) / M` within `±1.66533e-16`, `1.5u`, and `(P0 − z0) / M` and `(P1
+  − z1) / M` within `±1.11022e-16`, `u`, each;
+- `XMM` within `±9.4369e-16`, `8.500000000002274u`, and so `XM / cM` within
+  `±0.944444`, `8.5 / 9`;
+- `XE / V` within `±0.5`, and `XE / cE` within `±1`.
+
+`stage_e0.g` prints the same shares, with `XMM` within `±9.4369e-16`, exactly
+`8.5u`. A probe with its goal left open, and `c_e0_8375.g`'s best, both print
+`±9.44991e-16`, `8.51171875u`, and `r_e0_85.g` proves the goal at `8.5u`.
+
+At the edges, at `share = 0` `share − A` is in `[−2.47033e-324, 0]`, the two
+products are exact, and `XMM` is within `±1.11022e-16`, `u`, so `XM / cM` is
+within `±0.111111`. At `share = 1` `share − A` is in `[0, 3.33067e-16]`, `3u`,
+`XMM` within `±7.77156e-16`, `7u`, and `XM / cM` within `±0.777778`. In both
+`rest − (1 − share)` is 0, and `stage_e0_0.g` and `stage_e0_1.g` give the same
+`XMM` as `stage_0.g` and `stage_1.g`.
+
+**4. What the doc counts differently.** The doc (`de_boor.rs:48-64`) charges
+`4u` for `b = 1 − a`, `3u` for `a`, and `2u` for the two products and the sum,
+`9u` in all. None of its terms is shown wrong. It is a first-order count, and
+it says so (`de_boor.rs:70-77`): its `18225u²` pays for "the second-order terms
+dropped from the per-stage argument above". Gappa's count, which drops
+nothing, splits the `8.5u` another way:
+
+- `share − A` is `2.5u` over the middle range. By hand, the divide rounds a
+  quotient below one by at most `0.5u`, and the two subtractions cost about
+  `2u·A`. At `share = 1` it is `3u`, the doc's figure.
+- The two coefficient errors are one error. `rest`'s is `share`'s with its
+  sign turned, plus `rest`'s own rounding, so together they enter as `(share −
+  A)·(t1 − t0) + (rest − (1 − share))·t0`. On `|t1 − t0| ≤ 2M` the first is
+  `5u`, where the doc has `7u`. The second is 0 above `share = 1/2`, where `1 −
+  share` is exact, and `0.5u` below it, where the doc charges `u`.
+- The two products and the sum are `u`, `u` and `1.5u`, `3.5u`, each rounding
+  bounded on its own. The doc takes the three together, at `2u`, and these
+  scripts do not check that.
+
+Above `share = 1/2` that is `5u + 0 + 3.5u = 8.5u`. Below it, the shares as
+printed, each over the whole middle range, add to `9u`, and `XMM`, Gappa's
+bound on their sum, is still `8.5u`.
+
+**5. The hypotheses.** Each script's, in its order:
+
+- `at`, `below` and `above` are `f64` values, at most `2¹⁰²⁴` in magnitude.
+- `above − below` is in `[2⁻¹⁰⁷⁴, 2¹⁰²⁴]`: positive by the assert at
+  `de_boor.rs:220`, and in range because `KnotVector::new` refuses a knot
+  vector whose first and last knots cannot be subtracted, and every difference
+  the recursion forms sits between those two (precondition 3,
+  `de_boor.rs:95-102`).
+- `A` is in `[0, 1]`: `span_containing` (`knot_vector.rs:193`) gives a span
+  with `knots[span] ≤ parameter ≤ knots[span + 1]`, and `below` and `above`
+  sit on either side of it (`de_boor.rs:190-199`).
+- `share` is in the middle range, or at 0 or 1 in the edges, as 2 says.
+- `M` is in `[2⁻¹⁰²², 2¹⁰²⁴]`, normal by precondition 1 (`de_boor.rs:90-93`).
+- `|t0|` and `|t1|` are at most `M`, since the true running values are
+  averages, with weights in `[0, 1]` that sum to one, of control coordinates
+  at most `M` in magnitude.
+- In `stage.g`, `E / M` is in `[2⁻⁶⁰, 2⁻⁴⁰]` and each incoming error is at
+  most `E`; in `stage_e0.g`, each incoming error is at most `2⁻⁶⁰ M`.
+
+Gappa uses neither `A in [0, 1]` nor the knots' difference. `r_stage_noa.g`
+and `r_stage_noknots.g`, `stage.g` with each dropped, prove, with `share − A`
+within `±2.77556e-16` as before. Both are needed all the same, by hand: `A`'s
+range for `share`'s in 2, and the difference for the divisor `−(below) +
+(above)`, which `stage.out` takes to be nonzero 4 times (7). Overflow of the
+running values is not modelled: Gappa's `float<ieee_64, ne>` has no largest
+number.
+
+**6. The controls.** Each changes one thing and exits 1. A goal just under
+what the script reaches shows its hypotheses do not contradict each other,
+and a hypothesis dropped or widened shows the proof needs it.
+
+- `c_stage_85.g`, `stage.g` with `cM` at `8.5u`: best `±7.12221e+615`. `XMM`
+  reaches `8.500000000002274u`, so `XM / cM` comes out `2.7e-13` over one.
+- `c_stage_m.g`, `M` allowed below the normals: best `±1.00984e+631`.
+- `c_stage_noe.g`, without `E / M`'s range: best `[-inf, inf]`, with `(out −
+  S) / M`, `(P0 − z0) / M`, `(P1 − z1) / M`, `XMM`, `XE / V`, `XE / cE` and
+  `XM / cM` unproved.
+- `c_stage_noshare.g`, without `share`'s range: best `±1.10289e+619`.
+- `c_stage_not.g`, without `|t0|` and `|t1|` at most `M`: best `[-inf, inf]`,
+  with the three roundings, `XMM` and `XM / cM` unproved.
+- `c_stage_nod.g`, without the incoming errors at most `E`: best `[-inf,
+  inf]`, with the same seven unproved as `c_stage_noe.g`.
+- `c_e0_8375.g`, `stage_e0.g` with its goal at `8.375u`: best `±9.44991e-16`,
+  `8.51171875u`.
+- `c_e0_m.g`, `M` allowed below the normals: best `[-1, 1]`, in 37.26 s.
+- `c_e0_nod.g`, without the incoming errors at most `2⁻⁶⁰ M`: best `[-inf,
+  inf]`, with the three roundings and `XMM` unproved.
+
+Runs, and not controls: `r_stage_noa.g` and `r_stage_noknots.g` (5) and
+`r_e0_85.g`, `stage_e0.g` with its goal at `8.5u`, prove; `r_stage_e_from_0.g`,
+`r_stage_plain.g` and `r_e0_whole.g` fail, as 2 says. A probe tried
+`stage_e0.g`'s goal at `8u`, `8.25u` and `8.375u` before the controls were
+written, and each failed.
+
+**7. Coq checks five of the six, modulo their hints.** `gappa -Bcoq` and
+`coqc`, through `one.sh`, exit 0 on `stage.g`, `stage_0.g`, `stage_1.g`,
+`stage_e0.g` and `stage_e0_0.g`. On the last run of `all.sh` (8) their `.v`
+files came to 4529 lines with 21 hints, 2572 with 14, 2479 with 14, 1825 with
+9 and 1388 with 9, and `coqc` printed nothing.
+
+`stage_e0_1.g`, the small-`E` script at `share = 1`, proves, and `coqc`
+refuses its `.v`. `one.sh` printed `stage_e0_1 coq -Bcoq exit 0 coqc exit 1
+1.15s lines 1543 hints 9`, and `coqc` said:
+
+```text
+File "./stage_e0_1.v", line 468, characters 29-30:
+Error: Cannot interpret this number as a value of type positive
+```
+
+Line 468 is `Definition p49 := FLT _rest (0). (* FLT(rest, 0) *)`. `FLT(rest,
+0)` says `rest` needs no bits, which holds since `rest` is exactly 0 there, and
+characters 29-30 are that `0`, which Coq will not read as a `positive`.
+`p_e0_1_inline.g`, with `rest` written in place, gave the same error at its
+line 468, at `FLT r7 (0)`, and printed `p_e0_1_inline coq -Bcoq exit 0 coqc
+exit 1 0.79s lines 1543 hints 9`; it is not appended. `stage_1.g` has `rest`
+exactly 0 too, and its `.v` passes; why was not looked for. So that edge is
+proved by Gappa and not checked by Coq. The fault is in what `-Bcoq` writes,
+not in the kernel, and a row in 9 asks for the check.
+
+As in 464.21's 7, each hint enters the `.v` as a hypothesis with no
+condition, so a proof stands on its hints and on the divisors Gappa took to be
+nonzero. `grep -c 'assumed to be nonzero'` counts 46 in `stage.out`, 41 in
+each of `stage_0.out` and `stage_1.out`, and 33 in each of `stage_e0.out`,
+`stage_e0_0.out` and `stage_e0_1.out`. `stage.out`'s, by divisor: `M` 26, `E`
+4, `−(below) + (above)` 4, `V` 3, `D` 2, and once each `cR`, `cS`, `(1 +
+9u)·E`, `9·M`, `z0`, `z1` and `S`, which Gappa writes `2 * (rest) * (E)`,
+`9007199254741001 * (E)`, `(d0) * (rest)` and `(P1) + (P0)` and so on. Each is
+positive under the hypotheses but `z0`, `z1` and `S`. Those three come from
+the hints `(P0 − z0) / M -> ((P0 − z0) / z0) * (z0 / M)` and its two twins,
+which `stage.v:165-179` holds as `Hypothesis a14 : r101 = r108.`, `a15` and
+`a16`. Where `z0` is 0, `P0 = rnd(0) = 0`, and both sides are 0 whatever `x /
+0` is taken to be; the same holds for `z1` and for `S`. No `.out` says "no
+need" or "trivially". The controls and runs ran without `-Bcoq`.
+
+**8. The scripts, whole, as they ran.** To run them again, save `stage.g`,
+`stage_e0.g`, `controls.py` and `all.sh` in one directory with 464.13's
+`one.sh`, and run `bash all.sh` there. `controls.py` writes the four edges,
+the controls of 6 and the runs from the two scripts. The longest run,
+`r_e0_whole.g`, took 51.41 s, as `all.sh`'s print shows. `same.py` is a check,
+and `all.sh` does not need it.
+
+`stage.g`:
+
+```gappa
+# restates: crates/rcad-geom/src/de_boor.rs EVALUATION_ROUNDOFF at 812503ed
+# restates: crates/rcad-geom/src/de_boor.rs de_boor at 812503ed
+# restates: crates/rcad-geom/src/de_boor.rs blended at 812503ed
+# One coordinate of one de Boor stage as de_boor and blended compute it in
+# f64: share = (at - below) / (above - below), rest = 1 - share, and
+# out = rest * d0 + share * d1, each step rounded once. d0 and d1 are the
+# computed running values, each within E of the true ones t0 and t1, and M is
+# at least |t0| and |t1|. This proves the doc's recurrence,
+# |out - Ex| <= (1 + 9u) E + 9u M, for E from 2^-60 M to 2^-40 M and share as
+# the hypotheses have it: strictly between 0 and 1 here, and at 0 and at 1 in
+# the two scripts controls.py writes from this one. stage_e0.g takes E below
+# 2^-60 M.
+@rnd = float<ieee_64, ne>;
+
+at = rnd(at_); below = rnd(below_); above = rnd(above_);
+d0 = rnd(d0_); d1 = rnd(d1_);
+
+num = rnd(at - below);
+den = rnd(above - below);
+share = rnd(num / den);
+rest = rnd(1 - share);
+z0 = rest * d0; z1 = share * d1;
+P0 = rnd(z0); P1 = rnd(z1);
+S = P0 + P1;
+out = rnd(S);
+
+# The stage worked without rounding, on the true running values.
+A = (at - below) / (above - below);
+Ex = (1 - A) * t0 + A * t1;
+
+# out - Ex is XE + XM: XE carries the incoming errors through, and XM is what
+# this stage rounds, XMM per unit of M. The bound is cE + cM.
+XE = rest * (d0 - t0) + share * (d1 - t1);
+cR = 2 * rest * E; cS = 2 * share * E;
+V = cR + cS;
+XM = (out - S) + (P0 - z0) + (P1 - z1) + (rest - (1 - share)) * t0 + (share - A) * (t1 - t0);
+XMM = (out - S) / M + (P0 - z0) / M + (P1 - z1) / M
+    + (rest - (1 - share)) * (t0 / M) + (share - A) * (t1 / M - t0 / M);
+cE = (1 + 9b-53) * E;
+cM = 9b-53 * M;
+D = cE + cM;
+
+{
+     |at| <= 1b1024 /\ |below| <= 1b1024 /\ |above| <= 1b1024
+  /\ above - below in [1b-1074, 1b1024]
+  /\ A in [0, 1]
+  /\ share in [1b-1074, 9007199254740991b-53]
+  /\ M in [1b-1022, 1b1024]
+  /\ t0 / M in [-1, 1] /\ t1 / M in [-1, 1]
+  /\ E / M in [1b-60, 1b-40]
+  /\ (d0 - t0) / E in [-1, 1] /\ (d1 - t1) / E in [-1, 1]
+->
+  share - A in ? /\ rest - (1 - share) in ? /\ XE / V in ? /\ XMM in ?
+  /\ (out - S) / M in ? /\ (P0 - z0) / M in ? /\ (P1 - z1) / M in ?
+  /\ XE / cE in ? /\ XM / cM in ?
+  /\ (out - Ex) / D in [-1, 1]
+}
+
+# (out - Ex) / D is the average of XE / cE and XM / cM, weighted by cE and cM.
+(out - Ex) / D -> ((D + (out - Ex)) - D) / D;
+D + (out - Ex) -> (cE + XE) + (cM + XM);
+(cE + XE) - cE -> XE;
+(cM + XM) - cM -> XM;
+
+# XE / cE through the average of the two incoming errors, over twice their
+# weights. Over the weights themselves, as r_stage_plain.g has it, Gappa
+# bounds XE / V by 1.5 and not by 1.
+XE / cE -> (XE / V) * (2 * (rest + share) / (1 + 9b-53));
+rest + share -> 1 + (rest - (1 - share));
+XE / V -> ((V + XE) - V) / V;
+V + XE -> (cR + rest * (d0 - t0)) + (cS + share * (d1 - t1));
+(cR + rest * (d0 - t0)) - cR -> rest * (d0 - t0);
+(cS + share * (d1 - t1)) - cS -> share * (d1 - t1);
+rest * (d0 - t0) / cR -> ((d0 - t0) / E) / 2;
+share * (d1 - t1) / cS -> ((d1 - t1) / E) / 2;
+
+# XM a share at a time, each rounding relative to what it rounds and that
+# per unit of M.
+XM / cM -> XMM / 9b-53;
+(P0 - z0) / M -> ((P0 - z0) / z0) * (z0 / M);
+(P1 - z1) / M -> ((P1 - z1) / z1) * (z1 / M);
+(out - S) / M -> ((out - S) / S) * (S / M);
+z0 / M -> rest * (d0 / M);
+z1 / M -> share * (d1 / M);
+d0 / M -> t0 / M + ((d0 - t0) / E) * (E / M);
+d1 / M -> t1 / M + ((d1 - t1) / E) * (E / M);
+S / M -> (P0 - z0) / M + (P1 - z1) / M + z0 / M + z1 / M;
+
+# Where 1 - share starts to be exact.
+$ share in (0.5);
+# Where each product and the sum leaves the normal range, below which its
+# rounding is absolute.
+$ z0 in (-1b-1022, 1b-1022);
+$ z1 in (-1b-1022, 1b-1022);
+$ S in (-1b-1022, 1b-1022);
+```
+
+`stage_e0.g`, the incoming errors within `2⁻⁶⁰ M`, stage 1's `E = 0` among
+them:
+
+```gappa
+# restates: crates/rcad-geom/src/de_boor.rs EVALUATION_ROUNDOFF at 812503ed
+# restates: crates/rcad-geom/src/de_boor.rs de_boor at 812503ed
+# restates: crates/rcad-geom/src/de_boor.rs blended at 812503ed
+# stage.g's stage with the computed running values within 2^-60 M of the
+# true ones, stage 1's exact control points among them: |out - Ex| <= 9u M,
+# which is at most (1 + 9u) E + 9u M for every E >= 0. share is as the
+# hypotheses have it: strictly between 0 and 1 here, and at 0 and at 1 in the
+# two scripts controls.py writes from this one.
+@rnd = float<ieee_64, ne>;
+
+at = rnd(at_); below = rnd(below_); above = rnd(above_);
+d0 = rnd(d0_); d1 = rnd(d1_);
+
+num = rnd(at - below);
+den = rnd(above - below);
+share = rnd(num / den);
+rest = rnd(1 - share);
+z0 = rest * d0; z1 = share * d1;
+P0 = rnd(z0); P1 = rnd(z1);
+S = P0 + P1;
+out = rnd(S);
+
+A = (at - below) / (above - below);
+Ex = (1 - A) * t0 + A * t1;
+
+XMM = (out - S) / M + (P0 - z0) / M + (P1 - z1) / M
+    + (rest - (1 - share)) * (t0 / M) + (share - A) * (t1 / M - t0 / M);
+
+{
+     |at| <= 1b1024 /\ |below| <= 1b1024 /\ |above| <= 1b1024
+  /\ above - below in [1b-1074, 1b1024]
+  /\ A in [0, 1]
+  /\ share in [1b-1074, 9007199254740991b-53]
+  /\ M in [1b-1022, 1b1024]
+  /\ t0 / M in [-1, 1] /\ t1 / M in [-1, 1]
+  /\ (d0 - t0) / M in [-1b-60, 1b-60] /\ (d1 - t1) / M in [-1b-60, 1b-60]
+->
+  share - A in ? /\ rest - (1 - share) in ? /\ XMM in ?
+  /\ (out - S) / M in ? /\ (P0 - z0) / M in ? /\ (P1 - z1) / M in ?
+  /\ (out - Ex) / M in [-9b-53, 9b-53]
+}
+
+# (out - Ex) / M is XMM, what this stage rounds per unit of M, plus the
+# incoming errors carried through. XMM is bounded as in stage.g.
+(out - Ex) / M -> XMM + rest * ((d0 - t0) / M) + share * ((d1 - t1) / M);
+(P0 - z0) / M -> ((P0 - z0) / z0) * (z0 / M);
+(P1 - z1) / M -> ((P1 - z1) / z1) * (z1 / M);
+(out - S) / M -> ((out - S) / S) * (S / M);
+z0 / M -> rest * (d0 / M);
+z1 / M -> share * (d1 / M);
+d0 / M -> t0 / M + (d0 - t0) / M;
+d1 / M -> t1 / M + (d1 - t1) / M;
+S / M -> (P0 - z0) / M + (P1 - z1) / M + z0 / M + z1 / M;
+
+# Where 1 - share starts to be exact.
+$ share in (0.5);
+# Where each product and the sum leaves the normal range, below which its
+# rounding is absolute.
+$ z0 in (-1b-1022, 1b-1022);
+$ z1 in (-1b-1022, 1b-1022);
+$ S in (-1b-1022, 1b-1022);
+```
+
+`controls.py`, which writes the four edges, the controls of 6 and the runs:
+
+```python
+"""Write stage.g's and stage_e0.g's two share edges, their controls, and the
+runs that show what the scripts do not use and why they are cut as they are.
+An edge takes share at 0 or at 1, the two values the f64 divide can give
+outside the range the main scripts take. Each control changes one thing: a
+smaller bound, to see whether the script proved its goal from hypotheses that
+contradict each other; or a hypothesis dropped or weakened, to see whether the
+proof needs it."""
+
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+def write(name, src):
+    open(name, "w").write(src)
+
+
+SHARE = "  /\\ share in [1b-1074, 9007199254740991b-53]\n"
+SPLIT = "# Where 1 - share starts to be exact.\n$ share in (0.5);\n"
+
+stage = open("stage.g").read()
+small = open("stage_e0.g").read()
+
+# The edges. With share at 0 or at 1, one of the two incoming errors has no
+# weight, so XE / cE needs no average, and there is no half to split at.
+AVERAGE = stage[stage.index("# XE / cE through the average"):stage.index("# XM a share at a time")]
+DIRECT = ("# share is 0 or 1, so XE / cE needs no average.\n"
+          "XE / cE -> (rest * ((d0 - t0) / E) + share * ((d1 - t1) / E)) / (1 + 9b-53);\n\n")
+for name, at in (("stage_0.g", "[0, 0]"), ("stage_1.g", "[1, 1]")):
+    text = sub(stage, SHARE, "  /\\ share in " + at + "\n")
+    text = sub(text, AVERAGE, DIRECT)
+    text = sub(text, " /\\ XE / V in ?", "")
+    write(name, sub(text, SPLIT, ""))
+for name, at in (("stage_e0_0.g", "[0, 0]"), ("stage_e0_1.g", "[1, 1]")):
+    text = sub(small, SHARE, "  /\\ share in " + at + "\n")
+    write(name, sub(text, SPLIT, ""))
+
+# 8.5u for the M part, below the 8.5u and a hair XMM reaches.
+text = sub(stage, "cM = 9b-53 * M;", "cM = 17b-54 * M;")
+write("c_stage_85.g", sub(text, "XM / cM -> XMM / 9b-53;", "XM / cM -> XMM / 17b-54;"))
+# M allowed below the normal range.
+write("c_stage_m.g", sub(stage, "/\\ M in [1b-1022, 1b1024]", "/\\ M in [1b-1074, 1b1024]"))
+# Without the incoming error's size against M.
+write("c_stage_noe.g", sub(stage, "  /\\ E / M in [1b-60, 1b-40]\n", ""))
+# Without share's range: what the case split gives.
+write("c_stage_noshare.g", sub(stage, SHARE, ""))
+# Without M at least the true running values.
+write("c_stage_not.g", sub(stage, "  /\\ t0 / M in [-1, 1] /\\ t1 / M in [-1, 1]\n", ""))
+# Without the incoming errors at most E.
+write("c_stage_nod.g", sub(stage, "  /\\ (d0 - t0) / E in [-1, 1] /\\ (d1 - t1) / E in [-1, 1]\n", ""))
+E0_GOAL = "/\\ (out - Ex) / M in [-9b-53, 9b-53]"
+# 8.375u for the small-E case, below the 8.5u it proves.
+write("c_e0_8375.g", sub(small, E0_GOAL, "/\\ (out - Ex) / M in [-67b-57, 67b-57]"))
+# M allowed below the normal range.
+write("c_e0_m.g", sub(small, "/\\ M in [1b-1022, 1b1024]", "/\\ M in [1b-1074, 1b1024]"))
+# Without the incoming errors at most 2^-60 M.
+write("c_e0_nod.g", sub(small, "  /\\ (d0 - t0) / M in [-1b-60, 1b-60] /\\ (d1 - t1) / M in [-1b-60, 1b-60]\n",
+                        ""))
+
+# The runs. Without the parameter between the two knots, and without the
+# knots' difference positive and in range: neither is used by Gappa, and both
+# enter by hand.
+write("r_stage_noa.g", sub(stage, "  /\\ A in [0, 1]\n", ""))
+write("r_stage_noknots.g", sub(stage, "  /\\ above - below in [1b-1074, 1b1024]\n", ""))
+# The small-E case at 8.5u, which it reaches.
+write("r_e0_85.g", sub(small, E0_GOAL, "/\\ (out - Ex) / M in [-17b-54, 17b-54]"))
+# stage.g with E allowed to be zero, which is why stage_e0.g exists.
+write("r_stage_e_from_0.g", sub(stage, "/\\ E / M in [1b-60, 1b-40]", "/\\ E / M in [0, 1b-40]"))
+# stage.g averaging over the weights themselves, which is why it takes twice
+# them.
+text = sub(stage, "cR = 2 * rest * E; cS = 2 * share * E;", "cR = rest * E; cS = share * E;")
+text = sub(text, "XE / cE -> (XE / V) * (2 * (rest + share) / (1 + 9b-53));",
+           "XE / cE -> (XE / V) * ((rest + share) / (1 + 9b-53));")
+text = sub(text, "rest * (d0 - t0) / cR -> ((d0 - t0) / E) / 2;", "rest * (d0 - t0) / cR -> (d0 - t0) / E;")
+write("r_stage_plain.g",
+      sub(text, "share * (d1 - t1) / cS -> ((d1 - t1) / E) / 2;", "share * (d1 - t1) / cS -> (d1 - t1) / E;"))
+# stage_e0.g with share over all of [0, 1], which is why share is cut in three.
+write("r_e0_whole.g", sub(small, SHARE, "  /\\ share in [0, 1]\n"))
+```
+
+`all.sh`:
+
+```sh
+#!/bin/bash
+# Write the edges, the controls and the runs, then run every script at once,
+# each through 464.13's one.sh: the two stage scripts and their four edges with
+# coq, and the controls and the runs without.
+cd "$(dirname "$0")"
+python3 controls.py
+for f in stage.g stage_0.g stage_1.g stage_e0.g stage_e0_0.g stage_e0_1.g; do
+  ./one.sh "$f" coq > "${f%.g}.run" 2>&1 &
+done
+for f in c_stage_85.g c_stage_m.g c_stage_noe.g c_stage_noshare.g c_stage_not.g c_stage_nod.g \
+         c_e0_8375.g c_e0_m.g c_e0_nod.g \
+         r_stage_noa.g r_stage_noknots.g r_e0_85.g r_stage_e_from_0.g r_stage_plain.g r_e0_whole.g; do
+  ./one.sh "$f" > "${f%.g}.run" 2>&1 &
+done
+wait
+cat stage.run stage_0.run stage_1.run stage_e0.run stage_e0_0.run stage_e0_1.run \
+    c_stage_85.run c_stage_m.run c_stage_noe.run c_stage_noshare.run c_stage_not.run \
+    c_stage_nod.run c_e0_8375.run c_e0_m.run c_e0_nod.run \
+    r_stage_noa.run r_stage_noknots.run r_e0_85.run r_stage_e_from_0.run r_stage_plain.run \
+    r_e0_whole.run
+```
+
+It printed, on the last run:
+
+```text
+stage exit 0 1.96s
+stage coq -Bcoq exit 0 coqc exit 0 2.91s lines 4529 hints 21
+stage_0 exit 0 0.98s
+stage_0 coq -Bcoq exit 0 coqc exit 0 2.52s lines 2572 hints 14
+stage_1 exit 0 0.96s
+stage_1 coq -Bcoq exit 0 coqc exit 0 2.64s lines 2479 hints 14
+stage_e0 exit 0 0.33s
+stage_e0 coq -Bcoq exit 0 coqc exit 0 1.84s lines 1825 hints 9
+stage_e0_0 exit 0 0.28s
+stage_e0_0 coq -Bcoq exit 0 coqc exit 0 1.50s lines 1388 hints 9
+stage_e0_1 exit 0 0.26s
+stage_e0_1 coq -Bcoq exit 0 coqc exit 1 1.15s lines 1543 hints 9
+c_stage_85 exit 1 3.07s
+c_stage_m exit 1 3.37s
+c_stage_noe exit 1 1.40s
+c_stage_noshare exit 1 2.82s
+c_stage_not exit 1 2.23s
+c_stage_nod exit 1 1.94s
+c_e0_8375 exit 1 3.14s
+c_e0_m exit 1 37.26s
+c_e0_nod exit 1 0.42s
+r_stage_noa exit 0 1.85s
+r_stage_noknots exit 0 1.84s
+r_e0_85 exit 0 0.84s
+r_stage_e_from_0 exit 1 2.88s
+r_stage_plain exit 1 2.93s
+r_e0_whole exit 1 51.41s
+```
+
+`same.py`, a check that what this subsection appends is what ran:
+
+```python
+"""Check that each script 464.22 appends whole is byte for byte the file that
+was run, in q2692/ran/; that one.sh is 464.13's block; that all.log is the
+print 464.22 gives for all.sh; and that controls.py, run again in a fresh
+directory beside the two stage scripts from the appended text, writes the
+scripts that ran.
+Run as: python3 same.py <doc> <q2692/ran dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, ran = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+sec = section(22)
+blocks = FENCED.findall(sec)
+print("code blocks in 464.22:", len(blocks))
+assert len(re.findall(r"^```", sec, re.M)) == 2 * len(blocks)
+
+# Which appended block is which file: by its first lines.
+HEAD = ("# restates: crates/rcad-geom/src/de_boor.rs EVALUATION_ROUNDOFF at 812503ed\n"
+        "# restates: crates/rcad-geom/src/de_boor.rs de_boor at 812503ed\n"
+        "# restates: crates/rcad-geom/src/de_boor.rs blended at 812503ed\n")
+marks = {
+    "stage.g": HEAD + "# One coordinate",
+    "stage_e0.g": HEAD + "# stage.g's stage",
+    "controls.py": '"""Write stage.g\'s and stage_e0.g\'s two share edges',
+    "all.sh": "#!/bin/bash\n# Write the edges, the controls and the runs",
+    "same.py": '"""Check that each script 464.22 appends whole',
+}
+found = {}
+for lang, body in blocks:
+    for name, mark in marks.items():
+        if not body.startswith(mark):
+            continue
+        assert name not in found, name
+        found[name] = body
+for name in marks:
+    if name not in found:
+        print(name, "not appended")
+        continue
+    path = os.path.abspath(__file__) if name == "same.py" else os.path.join(ran, name)
+    print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+
+def block_of(n, first):
+    got = [body for lang, body in FENCED.findall(section(n)) if body.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+def printed(first):
+    got = [body for lang, body in blocks if lang == "text" and body.startswith(first)]
+    assert len(got) == 1, (first, len(got))
+    return got[0]
+
+
+print("one.sh is 464.13's block:", open(os.path.join(ran, "one.sh")).read()
+      == block_of(13, "#!/bin/bash\n# Run one Gappa script under 464.4's pin"))
+print("all.log is what 464.22 gives:",
+      open(os.path.join(ran, "all.log")).read() == printed("stage exit "))
+
+fresh = tempfile.mkdtemp()
+for name in ("stage.g", "stage_e0.g", "controls.py"):
+    open(os.path.join(fresh, name), "w").write(found[name])
+subprocess.run(["python3", "controls.py"], cwd=fresh, check=True)
+written = sorted(f for f in os.listdir(fresh) if f.endswith(".g") and f not in found)
+for name in written:
+    print(name, "written again is the one that ran:",
+          filecmp.cmp(os.path.join(fresh, name), os.path.join(ran, name), shallow=False))
+print(".g files that ran and are neither appended nor written again:",
+      sorted(f for f in os.listdir(ran) if f.endswith(".g") and f not in found and f not in written))
+shutil.rmtree(fresh)
+```
+
+It prints:
+
+```text
+code blocks in 464.22: 8
+stage.g same
+stage_e0.g same
+controls.py same
+all.sh same
+same.py same
+one.sh is 464.13's block: True
+all.log is what 464.22 gives: True
+c_e0_8375.g written again is the one that ran: True
+c_e0_m.g written again is the one that ran: True
+c_e0_nod.g written again is the one that ran: True
+c_stage_85.g written again is the one that ran: True
+c_stage_m.g written again is the one that ran: True
+c_stage_nod.g written again is the one that ran: True
+c_stage_noe.g written again is the one that ran: True
+c_stage_noshare.g written again is the one that ran: True
+c_stage_not.g written again is the one that ran: True
+r_e0_85.g written again is the one that ran: True
+r_e0_whole.g written again is the one that ran: True
+r_stage_e_from_0.g written again is the one that ran: True
+r_stage_noa.g written again is the one that ran: True
+r_stage_noknots.g written again is the one that ran: True
+r_stage_plain.g written again is the one that ran: True
+stage_0.g written again is the one that ran: True
+stage_1.g written again is the one that ran: True
+stage_e0_0.g written again is the one that ran: True
+stage_e0_1.g written again is the one that ran: True
+.g files that ran and are neither appended nor written again: []
+```
+
+**9. What this leaves.** Rows, filed from this write-up when it merges, each
+from Q2692:
+
+- Restate `EVALUATION_ROUNDOFF`'s per-stage count (`de_boor.rs:41-77`)
+  against 3 and 4: `share − A` at `2.5u` over the middle range and `3u` at
+  `share = 1`; the two coefficient errors as one error, `5u` on `|t1 − t0| ≤
+  2M` where the doc has `7u`; `1 − share` exact above one half; the two
+  products and the sum at `3.5u`, bounded one at a time, where the doc takes
+  `2u` for the three together; `8.5u` in all. None of the doc's terms is shown
+  wrong, and the doc's `9u` holds.
+- Check `stage_e0_1.g` in Coq. `gappa -Bcoq` writes `Definition p49 := FLT
+  _rest (0).` at `stage_e0_1.v` line 468, and `coqc` says `Error: Cannot
+  interpret this number as a value of type positive` (7). `stage_1.g` has
+  `rest` exactly 0 too, and its `.v` passes. Find why, and get the edge
+  checked by Coq or record why it cannot be.
+
+And what is not a row: the sum over fifteen stages, which is Q2696's, in Lean
+(464.9); a stage whose running values overflow, which no script here models,
+since Gappa's `float<ieee_64, ne>` has no largest number, and which nobody has
+run, so it has no class (§360.5); and Q2700, which moves these scripts into
+`proofs/gappa/` with the rest of 464's and already waits on Q2692.
