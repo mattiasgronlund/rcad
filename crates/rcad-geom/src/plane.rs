@@ -1004,6 +1004,11 @@ impl Predicate for SideOfAFlatSurfaceThroughAPoint {
         let point = self.point.exact_coordinates()?;
         let [facing, through] = [self.facing, self.through];
 
+        // Not needed for a right sign, as the doc on
+        // `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` says. What this
+        // does is send a product below the normals on to level 2, so that every
+        // sign this level gives rests on the relative argument in that doc and
+        // not on Gappa's case split alone.
         if !(0..3).all(|axis| {
             product_is_normal(facing[axis], point[axis])
                 && product_is_normal(facing[axis], through[axis])
@@ -1085,8 +1090,20 @@ impl Predicate for SideOfAFlatSurfaceThroughAPoint {
 /// `on_floats` hands `decide` a number, not only that one: [`product_is_normal`]
 /// lets a product with a zero factor through, and the floor through the origin
 /// makes five of the six zero, yet the bound holds for any set of zero products
-/// and with any of the fold's sums cancelling to zero. Whether a product below
-/// the normals, which `on_floats` refuses, would break it has not been run.
+/// and with any of the fold's sums cancelling to zero.
+///
+/// The bound holds further down than that, though. Gappa proves it at this
+/// constant, on the sum before `value`'s last rounding, with any of the six
+/// products below the normals, the others normal or zero, and any of the sums
+/// cancelling to zero (`docs/decisions.md` §464.27). A product below the
+/// normals loses at most 2⁻¹⁰⁷⁵ when it rounds, and so does one that rounds to
+/// zero, and a bound that is a normal number, the only kind `decide` compares
+/// against, is 2⁻¹⁰²² or more and puts the permanent above 2⁻⁹⁷². Five such
+/// losses fit in the constant beside the relative part. With no product
+/// normal the bound is not normal, so `decide` does not compare. So
+/// `on_floats` does not need its [`product_is_normal`] checks to give a right
+/// sign. It keeps them so that level 1 answers only where the relative
+/// argument of the first paragraph holds.
 const SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (6.0 + 128.0 * epsilon) * epsilon
