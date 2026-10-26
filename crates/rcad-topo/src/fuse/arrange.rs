@@ -20194,6 +20194,71 @@ mod tests {
         );
     }
 
+    /// The same top, and two places a step up, at `y = 1 + u`, with
+    /// `x − y = u/2` and `3u/2`: `x = 1 + 3u/2` and `1 + 5u/2`, a step apart,
+    /// in boxes that overlap. Neither is the meet of the line's two planes and
+    /// a third, so neither names a plane that cuts the line where it is, and
+    /// nothing before a policy puts them in order, so a certified
+    /// `nodes_along` refuses. The order exists, so the refusal is a gap, and
+    /// no fuse has been shown to reach it (Q2840).
+    #[test]
+    fn two_places_a_step_off_a_line_in_boxes_that_overlap_are_not_put_in_order_before_any_policy() {
+        let step = f64::EPSILON;
+        let (model, cube) = a_cube_of_side_two();
+        let top = the_top_of_a_cube(&model, cube);
+        let line = [0.0, 1.0, 0.0, -1.0];
+        let face = cut_by(&top, &[line]);
+        let mut arrangement = drawn_up_to_its_corners(&face);
+        let along = the_crossing_of_the_cut(&arrangement, line);
+        let flat = arrangement.surface;
+        let a_step_up = Surface::Plane(
+            Plane::from_coefficients([0.0, 1.0, 0.0, -(1.0 + step)]).expect("a plane"),
+        );
+        let mut placed = |x_less_y: f64| {
+            let across = Plane::from_coefficients([1.0, -1.0, 0.0, -x_less_y]).expect("a plane");
+            arrangement.nodes.push(a_node_where_three_planes_meet(
+                [flat, a_step_up, Surface::Plane(across)],
+                along,
+            ));
+            arrangement.nodes.len() - 1
+        };
+        let nearer = placed(0.5 * step);
+        let farther = placed(1.5 * step);
+        let mut log = ProvenanceLog::new();
+        arrangement
+            .work_out_how_each_crossing_runs(&mut log)
+            .expect("every crossing here is a line");
+
+        for (one, other) in [(nearer, farther), (farther, nearer)] {
+            let (by_the_boxes, _) = arrangement
+                .as_the_boxes_say(along, one, other)
+                .expect("boxes along an axis");
+            assert!(
+                matches!(by_the_boxes, Decision::Undecidable { .. }),
+                "the boxes cannot say: {by_the_boxes:?}"
+            );
+            assert_eq!(
+                arrangement.as_the_planes_say(along, one, other),
+                None,
+                "nor can the planes"
+            );
+            let (decided, _) = arrangement
+                .as_proved_before_any_policy(along, one, other)
+                .expect("boxes along an axis");
+            assert!(
+                matches!(decided, Decision::Undecidable { .. }),
+                "nor anything else asked before a policy: {decided:?}"
+            );
+        }
+        for hint in [[nearer, farther], [farther, nearer]] {
+            let refused = arrangement.nodes_along(along, &hint, &Policy::certified(), &mut log);
+            assert!(
+                matches!(refused, Err(crate::Error::Undecidable { .. })),
+                "a certified order refuses: {refused:?}"
+            );
+        }
+    }
+
     /// A node on the crossing `on` where the `three` planes meet, boxed as
     /// `place_the_meets` boxes it.
     fn a_node_where_three_planes_meet(three: [Surface; 3], on: usize) -> Node {
