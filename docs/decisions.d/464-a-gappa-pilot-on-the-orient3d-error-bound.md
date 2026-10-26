@@ -13167,7 +13167,7 @@ Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
 
 **1. What the proof guards.** `NORMAL_LENGTH_ROUNDOFF` (`plane.rs:114-165`)
 is how far `n·n` may sit from one and still be a turned unit normal:
-`has_length_one_to_within_a_turn` (`plane.rs:777-813`) keeps a normal inside
+`has_length_one_to_within_a_turn` (`plane.rs:777-807`) keeps a normal inside
 it, for `Plane::from_point_and_normal_as_written` and `Axis::as_written`, and
 scales one outside it. A moved plane's normal is `Plane::transformed`
 (`plane.rs:544-550`), which is `Isometry::apply_to_vector`
@@ -13254,18 +13254,30 @@ shift, and each `|nᵢ| ≤ 1`. `square.g`'s, in its order:
 - `c_square_nod.g`, without `vector.g`'s bound on `d`: best `[-inf, inf]`.
 
 **7. Coq checks the proof, modulo its hints.** `gappa -Bcoq` and `coqc`,
-through `one.sh`, exit 0 on `vector.g` and `square.g`: `vector.v` came to
-6399 lines with 33 hints and `square.v` to 4595 with 18. As in 464.19's 8,
-each hint enters the Coq file as a hypothesis with no condition, so the
-proof stands on its hints and on the divisors Gappa took to be nonzero: 134
-warnings in `vector.out` and 15 in `square.out`. `vector.out` also says
-there is "no need for the rewriting at line 136", the hint `out - Ex ->
+through `one.sh`, exit 0 on `vector.g` and `square.g`: on the last run of
+`all.sh` (8), `vector.v` came to 6740 lines with 33 hints and `square.v` to
+4398 with 18. The lines are that run's and no other's: `gappa -Bcoq` does not
+write the same file each time. `again.sh` (8) ran `square.g` through
+`one.sh` three times more and got 4394, 4394 and 4405 lines, two different
+files, each with 18 hints and each accepted by `coqc`; the first lane's run
+wrote 6399 and 4595. What Gappa proves does not move with it: every bound 2,
+3 and 6 quote, read off the first lane's run, is what the last run printed
+too.
+
+As in 464.19's 8, each hint enters the Coq file as a hypothesis with no
+condition, so the proof stands on its hints and on the divisors Gappa took to
+be nonzero: 134 warnings that a divisor is "assumed to be nonzero" in
+`vector.out`, as in `vector1.out` and `vector2.out`, and 15 in `square.out`,
+counted on the last run with `grep -c 'assumed to be nonzero'`. None of the
+four says a hint's two sides are "not trivially equal". `vector.out` also
+says there is "no need for the rewriting at line 136", the hint `out - Ex ->
 ((out - Ex) / D) * D`, if `D != 0`. `vector1.g` and `vector2.g` ran without
 `-Bcoq`.
 
-**8. The scripts, whole, as they ran.** To run them again, save these six
-and `one.sh` in one directory and run `bash all.sh` there, which took about
-two and a half minutes.
+**8. The scripts, whole, as they ran.** To run them again, save the first
+six, `vector.g` to `all.sh`, and `one.sh` in one directory and run `bash
+all.sh` there, which took two to two and a half minutes. `again.sh` and
+`same.py`, after them, are checks, and `all.sh` needs neither.
 
 `vector.g`:
 
@@ -13749,26 +13761,180 @@ cat vector.run square.run vector1.run vector2.run c_vector_195.run c_vector_non4
     r_square_14.run r_square_15.run r_square_one.run
 ```
 
-It printed:
+Its last run, the second lane's, saved as `all.log`, printed:
 
 ```text
 vector1.g written, 446 names
 vector2.g written, 446 names
-vector exit 0 32.68s
-vector coq -Bcoq exit 0 coqc exit 0 37.93s lines 6399 hints 33
-square exit 0 13.69s
-square coq -Bcoq exit 0 coqc exit 0 18.21s lines 4595 hints 18
-vector1 exit 0 31.58s
-vector2 exit 0 28.77s
-c_vector_195 exit 1 135.97s
-c_vector_non4 exit 1 128.94s
-c_vector_nonormal exit 1 32.26s
-c_square_119 exit 1 132.76s
-c_square_non4 exit 1 13.67s
-c_square_nod exit 1 12.82s
-r_square_14 exit 0 11.94s
-r_square_15 exit 1 42.56s
-r_square_one exit 0 14.06s
+vector exit 0 13.40s
+vector coq -Bcoq exit 0 coqc exit 0 17.34s lines 6740 hints 33
+square exit 0 4.61s
+square coq -Bcoq exit 0 coqc exit 0 7.35s lines 4398 hints 18
+vector1 exit 0 12.16s
+vector2 exit 0 12.58s
+c_vector_195 exit 1 120.68s
+c_vector_non4 exit 1 110.62s
+c_vector_nonormal exit 1 12.39s
+c_square_119 exit 1 117.55s
+c_square_non4 exit 1 7.10s
+c_square_nod exit 1 4.74s
+r_square_14 exit 0 5.22s
+r_square_15 exit 1 16.08s
+r_square_one exit 0 4.23s
+```
+
+The first lane's run printed the same exits, with `lines 6399` for `vector`
+and `lines 4595` for `square`.
+
+`again.sh`, which runs `square.g` with coq three times more (7):
+
+```sh
+#!/bin/bash
+# Run square.g through one.sh with coq three times, in a directory of its own
+# so that all.sh's square.v stays as it ran, and print a checksum of each
+# square.v beside one.sh's line: the Coq file is not the same from run to run.
+cd "$(dirname "$0")"
+d=$(mktemp -d)
+cp one.sh square.g "$d"
+for i in 1 2 3; do
+  "$d/one.sh" square.g coq | grep coq
+  md5sum < "$d/square.v"
+done
+rm -r "$d"
+```
+
+It printed:
+
+```text
+square coq -Bcoq exit 0 coqc exit 0 7.33s lines 4394 hints 18
+e62ab5f91d1b330a17cf537df845d9dd  -
+square coq -Bcoq exit 0 coqc exit 0 7.26s lines 4394 hints 18
+e62ab5f91d1b330a17cf537df845d9dd  -
+square coq -Bcoq exit 0 coqc exit 0 6.73s lines 4405 hints 18
+e694ba43c4053cf42cf306c0acbd1b02  -
+```
+
+`same.py`, whole:
+
+```python
+"""Check that each script 464.20 appends whole is byte for byte the file that
+was run, in q2690/; that one.sh is 464.13's block; that sos.py, run again,
+prints what 464.20 gives, and that all.log is the print 464.20 gives for
+all.sh; and that controls.py and turn.py, run again in a fresh directory
+beside vector.g and square.g, each from the appended text, write the scripts
+that ran.
+Run as: python3 same.py <doc> <q2690 dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, ran = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+sec = section(20)
+blocks = FENCED.findall(sec)
+print("code blocks in 464.20:", len(blocks))
+assert len(re.findall(r"^```", sec, re.M)) == 2 * len(blocks)
+
+# Which appended block is which file: by its first lines.
+marks = {
+    "vector.g": "# restates: crates/rcad-geom/src/isometry.rs apply_to_vector at 4b642567\n",
+    "square.g": "# restates: crates/rcad-geom/src/plane.rs NORMAL_LENGTH_ROUNDOFF at 4b642567\n",
+    "turn.py": '"""Write vector1.g and vector2.g',
+    "controls.py": '"""Write vector.g\'s and square.g\'s controls',
+    "sos.py": '"""Check, in exact rationals at random points, the two identities',
+    "all.sh": "#!/bin/bash\n# Write the controls and the y and z scripts",
+    "again.sh": "#!/bin/bash\n# Run square.g through one.sh with coq three times",
+    "same.py": '"""Check that each script 464.20 appends whole',
+}
+found = {}
+for lang, body in blocks:
+    for name, mark in marks.items():
+        if not body.startswith(mark):
+            continue
+        assert name not in found, name
+        found[name] = body
+for name in marks:
+    if name not in found:
+        print(name, "not appended")
+        continue
+    path = os.path.abspath(__file__) if name == "same.py" else os.path.join(ran, name)
+    print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+
+def block_of(n, first):
+    got = [body for lang, body in FENCED.findall(section(n)) if body.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+def printed(first):
+    got = [body for lang, body in blocks if lang == "text" and body.startswith(first)]
+    assert len(got) == 1, (first, len(got))
+    return got[0]
+
+
+print("one.sh is 464.13's block:", open(os.path.join(ran, "one.sh")).read()
+      == block_of(13, "#!/bin/bash\n# Run one Gappa script under 464.4's pin"))
+again = subprocess.run(["python3", os.path.join(ran, "sos.py")], capture_output=True, text=True,
+                       check=True).stdout
+print("sos.py run again prints what 464.20 gives:", again == printed("drift identity holds at"))
+print("all.log is what 464.20 gives:",
+      open(os.path.join(ran, "all.log")).read() == printed("vector1.g written"))
+
+fresh = tempfile.mkdtemp()
+for name in ("vector.g", "square.g", "controls.py", "turn.py"):
+    open(os.path.join(fresh, name), "w").write(found[name])
+subprocess.run(["python3", "controls.py"], cwd=fresh, check=True)
+subprocess.run(["python3", "turn.py"], cwd=fresh, check=True, capture_output=True)
+written = sorted(f for f in os.listdir(fresh) if f.endswith(".g") and f not in found)
+for name in written:
+    print(name, "written again is the one that ran:",
+          filecmp.cmp(os.path.join(fresh, name), os.path.join(ran, name), shallow=False))
+print(".g files that ran and are neither appended nor written again:",
+      sorted(f for f in os.listdir(ran) if f.endswith(".g") and f not in found and f not in written))
+shutil.rmtree(fresh)
+```
+
+It prints:
+
+```text
+code blocks in 464.20: 12
+vector.g same
+square.g same
+turn.py same
+controls.py same
+sos.py same
+all.sh same
+again.sh same
+same.py same
+one.sh is 464.13's block: True
+sos.py run again prints what 464.20 gives: True
+all.log is what 464.20 gives: True
+c_square_119.g written again is the one that ran: True
+c_square_nod.g written again is the one that ran: True
+c_square_non4.g written again is the one that ran: True
+c_vector_195.g written again is the one that ran: True
+c_vector_non4.g written again is the one that ran: True
+c_vector_nonormal.g written again is the one that ran: True
+r_square_14.g written again is the one that ran: True
+r_square_15.g written again is the one that ran: True
+r_square_one.g written again is the one that ran: True
+vector1.g written again is the one that ran: True
+vector2.g written again is the one that ran: True
+.g files that ran and are neither appended nor written again: []
 ```
 
 **9. What this leaves.** Rows, filed from this write-up when it merges, each
@@ -13781,13 +13947,15 @@ from Q2690:
   `63.4ε` does not hold it, where Gappa's `59.64ε` does (4).
 - Run `vector.g` and `square.g` in the zero branches: a normal along an axis
   has two components zero, a turn about an axis two of `v`, and a sum may
-  cancel to zero. These are common inputs. Not run, so no class (§360.5).
+  cancel to zero. These are common inputs. Not run, so no class (§360.5). It
+  waits on Q2801, which runs `point.g` there, since `vector.g` is `point.g`
+  with no shift and can follow that run's split.
 - Whether a normal that reaches a turn other than from a constructor stays
   within the bound: one `from_point_and_normal_as_written` kept at up to
   `64ε`, or a plane stored after one turn and turned again. `square.g`
   assumes the constructor's `ε` before the turn. Not run, so no class.
 
 And what is not a row: the hypotheses 464.19 already leaves, the nine
-products below the normals and the route through `From<na::Isometry3<f64>>`,
-which `vector.g` shares with `point.g`; Q2700, which moves these scripts into
-`proofs/gappa/` with 464.19's.
+products below the normals (Q2802) and the route through
+`From<na::Isometry3<f64>>` (Q2803), which `vector.g` shares with `point.g`;
+Q2700, which moves these scripts into `proofs/gappa/` with 464.19's.
