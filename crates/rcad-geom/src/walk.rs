@@ -938,6 +938,10 @@ impl TwoLoopsHeldApartBy {
 /// apex is refused under the cone's name in both halves too, for the reason
 /// `intersect`'s cone-and-ball arm gives.
 ///
+/// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] for two cones
+/// of one slope off one axis that are exactly mirror images and touch, which
+/// `intersect` refuses under that name too, from the same function.
+///
 /// **Two cones on one apex with their axes proved apart are straight lines**,
 /// asked exactly as `intersect` asks it: whatever they share is rulings through
 /// that apex. That holds where `intersect` finds no ruling, or cannot tell the

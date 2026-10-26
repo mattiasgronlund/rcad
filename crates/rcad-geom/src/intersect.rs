@@ -166,7 +166,9 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// apart by a flat surface, where every straight line of one cone is proved to
 /// cross the other twice, once each side of it, or one loop and two branches
 /// that run off for ever, held apart by two flat surfaces (Q2812) — see
-/// [`how_two_cones_off_one_axis_cross`] for which shapes stay refused. Two cones
+/// [`how_two_cones_off_one_axis_cross`] for which shapes stay refused, and why
+/// two cones of one slope that are mirror images and touch are refused as a
+/// crossing that touches itself (Q2813). Two cones
 /// with one apex, one slope and their axes along one line are the same surface
 /// and come back as one, **whichever way each axis points** — see
 /// [`one_cone_either_way_round`].
@@ -183,11 +185,15 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when a crossing comes in two
 /// pieces and no half-space that `f64` can write down provably holds them apart.
 ///
-/// **Nothing is refused for running through itself.** A ball resting on the
-/// far inside of a pipe and a thin pipe resting on the inside of a wider one
-/// are each tangent at a point of the curve they cross in, and each is named as
-/// two loops that meet there, picked out by the two sides of one flat surface
-/// through that point.
+/// A ball resting on the far inside of a pipe and a thin pipe resting on the
+/// inside of a wider one are each tangent at a point of the curve they cross
+/// in, and each is named as two loops that meet there, picked out by the two
+/// sides of one flat surface through that point.
+///
+/// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] for two cones
+/// of one slope off one axis that are exactly mirror images and touch, where
+/// their crossing is two flat cuts that meet. That is the one pair refused for
+/// running through itself.
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a cone against a
 /// second cone that shares neither its axis nor its apex, for a ball whose skin
@@ -5127,7 +5133,9 @@ fn how_far_along_the_axis_the_two_circles_sit(cone: &Cone, pipe: &Cylinder) -> I
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the two share
 /// neither an axis nor an apex and [`how_two_cones_off_one_axis_cross`] proves
-/// their crossing neither two loops nor one loop and two branches.
+/// their crossing neither two loops nor one loop and two branches, and
+/// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] where it finds
+/// them of one slope, mirror images, and touching.
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where two circles are not
 /// held apart by more than the picking half-space's own rounding, and where
@@ -5305,16 +5313,27 @@ pub(crate) struct TwoConesOffOneAxis {
 ///
 /// # Errors
 ///
+/// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] where none of
+/// the four proves the crossing either way round and the two are of one slope,
+/// exactly mirror images across the flat surface halfway between their apexes,
+/// and touch, as [`two_mirror_images_that_touch`] asks. A turn of one about a
+/// line through a point of the other's axis makes such a pair. Their crossing
+/// is two flat cuts of either cone that meet where the two touch, and a touch
+/// is a double root on some line, which none of the four can prove, since each
+/// proves its roots simple.
+///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where none of the
-/// four proves the crossing either way round: two cones whose own directions
-/// overlap with `Y`'s apex inside `X`, or with `d·w` taking both signs, where
-/// each kind of branch may come in two, and every pair the enclosures above
-/// are too loose for. A **gap** where the crossing is two loops, or a loop and
-/// two branches, and the curve is there whatever its shape. Among the pairs
-/// refused are two cones of one slope, one turned about a line through a point
-/// of the other's axis: mirror images, which can touch at two points, as
-/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] says. A touch is a
-/// double root on some line, which `q(0) > 0 > q(t')` rules out.
+/// four proves the crossing either way round otherwise: two cones whose own
+/// directions overlap with `Y`'s apex inside `X`, or with `d·w` taking both
+/// signs, where each kind of branch may come in two, and every pair the
+/// enclosures above are too loose for. A **gap** where the crossing is two
+/// loops, or a loop and two branches, and the curve is there whatever its
+/// shape. Among the pairs refused are mirror images that do not touch, whose
+/// two flat cuts stay apart; two of one slope side by side, which cross in one
+/// curve in the flat surface halfway between them; and a cone turned off
+/// another of its slope whose turned axis was rounded when written or stored,
+/// so that the two are not exactly mirror images, do not touch, and pass close
+/// by each other where the exact pair would touch.
 ///
 /// [`Error::Undecidable`] where a sign asked exactly could not be settled.
 pub(crate) fn how_two_cones_off_one_axis_cross(
@@ -5334,6 +5353,9 @@ pub(crate) fn how_two_cones_off_one_axis_cross(
         )? {
             return Ok(crossing);
         }
+    }
+    if two_mirror_images_that_touch(first, second, &at, policy, log)? {
+        return Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo);
     }
     Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
 }
@@ -5604,6 +5626,149 @@ fn where_every_line_crosses_a_flat_inside(
         + Interval::exactly(2.0) * reach * root_enclosing(squared_length_enclosing(stretched))
         + reach * reach * squared_up;
     (most.hi() < 0.0).then_some(meets)
+}
+
+/// Whether `one` and `other` are mirror images of each other across the flat
+/// surface halfway between their apexes, and touch where they cross.
+///
+/// # Mirror images
+///
+/// Two cones of one slope, on apexes `a` and `b`, are mirror images across
+/// the flat surface `P` halfway between them where the mirror image of
+/// `one`'s axis direction `w` across `P`, `m = N·w − 2(w·n)·n` for
+/// `n = b − a` and `N = n·n`, lies along `other`'s axis direction `v`: where
+/// `‖m × v‖² = 0`, asked exactly. A turn about a line through a point of
+/// `one`'s axis gives such a pair. It is a mirror across the flat surface
+/// holding that line and the axis, which leaves `one` where it was, and then
+/// a mirror across a flat surface through the line, which takes `a` to `b` and
+/// so is `P`.
+///
+/// # Where they touch
+///
+/// Write `Q` for `one`'s form `W|y|² − k(y·w)²` with `y` from `a`, as
+/// [`how_two_cones_off_one_axis_cross`] does. `other`'s form is `Q` read
+/// through the mirror, so the two agree on `P`, and their difference is `P`'s
+/// own linear form times a second one: the crossing is where two flat surfaces
+/// cut `one`, and it runs through itself only where those two cuts meet. A
+/// point `y` of `one` on `P` is such a touch where the two cones' normals are
+/// one direction, which, `other`'s being the mirror image of `one`'s, is where
+/// `∇Q(y)·n = 0`: on the flat surface `y·u = 0` through `a`, for
+/// `u = W·n − k(w·n)·w`. That flat surface cuts `one` in two straight lines
+/// through `a`, in one doubled, or in `a` alone, by the sign of
+/// `s²·W·(u·u) − k(u·w)²`, which works out to `s²·W²·Q(n)`. So the two touch
+/// where those lines cross `P`, which does not hold `a`: at one point or two
+/// where `Q(n) > 0`, that is where `b` is outside `one`; all along the straight
+/// line from `a` to `b` where `Q(n) = 0`, `b` on `one`, since the doubled line
+/// is that one and both cones are tangent to the flat surface along it; and
+/// nowhere where `b` is inside `one`.
+///
+/// **Unless `w·n = 0`**, asked exactly. `u × n` is `−k(w·n)(w × n)`, so with
+/// the axes not on one line the flat surface `y·u = 0` is parallel to `P` just
+/// where `w·n = 0`: two cones side by side, their axes one direction, whose
+/// forms differ by `P`'s alone, so that they cross in one curve in `P` and
+/// touch nowhere. Otherwise at most one of the two lines is parallel to `P`,
+/// since two would both run along `n × u`, so at least one crosses it.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] where a sign asked exactly could not be settled.
+fn two_mirror_images_that_touch(
+    one: &Cone,
+    other: &Cone,
+    at: &[PredicatePoint; 2],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<bool> {
+    if one.slope() != other.slope() {
+        return Ok(false);
+    }
+    match ask(
+        &whether_one_cone_is_the_others_mirror_image(one, other),
+        Measures::ManyLengths { how_many: 4 },
+        at,
+        policy,
+        log,
+    )? {
+        Decision::Zero => (),
+        Decision::Pos => return Ok(false),
+        Decision::Neg | Decision::Undecidable { .. } | _ => {
+            unreachable!("a sum of squares asked through `ask` is never below zero nor undecided")
+        }
+    }
+    match ask(
+        &how_far_along_ones_axis_the_other_apex_is(one, other),
+        Measures::Length,
+        at,
+        policy,
+        log,
+    )? {
+        Decision::Zero => return Ok(false),
+        Decision::Pos | Decision::Neg => (),
+        Decision::Undecidable { .. } | _ => unreachable!("`ask` hands back a sign or an error"),
+    }
+    match ask(
+        &where_a_point_stands_against_a_cone(other.apex(), one),
+        Measures::Area,
+        at,
+        policy,
+        log,
+    )? {
+        Decision::Pos | Decision::Zero => Ok(true),
+        Decision::Neg => Ok(false),
+        Decision::Undecidable { .. } | _ => unreachable!("`ask` hands back a sign or an error"),
+    }
+}
+
+/// `‖m × v‖²` of [`two_mirror_images_that_touch`]: nothing exactly where the
+/// mirror image of `one`'s axis across the flat surface halfway between the
+/// apexes lies along `other`'s, as a question.
+fn whether_one_cone_is_the_others_mirror_image(one: &Cone, other: &Cone) -> impl Predicate {
+    let [here, there] = [one.apex(), other.apex()].map(|apex| apex.coordinates());
+    let up = one.axis().direction().components();
+    let along = other.axis().direction().components();
+    Question {
+        named: WHERE_TWO_CONES_CROSS,
+        enclosing: move || {
+            let apart = gap_enclosing(here, there);
+            let squared = squared_length_enclosing(apart);
+            let leaning = Interval::exactly(2.0) * dot_enclosing(exactly(up), apart);
+            let mirrored: [Interval; 3] = core::array::from_fn(|axis| {
+                squared * Interval::exactly(up[axis]) - leaning * apart[axis]
+            });
+            squared_length_enclosing(cross_enclosing(mirrored, exactly(along)))
+        },
+        exactly: move || {
+            let apart = Exact::gap_between(here, there);
+            let squared = Exact::squared_length_of(&apart)?;
+            let half_leaning = Exact::dot_of_two_exact(&Exact::of_each(up), &apart)?;
+            let leaning = half_leaning.plus(&half_leaning);
+            let mirrored = [0, 1, 2].map(|axis| {
+                Some(
+                    squared
+                        .times(&Exact::of(up[axis]))?
+                        .minus(&leaning.times(&apart[axis])?),
+                )
+            });
+            let [Some(x), Some(y), Some(z)] = mirrored else {
+                return None;
+            };
+            Exact::squared_length_of(&Exact::cross_of(&[x, y, z], along)?)
+        },
+    }
+}
+
+/// `w·n` of [`two_mirror_images_that_touch`]: nothing exactly where the line
+/// between the apexes is square to `one`'s axis, as a question.
+fn how_far_along_ones_axis_the_other_apex_is(one: &Cone, other: &Cone) -> impl Predicate {
+    let [here, there] = [one.apex(), other.apex()].map(|apex| apex.coordinates());
+    let up = one.axis().direction().components();
+    Question {
+        named: WHERE_TWO_CONES_CROSS,
+        enclosing: move || dot_enclosing(exactly(up), gap_enclosing(here, there)),
+        exactly: move || {
+            Exact::dot_of_two_exact(&Exact::of_each(up), &Exact::gap_between(here, there))
+        },
+    }
 }
 
 /// `Q(p − a)` for `cone`'s form `Q`: below zero where `point` is inside the

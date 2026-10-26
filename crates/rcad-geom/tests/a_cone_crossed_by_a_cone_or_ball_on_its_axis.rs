@@ -24,6 +24,10 @@
 //! which crosses the cone in a circle and the apex apart from it. A second cone
 //! of the same slope turned about a line through a point of the first's axis is
 //! more than an overlap: the two are mirror images, and can touch at two points.
+//! Where they do, and the numbers stored are exactly mirror images, the pair is
+//! refused as a crossing that touches itself. Where the turned axis was rounded
+//! they are not mirror images, do not touch, and are refused as any other
+//! overlap is.
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Error, HalfSpaceThroughAPoint, NamedRun, Picker, Point,
@@ -880,63 +884,189 @@ fn where_a_spout_line_meets_the_funnel(
     PredicatePoint::from(std::array::from_fn::<f64, 3, _>(|i| apex[i] + t * d[i]))
 }
 
-/// Two cones of slope one, the second the first turned `atan(15/8)` about the
-/// line along `x` through `(0, 0, 170)`, which puts its apex at `(0, 150, 90)`
-/// and its axis along `(0, -15, 8)`, every number exact.
+/// Two cones of slope one, the first on the origin along `(0, 5, 3)`, the
+/// second the first turned about the line along `x` through `(0, 25, 15)`, a
+/// point of the first's axis, which puts its apex at `(0, 0, 30)` and its axis
+/// along `(0, 5, -3)`.
 ///
 /// **A turn about a line that meets a cone's axis makes a mirror image of
 /// it.** The turn is a mirror across the flat surface holding both lines, which
 /// leaves the cone where it was, and then a mirror across a second flat surface
 /// through the line. So two cones of one slope, one turned so, are mirror
-/// images across the flat surface halfway between their apexes. Their crossing
-/// is where that flat surface cuts either cone and where a second flat surface,
-/// square to the first, cuts it, and the two cuts meet where the cones
-/// **touch**: here `(±68, 51, 85)`, where both pass and their normals are one
-/// direction. The crossing runs through itself at both.
+/// images across the flat surface halfway between their apexes, here `z = 15`.
+/// Their crossing is where that flat surface cuts either cone and where a
+/// second flat surface, square to the first, cuts it, and the two cuts meet
+/// where the cones **touch**: here `(±√136, 8, 15)`, where both pass and both
+/// normals are `34·(x, −17, 0)`. The crossing runs through itself at both.
 ///
-/// The two pointed cones of `rcad-topo`'s `a_funnel_with_a_leaning_spout.rs`
-/// are such a pair, turned `0.3` about a point four up, and touch at
-/// `(±1.5954, 0.1209, 3.2)`, inside both faces. There the turn's `sin` and
-/// `cos` are rounded, so they are no longer exact mirror images, and the two
-/// branches pass about `3e-8` apart instead of through each other.
+/// `Axis::new` stores each axis at length one, rounded, and it rounds these two
+/// alike but for the sign of the last number, so the pair stored is still
+/// exactly mirror images across `z = 15`. This pair turned so that the first's
+/// axis is `z`, and made `√34` times as large, is the second pair of
+/// [`two_cones_whose_turned_axis_is_rounded_are_not_mirror_images_and_are_refused_as_any_overlap_is`],
+/// whose numbers as written are exact but whose second axis is rounded on its
+/// own when stored.
 ///
-/// Their directions overlap, since the turn is less than a right angle, and
-/// the pair is refused as a degree-four curve.
+/// The pair is refused as a crossing that touches itself, by the namer and by
+/// the walker, whichever cone comes first.
 #[test]
 fn two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points() {
-    let upright = ([0, 0, 0], [0, 0, 1]);
-    let turned = ([0, 150, 90], [0, -15, 8]);
-    for x in [68, -68] {
-        let [one, other] = [upright, turned].map(|(apex, along)| {
-            let off: [i64; 3] = std::array::from_fn(|i| [x, 51, 85][i] - apex[i]);
-            let dot = |a: [i64; 3], b: [i64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-            let how_far_along = dot(off, along);
-            assert_eq!(
-                dot(along, along) * dot(off, off),
-                2 * how_far_along * how_far_along,
-                "({x}, 51, 85) is on the cone of slope one about {along:?} from {apex:?}"
-            );
-            std::array::from_fn::<i64, 3, _>(|i| {
-                dot(along, along) * off[i] - 2 * how_far_along * along[i]
-            })
-        });
+    let x_squared = 136;
+    let [one, other] = [([0, 0, 0], [0, 5, 3]), ([0, 0, 30], [0, 5, -3])].map(|(apex, along)| {
+        let off: [i64; 3] = std::array::from_fn(|i| [0, 8, 15][i] - apex[i]);
+        let dot = |a: [i64; 3], b: [i64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let how_far_along = dot(off, along);
         assert_eq!(
-            [
-                one[1] * other[2] - one[2] * other[1],
-                one[2] * other[0] - one[0] * other[2],
-                one[0] * other[1] - one[1] * other[0],
-            ],
-            [0; 3],
-            "the two cones are square to one direction at ({x}, 51, 85): {one:?} and {other:?}"
+            dot(along, along) * (x_squared + dot(off, off)),
+            2 * how_far_along * how_far_along,
+            "(±√136, 8, 15) is on the cone of slope one about {along:?} from {apex:?}"
         );
-    }
+        let normal_with_x_at_nought = std::array::from_fn::<i64, 3, _>(|i| {
+            dot(along, along) * off[i] - 2 * how_far_along * along[i]
+        });
+        (dot(along, along), normal_with_x_at_nought)
+    });
     assert_eq!(
-        named(
-            &the_right_angled_cone(),
-            &a_cone([0.0, 150.0, 90.0], [0.0, -15.0, 8.0], 1.0)
-        ),
+        one, other,
+        "the two cones are square to one direction at (±√136, 8, 15), \
+         since each normal's first number is the first number of the pair times x"
+    );
+    assert_refused_as_touching_itself(
+        &a_cone([0.0; 3], [0.0, 5.0, 3.0], 1.0),
+        &a_cone([0.0, 0.0, 30.0], [0.0, 5.0, -3.0], 1.0),
+    );
+}
+
+/// Two cones of one slope, the second the first turned a quarter about the
+/// line along `x` through `(0, 0, 4)`, which puts its apex at `(0, 4, 4)` and
+/// its axis along `-y`, every number exact: mirror images across the flat
+/// surface `y + z = 4` halfway between their apexes.
+///
+/// **They touch unless each apex is inside the other cone.** Of slope a half,
+/// half-angle `0.46`, the turn is less than `π` less twice that, the apex
+/// `(0, 4, 4)` is outside the upright cone, and the two touch at
+/// `(±√1.92, 0.8, 3.2)`, inside both pointed cones eight high. Of slope one,
+/// half-angle `π/4`, the turn is exactly `π` less twice that, the apex is on
+/// the upright cone, and the two share the straight line through both apexes,
+/// `x = 0, y = z`, and touch all along it, where both normals are along
+/// `(0, 1, −1)`. Of slope two, half-angle `1.11`, the apex is inside it, and
+/// the line along `x` through `(0, 3.2, 0.8)`, the only place they could
+/// touch, stays outside the upright cone, where `x² + y² − 4z²` is
+/// `x² + 7.68`: they cross without touching, and are refused as any other
+/// overlap is.
+#[test]
+fn two_cones_of_one_slope_a_quarter_turn_apart_touch_unless_each_apex_is_inside_the_other() {
+    let upright = |slope| a_cone([0.0; 3], [0.0, 0.0, 1.0], slope);
+    let turned = |slope| a_cone([0.0, 4.0, 4.0], [0.0, -1.0, 0.0], slope);
+    assert_refused_as_touching_itself(&upright(0.5), &turned(0.5));
+    assert_refused_as_touching_itself(&upright(1.0), &turned(1.0));
+    assert_eq!(
+        named(&upright(2.0), &turned(2.0)),
         Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
     );
+}
+
+/// Two cones of slope one side by side, the second on `(1, 0, 0)` with its
+/// axis along `z` or along `-z`, which is the same cone. They are mirror
+/// images across `x = 1/2`, halfway between their apexes, and each apex is
+/// outside the other cone, but they do not touch: their forms differ by
+/// `2x − 1` alone, so they cross in one hyperbola in `x = 1/2`, where the two
+/// normals `(1/2, y, −z)` and `(−1/2, y, −z)` are never one direction. The
+/// flat surface `x = 0` through the first apex, where a mirror pair touches,
+/// never meets `x = 1/2`.
+///
+/// The pair is refused as any other overlap is, by the namer and by the
+/// walker, and not as a crossing that touches itself.
+#[test]
+fn two_cones_of_one_slope_side_by_side_cross_in_one_hyperbola_and_do_not_touch() {
+    let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("a whole loop needs nothing picking it");
+    let one = a_cone([0.0; 3], [0.0, 0.0, 1.0], 1.0);
+    for other in [
+        a_cone([1.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0),
+        a_cone([1.0, 0.0, 0.0], [0.0, 0.0, -1.0], 1.0),
+    ] {
+        for along in [[&one, &other], [&other, &one]] {
+            assert_eq!(
+                named(along[0], along[1]),
+                Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+            );
+            assert_eq!(
+                where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new()).err(),
+                Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+            );
+        }
+    }
+}
+
+/// Two pairs of cones of one slope, the second of each the first turned about
+/// a line through a point of the first's axis, whose second axis is rounded
+/// when it is written or stored.
+///
+/// The first pair is the two pointed cones of `rcad-topo`'s
+/// `a_funnel_with_a_leaning_spout.rs`: slope a half, the second turned `0.3`
+/// about the line along `x` through `(0, 0, 4)`, written out with the turn's
+/// `sin` and `cos` rounded once each. Turned exactly, the two would touch at
+/// `(±1.5954, 0.1209, 3.2)`, inside both faces; as written, their branches pass
+/// about `3e-8` apart there.
+///
+/// The second pair is the pair of
+/// [`two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points`]
+/// turned so that the first's axis is `z`, and made `√34` times as large: slope
+/// one, the second's apex at `(0, 150, 90)` and its axis along `(0, -15, 8)`,
+/// every number as written exact, touching at `(±68, 51, 85)`. `Axis::new`
+/// stores that axis as the nearest numbers to `(0, −15/17, 8/17)`, and the
+/// first's stays `z`.
+///
+/// So in each pair the second's axis is not exactly the mirror image of the
+/// first's across the flat surface halfway between the apexes, and the two do
+/// not touch. Nothing proves either crossing one loop and two branches, and
+/// both are refused as a degree-four curve, by the namer and by the walker,
+/// and not as a crossing that touches itself.
+#[test]
+fn two_cones_whose_turned_axis_is_rounded_are_not_mirror_images_and_are_refused_as_any_overlap_is()
+{
+    let (sin, cos) = 0.3_f64.sin_cos();
+    let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("a whole loop needs nothing picking it");
+    for [upright, turned] in [
+        [
+            a_cone([0.0; 3], [0.0, 0.0, 1.0], 0.5),
+            a_cone([0.0, 4.0 * sin, 4.0 - 4.0 * cos], [0.0, -sin, cos], 0.5),
+        ],
+        [
+            the_right_angled_cone(),
+            a_cone([0.0, 150.0, 90.0], [0.0, -15.0, 8.0], 1.0),
+        ],
+    ] {
+        assert_eq!(
+            named(&upright, &turned),
+            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+        );
+        for along in [[&upright, &turned], [&turned, &upright]] {
+            assert_eq!(
+                where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new()).err(),
+                Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+            );
+        }
+    }
+}
+
+/// `intersect` refuses the pair as a crossing that touches itself whichever
+/// comes first, and so does `walk` for a loop stated on it.
+fn assert_refused_as_touching_itself(one: &Surface, other: &Surface) {
+    assert_eq!(
+        named(one, other),
+        Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
+    );
+    let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("a whole loop needs nothing picking it");
+    for along in [[one, other], [other, one]] {
+        assert_eq!(
+            where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new()).err(),
+            Some(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
+        );
+    }
 }
 
 /// Two apexes one ulp apart along the diagonal, `1e150` out: the nearer circle
