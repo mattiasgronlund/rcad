@@ -1357,6 +1357,10 @@ fn a_quartic_picked_up_at(
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when a settled point or a marched
 /// one has no box round it.
 ///
+/// [`Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces`] when settling
+/// the seed, or a closed run's corner, lands detectably off one of the two
+/// surfaces ([`settled_with_a_bound`], [`where_on_the_crossing_this_corner_can_be`]).
+///
 /// The marcher's two refusals.
 fn follow_the_quartic(
     run: &NamedRun,
@@ -1642,7 +1646,21 @@ fn how_far_off_the_crossing_a_corner_can_be(
 /// where the surfaces touch is refused before the march
 /// ([`how_far_off_the_crossing_a_corner_can_be`]).
 ///
+/// **A corner settled off one surface is not given the same pass.** Tangent
+/// means the correction had no direction to move in, which says nothing about
+/// whether the corner is really on the crossing — the loop the march already
+/// walked is what says that. Settled off one surface means the opposite: eight
+/// rounds of Newton ran to the end and still landed detectably off one of the
+/// surfaces, which is itself evidence that nothing near the corner sits on
+/// both. There is no loop already walked to fall back on believing instead, so
+/// this one stays a refusal rather than becoming the corner's own box.
+///
 /// # Errors
+///
+/// [`Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces`] when settling
+/// the corner lands somewhere still detectably off one of the surfaces, passed
+/// up rather than turned into the corner's own box, unlike the tangent case
+/// above.
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when settling the corner lands
 /// somewhere that is not a point, or the box round the corner's middle comes
@@ -2161,6 +2179,10 @@ fn the_two_corners_of_an_open_run(run: &NamedRun) -> Option<[PredicatePoint; 2]>
 /// [`the_seed_on_the_loop_a_corner_is_on`] refuses. Whatever
 /// [`intersect`](crate::intersect) refuses for the pair, for a run whose two
 /// corners are on different seeds' sides.
+///
+/// [`Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces`] when settling
+/// a seed lands detectably off one of the two surfaces
+/// ([`settled_with_a_bound`]).
 fn the_seed_this_run_is_picked_up_at(
     run: &NamedRun,
     pair: &[Surface; 2],
