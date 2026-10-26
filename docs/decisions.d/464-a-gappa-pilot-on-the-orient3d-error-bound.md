@@ -14188,9 +14188,9 @@ and 8199, with the same hints.
 
 `pipe.g` and `torus.g` needed `a` and `y` written in place. With the names
 `a0 = 0; a1 = 0; a2 = al;` and `y0 = RL; y1 = 0; y2 = TL;`, `gappa -Bcoq`
-stopped after it had written every hint, with `src/parser/ast.cpp:255:
-std::string dump_real(const ast_real*, unsigned int): Assertion 'false'
-failed`. `one.sh` printed `pipe coq -Bcoq exit 134 coqc exit 1 1.74s lines 166
+stopped after it had written every hint, with ``src/parser/ast.cpp:255:
+std::string dump_real(const ast_real*, unsigned int): Assertion `false'
+failed``. `one.sh` printed `pipe coq -Bcoq exit 134 coqc exit 1 1.74s lines 166
 hints 8`, and the torus the same with 188 lines and 11 hints, and `coqc` said
 `Error: The section Generated_by_Gappa needs to be closed.` Two variants of
 `pipe.g` were run. `p_inline.g`, with the six names dropped and each written
@@ -14216,9 +14216,9 @@ without `-Bcoq`.
 `plane.g`, `pipe.g`, `torus.g`, `controls.py` and `all.sh` in one directory
 with 464.13's `one.sh` and 464.19's `point.g`, and run `bash all.sh` there.
 `controls.py` writes the controls, `r_pipe_36.g` and the three runs at `25u`
-from them. The longest of the runs, `r_point2_25.g`, took 45.56 s and then
-102.15 s with `coqc`, as `all.sh`'s print shows. `sos.py` and `same.py` are
-checks, and `all.sh` needs neither.
+from them. The longest run, `r_point2_25.g` with `coqc`, took 102.15 s, as
+`all.sh`'s print shows. `sos.py` and `same.py` are checks, and `all.sh` needs
+neither.
 
 `ball.g`:
 
@@ -14453,7 +14453,7 @@ F4 -> ((34641b-53 / 1000 * An0 + dn0) * (34641b-53 / 1000 * An0 + dn0)
       - (34641b-53 / 1000 * AnAn + DNDN / (34641b-53 / 1000));
 ```
 
-`sos.py`, as it ran, printed:
+`sos.py` printed:
 
 ```text
 identities 1 to 4 hold at 1000 random points
@@ -14558,37 +14558,7 @@ for _ in range(1000):
 print("identity 6 holds at 1000 random points")
 ```
 
-**Draft, Q2691's fourth lane: `pipe.g` and `torus.g` prove, the controls
-fail, and `-Bcoq` aborts on the two axis scripts.** `pipe.g` takes the slips
-at `25u`. With `|w| ≤ 2` and each `|vᵢ| ≤ 2` added, each square being at most
-`q·q`, it proves: `S` `9.61481e-15` (`86.6u`), `TI` `1.33227e-14` (`120.0u`),
-`DR` `2.66454e-15` (`24.0u`), so `230.6u`; `DENQ − 1` within `±5.32907e-15`,
-which keeps the divisor off zero. Its first run, without those bounds, is now
-the control `c_pipe_nobound.g`. `torus.g` proves at `36u`: `S` `1.38453e-14`
-(`124.7u`), `TI` `3.84593e-15` (`34.6u`), `DRr` `±2.66454e-15`, `DRt`
-`±5.32907e-15`, `DR` `5.95808e-15` (`53.7u`), so `213.0u`. `r_point_25.g`,
-`r_point1_25.g` and `r_point2_25.g` prove, `D / L` at most `24.8`, and pass
-`coqc`. `r_pipe_36.g`, the pipe at `POINT_ROUNDOFF`'s `36u`, fails with best
-`2.98325e-14`, `268.7u`. Every control exits 1; their bests are in the `.out`
-files and not yet written up.
-
-`gappa -Bcoq` aborted on `pipe.g` and `torus.g` as the two blocks below
-write them, with `src/parser/ast.cpp:255: std::string dump_real(const
-ast_real*, unsigned int): Assertion 'false' failed`, after it had written the
-eight and eleven hints, while `ball.g`, `plane.g` and the `r_point` runs
-passed `coqc`. Q2691's fifth lane ran the two variants `variants.py` writes.
-`p_inline.g`, `pipe.g` with `a0 = 0; a1 = 0; a2 = al;` and `y0 = RL; y1 =
-0; y2 = TL;` dropped and each name written in place, printed `p_inline exit 0
-0.36s` and `p_inline coq -Bcoq exit 0 coqc exit 0 2.31s lines 3280 hints 8`,
-with the same six bounds as `pipe.g`. `p_named.g` never reached `-Bcoq`: it
-names `NUMQ` before `NUMQ`'s own line, and Gappa stopped with `Error:
-redefinition of identifier 'NUMQ' at line 62 column 4`. So `pipe.g` and
-`torus.g` now write `a` and `y` in place, and `all.sh`, run again on them,
-printed `pipe coq -Bcoq exit 0 coqc exit 0 1.95s lines 3280 hints 8` and
-`torus coq -Bcoq exit 0 coqc exit 0 2.05s lines 3483 hints 11`, every other
-line as before and every bound the same. The two blocks below are still the
-named form that aborted; the lane that finishes this appends the in-place
-form. The cone, the write-up and `same.py`'s run remain.
+`pipe.g`:
 
 ```gappa
 # restates: crates/rcad-geom/src/moved_corner.rs CORNER_AFTER_MOVING_ROUNDOFF at f95bb965
@@ -14618,34 +14588,34 @@ VV = v0 * v0 + v1 * v1 + v2 * v2;
 S01 = v0 * v0 + v1 * v1;
 S12 = v1 * v1 + v2 * v2;
 
-# The stored direction a, and y over L: RL is r over L, the corner's distance
-# from the axis, and TL how far along it the corner is.
-a0 = 0; a1 = 0; a2 = al;
+# The stored direction a is (0, 0, al), and y over L is (RL, 0, TL): RL is r
+# over L, the corner's distance from the axis, and TL how far along it the
+# corner is. Both are written in place below, coordinate by coordinate, since
+# gappa -Bcoq aborts in dump_real when names hold them (464.21's 7).
 AA = al * al;
-y0 = RL; y1 = 0; y2 = TL;
-YY = y0 * y0 + y1 * y1 + y2 * y2;
+YY = RL * RL + 0 * 0 + TL * TL;
 
 # nalgebra's turn of y and of a without rounding, as point.g's Ex writes x,
 # and their lengths squared.
-Ex0 = 2 * w * (v1 * y2 - v2 * y1)
-    + v1 * (2 * (v0 * y1 - v1 * y0)) - v2 * (2 * (v2 * y0 - v0 * y2)) + y0;
-Ex1 = 2 * w * (v2 * y0 - v0 * y2)
-    + v2 * (2 * (v1 * y2 - v2 * y1)) - v0 * (2 * (v0 * y1 - v1 * y0)) + y1;
-Ex2 = 2 * w * (v0 * y1 - v1 * y0)
-    + v0 * (2 * (v2 * y0 - v0 * y2)) - v1 * (2 * (v1 * y2 - v2 * y1)) + y2;
-Ea0 = 2 * w * (v1 * a2 - v2 * a1)
-    + v1 * (2 * (v0 * a1 - v1 * a0)) - v2 * (2 * (v2 * a0 - v0 * a2)) + a0;
-Ea1 = 2 * w * (v2 * a0 - v0 * a2)
-    + v2 * (2 * (v1 * a2 - v2 * a1)) - v0 * (2 * (v0 * a1 - v1 * a0)) + a1;
-Ea2 = 2 * w * (v0 * a1 - v1 * a0)
-    + v0 * (2 * (v2 * a0 - v0 * a2)) - v1 * (2 * (v1 * a2 - v2 * a1)) + a2;
+Ex0 = 2 * w * (v1 * TL - v2 * 0)
+    + v1 * (2 * (v0 * 0 - v1 * RL)) - v2 * (2 * (v2 * RL - v0 * TL)) + RL;
+Ex1 = 2 * w * (v2 * RL - v0 * TL)
+    + v2 * (2 * (v1 * TL - v2 * 0)) - v0 * (2 * (v0 * 0 - v1 * RL)) + 0;
+Ex2 = 2 * w * (v0 * 0 - v1 * RL)
+    + v0 * (2 * (v2 * RL - v0 * TL)) - v1 * (2 * (v1 * TL - v2 * 0)) + TL;
+Ea0 = 2 * w * (v1 * al - v2 * 0)
+    + v1 * (2 * (v0 * 0 - v1 * 0)) - v2 * (2 * (v2 * 0 - v0 * al)) + 0;
+Ea1 = 2 * w * (v2 * 0 - v0 * al)
+    + v2 * (2 * (v1 * al - v2 * 0)) - v0 * (2 * (v0 * 0 - v1 * 0)) + 0;
+Ea2 = 2 * w * (v0 * 0 - v1 * 0)
+    + v0 * (2 * (v2 * 0 - v0 * al)) - v1 * (2 * (v1 * al - v2 * 0)) + al;
 EE = Ex0 * Ex0 + Ex1 * Ex1 + Ex2 * Ex2;
 EaEa = Ea0 * Ea0 + Ea1 * Ea1 + Ea2 * Ea2;
 
 # v x y and v . y, without rounding.
-X0 = v1 * y2 - v2 * y1; X1 = v2 * y0 - v0 * y2; X2 = v0 * y1 - v1 * y0;
+X0 = v1 * TL - v2 * 0; X1 = v2 * RL - v0 * TL; X2 = v0 * 0 - v1 * RL;
 VY = X0 * X0 + X1 * X1 + X2 * X2;
-VD = v0 * y0 + v1 * y1 + v2 * y2;
+VD = v0 * RL + v1 * 0 + v2 * TL;
 
 # In this frame |Ex(a)|^2 is al^2 DENQ and |Ex(y) x Ex(a)|^2 is
 # RL^2 al^2 NUMQ (sos.py), so the distance of Ex(y) from the turned axis is
@@ -14712,7 +14682,7 @@ NUMQ - DENQ -> 4 * (N4 - 1) * S12 + 16 * (N4 - 1) * (N4 - 1) * VV * (v1 * v1);
 S12 -> N4 - w * w - v0 * v0;
 ```
 
-Draft `torus.g`, as it ran:
+`torus.g`:
 
 ```gappa
 # restates: crates/rcad-geom/src/moved_corner.rs CORNER_AFTER_MOVING_ROUNDOFF at f95bb965
@@ -14746,34 +14716,34 @@ S12 = v1 * v1 + v2 * v2;
 S02 = v0 * v0 + v2 * v2;
 P02 = 2 * v0 * v2;
 
-# The stored axis a, and y over L: RL is how far the corner is from the axis,
-# and TL how far along it.
-a0 = 0; a1 = 0; a2 = al;
+# The stored axis a is (0, 0, al), and y over L is (RL, 0, TL): RL is how far
+# the corner is from the axis, and TL how far along it. Both are written in
+# place below, coordinate by coordinate, since gappa -Bcoq aborts in dump_real
+# when names hold them (464.21's 7).
 AA = al * al;
-y0 = RL; y1 = 0; y2 = TL;
-YY = y0 * y0 + y1 * y1 + y2 * y2;
+YY = RL * RL + 0 * 0 + TL * TL;
 
 # nalgebra's turn of y and of a without rounding, as point.g's Ex writes x,
 # and their lengths squared.
-Ex0 = 2 * w * (v1 * y2 - v2 * y1)
-    + v1 * (2 * (v0 * y1 - v1 * y0)) - v2 * (2 * (v2 * y0 - v0 * y2)) + y0;
-Ex1 = 2 * w * (v2 * y0 - v0 * y2)
-    + v2 * (2 * (v1 * y2 - v2 * y1)) - v0 * (2 * (v0 * y1 - v1 * y0)) + y1;
-Ex2 = 2 * w * (v0 * y1 - v1 * y0)
-    + v0 * (2 * (v2 * y0 - v0 * y2)) - v1 * (2 * (v1 * y2 - v2 * y1)) + y2;
-Ea0 = 2 * w * (v1 * a2 - v2 * a1)
-    + v1 * (2 * (v0 * a1 - v1 * a0)) - v2 * (2 * (v2 * a0 - v0 * a2)) + a0;
-Ea1 = 2 * w * (v2 * a0 - v0 * a2)
-    + v2 * (2 * (v1 * a2 - v2 * a1)) - v0 * (2 * (v0 * a1 - v1 * a0)) + a1;
-Ea2 = 2 * w * (v0 * a1 - v1 * a0)
-    + v0 * (2 * (v2 * a0 - v0 * a2)) - v1 * (2 * (v1 * a2 - v2 * a1)) + a2;
+Ex0 = 2 * w * (v1 * TL - v2 * 0)
+    + v1 * (2 * (v0 * 0 - v1 * RL)) - v2 * (2 * (v2 * RL - v0 * TL)) + RL;
+Ex1 = 2 * w * (v2 * RL - v0 * TL)
+    + v2 * (2 * (v1 * TL - v2 * 0)) - v0 * (2 * (v0 * 0 - v1 * RL)) + 0;
+Ex2 = 2 * w * (v0 * 0 - v1 * RL)
+    + v0 * (2 * (v2 * RL - v0 * TL)) - v1 * (2 * (v1 * TL - v2 * 0)) + TL;
+Ea0 = 2 * w * (v1 * al - v2 * 0)
+    + v1 * (2 * (v0 * 0 - v1 * 0)) - v2 * (2 * (v2 * 0 - v0 * al)) + 0;
+Ea1 = 2 * w * (v2 * 0 - v0 * al)
+    + v2 * (2 * (v1 * al - v2 * 0)) - v0 * (2 * (v0 * 0 - v1 * 0)) + 0;
+Ea2 = 2 * w * (v0 * 0 - v1 * 0)
+    + v0 * (2 * (v2 * 0 - v0 * al)) - v1 * (2 * (v1 * al - v2 * 0)) + al;
 EE = Ex0 * Ex0 + Ex1 * Ex1 + Ex2 * Ex2;
 EaEa = Ea0 * Ea0 + Ea1 * Ea1 + Ea2 * Ea2;
 
 # v x y and v . y, without rounding.
-X0 = v1 * y2 - v2 * y1; X1 = v2 * y0 - v0 * y2; X2 = v0 * y1 - v1 * y0;
+X0 = v1 * TL - v2 * 0; X1 = v2 * RL - v0 * TL; X2 = v0 * 0 - v1 * RL;
 VY = X0 * X0 + X1 * X1 + X2 * X2;
-VD = v0 * y0 + v1 * y1 + v2 * y2;
+VD = v0 * RL + v1 * 0 + v2 * TL;
 
 # In this frame |Ex(a)|^2 is al^2 DENQ, |Ex(y) x Ex(a)|^2 is
 # RL^2 al^2 NUMQ and Ex(y) . Ex(a) is al (TL DENQ - 2 (q.q - 1) P02 RL)
@@ -14808,9 +14778,13 @@ DR = sqrt(DRr * DRr + DRt * DRt);
   # A stored axis has a.a within NORMAL_LENGTH_ROUNDOFF, 64 epsilon, of one.
   /\ AA in [9007199254740864b-53, 9007199254741120b-53]
   /\ al in [0, 2]
-  # L is at least ring + tube, which is as far as the corner can be from the
-  # centre.
-  /\ RL in [0, 1] /\ TL in [-1, 1] /\ YY in [0, 1]
+  # The corner is at most ring + tube from the centre, and L is at least
+  # ring + tube as f64 adds them, which is at least (ring + tube) / (1 + u).
+  # So |y| / L is at most 1 + u: RL and TL within 1 + 2u, and YY within
+  # (1 + u)^2, under 1 + 8u.
+  /\ RL in [0, 4503599627370497b-52]
+  /\ TL in [-4503599627370497b-52, 4503599627370497b-52]
+  /\ YY in [0, 1125899906842625b-50]
   # What point.g, point1.g and point2.g prove of the moved corner and the
   # moved centre, L at least every coordinate of either and of the shift.
   /\ kp0 in [-36b-53, 36b-53] /\ kp1 in [-36b-53, 36b-53]
@@ -14848,7 +14822,7 @@ P02 -> (v0 + v2) * (v0 + v2) - S02;
 S02 -> N4 - w * w - v1 * v1;
 ```
 
-Draft `controls.py`, as it ran:
+`controls.py`:
 
 ```python
 """Write the controls of ball.g, plane.g, pipe.g and torus.g, pipe.g's run with
@@ -14967,7 +14941,7 @@ for name, src, axis in (("r_point1_25.g", once, "y"), ("r_point2_25.g", twice, "
     write(name, sub(src, X, "# moved point's " + axis + " is within"))
 ```
 
-Draft `all.sh`, as it ran:
+`all.sh`:
 
 ```sh
 #!/bin/bash
@@ -14993,7 +14967,41 @@ cat ball.run plane.run pipe.run torus.run r_point_25.run r_point1_25.run r_point
     c_torus_212.run c_torus_non4.run
 ```
 
-Draft `same.py`, not yet run against a finished section:
+It printed, on the last run:
+
+```text
+ball exit 0 0.13s
+ball coq -Bcoq exit 0 coqc exit 0 1.00s lines 1347 hints 3
+plane exit 0 0.93s
+plane coq -Bcoq exit 0 coqc exit 0 3.40s lines 8504 hints 17
+pipe exit 0 0.24s
+pipe coq -Bcoq exit 0 coqc exit 0 1.55s lines 3422 hints 8
+torus exit 0 0.30s
+torus coq -Bcoq exit 0 coqc exit 0 1.76s lines 3556 hints 11
+r_point_25 exit 0 45.85s
+r_point_25 coq -Bcoq exit 0 coqc exit 0 78.49s lines 8222 hints 34
+r_point1_25 exit 0 48.21s
+r_point1_25 coq -Bcoq exit 0 coqc exit 0 73.58s lines 8162 hints 34
+r_point2_25 exit 0 45.56s
+r_point2_25 coq -Bcoq exit 0 coqc exit 0 102.15s lines 8195 hints 34
+c_ball_148 exit 1 0.16s
+c_ball_non4 exit 1 0.12s
+c_ball_nok exit 1 0.13s
+c_plane_222 exit 1 1.36s
+c_plane_non4 exit 1 1.21s
+c_plane_nodn exit 1 0.79s
+c_plane_nodp exit 1 1.25s
+c_plane_nodd exit 1 1.07s
+c_pipe_230 exit 1 0.24s
+c_pipe_non4 exit 1 0.25s
+c_pipe_nobound exit 1 0.23s
+c_pipe_noda exit 1 0.23s
+r_pipe_36 exit 1 0.23s
+c_torus_212 exit 1 0.35s
+c_torus_non4 exit 1 0.30s
+```
+
+`same.py`, a check that what this subsection appends is what ran:
 
 ```python
 """Check that each script 464.21 appends whole is byte for byte the file that
@@ -15091,3 +15099,58 @@ print(".g files that ran and are neither appended, 464.19's nor written again:",
              if f.endswith(".g") and f not in found and f != "point.g" and f not in written))
 shutil.rmtree(fresh)
 ```
+
+It prints:
+
+```text
+code blocks in 464.21: 11
+ball.g same
+plane.g same
+pipe.g same
+torus.g same
+sos.py same
+controls.py same
+all.sh same
+same.py same
+one.sh is 464.13's block: True
+point.g is 464.19's block: True
+sos.py run again prints what 464.21 gives: True
+all.log is what 464.21 gives: True
+c_ball_148.g written again is the one that ran: True
+c_ball_nok.g written again is the one that ran: True
+c_ball_non4.g written again is the one that ran: True
+c_pipe_230.g written again is the one that ran: True
+c_pipe_nobound.g written again is the one that ran: True
+c_pipe_noda.g written again is the one that ran: True
+c_pipe_non4.g written again is the one that ran: True
+c_plane_222.g written again is the one that ran: True
+c_plane_nodd.g written again is the one that ran: True
+c_plane_nodn.g written again is the one that ran: True
+c_plane_nodp.g written again is the one that ran: True
+c_plane_non4.g written again is the one that ran: True
+c_torus_212.g written again is the one that ran: True
+c_torus_non4.g written again is the one that ran: True
+r_pipe_36.g written again is the one that ran: True
+r_point1_25.g written again is the one that ran: True
+r_point2_25.g written again is the one that ran: True
+r_point_25.g written again is the one that ran: True
+.g files that ran and are neither appended, 464.19's nor written again: []
+```
+
+**9. What this leaves.** Rows, filed from this write-up when it merges, each
+from Q2691:
+
+- Restate `CORNER_AFTER_MOVING_ROUNDOFF`'s doc (`moved_corner.rs:38-97`)
+  against this subsection: the shares of 3, the three miscounts of 4, the
+  pipe's need of `point.g`'s `25u`, and the cone left unproved.
+- Search for a corner on a cone that a move puts past `128ε · L`, or prove the
+  cone within it by a sharper argument than 3's. Not run, so no class
+  (§360.5).
+- Run `vector.g` with each component up to about `1 + 64u`, as a stored axis
+  direction can have, and say whether its `20u` holds; `pipe.g` and `torus.g`
+  take it. Not run, so no class. Q2826 is its twin for a normal.
+
+And what is not a row: the zero branches (Q2801, Q2825), the products below
+normal (Q2802) and the route through `From<na::Isometry3<f64>>` (Q2803), which
+these scripts share with `point.g` and `vector.g`; and Q2700, which moves these
+scripts into `proofs/gappa/` with the rest of 464's.
