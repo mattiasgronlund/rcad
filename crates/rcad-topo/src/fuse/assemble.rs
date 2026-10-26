@@ -40,6 +40,16 @@
 //! different solid on each side stays refused: §80.9 leaves two touching
 //! solids unbuilt.
 //!
+//! A line flat faces still crowd after that, since Q2784, is parted where
+//! each face's dart pairs with one of another face on its plane facing the
+//! same way, walking the line the other way, and at most one dart each way on
+//! two planes is left over to be the line's own edge.
+//! [`Assembly::part_each_line_more_faces_walk_into_pairs_on_one_plane`] does
+//! it, for an edge a rounding long by the placed pyramid's apex that pieces of
+//! a wedge's faces walk six or four times in the union of the two. Each pair on
+//! one plane is two pieces of one flat region, and the joining dissolves the
+//! line between them.
+//!
 //! # Two pieces on one plane are one face
 //!
 //! Selection can keep two pieces that lie on the same plane facing the same way
@@ -1172,6 +1182,7 @@ impl Assembly {
         assembly.leave_out_each_pair_of_flat_faces_walking_one_ring_both_ways(log)?;
         assembly.leave_out_what_no_wire_walks();
         assembly.part_each_line_two_faces_rest_against_each_other_along(model, chosen);
+        assembly.part_each_line_more_faces_walk_into_pairs_on_one_plane();
         every_closed_edge_read_off_one_spelling(
             &assembly.edges,
             &assembly.corners,
@@ -1553,6 +1564,11 @@ impl Assembly {
     /// prism's edge goes to the prism's; the line is no edge of the wall or the
     /// top face, so theirs takes none.
     ///
+    /// A line this leaves with more than two darts along it, whether more than
+    /// four or four pieces of one input face, goes on to
+    /// [`Assembly::part_each_line_more_faces_walk_into_pairs_on_one_plane`],
+    /// which parts it where its darts pair up on planes facing one way.
+    ///
     /// # Panics
     ///
     /// If an input edge the line is a piece of runs along none of the four
@@ -1906,6 +1922,165 @@ impl Assembly {
             (Some(mine), Some(theirs)) => mine.agreement_with(theirs) == PlaneAgreement::SameWay,
             (Some(_) | None, None) | (None, Some(_)) => false,
         }
+    }
+
+    /// Part each straight line more than two flat faces still walk, once
+    /// [`Assembly::part_each_line_two_faces_rest_against_each_other_along`]
+    /// has parted what it parts, into pairs of faces on one plane facing one
+    /// way, each pair walking the line both ways, with at most one pair of
+    /// two planes left over to be the line's own edge.
+    ///
+    /// **A rounding-long edge by the apex of the placed pyramid** is claimed
+    /// so (queue row Q2784, `a_broken_three_surface_corner_read_back_from_bytes.rs`).
+    /// Shifted to `(7, −5, 2.5)` and united with the wedge whose edge runs up
+    /// through its apex, over its `−y` edge, the pyramid's side planes cut the
+    /// wedge's faces into specks a rounding across, and two corners of those
+    /// specks a rounding apart stay two corners with an edge between them. One
+    /// piece of the wedge face `y = −x/2` walks out along that edge and back,
+    /// two more walk it once each, one each way, and two pieces of the face
+    /// `y = −2x` walk it once each way: six darts, and the union was refused
+    /// `ResultIsNotManifold { count: 6 }`. Turned 2.9 about `(0.3, −1, 2)`
+    /// first, the wedge over the `+y` edge left four darts of one wedge face
+    /// along one such edge, `{ count: 4 }`.
+    ///
+    /// **Two faces on one plane facing one way that walk a line opposite ways
+    /// lie either side of it**, so the line between them is no boundary, and
+    /// [`Assembly::edges_with_one_face_on_both_sides`] dissolves it as any edge
+    /// between two pieces of one flat region. A dart is never paired with
+    /// another of its own face, since that pair is never dissolved and the
+    /// face's spike would stay in its ring; where every pairing does that, the
+    /// line stays one edge and is refused, as it is where a plane has two
+    /// darts more one way than the other, or the darts left over are not one
+    /// each way on two planes. Each face's darts still pair up one way with the
+    /// other, so every corner of the line is left by as many darts as reach
+    /// it, and the faces' rings are walked as before. Parted, every edge has
+    /// two faces along it, which is all §17.4 asks, and what that answers may
+    /// touch itself along the line (`docs/decisions.md` §39.4).
+    ///
+    /// The pair of two planes keeps the edge, or where there is none, the
+    /// first pair does; each other pair is moved onto a copy that is a piece
+    /// of no input edge, since the line is no edge of the face that pair is
+    /// pieces of.
+    fn part_each_line_more_faces_walk_into_pairs_on_one_plane(&mut self) {
+        for (kept, by) in self.claimants_of_each_edge().into_iter().enumerate() {
+            let Some(pairs) = self.pairs_on_one_plane_along(kept, &by) else {
+                continue;
+            };
+            for moving in pairs.into_iter().skip(1) {
+                let original = &self.edges[kept];
+                let copy = Edge {
+                    ends: original.ends,
+                    carried_by: original.carried_by,
+                    arc: original.arc,
+                    from: Vec::new(),
+                };
+                self.edges.push(copy);
+                let parted = self.edges.len() - 1;
+                for dart in moving {
+                    self.faces[dart.face].wires[dart.wire][dart.position].edge = parted;
+                }
+            }
+        }
+    }
+
+    /// The pairs the darts `by` along `edge` part into, the pair that keeps
+    /// the edge first; `None` where the edge has two darts or fewer, or is not
+    /// a straight line between flat faces that parts so. See
+    /// [`Assembly::part_each_line_more_faces_walk_into_pairs_on_one_plane`].
+    fn pairs_on_one_plane_along(&self, edge: usize, by: &[Dart]) -> Option<Vec<[Dart; 2]>> {
+        if by.len() <= 2 || !self.edges[edge].lies_on_two_planes() {
+            return None;
+        }
+        let mut planes: Vec<(&Plane, Vec<Dart>)> = Vec::new();
+        for &dart in by {
+            let plane = self.faces[dart.face].surface.as_plane()?;
+            let agreements: Vec<PlaneAgreement> = planes
+                .iter()
+                .map(|(on, _)| on.agreement_with(plane))
+                .collect();
+            if agreements.contains(&PlaneAgreement::CannotTell) {
+                return None;
+            }
+            match agreements
+                .iter()
+                .position(|&agreement| agreement == PlaneAgreement::SameWay)
+            {
+                Some(on) => planes[on].1.push(dart),
+                None => planes.push((plane, vec![dart])),
+            }
+        }
+        let mut pairs = Vec::new();
+        let mut left_over = Vec::new();
+        for (_, darts) in planes {
+            let (forwards, backwards): (Vec<Dart>, Vec<Dart>) = darts
+                .into_iter()
+                .partition(|&dart| self.side_of(dart).forward);
+            let (paired, left) = Self::pairs_of_two_faces_leaving_one_over(&forwards, &backwards)?;
+            pairs.extend(paired);
+            left_over.extend(left);
+        }
+        match *left_over.as_slice() {
+            [] => Some(pairs),
+            [one, other] if self.side_of(one).forward != self.side_of(other).forward => {
+                pairs.insert(0, [one, other]);
+                Some(pairs)
+            }
+            _ => None,
+        }
+    }
+
+    /// Each dart of `forwards` paired with one of `backwards` of another face,
+    /// and the one dart left over where one side has one more, trying each in
+    /// turn; `None` where one side has two more, or no pairing keeps every
+    /// pair to two faces.
+    fn pairs_of_two_faces_leaving_one_over(
+        forwards: &[Dart],
+        backwards: &[Dart],
+    ) -> Option<(Vec<[Dart; 2]>, Option<Dart>)> {
+        let all_but = |darts: &[Dart], left: usize| {
+            let mut rest = darts.to_vec();
+            rest.remove(left);
+            rest
+        };
+        match forwards.len().cmp(&backwards.len()) {
+            Ordering::Equal => Some((Self::pairs_of_two_faces(forwards, backwards)?, None)),
+            Ordering::Greater if forwards.len() == backwards.len() + 1 => (0..forwards.len())
+                .find_map(|left| {
+                    let pairs = Self::pairs_of_two_faces(&all_but(forwards, left), backwards)?;
+                    Some((pairs, Some(forwards[left])))
+                }),
+            Ordering::Less if backwards.len() == forwards.len() + 1 => (0..backwards.len())
+                .find_map(|left| {
+                    let pairs = Self::pairs_of_two_faces(forwards, &all_but(backwards, left))?;
+                    Some((pairs, Some(backwards[left])))
+                }),
+            Ordering::Greater | Ordering::Less => None,
+        }
+    }
+
+    /// Each dart of `forwards` paired with one of as many `backwards`, no pair
+    /// two darts of one face; `None` where every pairing has one. The first
+    /// pairing found, trying the first dart against each in turn.
+    fn pairs_of_two_faces(forwards: &[Dart], backwards: &[Dart]) -> Option<Vec<[Dart; 2]>> {
+        assert_eq!(
+            forwards.len(),
+            backwards.len(),
+            "darts are paired one way with the other only where there are as many each way"
+        );
+        let Some((&first, rest)) = forwards.split_first() else {
+            return Some(Vec::new());
+        };
+        backwards
+            .iter()
+            .enumerate()
+            .filter(|&(_, back)| back.face != first.face)
+            .find_map(|(at, &back)| {
+                let mut others = backwards.to_vec();
+                others.remove(at);
+                let mut pairs = vec![[first, back]];
+                pairs.extend(Self::pairs_of_two_faces(rest, &others)?);
+                Some(pairs)
+            })
     }
 
     /// Fold every run of faces that is really one flat region into one face.
