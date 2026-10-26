@@ -482,9 +482,19 @@ pub(crate) fn march_to(
 ///
 /// # Errors
 ///
-/// The same two [`march`] has, for the same reasons.
+/// [`Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces`] when the seed,
+/// settled, is still far enough off one of the surfaces that nothing near it can
+/// be on both, which is the seed [`march`] turns away (§43.6, Q2796).
+///
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when the two
+/// surfaces are too nearly parallel at the seed to settle it or to bound how far
+/// off the crossing it is, and [`Error::CannotWorkOutHowBigACrossingIs`] when a
+/// round of the settling lands somewhere that is not a point.
 pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Result<(Point, f64)> {
     let settled = settled(surfaces, seed)?;
+    if the_settling_did_not_land_on_both(surfaces, settled) {
+        return Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces);
+    }
     let off = how_far_off_the_crossing(surfaces, settled)?;
     Ok((settled, off))
 }
@@ -532,7 +542,7 @@ pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Resu
 /// than a half, or the radius left to either surface is not more than nothing:
 /// the two surfaces are too nearly parallel for their bend to leave any bound
 /// on how far off the crossing the point is. And what [`settled_with_a_bound`]
-/// refuses.
+/// refuses, but for its seed check, which is not asked here.
 pub(crate) fn settled_with_a_bound_where_they_bend(
     surfaces: [&Surface; 2],
     seed: Point,
@@ -1294,6 +1304,15 @@ fn how_far_off_a_pipe_enclosing(pipe: &Cylinder, at: Point) -> (Interval, [Inter
 ///
 /// Reached by the loops a cone crosses a pipe or a ball in off its axis, as
 /// [`how_far_off_and_which_way`]'s cone arm says.
+///
+/// **Where how far up the axis the point is encloses to both signs**, the
+/// arithmetic cannot tell which nappe the point stands over. Then `|up|` is
+/// enclosed as running from nothing to the further end, and the normal's
+/// lean along the axis as anything from one nappe's to the other's, since
+/// either may be the true one. Taking the upper nappe there put `−slope·up`
+/// where `−slope·|up|` belongs, and left the true distance below the
+/// enclosure wherever `up` ran further below zero than above it (§43.6,
+/// Q2796).
 fn how_far_off_a_cone_enclosing(cone: &Cone, at: Point) -> (Interval, [Interval; 3]) {
     let along = exactly(cone.axis().direction().components());
     let squared_direction = squared_length_enclosing(along);
@@ -1303,12 +1322,22 @@ fn how_far_off_a_cone_enclosing(cone: &Cone, at: Point) -> (Interval, [Interval;
     let reach = root_enclosing(squared_length_enclosing(sideways));
     let slope = Interval::exactly(cone.slope());
     let steepness = root_enclosing(Interval::exactly(1.0) + slope * slope);
-    let leaning = if up.hi() < 0.0 {
+    let up_either_way = if up.lo() >= 0.0 {
+        up
+    } else if up.hi() <= 0.0 {
+        -up
+    } else {
+        Interval::new(0.0, furthest_from_zero(up).hi())
+            .expect("an enclosure either side of zero has a further end above zero")
+    };
+    let leaning = if up.lo() > 0.0 {
+        Interval::exactly(1.0)
+    } else if up.hi() < 0.0 {
         -Interval::exactly(1.0)
     } else {
-        Interval::exactly(1.0)
+        Interval::new(-1.0, 1.0).expect("minus one to one is a range")
     };
-    let off = quotient_or_everything(reach - slope * up * leaning, steepness);
+    let off = quotient_or_everything(reach - slope * up_either_way, steepness);
     let outwards: [Interval; 3] = core::array::from_fn(|axis| {
         let across = quotient_or_everything(sideways[axis], reach);
         let down = quotient_or_everything(
