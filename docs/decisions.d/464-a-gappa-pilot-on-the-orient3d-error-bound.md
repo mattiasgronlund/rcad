@@ -17045,13 +17045,15 @@ done
 
 ### 464.25 Two or more of the nine differences at zero
 
-UNFINISHED: Q2747's first and second lanes handed over here (§416). What
-follows is what they ran, for the next lane to carry on and rewrite as the
-finished section.
+Q2747 ran block 1 with two or more of the nine differences `adx` to `cdz` at
+zero at once, in three lanes on 2026-10-26. Each of the 237 branches proves at
+the code's `B` and fails below the bound it proves, and Coq checks each proof,
+modulo its hints. Nothing in `orient3d.rs` needs to change for it.
 
-Q2747 runs block 1 with two or more of the nine differences `adx` to `cdz` at
-zero at once. Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`,
-through 464.13's `one.sh`, with `block1.g` lines 358 to 534 of this file.
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, with `block1.g` lines 358 to 534 of this file, against
+`on_floats` as 464.4 read it at `d9f931e8`: no commit touches `orient3d.rs`
+between 464.11's `ca9b6493` and `492b00d2`.
 
 **Which sets are branches.** Of the 502 sets of two or more differences, 237
 leave `y` not zero by its shape: all 36 pairs, 78 of the 84 threes, 81 of the
@@ -17061,37 +17063,84 @@ In the other 265 every term is zero by its shape, so `value` is zero and
 is zero, or when both products of its minor have a zero factor, as `adx` and
 `bdx` do for `third`.
 
-**What has run, at the code's `B`.** `dz_adx_bdx`, `dz_adx_ady`, `dz_adx_bdy`,
-`dz_adz_cdz` and `dz_adx_ady_bdz` prove with `(y − Ex) / P6` within
-`6.66134e-16`; `dz_bdx_cdx` and `dz_ady_adz_bdx_bdz_cdx_cdy` within
-`5.55112e-16`. `dz_adz_bdz` (only `third`'s term left) failed at
-`REL(P, Phat)` until the generator wrote `P = rnd((r1 + r2) + r3)` and asked
-`(P - Phat) / Phat in ?` in its place. Then it proves at the code's `B`, at
-`7u + 46u²`, `8u`, `16u` and `2⁻⁴⁰`, but Gappa bounds `(P − Phat) / Phat`
-only within `[-1, 5.4067e+1202]`, and at `6u` it fails with best
-`±1.39141e+1218`, not near 1. Why it proves at all with that bound on `P` is
-not traced: asked as `(y - Ex) / eb in ?` it gets only `±1.39141e+1218`, so the
-proof leans on the goal's own interval, and the goals `(P - Phat) / Phat in
-[-1b-50, 1b-50]` and `Phat / P in [0, 2]` each run out the 600 s timeout.
+**The scripts.** `make_differences_zero.py`, below, writes each branch as
+464.11's `make_one_difference_zero.py` writes one difference: on each axis
+with a zero difference, `d`'s coordinate is the same double as the point's;
+each zero difference, each product with it, and each term zero by its shape is
+left unrounded; and a term whose product is zero stays in `P6` and in the
+split of `P6 + (y − Ex)` as a bare `c_k`, with no error of its own. A minor
+whose two products are both zero is zero, and it and its `q` are left
+unrounded. A minor with one product zero rounds a double less a zero, and its
+`q` a double plus a zero, as in 464.11. The generator does two things more.
 
-The second lane split `Phat` into `Phat1`, `Phat2` and `Phat3` when `t1` and
-`t2` are both zero, and carried `r1` and `r2` as amounts against `Phat`, as
-`make_two_zero.py` does (the `{1, 2} <= terms` block below). Then
-`dz_adz_bdz` proves in 3.44 s with `(y − Ex) / P6` within `6.66134e-16` and
-`(P − Phat) / Phat` within `3.33067e-16`, and its 6u control fails with best
-`[-1, 1]`, as 464.11's 6u scripts do. 57 of the 237 sets have `t1` and `t2`
-both zero.
+1. **A `q` that rounds a double plus a zero where its term is zero too.**
+   464.11 takes such a `q`'s rounding as off by at most `u + 2u²`, as a
+   hypothesis, and a goal checks that `|q| ≥ 2⁻¹⁰²²`, for a minor whose term
+   is not zero. Here a z difference can zero the term of a minor with one
+   product zero, as `bdz` with `adx` does to `second`. Gappa still needs that
+   `q`'s rounding, since `P −/ Phat` sets `r2 = q2 × |bdz|` against
+   `(|cdxady| + |adxcdy|) × |bdz|`, both zero. 86 of the 237 sets have such a
+   minor and not both of `t1` and `t2` zero. With the hypothesis only where
+   the term is not zero, as the generator stood at `84462b71`, 82 of them ran
+   and each failed at `REL(P, Phat)`; the other 4 did not run. Run again,
+   `dz_adx_bdz` fails after 52.91 s with best `[-9.62462e+494, 3.16494e+451]`
+   and `dz_adz_bdx` after 52.27 s with best `[-1.54015e+453, 4.31583e+451]`.
+   `dz_adx_bdz` with `q2 −/ (|cdxady| + |adxcdy|)` and `r2 −/ Phat2` asked as
+   goals, in place of the one on `eb`, fails at those two and then at
+   `REL(P, Phat)`, as 464.11's `REL(q2, ...)` did. The 28 other sets with such
+   a minor proved, since they have `t1` and `t2` both zero and carry `r1` and
+   `r2` as amounts (2 below). With the hypothesis and its goal wherever a
+   minor has one product zero, `dz_adx_bdz` proves in 2.19 s and `dz_adz_bdx`
+   in 2.39 s, and so does each of the 86.
+2. **`t1` and `t2` both zero**, in 57 sets. `P` then adds two zeros first, and
+   Gappa finds no `REL(P, Phat)`: two of the three parts it would average are
+   zero. The script asks for `(P − Phat) / Phat` in its place, splits `Phat`
+   into `Phat1`, `Phat2` and `Phat3`, and carries `r1` and `r2` as amounts
+   against `Phat`, which `Phat3` keeps away from zero, as `make_two_zero.py`
+   does. With block 1's hints alone, `dz_adz_bdz` failed at `REL(P, Phat)`.
+   With `P` written `rnd((r1 + r2) + r3)` and `(P − Phat) / Phat` asked for,
+   but without the amounts, it proved only by leaning on the goal's own
+   interval: asked as `(y − Ex) / eb in ?` it got `±1.39141e+1218`, and the
+   goals `(P − Phat) / Phat in [-1b-50, 1b-50]` and `Phat / P in [0, 2]` each
+   ran out the 600 s timeout. With the amounts it proves in 3.44 s.
 
-A first run of every `dz_` script, stopped at the second lane's budget after
-233 of the 237, had 151 prove, each with `coqc` exit 0, and 82 exit 1. The
-three it read fail at `REL(P, Phat)` with `(y − Ex) / P6` still bounded. Each
-of the 82 zeroes at least one of `adz`, `bdz` and `cdz` and at least one x or
-y difference: `dz_adx_bdz`, `dz_adx_cdz`, `dz_adz_bdx`, `dz_bdx_cdz` and 78
-more. `dz_adx_bdz` printed best `[-1.22787e+1205, 1.88277e+1206]`. They may
-want `P` carried as amounts the same way; that is not yet tried.
+**What runs, at the code's `B`.** Each of the 237 proves, with `(y − Ex) / P6`
+within:
 
-`make_differences_zero.py`, as it stands, run as `python3
-make_differences_zero.py` beside `block1.g`:
+- `7.77156e-16`, `7u` and some `u²`, for 4: `adx` with `cdz`, `ady` with
+  `cdz`, `bdx` with `cdz` and `bdy` with `cdz`. At `6u` each fails with best
+  `±1.16667`, and at `5u` with `±1.4`.
+- `6.66134e-16`, `6u` and some `u²`, for 51, such as `adx` with `bdx` and
+  `adz` with `bdz`. At `6u` each fails with best `±1`, and at `5u` with
+  `±1.2`.
+- `5.55112e-16`, `5u` and some `u²`, for 182. At `6u` each proves, and at `5u`
+  each fails with best `±1`.
+
+In each of the 237 the count of `u` is the count of roundings on the longest
+path through a term of `y` that is not zero: the three differences, the
+product, the minor where its other product is not zero, the term, and the sum
+of the first two terms where the term is one of them and the other is not
+zero. Seven is block 1's own count (464.4). `summarize.py`, below, works the
+count out from the set alone, and its groups split the 237 the same way the
+printed bounds do.
+
+`P −/ Phat` is within `4.44089e-16` in the 180 that ask for it, and
+`(P − Phat) / Phat` within `3.33067e-16` in the 57 with `t1` and `t2` both
+zero.
+
+Every one of the 237 fails at `5u`, and the 55 whose bound is above `6u` fail
+there too, so each fails below the bound it proves, and none proves its goal
+from hypotheses that contradict each other (464.7). The 222 `dzq_` scripts,
+each a script with its `q` hypotheses taken out and only its `|q|` goals left,
+each prove: no goal leans on the hypothesis it backs.
+
+`gappa -Bcoq` writes each of the 237 proofs, 4017 to 10070 lines with 16 to
+31 hints, and `coqc` under 464.5's commands accepts each, exit 0. Gappa takes
+1.17 to 9.11 s on a script, and `-Bcoq` and `coqc` together 3.39 to 17.16 s.
+`field` has not been run on these hints (464.10).
+
+`make_differences_zero.py`, run as `python3 make_differences_zero.py` beside
+`block1.g`:
 
 ```python
 """Write block 1 with two or more of the nine differences adx to cdz zero.
@@ -17167,6 +17216,8 @@ def make(zero):
     # A minor that is not zero but has one product zero rounds a double less
     # a zero, or a zero less a double.
     half = [m for m in (1, 2, 3) if m not in terms and len({2 * m - 1, 2 * m} & dead) == 1]
+    # Its q rounds a double plus a zero, whether its term is zero or not.
+    half_q = [m for m in (1, 2, 3) if len({2 * m - 1, 2 * m} & dead) == 1]
     src = open("block1.g").read()
     src = sub(
         src,
@@ -17248,19 +17299,20 @@ def make(zero):
         (m,) = terms & {1, 2}
         other = 3 - m
         tail += f"\n# t{m} is zero, so t1 + t2 is the double t{other} and rounds to itself.\nt1 + t2 -> t{other};\n"
-    if half:
+    if half_q:
         last = f"  /\\ eb -/ B * P {BOUND}"
-        qs = " and ".join(f"q{m}" for m in half)
+        qs = " and ".join(f"q{m}" for m in half_q)
         src = sub(
             src,
             last,
             last + f"  # {qs} each round a double plus a zero, so each is at least 2^-1022\n"
             "  # as that double is, and lemma.g gives the same of it. The goals\n"
             "  # check the first part.\n"
-            + "".join(f"  /\\ q{m} -/ ({NOTE[m]}) {BOUND}" for m in half),
+            + "".join(f"  /\\ q{m} -/ ({NOTE[m]}) {BOUND}" for m in half_q),
         )
         goal = "  (y - Ex) / P6 in ? /\\ P -/ Phat in ?\n"
-        src = sub(src, goal, goal + "".join(f"  /\\ |q{m}| >= 1b-1022\n" for m in half))
+        src = sub(src, goal, goal + "".join(f"  /\\ |q{m}| >= 1b-1022\n" for m in half_q))
+    if half:
         hints = []
         for m in half:
             left, right = PRODUCT[2 * m - 1][0], PRODUCT[2 * m][0]
