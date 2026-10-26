@@ -18118,3 +18118,736 @@ main()
   so it stays. In the `dm_` scripts written from those six,
   `make_minor_zero_too.py` puts a line such as
   `Nothing checks r1, since first is zero.` in its place.
+
+### 464.27 The side of a flat surface through a point with every product anywhere
+
+Q2760 took up `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` again, in
+four lanes on 2026-10-26, for what 464.13's 5 left unrun: products of
+`SideOfAFlatSurfaceThroughAPoint` below the normals, which `on_floats`'s six
+`product_is_normal` checks refuse, as 464.18 ran them for
+`SideOfAFlatSurface`'s three. The first lane wrote `flatall.py` and ran nine
+of its scripts. The second wrote `prodzero.g` again so that it proves, and ran
+every case and control. The third restated `plane.rs` and wrote this up, and
+the fourth read the controls.
+
+The bound is proved at the code's constant in every case of where the six
+products land, normal, below the normals or rounding to zero, with any of the
+sums cancelling to zero. So `on_floats` does not need its six
+`product_is_normal` checks to give a right sign. They are kept, as 464.18's 7
+kept plane's and Q2766 the sphere's (464.14), and the comment on them and the
+doc on the constant now say why (6). Coq checks each proof, modulo its hints
+(7).
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, against
+`plane.rs` and `cascade.rs` at `eb125ed0`, through 464.13's `one.sh`, sixteen
+at a time. `u` is `2⁻⁵³`, and the code's `B = 6u + 128u²` is written `B =
+6b-53 + 1b-99;`. Each script follows 464.13's `flat.g`: one ratio hint per
+rounding of a normal number, the error split into one term per product so
+that Gappa averages them, and 464.5's lemma for each product that rounds to a
+normal number and for `eb`. What rounding a product below the normals cost,
+and each product that rounds to zero, is carried as an amount, as 464.18's
+cases carry it.
+
+**1. What the proof guards.** As in 464.13's 1, at `eb125ed0`:
+`which_side_of_a_flat_surface_through` (`plane.rs:972-988`) runs the cascade
+on `SideOfAFlatSurfaceThroughAPoint`. Its one caller is
+`HalfSpaceThroughAPoint::side_of_point` (`half_space.rs:668-675`), and
+`lib.rs:101` exports `HalfSpaceThroughAPoint`, so a user reaches it.
+
+**2. `on_floats`, line for line.** `SideOfAFlatSurfaceThroughAPoint::on_floats`
+(`plane.rs:1003-1026` at `eb125ed0`) returns `None` for a point that is not
+exact `f64`s, and unless `product_is_normal` holds for each of the six
+products (`plane.rs:1007-1012`). Then it takes the facing times the point on
+each axis and the facing times the through point on each axis, negated
+(`plane.rs:1014-1017`), folds them from `(0.0, 0.0)` into `value` and
+`permanent` (`plane.rs:1018-1020`), and returns `error_bound =
+SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND * permanent`
+(`plane.rs:1024`). Each script writes that as 464.13's `flat.g` does, with the
+check left out. `product_is_normal(a, b)` is `a == 0.0 || b == 0.0 || (a *
+b).abs() >= f64::MIN_POSITIVE` (`cascade.rs:67-69`): it lets through a product
+with a zero factor and one that rounds to `2⁻¹⁰²²` or more, and refuses every
+other. `decide` compares only against a bound that is a normal number
+(`cascade.rs:125`), and the doc on `Filtered::error_bound` asks for the bound
+on `y`, the sum before `value`'s last rounding. So every claim here is on `y`.
+464.13's 4 proved `value` within `eb` too with every product normal or zero;
+that was not run with a product below the normals.
+
+**3. Every place the six products can land.** 464.18's `planeall.py` split
+each product four ways, normal, zero, and below the normals of either sign.
+Carried over to six products that is `4⁶ = 4096` placements before the sums
+are split. `flatall.py` (8) cuts the same inputs into 722 cases and one more,
+by four facts:
+
+- Each product of two doubles, `X = a · b` rounded to `t = rnd(X)`, is one of
+  three. `z`: it rounds to zero, and then `|X| ≤ 2⁻¹⁰⁷⁵` (`prodzero.g`, 8).
+  `n`: it rounds to `2⁻¹⁰²²` or more, which `product_is_normal` lets through.
+  `s`: it rounds to a double that is neither zero nor normal, and then `|X| ≤
+  2⁻¹⁰²²`, since rounding is monotone and `2⁻¹⁰²²` is a double. Those three
+  cover every product. A product with a zero factor is a `z`, which the check
+  lets through; so is a product below the normals that rounds to zero, which
+  the check refuses; every `s` the check refuses.
+- A through product enters the fold negated, and `−rnd(f · q)` is `rnd(f ·
+  (−q))`, rounding to nearest being symmetric. So each script writes the six
+  alike, `t = rnd(a · b)`, each with two factors of its own. That drops the
+  facing being shared between two products, which covers more inputs than the
+  code can make, not fewer.
+- A `z` term is left out of both folds, adding zero to a double giving the
+  double back (464.13's `addzero.g`), and stays only in `Ex`, as its exact
+  product `Z`. So where the `z` terms sit does not matter, only how many there
+  are. The terms left are folded in the order the code adds them.
+- Each rounded sum of the terms left is either at least `2⁻¹⁰⁷⁴`, a sum of
+  two doubles being a multiple of `2⁻¹⁰⁷⁴`, or it cancels to zero, rounds to
+  itself and is written unrounded, as 464.13's 6 writes it. An `n` or `s` term
+  is not zero, so the sum after a cancelled one is not zero, and two
+  cancelling sums are never next to each other. In 464.18 they could be, since
+  a product below the normals could round to zero there; here that is a `z`,
+  and left out.
+
+With `L` terms left there are `2^L − 1` strings of `n` and `s` with an `n`
+among them, and as many sets of cancelling sums as there are sets of the sums
+`1` to `L − 2` with no two next to each other: 1, 1, 2, 3, 5 and 8 for `L`
+from 1 to 6. That makes `1·1 + 3·1 + 7·2 + 15·3 + 31·5 + 63·8 = 722` cases,
+each `fa_<states>[_c<set>].g`: `<states>` one letter for each term left, in
+the fold's order, and `<set>` the place among them of each term whose sum
+cancels. `fa_nnnnnn.g` is 464.13's `flat.g` in this form.
+
+- With an `n` term, the step is 464.18's, `(y − Ex) / eb -> ((Σ e) / Phat) ·
+  (Phat / P) · (P / eb) + A / eb`. Each term left carries `e = t · W`, `W`
+  what the rounded sums after it multiplied it by, less one, and for an `n`
+  term less `1 / rp` rather than one, `rp` what its own rounding multiplied it
+  by. `Phat` is the permanent with no rounding of its own. What each `s`
+  term's own rounding cost, `d = t − X`, less each `Z`, is the amount `A`, so
+  `y − Ex` is `Σ e + A`, and `eb` being normal keeps `A` small against `eb`.
+  No sign split is needed.
+- With none, `fa_none.g` takes every case at once: each of the six products
+  is at most `2⁻¹⁰²²`, so `P` is at most about `6 · 2⁻¹⁰²²`, `eb` is far below
+  the normals, and `decide` does not compare. Unlike 464.18's plane, no offset
+  can make `eb` normal here.
+
+**4. What they print.** `runall.sh` (8) ran the 722 cases, `fa_none.g` and
+`prodzero.g` with Coq, from 20:42:34Z to 21:07:17Z on a load of 15 to 33 over
+24 cores.
+
+- Each of the 722 and `fa_none.g` proves at the code's `B`, and so does
+  `prodzero.g`: `grep -c ' exit 0 [0-9.]*s$' list_fa.log` prints 724. Only
+  `fa_none.g` prints "pointless". The slowest is `fa_nnnnnn.g`, 92.72 s.
+- `fa_nnnnnn.g` prints 464.13's figures for `flat.g`: `(Σ e) / Phat` within
+  `5u + 7u²` and `P −/ Phat` within `5u + 10u²`, each with a little more.
+- `summary.py` (8) reads each case. In all 722, `A` is within exactly
+  `2⁻¹⁰⁷⁵` for each term that is not `n`, so at most `5 · 2⁻¹⁰⁷⁵`. `(Σ e) /
+  Phat` is within `k u + 7u²`, `k` the most roundings a term goes through on
+  its way to `y` with every term normal, `L − 1 − c` for `c` sums cancelling
+  and at least 1, and `P −/ Phat` within `(L − 1) u + 10u²`, each with a
+  little more: `summary.py` prints that little more as `u³` and `10u³` at
+  most, to ten digits. The largest are `5u + 7u²`, in 46 cases with
+  `fa_nnnnnn` and `fa_nnssss` among them, and `5u + 10u²`, in 384 with
+  `fa_snssss_c4` among them (`grep -c -F 'e: 5.000000u = 5u+7.0000u^2'
+  summary.txt` and `grep -c -F 'P: 5.000000u = 5u+10.0000u^2' summary.txt`,
+  with `summary.txt` what `summary.py` printed). 131 cases print less than
+  `k u` (`grep -c 'e: [0-9.]*u = [0-9]u-' summary.txt`), such as `fa_ssssnn`
+  at `2.8u` for its `5u`. To six digits, `(Σ e) / Phat` is `u` in 38 cases,
+  `1.8u` in 2, `2u` in 112, `2.8u` in 2, `3u` in 288, `4u` in 232 and `5u` in
+  48 (`grep -o 'e: [0-9.]*u' summary.txt | sort | uniq -c`).
+
+So the bound holds with any of the products below the normals because a
+normal `eb` is `2⁻¹⁰²²` or more, which puts `P` at `2^(-971.585)` or more
+(`pmin.g`, 8, with `P` any real at least zero, so every permanent). The
+relative part is then at most `5u + 7u²` of `Phat`, and a little more, against
+`B = 6u + 128u²`, and `A` at most `5 · 2⁻¹⁰⁷⁵`, which is `5u` of `eb`. That is
+464.18's 4 again, with five products not normal where it had at most two
+beside a normal one.
+
+**5. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3), so each case is run again where it must fail:
+
+- Each of the 722 cases at `B = u / 2` (`c_<name>_half.g`, `B = 1b-54;`)
+  exits 1, and none prints "pointless". Its best is `[−2x, 2x]` for the `x u`
+  that `summary.py` prints for its case's `(Σ e) / Phat`, which `controls.py`
+  (8) checks for each, to within a thousandth: it prints `_half controls
+  whose best is twice their case's u count: 722`, with none under, none over
+  and none without a best. `c_fa_nnnnnn_half.g`'s best is `[-10, 10]`. Gappa's
+  best for a goal it does not prove can change from one run to the next
+  (464.26), so these are this run's figures, each a bound Gappa found on the
+  size of `(y − Ex) / eb`, and not an exact value.
+- `c_fa_none_noeb.g`, `fa_none.g` without `eb` normal, exits 1, best `[-inf,
+  inf]`, printing `eb` in `[0, 9b-1073]` and `P` in `[0, 3b-1021]`. So what
+  proves `fa_none.g` is the contradiction with `eb` normal and nothing else,
+  as 464.13's `flat_z012345.g`.
+- `c_prodzero.g` is `prodzero.g` asking for `2⁻¹⁰⁷⁶`, and exits 1, best
+  `[-2.47033e-324, 2.47033e-324]`, `2⁻¹⁰⁷⁵`. That is the bound, met: `2⁻¹⁰⁷⁴
+  · 2⁻¹` is a product of two doubles, and rounds to zero, the tie going to
+  even.
+
+`runall.sh` (8) ran the 724 controls, the 722 and these two, without Coq,
+from 21:07:17Z to 21:27:52Z: `grep -c ' exit 1 ' list_c.log` prints 724, and
+`grep -l pointless c_*.out | wc -l` prints 0.
+
+**6. What `plane.rs` said, and says now.** At `eb125ed0` the doc on the
+constant ended, `plane.rs:1088-1089`: "Whether a product below the normals,
+which `on_floats` refuses, would break it has not been run." The check itself
+had no comment. By 4 it would not break it: without the check, `on_floats`
+would hand `decide` a number with one to five of the six products below the
+normals, and `decide` would certify no wrong sign from it, and with all six
+there `decide` does not compare.
+
+So the six checks are not needed for a right sign. They are kept, as 464.18's
+7 kept plane's three, for the same reason: with them, level 1 answers only
+where the relative argument in the constant's doc holds, and the 722 cases
+stay a second proof rather than the only one. Dropping them would move the
+inputs with a product below the normals from level 2 to level 1, and whether
+that turns any refusal into an answer was not run. The check now carries a
+comment saying it is not needed for a right sign and what it does, in the
+words of plane's (`plane.rs:863-867`), and the doc on the constant ends with
+how far down the bound holds and why, citing this subsection, in place of the
+sentence above. Comment only: lines that run 0.
+
+**7. Rocq checks every proof here, modulo its hints.** `gappa -Bcoq` and
+`coqc`, under 464.4's pins with gappalib 1.8.0, exit 0 on each of the 722,
+`fa_none.g` and `prodzero.g`: `grep -c 'coq -Bcoq exit 0 coqc exit 0'
+list_fa.log` prints 724. Gappa does not write the same proof each run (464.4),
+so the sizes are the second lane's:
+
+- the 722 cases: 1513 to 6969 lines, 8 to 27 hints; `fa_nnnnnn.g` 5369 lines
+  and 27 hints, beside `flat.g`'s 4926 and 27 in 464.13's 8;
+- `fa_none.g`: 832 lines, no hints;
+- `prodzero.g`: 101 lines, no hints.
+
+The slowest, `fa_nnnnnn.g`, took 104.44 s for the two together. Each hint
+enters the Coq file as a hypothesis with no condition attached, as in 464.4,
+so each proof stands on its hints, and on the divisors Gappa took to be
+nonzero, which its warnings name. `field` has not been run on these hints
+(464.10).
+
+**8. The scripts.** `flatall.py` writes the 722 cases, `fa_none.g`, a control
+at `u / 2` for each case and `c_fa_none_noeb.g`. `prodzero.g`, `c_prodzero.g`
+and `pmin.g` are whole below. `runall.sh` runs every script through
+`runmany.sh` and 464.13's `one.sh`, unchanged; `summary.py` and `controls.py`
+read what they print. To run them again, save these eight files and `one.sh`
+in one directory and run `python3 flatall.py`, `bash runall.sh`, `python3
+summary.py` and `python3 controls.py` there.
+
+`flatall.py`, whole, as run:
+
+```python
+"""Write SideOfAFlatSurfaceThroughAPoint::on_floats without its six
+product_is_normal checks, in every case of where its six products land, as
+464.18's planeall.py does for SideOfAFlatSurface's three.
+
+Each of the six terms the fold adds is a rounded product of two doubles: a
+through product enters negated, and -rnd(f * q) is rnd(f * -q). A term that
+rounds to zero is left out of both folds (464.13's addzero.g), so a case is
+the states of the terms left, in the order the fold adds them, and how many
+rounded to zero. Each term left is in one of two states:
+
+- n, normal: it rounds to at least 2^-1022, as product_is_normal lets through;
+- s, below the normals and rounding to a double that is not zero, which
+  product_is_normal refuses;
+
+and each term that rounds to zero is z: a zero factor, which product_is_normal
+lets through, or a product below the normals at most 2^-1075 (prodzero.g).
+Each rounded sum either rounds, and is then at least 2^-1074, or cancels to
+zero and is written unrounded; two cancelling sums are never next to each
+other, since the sum after one is a term left alone, which is not zero.
+
+fa_<states>[_c<set>].g for each case with an n term, <states> one letter per
+term left, <set> naming each term whose sum cancels by its place among those
+left; c_<name>_half.g, each again at B = u / 2, which must fail;
+fa_none.g, every case with no n term at once, where eb cannot be normal, and
+c_fa_none_noeb.g, that again without eb normal, which must fail.
+
+Run as: python3 flatall.py; it writes beside itself.
+"""
+import itertools
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+B_CODE = "B = 6b-53 + 1b-99;"
+B_HALF = "B = 1b-54;"
+LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
+HEAD = [
+    "# restates: crates/rcad-geom/src/plane.rs on_floats at eb125ed0",
+    "# restates: crates/rcad-geom/src/plane.rs SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND at eb125ed0",
+    "# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at eb125ed0",
+    "# restates: crates/rcad-predicates/src/cascade.rs decide at eb125ed0",
+    "# SideOfAFlatSurfaceThroughAPoint::on_floats without its six product_is_normal",
+    "# checks: the sign of facing . point - facing . through, as six rounded",
+    "# products of two doubles folded left to right.",
+]
+
+
+def cancellable(left):
+    sums = list(range(1, left - 1))
+    for n in range(len(sums) + 1):
+        for c in itertools.combinations(sums, n):
+            if all(b - a > 1 for a, b in zip(c, c[1:])):
+                yield c
+
+
+def fold(src, left, cancel):
+    """Write the fold of t0 .. t<left-1> into y; return the sums that round."""
+    rounded = []
+    running = "t0"
+    for k in range(1, left - 1):
+        src.append(f"S{k} = {running} + t{k};")
+        if k in cancel:
+            src.append(f"s{k} = S{k};")
+        else:
+            src.append(f"s{k} = rnd(S{k});")
+            rounded.append(k)
+        running = f"s{k}"
+    src.append(f"y = {running} + t{left - 1};" if left >= 2 else "y = t0;")
+    return rounded
+
+
+def permanent(left):
+    perm = "|t0|"
+    for k in range(1, left):
+        perm = f"rnd({perm} + |t{k}|)"
+    return perm
+
+
+def hypotheses(src, hyps):
+    src += ["", "{"]
+    first = True
+    for comment, rows in hyps:
+        src.append(f"  # {comment}")
+        for row in rows:
+            if row:
+                src.append(("     " if first else "  /\\ ") + " /\\ ".join(row))
+                first = False
+    src.append("->")
+
+
+def make(states, cancel=(), b=B_CODE):
+    left = len(states)
+    zeros = 6 - left
+    small = [k for k in range(left) if states[k] == "s"]
+    normal = [k for k in range(left) if states[k] == "n"]
+    src = list(HEAD)
+    src.append(f"# The terms left, in the order the fold adds them: {states}"
+               + (f"; {zeros} more round{'s' if zeros == 1 else ''} to zero." if zeros else "."))
+    if cancel:
+        src.append(f"# The sum{'s' if len(cancel) > 1 else ''} adding term{'s' if len(cancel) > 1 else ''} "
+                   f"{', '.join(map(str, cancel))} cancel{'' if len(cancel) > 1 else 's'} to zero, which rounds to itself.")
+    src += [
+        "@rnd = float<ieee_64, ne>;",
+        "",
+        "# The two factors of each term left, each an f64.",
+        " ".join(f"a{k} = rnd(a{k}_); b{k} = rnd(b{k}_);" for k in range(left)),
+    ]
+    if zeros:
+        src += ["# The two factors of each term that rounds to zero.",
+                " ".join(f"g{j} = rnd(g{j}_); h{j} = rnd(h{j}_);" for j in range(zeros))]
+    src += [
+        "",
+        "# What on_floats computes, line for line. The fold starts at 0.0, and",
+        "# adding 0.0 or a term that rounded to zero to a double gives that double",
+        "# back (464.13's addzero.g), so those and the first addition are left out.",
+        " ".join(f"X{k} = a{k} * b{k};" for k in range(left)),
+    ]
+    if zeros:
+        src.append(" ".join(f"Z{j} = g{j} * h{j};" for j in range(zeros)))
+    src.append(" ".join(f"t{k} = rnd(X{k});" for k in range(left)))
+    rounded = fold(src, left, cancel)
+    src += ["", "# The permanent folds the same terms' magnitudes in the same order.",
+            f"P = {permanent(left)};", "", b, "eb = rnd(B * P);", "",
+            "# The true value of the same inputs."]
+    src.append("Ex = " + " + ".join([f"X{k}" for k in range(left)] + [f"Z{j}" for j in range(zeros)]) + ";")
+    src += ["", "# The permanent with no rounding of its own.",
+            "Phat = " + " + ".join(f"|t{k}|" for k in range(left)) + ";"]
+    src += ["", "# What each rounding multiplied its argument by."]
+    if normal:
+        src.append(" ".join(f"rp{k} = t{k} / X{k};" for k in normal))
+    if rounded:
+        src.append(" ".join(f"rs{k} = s{k} / S{k};" for k in rounded))
+    src += ["", "# Each term as y carries it less the term: e the part that is a fraction",
+            "# of the term as on_floats rounds it, with W that fraction, and for a term",
+            "# below the normals d what its own rounding cost, an amount."]
+    for k in range(left):
+        carry = [f"rs{j}" for j in rounded if j >= k]
+        carried = " * ".join(carry) if carry else "1"
+        src.append(f"W{k} = {carried} - 1 / rp{k};" if k in normal else f"W{k} = {carried} - 1;")
+    src.append(" ".join(f"e{k} = t{k} * W{k};" for k in range(left)))
+    src.append(" ".join(f"c{k} = |t{k}|;" for k in range(left)))
+    if small:
+        src.append(" ".join(f"d{k} = t{k} - X{k};" for k in small))
+    amount = " + ".join([f"d{k}" for k in small]) + "".join(f" - Z{j}" for j in range(zeros))
+    if not small and zeros:
+        amount = "-" + " - ".join(f"Z{j}" for j in range(zeros))
+    if amount:
+        src.append(f"A = {amount};")
+
+    hyps = [("Every input is a finite f64.",
+             [[f"|a{k}| <= 1b1024 /\\ |b{k}| <= 1b1024" for k in range(left)],
+              [f"|g{j}| <= 1b1024 /\\ |h{j}| <= 1b1024" for j in range(zeros)]]),
+            ("No factor of a normal term is zero.",
+             [[f"|a{k}| >= 1b-1074 /\\ |b{k}| >= 1b-1074" for k in normal]])]
+    if rounded:
+        hyps.append(("No rounded sum cancels to zero.", [[f"|S{k}| >= 1b-1074" for k in rounded]]))
+    if small:
+        hyps.append(("The terms below the normals that round to a double that is not zero.",
+                     [[f"|X{k}| <= 1b-1022 /\\ |t{k}| >= 1b-1074" for k in small]]))
+    if zeros:
+        hyps.append(("The terms that round to zero (prodzero.g).",
+                     [[f"|Z{j}| <= 1b-1075" for j in range(zeros)]]))
+    hyps += [("The normal terms, as product_is_normal has them.", [[f"|t{k}| >= 1b-1022" for k in normal]]),
+             ("The bound is normal, which decide checks.", [["|eb| >= 1b-1022"]]),
+             ("What lemma.g proves each of those gives.",
+              [[f"t{k} -/ X{k} {LEMMA}"] for k in normal] + [[f"eb -/ B * P {LEMMA}"]]),
+             ("x / |x| is in [-1, 1] for any x that is not zero.",
+              [[f"t{k} / |t{k}| in [-1, 1]" for k in range(left)]])]
+    hypotheses(src, hyps)
+    esum = " + ".join(f"e{k}" for k in range(left))
+    src.append(f"  ({esum}) / Phat in ? /\\ P -/ Phat in ?" + (" /\\ A in ?" if amount else ""))
+    src += ["  /\\ (y - Ex) / eb in [-1, 1]", "}", "", "# How far each rounding is from the identity."]
+    for k in normal:
+        src.append(f"t{k} / X{k} -> 1 + (t{k} - X{k}) / X{k};")
+    for k in rounded:
+        src.append(f"s{k} / S{k} -> 1 + (s{k} - S{k}) / S{k};")
+    src += [
+        "",
+        "# The relative part is averaged over the permanent as in flat.g; what",
+        "# rounding a term below the normals cost, and each term that rounded to",
+        "# zero, is an amount, and eb being normal keeps it small against eb.",
+        f"(y - Ex) / eb -> (({esum}) / Phat) * (Phat / P) * (P / eb)" + (" + A / eb;" if amount else ";"),
+        f"({esum}) / Phat -> ((Phat + ({esum})) - Phat) / Phat;",
+        f"Phat + ({esum}) -> " + " + ".join(f"(c{k} + e{k})" for k in range(left)) + ";",
+    ]
+    for k in range(left):
+        src.append(f"(c{k} + e{k}) - c{k} -> e{k};")
+    for k in range(left):
+        src.append(f"e{k} / c{k} -> (t{k} / |t{k}|) * W{k};")
+    src += [
+        "Phat / P -> 1 / (1 + (P - Phat) / Phat);",
+        "P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));",
+    ]
+    return "\n".join(src) + "\n"
+
+
+def make_none(eb_normal=True):
+    """Every case with no normal term: each of the six rounds below 2^-1022 or
+    to zero, so each product is at most 2^-1022, the permanent at most about
+    six times that, and eb far below the normals."""
+    src = list(HEAD)
+    src += ["# No term is normal: each product is at most 2^-1022, and may be zero.",
+            "@rnd = float<ieee_64, ne>;", "",
+            " ".join(f"a{k} = rnd(a{k}_); b{k} = rnd(b{k}_);" for k in range(6)), "",
+            "# What on_floats computes, every term in the fold.",
+            " ".join(f"X{k} = a{k} * b{k};" for k in range(6)),
+            " ".join(f"t{k} = rnd(X{k});" for k in range(6))]
+    fold(src, 6, ())
+    src += ["", f"P = {permanent(6)};", "", B_CODE, "eb = rnd(B * P);", "",
+            "Ex = " + " + ".join(f"X{k}" for k in range(6)) + ";"]
+    hyps = [("Every input is a finite f64.", [[f"|a{k}| <= 1b1024 /\\ |b{k}| <= 1b1024" for k in range(6)]]),
+            ("No term is normal.", [[f"|X{k}| <= 1b-1022" for k in range(6)]])]
+    if eb_normal:
+        hyps.append(("The bound is normal, which decide checks.", [["|eb| >= 1b-1022"]]))
+    hypotheses(src, hyps)
+    src += ["  eb in ? /\\ P in ?", "  /\\ (y - Ex) / eb in [-1, 1]", "}"]
+    return "\n".join(src) + "\n"
+
+
+def name_of(states, cancel):
+    return f"fa_{states}" + (f"_c{''.join(map(str, cancel))}" if cancel else "")
+
+
+if __name__ == "__main__":
+    proving = []
+    for left in range(1, 7):
+        for states in ("".join(s) for s in itertools.product("ns", repeat=left)):
+            if "n" not in states:
+                continue
+            for cancel in cancellable(left):
+                name = name_of(states, cancel)
+                open(f"{name}.g", "w").write(make(states, cancel))
+                open(f"c_{name}_half.g", "w").write(make(states, cancel, b=B_HALF))
+                proving.append(name)
+    open("fa_none.g", "w").write(make_none())
+    open("c_fa_none_noeb.g", "w").write(make_none(eb_normal=False))
+    print(f"{len(proving)} cases with a normal term, each with a control at u / 2, and fa_none.g")
+```
+
+`python3 flatall.py` prints `722 cases with a normal term, each with a
+control at u / 2, and fa_none.g`.
+
+`prodzero.g` proves the cover's `z`. The first lane wrote it with both
+directions as implications inside the goal, and it failed, `BND(X)` best
+within `2.22507e-308`: Gappa reads an implication in the goal by negating it,
+and the edge at `2⁻¹⁰⁷⁵` is not closed. The cover needs one direction only,
+and with `t` zero among the hypotheses it proves with no hint:
+
+```gappa
+# prodzero.g: a product of two doubles, of either sign, that rounds to zero
+# is at most 2^-1075 in magnitude.
+@rnd = float<ieee_64, ne>;
+a = rnd(a_); b = rnd(b_);
+X = a * b;
+t = rnd(X);
+{ |a| <= 1b1024 /\ |b| <= 1b1024 /\ t in [0, 0]
+  -> X in [-1b-1075, 1b-1075] }
+```
+
+`c_prodzero.g`, its control (5):
+
+```gappa
+# c_prodzero.g: prodzero.g asking for half its bound, which must fail: 2^-1075
+# is a product of two doubles and rounds to zero, ties going to even.
+@rnd = float<ieee_64, ne>;
+a = rnd(a_); b = rnd(b_);
+X = a * b;
+t = rnd(X);
+{ |a| <= 1b1024 /\ |b| <= 1b1024 /\ t in [0, 0]
+  -> X in [-1b-1076, 1b-1076] }
+```
+
+`pmin.g`, which `bash one.sh pmin.g nocoq` runs, printing `P in
+[1071292029505990860761435525475052308156628044440098539197007b-1171
+{3.34028e-293, 2^(-971.585)}, 1b1000 {1.07151e+301, 2^(1000)}]`:
+
+```gappa
+# pmin.g: how small the permanent can be with eb = rnd(B * P) normal, at the
+# code's B. P is any non-negative real here, which covers every permanent.
+@rnd = float<ieee_64, ne>;
+B = 6b-53 + 1b-99;
+eb = rnd(B * P);
+{ P >= 0 /\ P <= 1b1000 /\ eb >= 1b-1022 /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+  -> P in ? }
+P -> (eb / B) / (1 + (eb - B * P) / (B * P));
+```
+
+`runall.sh`:
+
+```sh
+#!/bin/bash
+# Run every case and prodzero.g with Coq, then every control without, through
+# runmany.sh, and print when each list is done.
+cd "$(dirname "$0")"
+{ ls fa_*.g; echo prodzero.g; } > list_fa
+ls c_*.g > list_c
+date -u +%FT%TZ
+bash runmany.sh list_fa coq
+date -u +%FT%TZ
+bash runmany.sh list_c nocoq
+date -u +%FT%TZ
+```
+
+What it printed, `runall.log`:
+
+```text
+2026-10-26T20:42:34Z
+done 724 files from list_fa
+2026-10-26T21:07:17Z
+done 724 files from list_c
+2026-10-26T21:27:52Z
+```
+
+`runmany.sh`, 464.18's at sixteen at a time rather than eight:
+
+```sh
+#!/bin/bash
+# Run every .g named in $1 through one.sh, 16 at a time, appending to $1.log.
+cd "$(dirname "$0")"
+rm -f "$1.log"
+xargs -P 16 -I{} bash one.sh {} "$2" < "$1" >> "$1.log" 2>&1
+echo "done $(wc -l < "$1") files from $1"
+```
+
+`summary.py`:
+
+```python
+"""Read every fa_*.out beside this file and print, one line per case, what
+Gappa printed for each goal: (sum e) / Phat and P -/ Phat in u, each with how
+far past k u it is in u^2, and A as a multiple of 2^-1075. Then check each
+case: (sum e) / Phat within k u + 64 u^2, k the most roundings a term goes
+through on its way to y; P -/ Phat within (left - 1) u + 64 u^2, left - 1 the
+additions that fold the permanent; and A within exactly 2^-1075 for each
+product that is not normal. Gappa prints a bound with a little more than its
+u^2 part (464.13's 5), so the counts within 7 u^2 and 10 u^2 are of cases
+whose u^2 part is at most 7.0001 and 10.0001."""
+import os
+import re
+import sys
+from fractions import Fraction
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+U = Fraction(1, 2**53)
+TINY = Fraction(1, 2**1075)
+ROOM = Fraction(1, 10000)
+NUM = re.compile(r"(-?\d+)(?:b(-?\d+))?")
+NAME = re.compile(r"fa_([ns]+)(?:_c(\d+))?")
+
+
+def value(text):
+    m = NUM.fullmatch(text)
+    mant, exp = int(m.group(1)), int(m.group(2) or 0)
+    return Fraction(mant) * (Fraction(2) ** exp)
+
+
+def interval(line):
+    m = re.search(r" in \[(-?\d+(?:b-?\d+)?)(?: \{[^}]*\})?, (-?\d+(?:b-?\d+)?)(?: \{[^}]*\})?\]", line)
+    return value(m.group(1)), value(m.group(2))
+
+
+def chain(left, cancel):
+    """The most roundings a term goes through on its way to y with every term
+    normal: its own, and each rounded sum, as 464.13's 6 counts them."""
+    return max(1, left - 1 - cancel)
+
+
+def read(name):
+    text = open(f"{name}.out").read()
+    out = {}
+    if "Results:" not in text or "pointless" in text:
+        return out
+    for line in text.split("Results:", 1)[1].splitlines():
+        line = line.strip()
+        if " in " not in line:
+            continue
+        goal = line.split(" in ")[0]
+        lo, hi = interval(line)
+        top = max(-lo, hi)
+        # Gappa prints a goal by what it names, so with one term left P -/ Phat
+        # is |...| -/ |...|, and with one amount A is t5 - X5 or the like.
+        if " -/ " in goal:
+            out["P"] = top
+        elif " / " in goal:
+            out["e"] = top
+        else:
+            out["A"] = top
+    return out
+
+
+def past(x, k):
+    """How far x is past k u, in u^2."""
+    return (x - k * U) / (U * U)
+
+
+names = sys.argv[1:] or sorted(f[:-4] for f in os.listdir(".")
+                               if f.endswith(".out") and NAME.fullmatch(f[:-4]))
+odd, rows = [], []
+for name in names:
+    r = read(name)
+    m = NAME.fullmatch(name)
+    states, cancel = m.group(1), m.group(2) or ""
+    left = len(states)
+    if "e" not in r or "P" not in r:
+        odd.append(name)
+        continue
+    k = chain(left, len(cancel))
+    rows.append((name, states, left, k, r))
+    print(name, f"e: {float(r['e'] / U):.6f}u = {k}u{float(past(r['e'], k)):+.4f}u^2",
+          f"P: {float(r['P'] / U):.6f}u = {left - 1}u{float(past(r['P'], left - 1)):+.4f}u^2",
+          f"A: {r['A'] / TINY}*2^-1075" if "A" in r else "")
+
+print()
+print(f"cases read: {len(rows)}; no figures or pointless: {odd}")
+for label, key, ku, cap in (("(sum e) / Phat", "e", "k u", 7), ("P -/ Phat", "P", "(left - 1) u", 10)):
+    excess = [(past(r[key], k if key == "e" else left - 1), name) for name, _, left, k, r in rows]
+    within = sum(1 for x, _ in excess if x <= 64)
+    small = {c: sum(1 for x, _ in excess if x <= c + ROOM) for c in (7, 10)}
+    most = max(excess)
+    whole = max((r[key] / U, name) for name, _, _, _, r in rows)
+    print(f"{label} within {ku} + 64 u^2: {within} of {len(rows)}; "
+          f"within {ku} + 7 u^2 and a little more: {small[7]}; within {ku} + 10 u^2 and a little more: {small[10]}")
+    print(f"  most past {ku}: {most[1]}, {float(most[0]):.4f}u^2, "
+          f"and past {ku} + {cap} u^2 by {float((most[0] - cap) / U):.10g}u^3 at most; "
+          f"largest: {whole[1]}, {float(whole[0]):.6f}u, {float(past(whole[0] * U, 5)):.6f}u^2 over 5u")
+not_a = [name for name, states, _, _, r in rows if r.get("A", 0) / TINY != 6 - states.count("n")]
+print(f"A within exactly 2^-1075 for each product not normal: {len(rows) - len(not_a)}; not: {not_a}")
+```
+
+`python3 summary.py` printed one line for each case, such as
+
+```text
+fa_nnssss e: 5.000000u = 5u+7.0000u^2 P: 5.000000u = 5u+10.0000u^2 A: 4*2^-1075
+fa_snssss_c4 e: 4.000000u = 4u+2.0000u^2 P: 5.000000u = 5u+10.0000u^2 A: 5*2^-1075
+fa_ssssnn e: 2.800000u = 5u-19815838360430180.0000u^2 P: 2.000000u = 5u-27021597764222952.0000u^2 A: 4*2^-1075
+```
+
+and then:
+
+```text
+cases read: 722; no figures or pointless: []
+(sum e) / Phat within k u + 64 u^2: 722 of 722; within k u + 7 u^2 and a little more: 722; within k u + 10 u^2 and a little more: 722
+  most past k u: fa_nnssss, 7.0000u^2, and past k u + 7 u^2 by 1u^3 at most; largest: fa_nnssss, 5.000000u, 7.000000u^2 over 5u
+P -/ Phat within (left - 1) u + 64 u^2: 722 of 722; within (left - 1) u + 7 u^2 and a little more: 338; within (left - 1) u + 10 u^2 and a little more: 722
+  most past (left - 1) u: fa_snssss_c4, 10.0000u^2, and past (left - 1) u + 10 u^2 by 10u^3 at most; largest: fa_snssss_c4, 5.000000u, 10.000000u^2 over 5u
+A within exactly 2^-1075 for each product not normal: 722; not: []
+```
+
+`controls.py`:
+
+```python
+"""For each c_fa_*_half control beside this file, read its best and say
+whether it is twice the u count its case printed for (sum e) / Phat: a case
+that proves at B = 6u + 2^-99 with that sum within x u fails at B = u / 2 with
+a best near 2x. Gappa's best for a goal it does not prove can change from run
+to run (464.26), so this counts the bests within a thousandth of 2x, under it
+and over it, and says nothing finer."""
+import os
+import re
+import subprocess
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+summary = subprocess.run([sys.executable, "summary.py"], capture_output=True, text=True).stdout
+ucount = {}
+for line in summary.splitlines():
+    m = re.match(r"(fa_\S+) e: ([0-9.]+)u", line)
+    if m:
+        ucount[m.group(1)] = float(m.group(2))
+
+at, under, over, pointless, nobest = 0, [], [], [], []
+for f in sorted(os.listdir(".")):
+    if not (f.startswith("c_fa_") and f.endswith("_half.out")):
+        continue
+    text = open(f).read()
+    case = f[2 : -len("_half.out")]
+    if "pointless" in text:
+        pointless.append(case)
+    # With one term left Gappa names y by what it is, float<...>(X0).
+    m = re.search(r"BND\(\(\S+ - Ex\) / eb\), best: \[([^,]+), ([^\]]+)\]", text)
+    if not m:
+        nobest.append(case)
+        continue
+    best, want = float(m.group(2)), 2 * ucount[case]
+    if abs(best - want) <= 1e-3:
+        at += 1
+    elif best < want:
+        under.append((case, best, want))
+    else:
+        over.append((case, best, want))
+print(f"_half controls read: {at + len(under) + len(over) + len(nobest)}")
+print(f"_half controls whose best is twice their case's u count: {at}")
+print("under it:", under)
+print("over it:", over)
+print("pointless:", pointless)
+print("no best for (y - Ex) / eb:", nobest)
+```
+
+`python3 controls.py` printed:
+
+```text
+_half controls read: 722
+_half controls whose best is twice their case's u count: 722
+under it: []
+over it: []
+pointless: []
+no best for (y - Ex) / eb: []
+```
+
+**9. What this leaves.** No row. What is not a row:
+
+- Q2767, on the doc of `product_is_normal` in `cascade.rs`, already waits on
+  Q2760. 6 here is a third predicate, after 464.14's sphere and 464.18's
+  plane, where that doc's claim does not hold: without its checks, a product
+  below the normals would not make this filter certify a sign it has not
+  earned.
+- Q2700 moves the Gappa scripts that rows of 464 appended into
+  `proofs/gappa/`, and that takes in the eight of 8.
+- Whether dropping the six checks would turn a refusal at level 1 into an
+  answer was not run (6). The checks stay, so nothing asks for it (§13).
+- The claim on `value`, rather than `y`, with a product below the normals was
+  not run. `decide` needs only `y` (2).
+- `field` on these scripts' hints (464.10).
