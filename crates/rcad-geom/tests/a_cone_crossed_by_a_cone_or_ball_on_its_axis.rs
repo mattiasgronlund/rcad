@@ -18,7 +18,8 @@
 //! each side of one flat surface. A second cone off the axis whose directions
 //! overlap the first's, with its apex outside the first, can cross it in one
 //! loop and two branches that run off for ever: `intersect` names all three,
-//! and `walk` marches the loop and refuses the branches by name. What stays
+//! and `walk` marches the loop and a branch between two corners on it, and
+//! refuses a whole branch by name. What stays
 //! refused is any other overlap, and a ball whose skin runs through the apex,
 //! which crosses the cone in a circle and the apex apart from it. A second cone
 //! of the same slope turned about a line through a point of the first's axis is
@@ -691,8 +692,8 @@ fn a_second_cone_off_the_axis_is_refused_by_name_in_both_halves() {
 /// square to the leaned cone's axis, one through its apex and one through
 /// `(0, 0, 4)`, and each branch on the far side of one of them. `walk` marches
 /// the loop, whole and each half of it between its two corners on `x = 0`, and
-/// refuses a run on a branch by name, whole or between two corners on it,
-/// since a march follows only a closed loop.
+/// marches a run on a branch between two corners on it, from either corner. A
+/// whole branch has no end to march to, and is refused by name.
 #[test]
 fn a_narrower_cone_leaned_less_than_the_wider_ones_half_angle_crosses_it_in_a_loop_and_two_endless_branches()
  {
@@ -789,23 +790,26 @@ fn a_narrower_cone_leaned_less_than_the_wider_ones_half_angle_crosses_it_in_a_lo
             let [corners] = on_it.as_slice() else {
                 panic!("one pair of corners on {branch:?}: {on_it:?}");
             };
-            let between =
-                NamedRun::new(branch.run().clone(), **corners).expect("two ends that name places");
-            for run in [branch, &between] {
+            for ends in [**corners, [corners[1], corners[0]]] {
+                let between =
+                    NamedRun::new(branch.run().clone(), ends).expect("two ends that name places");
                 for along in [[&funnel, &spout], [&spout, &funnel]] {
-                    assert_eq!(
-                        walk(
-                            run,
-                            along,
-                            Deflection::of(0.01).expect("a length above zero"),
-                            &Policy::certified(),
-                            &mut ProvenanceLog::new()
-                        )
-                        .err(),
-                        Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
-                        "{run:?}"
-                    );
+                    assert_marched_on_both_and_on_its_side(&between, along, 0.01, 4, &[*picker]);
                 }
+            }
+            for along in [[&funnel, &spout], [&spout, &funnel]] {
+                assert_eq!(
+                    walk(
+                        branch,
+                        along,
+                        Deflection::of(0.01).expect("a length above zero"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new()
+                    )
+                    .err(),
+                    Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+                    "{branch:?}"
+                );
             }
         }
     }
