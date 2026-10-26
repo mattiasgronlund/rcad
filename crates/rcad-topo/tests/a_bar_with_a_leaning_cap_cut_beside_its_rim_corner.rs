@@ -1,5 +1,5 @@
 //! A plate with a round tab at its corner whose cap leans, turned about `z`
-//! (Q2856, from Q2854 and Q2716).
+//! (Q2856, from Q2854 and Q2716; Q2797 and Q2798).
 //!
 //! At `Scale::millimetres(100.0)` the plate is the square `[0, 10]²` extruded
 //! 2 high, united under certified with `add_bar_cut_off_by(3, [the plane
@@ -46,6 +46,49 @@ fn the_rim_corner_two_ulps_off_the_rims_start_is_counted_first_round_it() {
         .unwrap_or_else(|why| panic!("{why}"));
 }
 
+/// Every turn `step · 0.05` about `z` at which the union with the far block
+/// was refused (Q2797): `AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve` for the lean
+/// `(0.1, 0, 1)`, and the order along a crossing for the other two. All but
+/// one of them: the lean `(0, 0.1, 1)` turned `50 · 0.05` is still refused on
+/// the side of the cylinder at the box `[−16, 16] × [0, 32] × [1, 4]`, which
+/// Q2857 traces.
+#[test]
+fn every_turn_the_union_with_the_far_block_was_refused_at_answers() {
+    let refused: [([f64; 3], &[u8]); 3] = [
+        ([0.1, 0.0, 1.0], &[1, 14, 27, 32, 35, 40, 52]),
+        ([0.0, 0.1, 1.0], &[29, 30, 34, 35, 40, 44, 49, 56, 57, 58]),
+        ([-0.1, 0.0, 1.0], &[37, 42, 50, 55, 57, 59]),
+    ];
+    let wrong: Vec<String> = refused
+        .into_iter()
+        .flat_map(|(lean, steps)| {
+            steps.iter().filter_map(move |&step| {
+                unites_with_the_far_block_as_the_two_it_was(lean, f64::from(step) * 0.05).err()
+            })
+        })
+        .collect();
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Every turn `step · 0.05` about `z` at which the plate's own union, the
+/// square with the tab, was refused on the order along a crossing (Q2798).
+#[test]
+fn every_turn_the_plate_was_refused_at_answers_as_the_plate() {
+    let refused: [([f64; 3], &[u8]); 2] = [
+        ([0.0, 0.1, 1.0], &[11, 12, 13, 43, 45]),
+        ([-0.1, 0.0, 1.0], &[19, 20, 52]),
+    ];
+    let wrong: Vec<String> = refused
+        .into_iter()
+        .flat_map(|(lean, steps)| {
+            steps.iter().filter_map(move |&step| {
+                the_plate_as_it_should_be(lean, f64::from(step) * 0.05).err()
+            })
+        })
+        .collect();
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// How far a solid's volume may move because its turned corners are each a
 /// rounding off where the turn puts them. The block's mesh is its own flat
 /// faces, so its volume error is about `1.3e-14`, and turned `0.05` it
@@ -60,7 +103,8 @@ fn unites_with_the_far_block_as_the_two_it_was(lean: [f64; 3], angle: f64) -> Re
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
     let turn = Isometry::rotation(&Axis::z(), angle).expect("a finite angle");
-    let plate = a_plate_with_a_leaning_tab(&mut model, &turn, lean)?;
+    let plate = a_plate_with_a_leaning_tab(&mut model, &turn, lean)
+        .map_err(|why| format!("lean {lean:?} turned {angle}: {why}"))?;
     let block = a_block(&mut model, [50.0, 50.0, 0.0], [56.0, 56.0, 3.0]);
     model
         .place_solid(block, &turn)
@@ -81,18 +125,7 @@ fn unites_with_the_far_block_as_the_two_it_was(lean: [f64; 3], angle: f64) -> Re
         .solids()
         .iter()
         .map(|solid| {
-            let measured = model
-                .solid(*solid)
-                .expect("this model made the key")
-                .measure(
-                    Deflection::of(0.01).expect("a positive length"),
-                    &policy,
-                    &mut ProvenanceLog::new(),
-                )
-                .map_err(|why| {
-                    format!("lean {lean:?} turned {angle}: does not measure: {why:?}")
-                })?;
-            Ok((measured.volume(), measured.volume_error()))
+            measured(&model, *solid).map_err(|why| format!("lean {lean:?} turned {angle}: {why}"))
         })
         .collect::<Result<Vec<_>, String>>()?;
     volumes.sort_by(|one, other| one.0.total_cmp(&other.0));
@@ -109,6 +142,29 @@ fn unites_with_the_far_block_as_the_two_it_was(lean: [f64; 3], angle: f64) -> Re
         return Err(format!(
             "lean {lean:?} turned {angle}: measured {block} ± {block_error} and {plate} ± \
              {plate_error}, not within {closed_forms:?}"
+        ));
+    }
+    Ok(())
+}
+
+/// The plate of `lean` turned by `angle` about `z`; it must validate and
+/// measure its closed form within its mesh's own volume error and
+/// [`TURNED_A_ROUNDING_OFF`].
+fn the_plate_as_it_should_be(lean: [f64; 3], angle: f64) -> Result<(), String> {
+    let policy = Policy::certified();
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let turn = Isometry::rotation(&Axis::z(), angle).expect("a finite angle");
+    let plate = a_plate_with_a_leaning_tab(&mut model, &turn, lean)
+        .map_err(|why| format!("lean {lean:?} turned {angle}: {why}"))?;
+    model
+        .validate(&policy, &mut ProvenanceLog::new())
+        .map_err(|why| format!("lean {lean:?} turned {angle}: does not validate: {why}"))?;
+    let (volume, error) =
+        measured(&model, plate).map_err(|why| format!("lean {lean:?} turned {angle}: {why}"))?;
+    let closed_form = the_plates_volume(lean);
+    if (volume - closed_form).abs() > error + TURNED_A_ROUNDING_OFF {
+        return Err(format!(
+            "lean {lean:?} turned {angle}: measured {volume} ± {error}, not {closed_form}"
         ));
     }
     Ok(())
@@ -168,6 +224,20 @@ fn a_plate_with_a_leaning_tab(
         return Err(format!("the plate: {} solids", fused.solids().len()));
     };
     Ok(*plate)
+}
+
+/// The volume of `solid` and how far its mesh may be off it.
+fn measured(model: &Model, solid: SolidKey) -> Result<(f64, f64), String> {
+    let measured = model
+        .solid(solid)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.01).expect("a positive length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .map_err(|why| format!("does not measure: {why:?}"))?;
+    Ok((measured.volume(), measured.volume_error()))
 }
 
 fn a_block(model: &mut Model, [x0, y0, z0]: [f64; 3], [x1, y1, z1]: [f64; 3]) -> SolidKey {
