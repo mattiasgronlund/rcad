@@ -399,7 +399,9 @@ impl SolidView<'_> {
     ///   Not from the first rung, because the bowls a rounding off a half ball
     ///   in `a_piece_grazed_by_a_trimming_nothing_follows.rs`, whose ring clears
     ///   with both rims halved, were refused when only the outline was, and a
-    ///   mesh that cleared halving both is cut as it was.
+    ///   mesh that cleared halving both is cut as it was. From the outline's
+    ///   second rung on, each of its sides is also walked fine enough that its
+    ///   chords stay clear of the point of a hole nearest it (Q2845).
     /// - **A refusal on a finer rung hands back the last crossing.** The
     ///   finer rooms are this function's own numbers, and a refusal at one of
     ///   them is no answer about the deflection the caller asked for — the same
@@ -549,7 +551,7 @@ impl SolidView<'_> {
                         rung if rung == RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER + 1 => building
                             .with_its_sides_walked_as_asked(face)
                             .again_with_its_outline_walked_finer(face),
-                        _ => building.again_with_its_outline_walked_finer(face),
+                        _ => building.again_with_its_outline_walked_clear_of_its_holes(face),
                     };
                     last_crossing = Some((why, said));
                     continue;
@@ -752,7 +754,11 @@ fn a_flat_face_whose_bent_sides_crossed<'m>(
 /// rounding off a half ball, and the ring below. So for that shape the cap is
 /// no margin. Swept over 628 turns a hundredth apart, 501 of its meshes cleared
 /// on the outline's eighth rung and 767 ran out, and the fuses at five of those
-/// turns are still refused. It is kept at eight for what running out costs.
+/// turns were refused. It is kept at eight for what running out costs. From
+/// the outline's second rung on, each side is walked fine enough to clear the
+/// point of a hole nearest it as well (Q2845,
+/// [`BuildingAMesh::again_with_its_outline_walked_clear_of_its_holes`]), and
+/// the meshes of those five turns clear there.
 ///
 /// **And what running out costs.** An arc walked to a room `r` takes about
 /// `1/√r` points, so each rung walks about `√2` times the points of the one
@@ -763,7 +769,10 @@ fn a_flat_face_whose_bent_sides_crossed<'m>(
 /// meshes at `0.1` in 8 ms
 /// (`a_ring_a_rounding_wide_is_refused_before_its_rims_are_walked_into_tens_of_thousands_of_points`).
 /// Its outline alone walked eight times more, with its inner rim back at the
-/// room asked, that whole test takes 3.3 s.
+/// room asked, that whole test took 3.3 s. Its inner rim stands `9.2e-16` in
+/// from the outline, so the outline's second rung now asks a room under what
+/// placing the face rounds by, that walk is refused, and the crossing is
+/// handed back there.
 /// At a cap of 30 the two half-disc plates' tests took 186 s and 325 s.
 const RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER: u32 = 8;
 
@@ -957,6 +966,96 @@ impl BuildingAMesh {
     /// they were walked at.
     fn again_with_its_outline_walked_finer(self, face: FaceView<'_>) -> Self {
         self.again_with_the_bent_sides_of_walked_finer(face, face.wires().take(1))
+    }
+
+    /// [`Self::again_with_its_outline_walked_finer`], with each side walked so
+    /// that its chords sag no more than half the way the point of `face`'s
+    /// holes nearest the curved surface it runs along stands in from it, where
+    /// every point of the holes stands on one side of that surface.
+    ///
+    /// **Halving alone fell short where a hole comes a rounding from the
+    /// outline** (Q2845). A chord of a side sags into the face, so a point of
+    /// a hole a little in from where the hole touches the outline lies outside
+    /// the chord across that place until the chord sags less than the point
+    /// stands in. A thin bar inside a thick one, both turned 4.71 about `z`,
+    /// has a corner of its hole `1.4e−6` in from the thick pipe, and eight
+    /// halvings from the room the mesh was asked for do not reach that. A
+    /// side is walked in steps whose chords sag at most
+    /// [`WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO`] times the room it is walked to,
+    /// so the room here is the way in over twice that share. The two is a
+    /// margin and not a bound, and a face still crossed is halved again from
+    /// there on the next rung. At the way in over two, a room `16/3` times
+    /// smaller, the thin bar's fuses at five turns near a quarter cleared on
+    /// the same rung with twice the points walked.
+    ///
+    /// **Not on the outline's first rung**, which walks the holes back at the
+    /// room asked: the points read here are the ones the last pass walked, and
+    /// only from the second rung on are they the ones the next pass walks. Read
+    /// off the holes walked finer, the outline was walked finer than the holes
+    /// it is walked round need.
+    fn again_with_its_outline_walked_clear_of_its_holes(self, face: FaceView<'_>) -> Self {
+        let clear_of_its_holes: Vec<(EdgeKey, f64)> = face
+            .wires()
+            .take(1)
+            .flat_map(WireView::coedges)
+            .map(|coedge| coedge.edge())
+            .filter(|edge| *edge.stored_run() != EdgeRun::Straight)
+            .filter_map(|edge| Some((edge.key(), self.how_far_its_holes_stand_in(face, edge)?)))
+            .collect();
+        let mut again = self.again_with_its_outline_walked_finer(face);
+        for (edge, standing_in) in clear_of_its_holes {
+            let room = again
+                .walked_finer
+                .get_mut(&edge)
+                .expect("each bent side of the outline was just walked finer");
+            *room = room.min(standing_in / (2.0 * WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO));
+        }
+        again
+    }
+
+    /// How far the point of `face`'s holes nearest the curved surface `edge`
+    /// runs along stands from it, over the points the holes were walked into
+    /// and their corners, when every one of them stands on one side of it.
+    ///
+    /// `None` when one stands on it, when a side cannot be told, or when they
+    /// stand on both sides, as a hole poking out through the outline does,
+    /// which no walk of the outline clears.
+    fn how_far_its_holes_stand_in(&self, face: FaceView<'_>, edge: EdgeView<'_>) -> Option<f64> {
+        let along: SmallVec<[Surface; 2]> = self
+            .along_each_edge
+            .get(&edge.key())
+            .expect("an edge reached through a face has that face along it")
+            .iter()
+            .map(SurfaceAlongAnEdge::where_it_really_is)
+            .collect();
+        let pair = match along.as_slice() {
+            [only] => [only, only],
+            [first, second] => [first, second],
+            _ => return None,
+        };
+        let pair = which_two_surfaces_a_run_is_between(&edge.run(), pair);
+        let curved = pair.iter().find(|surface| surface.as_plane().is_none())?;
+        let holes = || face.wires().skip(1);
+        let walked = holes()
+            .flat_map(WireView::coedges)
+            .filter_map(|coedge| self.along_edge.get(&coedge.edge().key()))
+            .flatten()
+            .map(|&at| self.points[at as usize]);
+        let corners = holes().flat_map(WireView::points);
+        let mut side = None;
+        let mut nearest = f64::INFINITY;
+        for point in walked.chain(corners) {
+            let here = side_of_surface(curved, PredicatePoint::from(point.coordinates()));
+            let (Decision::Neg | Decision::Pos) = here else {
+                return None;
+            };
+            if *side.get_or_insert(here) != here {
+                return None;
+            }
+            let (u, v) = curved.coordinates_of(point);
+            nearest = nearest.min(point.distance_to(curved.point_at(u, v)));
+        }
+        side.map(|_| nearest)
     }
 
     /// This building with every side of `face` back at the room the mesh was

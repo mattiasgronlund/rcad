@@ -622,6 +622,64 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_opposite_its_seam_both_turned_so_it_r
     }
 }
 
+/// [`a_thin_bar_up_the_inside_of_a_thick_one_opposite_its_seam_both_turned_so_it_rounds_inside_answers_every_fuse`]
+/// turned 1.56, 1.58, 4.69, 4.71 and 4.73, within `0.023` of a quarter or
+/// three quarters of a turn, where `c² + s² − 1` is below zero at each.
+/// Every fuse answers as the unturned bars' do.
+///
+/// The union both ways round at 1.56, 1.58 and 4.71, and the thick bar less
+/// the thin one at all five, were refused `CannotMeshAFace` with
+/// `BoundaryCrossesItself` on the answer's thick floor (Q2845), after
+/// `the_coarsest_mesh_whose_sides_do_not_cross` in `validate.rs` had run every
+/// one of its rooms and `SolidView::mesh_or_how_it_folded` every one of its
+/// sixteen rungs at each. At every rung of every room the corner of the hole
+/// outside the outline was the same one, a corner every walk of the hole's
+/// circle keeps: the circle's own vertex, at the floor's chart's first axis
+/// from the thin axis, near a quarter turn, and the point opposite it near
+/// three quarters. That corner is `α` round the hole's centre from where the
+/// hole comes within a rounding of the outline, `α` the turn's distance from
+/// the quarter, and it lies `α²/4` in from the outline circle: `2.9e−5` at
+/// 1.56, `1.4e−6` at 4.71. The outline's chord across that place sags `β²`
+/// at its middle, `β` its half-angle round the thick axis, so the corner
+/// lies outside it while `β` is above about `α/2`. The finest outline the
+/// ladder walked had 269 corners for the union and 165 for the difference,
+/// `β` of `0.0117` and `0.019`, and 1.56 needs `β` under `0.0054`.
+///
+/// From the outline's second rung on, the mesh now walks each bent side of
+/// the outline so that its chords sag at most half the way the point of the
+/// hole nearest the thick pipe stands in from it
+/// (`BuildingAMesh::again_with_its_outline_walked_clear_of_its_holes` in
+/// `mesh.rs`). Here that point is this corner, `α²/4` in, and every mesh of
+/// these fuses clears on that rung.
+#[test]
+fn a_thin_bar_up_the_inside_of_a_thick_one_opposite_its_seam_turned_near_a_quarter_answers_every_fuse()
+ {
+    let turned: [(f64, Pair); 5] = [
+        (1.56, |model| both_bars_turned_about_z(model, -1.0, 1.56)),
+        (1.58, |model| both_bars_turned_about_z(model, -1.0, 1.58)),
+        (4.69, |model| both_bars_turned_about_z(model, -1.0, 4.69)),
+        (4.71, |model| both_bars_turned_about_z(model, -1.0, 4.71)),
+        (4.73, |model| both_bars_turned_about_z(model, -1.0, 4.73)),
+    ];
+    for (angle, build) in turned {
+        let mut model = a_model();
+        let [thick, thin] = build(&mut model).map(|solid| the_wall(&model, solid));
+        let Surface::Cylinder(pipe) = thin else {
+            panic!("a bar's wall is a pipe: {thin:?}");
+        };
+        let axis = pipe.axis().origin();
+        let (sign, short) = squared_length_less_one(Vector::new(axis.x(), axis.y(), 0.0));
+        assert_eq!(sign, Decision::Neg, "turn {angle}: c² + s² − 1 is {short}");
+        assert_eq!(curves(&thick, &thin), Ok(0), "turn {angle}");
+        assert_eq!(curves(&thin, &thick), Ok(0), "turn {angle}");
+        every_fuse_answers(
+            build,
+            [16.0 * PI, 6.0 * PI, 4.0 * PI],
+            [&[7], &[3], &[4], &[3, 3]],
+        );
+    }
+}
+
 /// [`a_thin_bar_up_the_inside_of_a_thick_one_rests_on_it_along_its_seam_and_every_fuse_answers`]
 /// with the thin bar turned `lean` about `x`: `4e−16`, `1e−15`, `1e−14` and
 /// `1e−8`. Its axis then runs `(x, −lean·z)`, so the thin pipe touches the
