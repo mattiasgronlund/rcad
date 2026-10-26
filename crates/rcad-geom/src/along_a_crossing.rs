@@ -154,8 +154,8 @@ use crate::intersect::{
     whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
 };
 use crate::{
-    Cone, Cylinder, Error, HalfSpace, Plane, Point, Result, Sphere, Surface, Torus, Vector,
-    WhereFollowingACrossingGaveUp,
+    Cone, Cylinder, Error, HalfSpace, HalfSpaceThroughAPoint, Plane, Point, Result, Sphere,
+    Surface, Torus, Vector, WhereFollowingACrossingGaveUp,
 };
 
 /// The name the ordering question goes by in provenance records.
@@ -1233,6 +1233,123 @@ fn whether_a_line_of_one_cone_comes_out_of_another_at(
         leaving.times(&Exact::dot_of_two_exact(&r, &Exact::of_each(along))?)
     })();
     exactly_out.map_or(boxed, |out| out.sign())
+}
+
+impl Cone {
+    /// Where this cone and `other`, off one axis, cross in two loops held apart
+    /// by `picker`'s flat surface: the side of `other` that every point of this
+    /// cone past that flat surface is on, seen from the loop in front of it.
+    /// Nothing where the pair is not two loops or `picker` is not the flat
+    /// surface between them, and [`NOTHING_IS_KNOWN`] where whether it is could
+    /// not be settled.
+    ///
+    /// The loop in front cuts this cone in two, and every point past the flat
+    /// surface is in one of the two parts: this is the partner's sign in that
+    /// part next to the loop. It is not the partner's sign at the point, which
+    /// past the other loop is the other one.
+    ///
+    /// # Read along the straight lines of the ruled cone
+    ///
+    /// `intersect`'s `how_two_cones_off_one_axis_cross` proves the two loops by
+    /// reading the form `Q` of one cone, `X`, along the straight lines `b + t·d` of the
+    /// other, `Y`, the ruled one, with apex `b`: every line has two roots, one
+    /// on each loop, neither at `t = 0`, and the flat surface crosses it once,
+    /// between them. It does so in one of three ways: through `b` square to
+    /// `Y`'s axis, with `b` inside `X`; through a point of `Y`'s axis where the
+    /// disc `Y`'s inside cuts the flat surface in is proved inside `X`; or,
+    /// where every line of `Y` runs inside `X`'s own directions, through `X`'s
+    /// apex `a` square to `X`'s axis.
+    ///
+    /// - **On `Y`** the loop in front meets each line once, never at the apex,
+    ///   so it cuts `Y` into the points beyond it along each line and the points
+    ///   short of it, and the points of a line past the flat surface are all on
+    ///   one of those two sides, the one its other root is on. Next to the loop
+    ///   on that side the line runs between its two roots, where `X`'s sign is
+    ///   the one opposite to `Q(d)`. `Q(d)` is above nothing on every line in
+    ///   the first two ways and below it in the third, so the side is inside
+    ///   `X` in the first two and outside in the third.
+    /// - **On `X`, the first two ways**: the flat surface meets `Y`'s solid
+    ///   inside strictly inside `X`, at `b` alone or in the proved disc, so it
+    ///   misses the part of `X` inside `Y`. The piece of that part in front of
+    ///   the flat surface then has its edge on the loop in front alone: it is a
+    ///   whole side of that loop, the one inside `Y`, and every point past the
+    ///   flat surface is on the other side, outside `Y`, even inside the other
+    ///   loop, where `Y`'s sign is below nothing.
+    /// - **On `X`, the third way**: the flat surface touches `X` at `a` alone,
+    ///   so the two loops are one on each nappe, and the points past it are the
+    ///   other nappe, joined to the loop in front through `a` without crossing
+    ///   `Y` on this nappe. The side is `Y`'s sign at `a`, which that way proves
+    ///   is not nothing, and which is below nothing where `a` is inside `Y`.
+    ///
+    /// On the flat surface itself the partner's sign is the side, in every
+    /// case: between the two roots on `Y`, outside `Y`'s solid on `X` in the
+    /// first two ways, and at `a` in the third.
+    ///
+    /// The third way is the one whose flat surface runs through the crossed
+    /// cone's apex. The first runs through the ruled cone's apex, never the
+    /// crossed one's, since two cones off one axis on one apex are refused
+    /// before. The second never does: its bound at the crossed apex is the
+    /// squared radius of the disc times `X`'s `w·w`, above nothing.
+    ///
+    /// **Asked again under a certified policy**, as the winding round these
+    /// loops asks it, since a fuse reads the pickers
+    /// `intersect` named and has no policy to hand here; and only where the
+    /// answer is two loops. A loop and two branches is named by flat surfaces
+    /// this does not read: each branch has one picker of its own, and is read
+    /// as it always was.
+    #[must_use]
+    pub fn which_side_past_the_flat_surface_between_two_loops(
+        &self,
+        other: &Self,
+        picker: &HalfSpaceThroughAPoint,
+    ) -> Option<Decision> {
+        if self.apex() == other.apex() {
+            return None;
+        }
+        // Two cones on one axis cross in circles picked by a flat surface
+        // through the steeper apex facing along the axis, which may be the
+        // very flat surface a pair off one axis would be read by.
+        match whether_two_cones_share_an_axis(self, other) {
+            Decision::Pos => (),
+            Decision::Zero => return None,
+            Decision::Undecidable { .. } => return Some(NOTHING_IS_KNOWN),
+            Decision::Neg => {
+                unreachable!("how far off an axis is a sum of squares, never below nothing")
+            }
+            unhandled => unreachable!("unhandled decision: {unhandled:?}"),
+        }
+        let crossing = match how_two_cones_off_one_axis_cross(
+            self,
+            other,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) {
+            Ok(crossing) => crossing,
+            Err(Error::Undecidable { .. }) => return Some(NOTHING_IS_KNOWN),
+            Err(_) => return None,
+        };
+        if crossing.apex.is_some()
+            || (*picker != crossing.across && *picker != crossing.across.reversed())
+        {
+            return None;
+        }
+        let third_way = crossing.across.through() == crossing.crossed.apex();
+        if self.apex() == crossing.ruled.apex() {
+            return Some(if third_way {
+                Decision::Pos
+            } else {
+                Decision::Neg
+            });
+        }
+        if !third_way {
+            return Some(Decision::Pos);
+        }
+        Some(
+            crossing
+                .ruled
+                .side_of(PredicatePoint::from(crossing.crossed.apex().coordinates())),
+        )
+    }
 }
 
 /// Which way one of the circles a ball on a cone's axis crosses it in runs, for

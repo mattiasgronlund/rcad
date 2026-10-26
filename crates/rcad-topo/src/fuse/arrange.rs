@@ -11074,7 +11074,11 @@ impl<'f> Arrangement<'f> {
     /// axis for a shallower pipe, and
     /// [`Arrangement::whether_past_the_flat_surface_through_a_cones_apex`] and
     /// [`Arrangement::whether_a_pipe_is_past_the_flat_surface_through_a_cones_apex`]
-    /// answer there (Q2789). A flat face square to a ring's axis is the one pair picked by
+    /// answer there (Q2789). So are two cones off one axis that cross in two
+    /// loops, picked by a flat surface square to one of the two axes that the
+    /// loops are not circles round, and
+    /// [`Arrangement::whether_past_the_flat_surface_between_two_loops_of_two_cones`]
+    /// answers there (Q2807). A flat face square to a ring's axis is the one pair picked by
     /// something other than a half-space: the plane cuts the ring in two
     /// circles round the axis, the pipe of the ring's own radius tells them
     /// apart, and
@@ -11148,6 +11152,13 @@ impl<'f> Arrangement<'f> {
         {
             return Self::whether_a_pipe_is_past_the_flat_surface_through_a_cones_apex(
                 picker, &pipe, &cone, at,
+            );
+        }
+        if let (Surface::Cone(this), Surface::Cone(other)) = (self.surface, partner)
+            && let [Picker::InFrontOfAFlatThrough(picker)] = self.crossings[crossing].picked_by()
+        {
+            return Self::whether_past_the_flat_surface_between_two_loops_of_two_cones(
+                picker, &this, &other, at,
             );
         }
         let axis = match (self.surface, partner) {
@@ -11457,6 +11468,58 @@ impl<'f> Arrangement<'f> {
         };
         if known_to_be_past
             || side_of_surface(&Surface::Cone(*cone), at) == towards_the_flat_surface
+        {
+            PastThePicker::Yes(towards_the_flat_surface)
+        } else {
+            PastThePicker::CannotTell
+        }
+    }
+
+    /// On a cone another cone off its axis cuts in two loops: whether a point
+    /// is past the flat half-space that picks one loop out, and if it is, which
+    /// side of the other cone that loop has towards it.
+    ///
+    /// The half-space is one `rcad_geom`'s `how_two_cones_off_one_axis_cross`
+    /// builds, and
+    /// [`Cone::which_side_past_the_flat_surface_between_two_loops`] says which
+    /// side, and why every point past the flat surface is on it: on the cone
+    /// whose straight lines each cross both loops, the side is read off the
+    /// other cone's form along those lines, and on the cone they cross, off
+    /// where the flat surface meets the first cone's inside. Where the pair is
+    /// not two loops, or the picker is not the flat surface between them, the
+    /// other cone's sign is the side, as it always was, and
+    /// [`PastThePicker::No`] says so: that is a loop and two branches, whose
+    /// branches are each picked by one flat surface of their own.
+    ///
+    /// On or in front of the half-space the other cone cuts this one in that
+    /// loop alone, so its sign is the side there. A point whose box straddles
+    /// the flat surface is answered where the two readings agree. The flat
+    /// surface is asked first, so the crossing is proved again only for a point
+    /// past it or straddling it. Read without this, the walk outside one loop
+    /// of a funnel a leaning spout runs through said nothing about the other
+    /// loop, and the funnel's face inside that loop was put with the face
+    /// outside it (Q2807).
+    fn whether_past_the_flat_surface_between_two_loops_of_two_cones(
+        picker: &HalfSpaceThroughAPoint,
+        this: &Cone,
+        other: &Cone,
+        at: PredicatePoint,
+    ) -> PastThePicker {
+        let known_to_be_past = match picker.side_of_point(at) {
+            Decision::Pos | Decision::Zero => return PastThePicker::No,
+            Decision::Neg => true,
+            Decision::Undecidable { .. } | _ => false,
+        };
+        let towards_the_flat_surface =
+            match this.which_side_past_the_flat_surface_between_two_loops(other, picker) {
+                None => return PastThePicker::No,
+                Some(side @ (Decision::Pos | Decision::Neg)) => side,
+                Some(Decision::Zero | Decision::Undecidable { .. } | _) => {
+                    return PastThePicker::CannotTell;
+                }
+            };
+        if known_to_be_past
+            || side_of_surface(&Surface::Cone(*other), at) == towards_the_flat_surface
         {
             PastThePicker::Yes(towards_the_flat_surface)
         } else {
