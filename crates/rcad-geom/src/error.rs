@@ -696,6 +696,22 @@ pub enum Error {
         most: usize,
     },
 
+    /// A crossing walked from one end of a run towards the other went no
+    /// further towards it.
+    ///
+    /// A run between two ends is walked by a measure of how far along it a
+    /// point is, which grows from the first end to the second. This is the
+    /// walk finding that neither way the crossing runs from the first end
+    /// grows it, or that a step it kept went back on what an earlier one had
+    /// covered. A step that goes back has jumped onto another piece of the
+    /// crossing, or the measure does not grow along this piece at all, and
+    /// either way the points walked so far are not the run asked for.
+    ///
+    /// Whether this is a gap or a limit is **not known**: no walk the tests
+    /// make meets it on a run that really goes from one end to the other.
+    #[error("no step along this crossing goes on towards the other end of its run")]
+    CannotFollowACrossingTowardsTheOtherEndOfItsRun,
+
     /// Two surfaces that cross in a curve that runs on for ever rather than in a
     /// closed one.
     ///
@@ -1039,6 +1055,7 @@ impl Error {
             | Self::CannotFollowACrossingWhereItsSurfacesAreTangent { .. }
             | Self::CannotFollowACrossingBecauseNoStepStaysOnIt { .. }
             | Self::TooManyPointsAlongOneCrossing { .. }
+            | Self::CannotFollowACrossingTowardsTheOtherEndOfItsRun
             | Self::TheseTwoSurfacesDoNotCrossInAConic
             | Self::WhereALineMeetsARingNeedsTheLineExactly
             | Self::Predicate(..)
