@@ -467,7 +467,7 @@ fn a_thinner_bar_resting_inside_a_thick_one_where_a_cut_across_its_wall_runs_ans
 /// ([`a_thin_bar_up_the_inside_of_a_thick_one_both_turned_a_radian_about_its_axis_answers_every_fuse`]).
 /// Turned 0.7, 2.5 or 3, it rounds the axis inside that circle, and they
 /// cross nowhere
-/// ([`a_thin_bar_up_the_inside_of_a_thick_one_both_turned_so_it_rounds_inside_is_refused_reading_a_corner_inside_the_thin_pipe`]).
+/// ([`a_thin_bar_up_the_inside_of_a_thick_one_both_turned_so_it_rounds_inside_answers_every_fuse`]).
 ///
 /// What they share is the thin bar between the thick bar's caps, `4π`.
 #[test]
@@ -539,26 +539,29 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_both_turned_a_radian_about_its_axis_a
 /// side of that circle the floor's rim lies on. It now reads a corner the way
 /// `passes_through` does.
 ///
-/// What they share and the thin bar less the thick one answer as the unturned
-/// bars' do. The union both ways round and the thick bar less the thin one are
+/// The union both ways round and the thick bar less the thin one were then
 /// refused `TheFuseWroteABrokenAnswer` with
-/// `AClosedEdgeIsWalkedAgainstItsSurface`, a refusal of a sound answer. With
-/// the union, the thick bar first and the turn 0.7, the face it is asked of is
-/// the answer's thick floor, a disc of radius 2 with the thin bar's hole in it,
-/// at the hole's rim. `validate` reads which side of the thin pipe the floor
-/// lies on off its one corner not on that pipe, the outline's `(2c, 2s, −2)`.
-/// That corner is `(c, s)` from the thin axis, and `c² + s²` is under 1, so
-/// it reads inside the thin pipe, where the floor is not.
+/// `AClosedEdgeIsWalkedAgainstItsSurface`, a refusal of a sound answer (Q2844).
+/// With the union, the thick bar first and the turn 0.7, the face it was asked
+/// of is the answer's thick floor, a disc of radius 2 with the thin bar's hole
+/// in it, at the hole's rim. `validate` read which side of the thin pipe the
+/// floor lies on off its one corner not on that pipe, the outline's
+/// `(2c, 2s, −2)`. That corner is `(c, s)` from the thin axis, and `c² + s²` is
+/// under 1, so it read inside the thin pipe, where the floor is not. That
+/// corner is within a rounding of the thin pipe, where `validate` lets a
+/// corner sit as on the pipe, so it says no side of it either. `validate` now
+/// reads no side off such a corner, and with no other corner off the thin pipe
+/// it asks the floor nothing at the hole's rim, as it asks a bar's cap nothing
+/// at its wall.
 ///
-/// These were refused `CannotMeshAFace` with `BoundaryCrossesItself` as the
-/// shells were sorted, before the answer was checked, as they were with the thin
-/// bar at `x = −1`
+/// Before that these were refused `CannotMeshAFace` with
+/// `BoundaryCrossesItself` as the shells were sorted, before the answer was
+/// checked, as they were with the thin bar at `x = −1`
 /// ([`a_thin_bar_up_the_inside_of_a_thick_one_opposite_its_seam_both_turned_so_it_rounds_inside_answers_every_fuse`]).
 /// The mesh now walks a crossed flat face's outline alone finer once walking
 /// every side finer has run out (Q2764).
 #[test]
-fn a_thin_bar_up_the_inside_of_a_thick_one_both_turned_so_it_rounds_inside_is_refused_reading_a_corner_inside_the_thin_pipe()
- {
+fn a_thin_bar_up_the_inside_of_a_thick_one_both_turned_so_it_rounds_inside_answers_every_fuse() {
     let turned: [(f64, Pair); 3] = [
         (0.7, |model| both_bars_turned_about_z(model, 1.0, 0.7)),
         (2.5, |model| both_bars_turned_about_z(model, 1.0, 2.5)),
@@ -575,34 +578,11 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_both_turned_so_it_rounds_inside_is_re
         assert_eq!(sign, Decision::Neg, "turn {angle}: c² + s² − 1 is {short}");
         assert_eq!(curves(&thick, &thin), Ok(0), "turn {angle}");
         assert_eq!(curves(&thin, &thick), Ok(0), "turn {angle}");
-        for one in [
-            (Rule::Intersection, true),
-            (Rule::Intersection, false),
-            (Rule::Difference, false),
-        ] {
-            the_fuse_answers(
-                build,
-                one,
-                [16.0 * PI, 6.0 * PI, 4.0 * PI],
-                [&[], &[3], &[], &[3, 3]],
-            );
-        }
-        for (rule, thick_first) in [
-            (Rule::Union, true),
-            (Rule::Union, false),
-            (Rule::Difference, true),
-        ] {
-            let said = fuse(&mut a_model(), build, rule, thick_first);
-            assert!(
-                matches!(
-                    said,
-                    Err(rcad_topo::Error::TheFuseWroteABrokenAnswer {
-                        broken: rcad_topo::Invalid::AClosedEdgeIsWalkedAgainstItsSurface
-                    })
-                ),
-                "turn {angle}: {rule:?} (thick first: {thick_first}): {said:?}"
-            );
-        }
+        every_fuse_answers(
+            build,
+            [16.0 * PI, 6.0 * PI, 4.0 * PI],
+            [&[7], &[3], &[4], &[3, 3]],
+        );
     }
 }
 

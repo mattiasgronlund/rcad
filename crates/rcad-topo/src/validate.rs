@@ -1049,9 +1049,14 @@ impl Model {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
+        let writing_it_down =
+            self.what_writing_a_point_down_costs(self.largest_coordinate_in(scope));
         for slot in scope.solids.keys() {
             self.check_this_solids_closed_edges_are_walked_the_way_their_surfaces_wind(
-                slot, policy, log,
+                slot,
+                writing_it_down,
+                policy,
+                log,
             )?;
         }
         Ok(())
@@ -1110,6 +1115,10 @@ impl Model {
     /// which side a corner is on. Which surface the partner *is* is settled in
     /// the stored frame first and then moved into place for that.
     ///
+    /// `writing_it_down` is [`Model::what_writing_a_point_down_costs`], the
+    /// room a corner within a rounding of the face across is given there
+    /// ([`which_side_of_it_this_face_lies_on`] says why).
+    ///
     /// # Panics
     ///
     /// If the face across an edge is placed anywhere but where this face is.
@@ -1122,6 +1131,7 @@ impl Model {
     fn check_this_solids_closed_edges_are_walked_the_way_their_surfaces_wind(
         &self,
         slot: SolidSlot,
+        writing_it_down: f64,
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
@@ -1186,7 +1196,13 @@ impl Model {
                         if partner == across.stored_surface() || against_the_face_across =>
                     {
                         which_side_of_it_this_face_lies_on(
-                            solid, face, across, asked.at, policy, log,
+                            solid,
+                            face,
+                            across,
+                            asked.at,
+                            writing_it_down,
+                            policy,
+                            log,
                         )?
                     }
                     Some(RoundTheTube::OnThePlane) | None => {
@@ -4678,6 +4694,19 @@ fn turned_by(side: Decision, orientation: Orientation) -> Decision {
 /// it. `arrange.rs`'s `whether_past_the_picker` reads a point of the fuse's
 /// arrangement the same way.
 ///
+/// **A corner that reads its own sign and is within a rounding of the face
+/// across says nothing**, as a corner on it does. Where it is stored says no
+/// side: [`check_curved_face`] and `check_edges` take a corner anywhere in the
+/// box [`not_provably_off`] widens it into, `writing_it_down` each way, as on
+/// a surface, so a corner on the face across may be stored on either side of
+/// it. A thin bar of radius 1 up the inside of a bar of radius 2, its axis 1
+/// from the thick one's so that the two walls touch along a line, is that: the
+/// thick floor's outline corner is where the outline touches the thin pipe.
+/// Turned 0.7 about `z`, that corner is stored `(2c, 2s, −2)` and reads inside
+/// the thin pipe, where the floor is not. Read off it, the floor walked the
+/// thin bar's hole against the pipe, and the union of the two bars was refused
+/// [`Invalid::AClosedEdgeIsWalkedAgainstItsSurface`] (row Q2844).
+///
 /// `None` when every corner of it is on that surface and nothing says — a bar's
 /// cap has its one corner on the wall, and that is the case §36.6 already names.
 fn which_side_of_it_this_face_lies_on(
@@ -4685,6 +4714,7 @@ fn which_side_of_it_this_face_lies_on(
     face: FaceView<'_>,
     across: FaceView<'_>,
     at: Point,
+    writing_it_down: f64,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Option<Decision>> {
@@ -4701,21 +4731,15 @@ fn which_side_of_it_this_face_lies_on(
         surface,
         corners_on_it,
     };
-    let Some(past) = what_a_corner_past_the_picker_says(
+    let past = what_a_corner_past_the_picker_says(
         &face.stored_surface(),
         &across.stored_surface(),
         at,
         policy,
         log,
     )?
-    else {
-        return the_side_this_face_lies_on(face, &trimming);
-    };
-    the_side_this_face_lies_on_with_a_picker(
-        face,
-        &trimming,
-        &past.moved_into_place(&face.location()),
-    )
+    .map(|past| past.moved_into_place(&face.location()));
+    the_side_this_face_lies_on_with_a_picker(face, &trimming, past.as_ref(), writing_it_down)
 }
 
 /// The flat half-space picking a closed edge's curve out of the two its
@@ -4828,8 +4852,10 @@ fn what_a_corner_past_the_picker_says(
     }))
 }
 
-/// [`the_side_this_face_lies_on`], with a corner past `past`'s half-space
-/// saying `past`'s side rather than its own sign.
+/// [`the_side_this_face_lies_on`], with a corner past `past`'s half-space,
+/// where there is one, saying `past`'s side rather than its own sign, and a
+/// corner whose own sign is within `writing_it_down` of the partner saying
+/// nothing ([`which_side_of_it_this_face_lies_on`] says why).
 ///
 /// # Errors
 ///
@@ -4839,7 +4865,8 @@ fn what_a_corner_past_the_picker_says(
 fn the_side_this_face_lies_on_with_a_picker(
     face: FaceView<'_>,
     trimming: &Trimming,
-    past: &PastThePicker,
+    past: Option<&PastThePicker>,
+    writing_it_down: f64,
 ) -> Result<Option<Decision>> {
     let mut found: Option<Decision> = None;
     for corner in face
@@ -4851,18 +4878,23 @@ fn the_side_this_face_lies_on_with_a_picker(
             continue;
         }
         let at = PredicatePoint::from(corner.point().coordinates());
-        let against_the_picker = past.picker.side_of_point(at);
-        if let Decision::Undecidable { enclosure } = against_the_picker {
-            return Err(gave_up_at(SIDE_OF_A_HALF_SPACE, at, enclosure));
-        }
-        let side = if against_the_picker == Decision::Neg {
+        let side = if let Some(past) = past
+            && lies_past_the_picker(past, at)?
+        {
             past.side
         } else {
-            assert!(
-                matches!(against_the_picker, Decision::Pos | Decision::Zero),
-                "a corner came back with a decision nothing here knows: {against_the_picker:?}"
-            );
-            side_of_surface(&trimming.surface, at)
+            let own = side_of_surface(&trimming.surface, at);
+            if matches!(own, Decision::Pos | Decision::Neg)
+                && not_provably_off(
+                    &trimming.surface,
+                    corner.point(),
+                    corner.approximation(),
+                    writing_it_down,
+                )
+            {
+                continue;
+            }
+            own
         };
         if let Decision::Undecidable { enclosure } = side {
             return Err(gave_up_at(
@@ -4885,6 +4917,26 @@ fn the_side_this_face_lies_on_with_a_picker(
         }
     }
     Ok(found)
+}
+
+/// Whether `at` is past `past`'s half-space, where a corner says `past`'s side.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] when its side of the half-space could not be settled.
+fn lies_past_the_picker(past: &PastThePicker, at: PredicatePoint) -> Result<bool> {
+    let against_the_picker = past.picker.side_of_point(at);
+    if let Decision::Undecidable { enclosure } = against_the_picker {
+        return Err(gave_up_at(SIDE_OF_A_HALF_SPACE, at, enclosure));
+    }
+    assert!(
+        matches!(
+            against_the_picker,
+            Decision::Pos | Decision::Neg | Decision::Zero
+        ),
+        "a corner came back with a decision nothing here knows: {against_the_picker:?}"
+    );
+    Ok(against_the_picker == Decision::Neg)
 }
 
 /// The refusal for a sign `named` could not settle at `at`.
