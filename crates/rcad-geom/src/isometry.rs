@@ -87,7 +87,7 @@ impl Isometry {
     /// the products below the normals have not been run.
     ///
     /// **A turn further than `6 · f64::EPSILON` from length one is outside the
-    /// proof, and does go past the 18**: one four times as long as one put 40
+    /// proof, and can go past the 18**: one four times as long as one put 40
     /// of 3072 coordinates past it, by up to 2.46 times
     /// (`a_turn_four_times_the_length_of_one_moves_points_past_the_published_roundoff`).
     /// So no route to a movement keeps such a turn. [`Isometry::compose`]
@@ -387,7 +387,8 @@ impl Default for Isometry {
 /// [`Isometry::POINT_ROUNDOFF`] is proved for. So a turn that has not drifted
 /// past `TURN_LENGTH_DRIFT` keeps its bits, and any other is read as stored
 /// parts are: brought into range and divided by its length, so no length is
-/// too long or too short to read. So the movements this file builds come back
+/// too long or too short to read. Either way a turn of a cube is stored the one
+/// way every route stores it. So the movements this file builds come back
 /// from nalgebra bit for bit as they went
 /// (`a_movement_handed_to_nalgebra_and_back_keeps_its_bits`), and a turn of any
 /// other length comes back within `6 · f64::EPSILON` of length one
@@ -1137,7 +1138,7 @@ mod tests {
     }
 
     /// §16.10 for [`Isometry::POINT_ROUNDOFF`]'s "a turn further than `6ε`
-    /// from length one goes past it", and the reason every route to a movement
+    /// from length one can go past it", and the reason every route to a movement
     /// holds its turn near length one: a turn four times as long as one, so
     /// `q·q = 16`, moves points past the bound of where its own numbers put
     /// them.
