@@ -762,23 +762,14 @@ fn a_tilted_wall_is_one_plane_whether_a_prism_or_the_hole_it_fills_stands_on_it(
 /// whose outline winds against its normal; why is not traced.
 #[test]
 fn a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_tells_its_cells_apart() {
-    use Came::{
-        Answered, AnsweredPastTheRangeCheck, RefusedAtTheRangeCheck, WroteAFaceAgainstItsNormal,
-    };
+    use Came::{Answered, AnsweredPastTheRangeCheck, RefusedAtTheRangeCheck};
     // Under `tolerant(100)`, by `Difference`, `Intersection` and `Union`.
     let under_each_policy = [
         (Answered, [Answered; 3]),
         (RefusedAtTheRangeCheck, [AnsweredPastTheRangeCheck; 3]),
         (Answered, [Answered; 3]),
         (RefusedAtTheRangeCheck, [AnsweredPastTheRangeCheck; 3]),
-        (
-            RefusedAtTheRangeCheck,
-            [
-                WroteAFaceAgainstItsNormal,
-                AnsweredPastTheRangeCheck,
-                WroteAFaceAgainstItsNormal,
-            ],
-        ),
+        (RefusedAtTheRangeCheck, [AnsweredPastTheRangeCheck; 3]),
         (RefusedAtTheRangeCheck, [AnsweredPastTheRangeCheck; 3]),
         (RefusedAtTheRangeCheck, [AnsweredPastTheRangeCheck; 3]),
         (RefusedAtTheRangeCheck, [AnsweredPastTheRangeCheck; 3]),
