@@ -15160,6 +15160,35 @@ scripts into `proofs/gappa/` with the rest of 464's.
 DRAFT, Q2692 relay 1: the scripts below ran and proved; the write-up, the
 controls, `controls.py`, `all.sh` and `same.py` are not written yet.
 
+DRAFT, Q2692 relay 2: `stage.g` and `stage_e0.g` now carry `restates:` headers
+and comments, with their code lines unchanged, and `controls.py` and `all.sh`
+are written; all five are in the scratch directory `q2692/ran/`, not here yet.
+One run of `all.sh` there, before its last edit, found three things:
+
+- `stage_e0_1.g`, the small-E script at `share = 1`, proves, but `coqc` fails
+  on its `.v`: `one.sh` printed `stage_e0_1 coq -Bcoq exit 0 coqc exit 1 1.17s
+  lines 1543 hints 9`, and `coqc` said `File "./stage_e0_1.v", line 468,
+  characters 29-30: Error: Cannot interpret this number as a value of type
+  positive`, at `Definition p49 := FLT _rest (0). (* FLT(rest, 0) *)`, which is
+  where `rest` is exactly 0. Writing `rest` in place as `rnd(1 - share)` gave
+  the same error. The other five `.v` files pass `coqc`. So that edge is
+  Gappa-proved and not Coq-checked, and the Coq check is a row.
+- Dropping `A in [0, 1]`, or dropping `above - below in [1b-1074, 1b1024]`,
+  from `stage.g` still proves, with `share - A` within `±2.77556e-16` as
+  before. Gappa does not use either one. Both come in by hand, through
+  `share`'s range and the divisors. They are runs `r_stage_noa.g` and
+  `r_stage_noknots.g` now, not controls.
+- `stage_e0.g` proves with its goal at `8.5u`, so the control for it is at
+  `8.375u` (`c_e0_8375.g`), and `r_e0_85.g` is a run that proves. A probe with
+  the goal left open printed `(out - Ex) / M` within `±9.44991e-16`, the hull
+  over its cases. Goals at `8u`, `8.25u` and `8.375u` failed.
+
+`c_stage_85.g` fails with best `±7.12221e+615`, because `XM / cM` comes out
+just over one. `c_stage_m.g`, `c_stage_noe.g`, `c_stage_noshare.g`,
+`c_stage_not.g`, `c_stage_nod.g`, `r_stage_e_from_0.g`, `r_stage_plain.g` and
+`r_e0_whole.g` exited 1 on that run. `c_e0_m.g` and `c_e0_nod.g` were added
+after it and have not run.
+
 What ran, each through 464.13's `one.sh`: `stage.g` printed `stage exit 0
 0.85s` and `stage coq -Bcoq exit 0 coqc exit 0 2.49s lines 4529 hints 21`;
 `stage_e0.g` printed `stage_e0_mid exit 0 0.18s` and `stage_e0_mid coq -Bcoq
