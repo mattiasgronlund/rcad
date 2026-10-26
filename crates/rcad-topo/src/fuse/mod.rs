@@ -619,9 +619,8 @@ impl Scratch {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Self> {
-        let mut solids = bake(model, arguments, policy, log)?;
-        let group_splits_here = solids.len();
-        solids.extend(bake(model, tools, policy, log)?);
+        let group_splits_here = arguments.len();
+        let mut solids = bake(model, &[arguments, tools].concat(), policy, log)?;
         cuts::gather(&mut solids, policy, log)?;
         let tools = solids.split_off(group_splits_here);
         let arguments = solids;
