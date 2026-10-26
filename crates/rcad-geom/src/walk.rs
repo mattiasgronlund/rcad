@@ -418,6 +418,11 @@ impl PointsAlongACrossing {
 /// [`Error::TooManyPointsAlongOneCrossing`] when the deflection asks for more
 /// than [`MOST_POINTS_ALONG_ONE_CROSSING`].
 ///
+/// [`Error::CannotFollowACrossingTowardsTheOtherEndOfItsRun`] when a run
+/// between two corners on a branch that runs off for ever, which is marched
+/// from one corner to the other, cannot be walked on towards the second
+/// corner: neither way from the first gets any nearer it, or a step went back.
+///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces on the
 /// run pick both of the two arcs between its ends, or neither, and on a
 /// degree-four crossing when its two ends are on two of its loops, or cannot
@@ -456,6 +461,10 @@ impl PointsAlongACrossing {
 /// torus's refusal also covers a whole circle such a partner shares with it
 /// that the run names by the two faces alone, which
 /// `where_a_ring_and_a_surface_on_its_axis_cut` keeps refused on purpose.
+/// Where two cones off one axis cross in a loop and two branches that run off
+/// for ever, the cone's refusal is for a whole branch, which has no end to
+/// march to, and for a run with its corners on two pieces: the loop is drawn,
+/// and so is a run between two corners on one branch.
 ///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run a caller
 /// states as going right round a crossing that runs on for ever — a plane and a
@@ -634,6 +643,11 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] and
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a cone or a
 /// torus against another curved surface, exactly as [`walk`] does.
+///
+/// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run between two
+/// corners on one of the branches that run off for ever, where two cones off
+/// one axis cross in a loop and two branches. [`walk`] marches that run from
+/// one corner to the other, and the branch it is on does not close.
 ///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a plane against a
 /// cone that cross in a parabola or a hyperbola, which is the same refusal as

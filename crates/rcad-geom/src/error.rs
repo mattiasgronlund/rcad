@@ -411,9 +411,10 @@ pub enum Error {
     /// one outside the other, are done where their crossing is proved one loop
     /// and two branches that run off for ever (Q2812): a cone of slope a half
     /// about `z` and one of slope a quarter leaned `0.3` about `x` through
-    /// `(0, 0, 4)` are named so, and `walk` marches the loop and refuses a run
-    /// on either branch with this, since a march follows only a closed loop.
-    /// What stays refused is every other overlap, and every pair the
+    /// `(0, 0, 4)` are named so. `walk` marches the loop, and a run between two
+    /// corners on either branch from one corner to the other (Q2817), and
+    /// refuses with this only a whole branch, which has no end to march to, and
+    /// a run whose two corners are not both on one branch. What stays refused is every other overlap, and every pair the
     /// enclosures are too loose for. Two cones of **one slope**, one turned
     /// about a line through a point of the other's axis, are mirror images
     /// across the flat surface halfway between their apexes, and can **touch**
