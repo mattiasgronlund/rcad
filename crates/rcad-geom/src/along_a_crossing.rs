@@ -141,17 +141,17 @@
 use core::cmp::Ordering;
 
 use rcad_predicates::{
-    Decision, Filtered, Interval, Measures, NOTHING_IS_KNOWN, Point as PredicatePoint, Predicate,
-    SideOfSurface, are_real_numbers, decide, is_a_real_point,
+    Decision, Filtered, Interval, Measures, NOTHING_IS_KNOWN, Point as PredicatePoint, Policy,
+    Predicate, ProvenanceLog, SideOfSurface, are_real_numbers, decide, is_a_real_point,
 };
 
 use crate::enclosure::{cross_enclosing, dot_enclosing, exactly, gap_enclosing};
 use crate::exact::Exact;
 use crate::intersect::{
     halfway_between_a_cones_apex_and_a_ball_on_its_axis, how_a_ball_on_a_cones_axis_meets_it,
-    how_a_plane_leans_against_a_pipe, whether_a_ball_runs_through_a_cones_apex,
-    whether_a_ball_sits_on_a_cones_axis, whether_a_cone_and_a_pipe_share_an_axis,
-    whether_two_cones_share_an_axis,
+    how_a_plane_leans_against_a_pipe, how_two_cones_off_one_axis_cross,
+    whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
+    whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
 };
 use crate::{
     Cone, Cylinder, Error, HalfSpace, Plane, Point, Result, Sphere, Surface, Torus, Vector,
@@ -349,11 +349,19 @@ struct RoundALine {
 
 /// The line a [`RoundALine`] is, read off the two surfaces it comes from.
 ///
-/// **Exhaustive on purpose.** These are the two one loops that are ordered
-/// round a line, and a third would need its own argument that every
-/// half-plane edged by its line crosses it once.
+/// **Exhaustive on purpose.** These are the loops that are ordered round a
+/// line, and another would need its own argument that every half-plane edged
+/// by its line crosses it once.
 #[derive(Clone, Copy, Debug)]
 enum WhichLine {
+    /// The axis of the cone each of whose straight lines crosses another cone
+    /// once on each of the two loops the two cross in off one axis. Its
+    /// readings turn anticlockwise about the axis direction `v`.
+    RoundAConesAxis {
+        apex: [f64; 3],
+        /// The axis direction `v`.
+        along: [f64; 3],
+    },
     /// The line through a ball's centre `c` that meets a pipe's axis square to
     /// it. Its readings turn anticlockwise about the step from the centre back
     /// to the axis, the way the loop runs with the ball taken first.
@@ -457,8 +465,9 @@ fn the_way_this_crossing_winds(
         // A cone against a pipe, a second cone or a ball on its axis crosses it
         // in circles square to that axis, and off the axis in a quartic. A pipe
         // steeper than the cone's skin crosses it there in two loops, each
-        // once round the pipe's axis, and every other quartic is refused
-        // inside.
+        // once round the pipe's axis, two cones whose crossing `intersect`
+        // names as two loops cross in loops each once round one cone's axis,
+        // and every other quartic is refused inside.
         [Surface::Cone(cone), Surface::Cylinder(pipe)] => {
             return the_way_a_cone_and_a_pipe_wind(cone, pipe, from);
         }
@@ -466,7 +475,7 @@ fn the_way_this_crossing_winds(
             return Ok(the_way_a_cone_and_a_pipe_wind(cone, pipe, from)?.the_other_way());
         }
         [Surface::Cone(one), Surface::Cone(other)] => {
-            return the_way_two_cones_on_one_axis_wind(one, other, from);
+            return the_way_two_cones_wind(one, other, from);
         }
         [Surface::Cone(cone), Surface::Sphere(ball)] => {
             return the_way_a_cone_and_a_ball_on_its_axis_wind(cone, ball, from);
@@ -1025,6 +1034,32 @@ fn how_much_shallower_than_a_cone_a_pipe_runs(
     )
 }
 
+/// Which way the crossing of two cones runs, for the pair in the order handed
+/// over: the circles of two on one axis, by
+/// [`the_way_two_cones_on_one_axis_wind`], and the loops of two off it, by
+/// [`the_way_a_loop_two_cones_cross_in_off_one_axis_winds`]. Whether they
+/// share an axis is asked by the same exact question `walk` asks before it
+/// draws the circles.
+///
+/// # Errors
+///
+/// What those two refuse.
+fn the_way_two_cones_wind(
+    one: &Cone,
+    other: &Cone,
+    from: PredicatePoint,
+) -> Result<WhichWayItWinds> {
+    match whether_two_cones_share_an_axis(one, other) {
+        Decision::Zero => the_way_two_cones_on_one_axis_wind(one, other, from),
+        Decision::Pos => the_way_a_loop_two_cones_cross_in_off_one_axis_winds(one, other, from),
+        Decision::Undecidable { .. } => Ok(WhichWayItWinds::CannotTell),
+        Decision::Neg => {
+            unreachable!("how far off an axis is a sum of squares, never below nothing")
+        }
+        other => unreachable!("unhandled decision: {other:?}"),
+    }
+}
+
 /// Which way the circle two cones on one axis cross in runs, for the pair in
 /// the order handed over.
 ///
@@ -1037,19 +1072,14 @@ fn how_much_shallower_than_a_cone_a_pipe_runs(
 ///
 /// # Errors
 ///
-/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the two are proved not
-/// to share an axis, and where they share an apex: two slopes there meet at the
-/// apex and nowhere else, and one slope is one cone. Neither is a circle.
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where they share an apex: two
+/// slopes there meet at the apex and nowhere else, and one slope is one cone.
+/// Neither is a circle.
 fn the_way_two_cones_on_one_axis_wind(
     one: &Cone,
     other: &Cone,
     from: PredicatePoint,
 ) -> Result<WhichWayItWinds> {
-    if let Some(not_a_circle) =
-        unless_proved_on_one_axis(whether_two_cones_share_an_axis(one, other))
-    {
-        return not_a_circle;
-    }
     if one.apex() == other.apex() {
         return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
     }
@@ -1063,6 +1093,146 @@ fn the_way_two_cones_on_one_axis_wind(
             the_way_a_circle_round_a_cones_axis_winds(other, other.apex(), from)?.the_other_way(),
         ),
     }
+}
+
+/// Which way the loop `from` is on runs, of the two loops two cones off one
+/// axis cross in, for the pair in the order handed over.
+///
+/// # Each loop runs once round one cone's axis
+///
+/// [`how_two_cones_off_one_axis_cross`] proves the crossing two loops by
+/// reading the form `Q` of one cone, `X`, with apex `a`, along each straight
+/// line `b + t·d` of the other, `Y`, the ruled one, with apex `b`, axis `v`
+/// and slope `s`: `d = v + s‖v‖e` for a unit `e` square to `v`, and `q(t) =
+/// Q(b − a + t·d)` has two simple roots on every line, one on each loop, held
+/// apart by one flat surface, and neither at `t = 0`, since `Q(b − a)` is not
+/// nothing. Each root moves with `e` without ever reaching the other or
+/// nothing, so along one loop `t` keeps one sign. The step out from `Y`'s axis
+/// to the point is `t s‖v‖e`, so the half-plane edged by that axis that faces
+/// along `e` meets a loop of `t` above nothing on the line along `e` alone,
+/// and one of `t` below nothing on the line along `−e` alone, once either way.
+/// Going round a loop goes once round `Y`'s axis.
+///
+/// # Which way round
+///
+/// On `Y`, `∇Y = 2tV s(‖v‖e − s v)` for `V = v·v`, and the step out from its
+/// axis is `ρ = t s‖v‖e`, so `v × ρ` runs anticlockwise about `v` and
+/// `(∇X × ∇Y) · (v × ρ) = (∇X · v)(∇Y · ρ) − (∇X · ρ)(∇Y · v)
+/// = 2t²s²V² (∇X · d)`, and `∇X · d` is `q′(t)`. So with the pair taken `X` first the
+/// loop runs anticlockwise about `v` where `q′` is above nothing at its root,
+/// which is where the line, running along `d`, comes out of `X`, and that is
+/// one sign all along a loop, since its roots are simple. With `p − b = t·d`
+/// and `(p − b) · v = tV`, `q′(t)` takes the sign of
+/// `∇Q(p − a) · (p − b)` times that of `(p − b) · v`, both read off `from`
+/// alone, with no picker: `whether_a_line_of_one_cone_comes_out_of_another_at`.
+///
+/// # Errors
+///
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the two share an apex,
+/// whose crossing is straight lines through it, where
+/// [`how_two_cones_off_one_axis_cross`] cannot prove the crossing two loops
+/// or a loop and two branches, and where it proves it a loop and two branches:
+/// the branches run off for ever, and the loop is not told apart from them
+/// here.
+///
+/// Whatever else [`how_two_cones_off_one_axis_cross`] refuses but
+/// [`Error::Undecidable`], which is nothing known here instead: it is asked
+/// under a certified policy, since this function has no policy to ask it
+/// under, and a crossing a tolerant policy named is then ordered where every
+/// sign it asked was proved and refused nowhere else.
+fn the_way_a_loop_two_cones_cross_in_off_one_axis_winds(
+    one: &Cone,
+    other: &Cone,
+    from: PredicatePoint,
+) -> Result<WhichWayItWinds> {
+    if one.apex() == other.apex() {
+        return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+    }
+    let crossing = match how_two_cones_off_one_axis_cross(
+        one,
+        other,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    ) {
+        Ok(crossing) => crossing,
+        Err(Error::Undecidable { .. }) => return Ok(WhichWayItWinds::CannotTell),
+        Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface) => {
+            return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+        }
+        Err(refused) => return Err(refused),
+    };
+    if crossing.apex.is_some() {
+        return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
+    }
+    let comes_out = match whether_a_line_of_one_cone_comes_out_of_another_at(
+        from,
+        &crossing.crossed,
+        &crossing.ruled,
+    ) {
+        Decision::Pos => true,
+        Decision::Neg => false,
+        // Neither is ever nothing on a loop: `t` is not nothing there, and a
+        // simple root leaves `q′` not nothing either. A box straddling it is
+        // too wide to say which loop it is on.
+        Decision::Zero | Decision::Undecidable { .. } => return Ok(WhichWayItWinds::CannotTell),
+        other => unreachable!("unhandled decision: {other:?}"),
+    };
+    let ruled_first = crossing.ruled.apex() == one.apex();
+    Ok(WhichWayItWinds::RoundALine(RoundALine {
+        line: WhichLine::RoundAConesAxis {
+            apex: crossing.ruled.apex().coordinates(),
+            along: crossing.ruled.axis().direction().components(),
+        },
+        backwards: comes_out == ruled_first,
+    }))
+}
+
+/// The sign of `(∇Q(at − a) · (at − b)) ((at − b) · v)`, for `Q` the form of
+/// `crossed`, of apex `a`, and `b` and `v` the apex and axis of `ruled`: the
+/// sign of `q′` where `at` is on `crossed`, so above nothing where the straight
+/// line of `ruled` through `at`, running along `ruled`'s axis, comes out of
+/// `crossed` there. Over `at`'s box first, and exactly where that straddles
+/// nothing and `at` is a point.
+fn whether_a_line_of_one_cone_comes_out_of_another_at(
+    at: PredicatePoint,
+    crossed: &Cone,
+    ruled: &Cone,
+) -> Decision {
+    let [up, along] = [crossed, ruled].map(|cone| cone.axis().direction().components());
+    let [from_the_crossed_apex, from_the_ruled_apex] =
+        [crossed, ruled].map(|cone| cone.apex().coordinates());
+    let out = at.enclosure();
+    let gap = |apex: [f64; 3]| -> [Interval; 3] {
+        core::array::from_fn(|axis| out[axis] - Interval::exactly(apex[axis]))
+    };
+    let [y, r] = [gap(from_the_crossed_apex), gap(from_the_ruled_apex)];
+    let slope = Interval::exactly(crossed.slope());
+    let widening = Interval::exactly(1.0) + slope * slope;
+    let up_boxed = exactly(up);
+    let leaving = dot_enclosing(up_boxed, up_boxed) * dot_enclosing(y, r)
+        - widening * dot_enclosing(y, up_boxed) * dot_enclosing(r, up_boxed);
+    let boxed = (leaving * dot_enclosing(r, exactly(along))).sign();
+    if !matches!(boxed, Decision::Undecidable { .. }) {
+        return boxed;
+    }
+    let Some(point) = at.exact_coordinates() else {
+        return boxed;
+    };
+    let exactly_out = (|| {
+        let y = Exact::gap_between(from_the_crossed_apex, point);
+        let r = Exact::gap_between(from_the_ruled_apex, point);
+        let up_exactly = Exact::of_each(up);
+        let widening = Exact::of(1.0).plus(&Exact::product_of(crossed.slope(), crossed.slope())?);
+        let leaving = Exact::dot_of(up, up)?
+            .times(&Exact::dot_of_two_exact(&y, &r)?)?
+            .minus(
+                &widening
+                    .times(&Exact::dot_of_two_exact(&y, &up_exactly)?)?
+                    .times(&Exact::dot_of_two_exact(&r, &up_exactly)?)?,
+            );
+        leaving.times(&Exact::dot_of_two_exact(&r, &Exact::of_each(along))?)
+    })();
+    exactly_out.map_or(boxed, |out| out.sign())
 }
 
 /// Which way one of the circles a ball on a cone's axis crosses it in runs, for
@@ -1771,7 +1941,7 @@ impl WhichLine {
     fn what_a_turn_measures(self) -> Measures {
         match self {
             Self::ThroughABallsCentre { .. } => Measures::Volume,
-            Self::BetweenTwoAxes { .. } => Measures::Area,
+            Self::BetweenTwoAxes { .. } | Self::RoundAConesAxis { .. } => Measures::Area,
         }
     }
 
@@ -1798,6 +1968,14 @@ impl WhichLine {
                 [
                     (one_at, cross_enclosing(square, exactly(one_way))),
                     (other_at, cross_enclosing(square, exactly(other_way))),
+                ]
+            }
+            Self::RoundAConesAxis { apex, along } => {
+                let across =
+                    cross_enclosing(exactly(the_axis_most_square_to(along)), exactly(along));
+                [
+                    (apex, cross_enclosing(across, exactly(along))),
+                    (apex, across),
                 ]
             }
         }
@@ -1827,8 +2005,22 @@ impl WhichLine {
                     (other_at, Exact::cross_of(&square, other_way)?),
                 ]
             }
+            Self::RoundAConesAxis { apex, along } => {
+                let across =
+                    Exact::cross_of(&Exact::of_each(the_axis_most_square_to(along)), along)?;
+                [(apex, Exact::cross_of(&across, along)?), (apex, across)]
+            }
         })
     }
+}
+
+/// The coordinate axis `u` along which `along` has its smallest part, so
+/// `u × along` is never nothing for a direction of length one.
+fn the_axis_most_square_to(along: [f64; 3]) -> [f64; 3] {
+    let least = (0..3)
+        .min_by(|&one, &other| along[one].abs().total_cmp(&along[other].abs()))
+        .expect("three parts");
+    core::array::from_fn(|axis| if axis == least { 1.0 } else { 0.0 })
 }
 
 /// Where two enclosures of one number overlap.

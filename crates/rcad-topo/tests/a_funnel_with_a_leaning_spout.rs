@@ -13,11 +13,11 @@
 //!   and which touch at two points, being mirror images of each other.
 //!
 //! Since row Q2667 `intersect` names the funnel and spout's two loops and
-//! `walk` marches them, and those fuses get further. **What each fuse gives now
-//! is pinned here**, under every rule both ways round, for the row after Q2667
-//! to turn round: the funnel and the spout are refused where a crossing is asked
-//! to be a conic, and the two pointed cones are still refused as a cone
-//! crossing another curved surface.
+//! `walk` marches them, and since row Q2807 the fuse orders the points of each
+//! loop round the spout's axis, so every fuse of the funnel and the spout
+//! answers. **What each fuse gives now is pinned here**, under every rule both
+//! ways round: the two pointed cones are still refused as a cone crossing
+//! another curved surface.
 //!
 //! A third shape came with row Q2818: two pointed cones of different slopes,
 //! the narrower leaning off the wider, which cross in a loop and two branches
@@ -39,10 +39,6 @@ mod cones;
 
 use cones::{a_frustum, a_pointed_cone};
 
-/// What `fuse` says where a crossing it needs as a conic is not one.
-const NOT_A_CONIC: &str =
-    "geometry: these two surfaces do not cross in one closed curve lying in a plane";
-
 /// What `fuse` says where `intersect` cannot name how a cone crosses a second
 /// curved surface.
 const A_CONE_ACROSS_A_CURVED_SURFACE: &str =
@@ -54,14 +50,12 @@ const A_CONE_ACROSS_A_CURVED_SURFACE: &str =
 /// radius a quarter and one and a half, leaned 0.8 radians about the `x` axis
 /// through the point four up the funnel's axis.
 ///
-/// Every fuse is refused where it asks for a crossing as a conic: the walk
-/// marches both loops, and the fuse cannot yet tell which way round one runs.
+/// The two cross in two loops, and each runs once round the spout's axis, so
+/// the fuse orders the points of a loop by how far round that axis they lie,
+/// since row Q2807. Every fuse answers, under every rule both ways round.
 #[test]
-fn a_funnel_fused_with_a_spout_leaning_across_it_is_refused_by_every_rule() {
-    assert_eq!(
-        every_fuse_of(funnel_and_spout).refusals(),
-        [[Some(NOT_A_CONIC); 2]; 3]
-    );
+fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
+    assert_eq!(every_fuse_of(funnel_and_spout).refusals(), [[None; 2]; 3]);
 }
 
 /// **Two pointed cones, one leaning off the other.** Both have slope a half and
