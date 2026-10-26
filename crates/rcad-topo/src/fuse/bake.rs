@@ -372,6 +372,14 @@ pub(crate) struct BakedCorner {
     /// planes meet three by three at points either side of a plane through the
     /// apex (§294.19). A question the box cannot settle is asked of these three, the
     /// point the box was worked out round, and never of another three.
+    ///
+    /// **Which three is a choice, and it changes the answer.** The arrangement
+    /// reads a corner with four or more planes round it as the point these
+    /// three meet at, with the others moved through it (§448.8), so a plane of
+    /// another solid that runs through the corner's room crosses the moved
+    /// ones where these three put them. [`derive_a_corner`] takes the three
+    /// with the least box unless that reading lets in a speck the fuse would
+    /// keep ([`AmongThePlanesOfTheFuse`]).
     pub(crate) solved_from: Option<[Surface; 3]>,
     /// How far the corner was grown before each plane in `around` was asked
     /// about it: the room `Model::validate_solid` grants a corner off a plane
@@ -1066,8 +1074,10 @@ fn faces_around_a_vertex(
 /// Where a corner of an input is, by whichever of §31.3's two routes its own
 /// faces allow.
 ///
-/// Three or more distinct surfaces round it and it is re-derived from the
-/// best-conditioned triple. Fewer, and the whole of the curve those surfaces
+/// Three or more distinct surfaces round it and it is re-derived from three of
+/// them ([`derive_a_corner`]), chosen against `planes_in_the_fuse` when every
+/// one is a face's and the corner is convex
+/// ([`the_planes_round_a_convex_corner`]). Fewer, and the whole of the curve those surfaces
 /// share passes through it, so there is nothing to solve and it is read out of
 /// the model and moved. **Its surfaces are not asked about it**, and this
 /// module's header says why (§286).
@@ -1145,7 +1155,8 @@ fn place_a_corner(
 /// polygon, every corner behind the line of every side it is not on, asked of
 /// the edges round the corner as the corners of a polygon. Then what lies
 /// behind every one of these planes is the solid there, and nothing else,
-/// which is what [`ACornerReadAsOnePoint::moves_a_meet_into_or_out_of_the_corner`]
+/// which is what
+/// [`ACornerReadAsOnePoint::lets_a_crossing_in_through_a_face_it_does_not_cut`]
 /// reads. It is asked of the stored corners and planes, since a placement
 /// moves both alike and keeps every side. A face round it that is not flat,
 /// a spelling it is baked on that is not its plane either way round, an edge
@@ -1317,8 +1328,9 @@ fn where_the_model_puts_a_corner(
 /// Solve a corner from the surfaces around it (§17.1, §31.3).
 ///
 /// A corner where four or more faces meet is over-determined, so it is solved
-/// from the best-conditioned triple and every remaining surface is then asked
-/// whether it agrees. [`meet_of_three_surfaces`] answering
+/// from three of them, by default the three whose meet has the least box, and
+/// every remaining surface is then asked whether it agrees.
+/// [`meet_of_three_surfaces`] answering
 /// [`MeetOfThree::Nowhere`] or [`MeetOfThree::MoreThanAPoint`] *is* the
 /// conditioning filter, so there is no second threshold here to argue about —
 /// and neither of those is a refusal (§34.9), it is that triple saying it does
@@ -1332,8 +1344,25 @@ fn where_the_model_puts_a_corner(
 /// The search stops at the first triple that solves to an exact point, because
 /// no later triple can beat a box of no width and the loop is cubic in the faces
 /// round the corner (§70.3). That is the same answer the whole sweep gave: the
-/// widths are compared with `<`, so a second exact triple never displaced the
-/// first anyway.
+/// triples are sorted by width with a stable sort, so a second exact triple
+/// never displaced the first anyway.
+///
+/// # Which three, when it is a choice
+///
+/// The arrangement reads a corner with four or more planes round it as the
+/// point its three meet at, with every other plane round it moved through
+/// that point (§448.8). So the three chosen decide where the planes of the
+/// other solid cross the moved ones. Given `choosing_among`, a convex corner
+/// and the plane of every face in the fuse, this keeps the least box unless
+/// its reading lets a line where two planes of the fuse cross come into the
+/// corner through a face one of the two does not cut further from it
+/// ([`ACornerReadAsOnePoint::lets_a_crossing_in_through_a_face_it_does_not_cut`]
+/// says why that is a speck). Then it takes the next triple, by box, whose
+/// reading does not, and the least box when none passes. Each is asked about
+/// every surface round the corner, as the least box is, and one a surface
+/// proves off is passed over. `None` keeps the least box, as before Q2815: the
+/// joined faces of a wholly flat solid, a corner with a surface round it that
+/// is no face's, and a corner not proved convex (§448.8).
 ///
 /// A surface that comes back [`Decision::Pos`] or [`Decision::Neg`] has *proved*
 /// the corner is somewhere else, which means the input's corners and its
@@ -1432,7 +1461,7 @@ fn derive_a_corner(
     let Some(among) = choosing_among else {
         return Ok(best);
     };
-    if !reading_it_moves_a_meet_into_or_out_of_it(&best, among) {
+    if !its_reading_lets_a_crossing_in_through_a_face_it_does_not_cut(&best, among) {
         return Ok(best);
     }
     Ok(solved[1..]
@@ -1440,13 +1469,17 @@ fn derive_a_corner(
         .find_map(|&(point, solved_from)| {
             solved_at(vertex, point, solved_from, &around, validate_allows)
                 .ok()
-                .filter(|corner| !reading_it_moves_a_meet_into_or_out_of_it(corner, among))
+                .filter(|corner| {
+                    !its_reading_lets_a_crossing_in_through_a_face_it_does_not_cut(corner, among)
+                })
         })
         .unwrap_or(best))
 }
 
 /// What [`derive_a_corner`] reads to choose which three planes round a convex
-/// corner to solve it from.
+/// corner to solve it from: which way each plane round it faces out of the
+/// solid, and which planes of the fuse can run a line into it
+/// ([`its_reading_lets_a_crossing_in_through_a_face_it_does_not_cut`]).
 #[derive(Clone, Copy)]
 struct AmongThePlanesOfTheFuse<'a> {
     /// The planes round the corner, in the order it lists them, each turned to
@@ -1503,13 +1536,15 @@ fn solved_at(
     })
 }
 
-/// Whether reading `corner` as the one point its planes run through moves into
-/// or out of it a point where three planes meet, of those round it and the
-/// planes of the fuse running through its room
-/// ([`ACornerReadAsOnePoint::moves_a_meet_into_or_out_of_the_corner`]).
-/// `false` for a corner with no such reading, and with fewer than two planes
-/// of the fuse through its room, where no such point is near it.
-fn reading_it_moves_a_meet_into_or_out_of_it(
+/// Whether reading `corner` as the one point its planes run through lets a
+/// line where two planes of the fuse running through its room cross come into
+/// it through a face one of the two does not cut further from it, which the
+/// fuse would keep as a speck
+/// ([`ACornerReadAsOnePoint::lets_a_crossing_in_through_a_face_it_does_not_cut`]).
+/// A plane round the corner, either way round, is not one of those two.
+/// `false` for a corner with no such reading, and with fewer than two such
+/// planes through its room, where no such line is near it.
+fn its_reading_lets_a_crossing_in_through_a_face_it_does_not_cut(
     corner: &BakedCorner,
     among: AmongThePlanesOfTheFuse<'_>,
 ) -> bool {

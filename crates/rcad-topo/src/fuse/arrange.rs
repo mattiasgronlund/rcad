@@ -3773,8 +3773,8 @@ impl<'f> Arrangement<'f> {
     /// Whether the face's surface and the partners of `first` and `second` are
     /// three planes that `bake` solved `corner` among and asked about it.
     ///
-    /// A corner with three or more surfaces round it is solved from its
-    /// best-conditioned triple, and every surface round it is then asked about
+    /// A corner with three or more surfaces round it is solved from three of
+    /// them (`derive_a_corner`), and every surface round it is then asked about
     /// the corner grown by the room writing it down cost plus the room
     /// `validate` allows a corner of its solid off that surface
     /// (`Model::room_a_corner_of_this_solid_gets`, §368); one that proves it
@@ -16444,6 +16444,11 @@ fn the_way_a_picker_leans(normal: [f64; 3], ways: [[f64; 3]; 2]) -> Option<[Opti
 /// ([`three_planes_against_a_fourth`]), exact in [`rcad_predicates::expansion`].
 /// A plane round the corner is read with `ω = 0`, through `K`, and every other
 /// plane with its own.
+///
+/// **Which three meet at `K` is `bake`'s choice**, and it moves what the
+/// reading draws: `derive_a_corner` passes over three whose reading
+/// [`lets_a_crossing_in_through_a_face_it_does_not_cut`](Self::lets_a_crossing_in_through_a_face_it_does_not_cut)
+/// (§448.8).
 pub(super) struct ACornerReadAsOnePoint {
     solved_from: [Plane; 3],
     pub(super) around: Vec<Plane>,
@@ -16529,36 +16534,48 @@ impl ACornerReadAsOnePoint {
         the_room_holds(self.room, point)
     }
 
-    /// Whether the reading moves into or out of a convex corner a point where
-    /// three planes meet, of those round the corner and `near`, two or more of
-    /// them from `near`: whether it lies behind or on every plane round the
-    /// corner but its own, in the true planes or as read, and not in the
-    /// other. `true` too where a side cannot be worked out exactly. `outward`
-    /// is the planes round the corner, in the order of `around`, each turned
-    /// to face out of the solid, which round a convex corner is what lies
-    /// behind them all. A plane of `near` that is one round the corner, either
-    /// way round, is left out.
+    /// Whether, as read, a line where two planes of `crossing` cross comes
+    /// into a convex corner through the face of a plane round it that one of
+    /// the two does not cut further from the corner
+    /// ([`the_plane_cuts_the_face_away_from_the_corner`]). `true` too where a
+    /// side or a cut cannot be worked out exactly. `outward` is the planes
+    /// round the corner, in the order of `around`, each turned to face out of
+    /// the solid, which round a convex corner is what lies behind them all.
+    /// `crossing` is planes of the other solids through the corner's room,
+    /// none of them round it either way round. `bake` asks this of each
+    /// triple it could solve the corner from, and passes over one it answers
+    /// `true` for (`derive_a_corner`, §448.8).
     ///
-    /// **Three with two or more round the corner are left to the reading.**
-    /// They meet where an edge of the corner, or the corner itself, crosses
-    /// the third, so asking where that is asks where the corner is, and the
-    /// reading settles that. Three with two or more from `near` meet at a
-    /// point the other solid makes, where the line two of them cross along
-    /// meets a third, and a plane the reading moves can sweep across it.
+    /// **Why that is a speck.** Two planes of the other solid whose line runs
+    /// within a rounding of the corner, as the two faces of a wedge whose edge
+    /// runs up through a pyramid's apex do, cross the face that line comes in
+    /// through in two lines from where it comes in. A plane that cuts the face
+    /// further from the corner, parting the far ends of its two edges at the
+    /// corner, runs its line across the face, and where both do, they part
+    /// there and the answer's corner is where the line comes in. A plane that
+    /// does not keeps its line within a rounding of the corner, and cuts off a
+    /// piece of the face whose sides are a rounding long: a speck the answer
+    /// keeps, and `certified` refuses at the range check.
     ///
-    /// **A meet in front of a plane round the corner, truly and as read, is
-    /// outside the solid both times**, and which side of the other planes it
-    /// lies on changes nothing the solid holds. Turned a tenth of a radian
-    /// about `(−2, 1, 0.5)`, the pyramid of
-    /// `tests/a_broken_three_surface_corner_read_back_from_bytes.rs` has the
-    /// wedge's edge cross its `+x` side plane behind the other three, behind
-    /// `+y` by `1.8e−17` of that plane's value: that is where the edge enters
-    /// the pyramid. Solved from `−y`, `+x` and `−x`, the reading moves `+y`
-    /// and that crossing lands `2.6e−16` in front of it, outside. Solved from
-    /// `+x`, `+y` and `−x`, the reading moves `−y`, which turns round the
-    /// order the edge crosses `−y` and `−x` in, but both crossings are in
-    /// front of `+x`, truly and as read, so this reading moves nothing in or
-    /// out (§448.8).
+    /// **It asks the reading, not the true planes**, since the reading is what
+    /// the face is drawn in. Turned a tenth of a radian about `(−2, 1, 0.5)`,
+    /// the pyramid of `tests/a_broken_three_surface_corner_read_back_from_bytes.rs`
+    /// has the edge of the wedge on one side of the `x` axis cross its `+x`
+    /// side plane behind the other three, behind `+y` by `1.8e−17` of that
+    /// plane's value, so in the true planes the edge comes in through `+x`,
+    /// which both wedge faces cut further down. Solved from `−y`, `+x` and
+    /// `−x`, the triple with the least box, the reading moves `+y`, and that
+    /// crossing lands `2.6e−16` in front of it: the edge comes in through
+    /// `+y`, which neither wedge face cuts further down, and the answer kept a
+    /// speck on `+y`. Solved from `+x`, `+y` and `−x`, it comes in through
+    /// `+x` again. Shifted to `(7, −5, 2.5)` after a tenth of a radian about
+    /// `(1, 2, 3)`, the edge of the wedge round the `x` axis comes in through
+    /// `−y` in the true planes, which neither wedge face cuts further down: a
+    /// speck the true planes make. Read from the triple with the least box, it
+    /// lets in no such line, and the difference answers under `certified`
+    /// with nothing in the log. Asked of the true planes instead, as Q2815's
+    /// lane tried at `2f0c46e2e`, `bake` took another triple, kept the true
+    /// speck, and `certified` refused that difference at the range check.
     pub(super) fn lets_a_crossing_in_through_a_face_it_does_not_cut(
         &self,
         outward: &[Plane],
