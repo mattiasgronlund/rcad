@@ -16774,13 +16774,13 @@ fn the_plane_cuts_the_face_away_from_the_corner(
             Decision::Neg,
         ])?);
     }
-    match far_ends.as_slice() {
-        [one, other] => Some(matches!(
-            (one, other),
-            (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos)
-        )),
-        _ => None,
-    }
+    let [one, other] = far_ends.as_slice() else {
+        return None;
+    };
+    Some(matches!(
+        (one, other),
+        (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos)
+    ))
 }
 
 /// Whether every point of `point`'s box lies inside `room`.
