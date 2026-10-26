@@ -15831,266 +15831,225 @@ run, so it has no class (§360.5); and Q2700, which moves these scripts into
 
 ### 464.23 POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF's parabola
 
-**Draft, unfinished.** Q2693's first lane relayed at its budget on
-2026-10-26, at base `7485253e`; the lane after it finishes this subsection or
-rewrites it. Nothing below is a result yet except the one print quoted.
+Q2693 proved the parabola branch of `POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF` in
+Gappa on 2026-10-26, for cone slopes `t` from `2⁻⁵⁰⁰` to 5. A point
+`Parabola::at` hands back is within `116.05u·L` of the true parabola's point at
+the same `s`, under the constant's `128u·L`, which is `64 ε·L`. That holds given
+the doc's `4u` for the two directions `and` and `across`, which this does not
+prove (5, 9). Past a slope of about 6.7, Gappa's bound on the scalars' share is
+over what the other terms leave (3): that is a proof that does not reach that
+far, not a kernel that fails there. The doc's count of about `98u·L` is not
+what is proved, and 4 says where the two part. Coq checks all five scripts,
+modulo their hints (7). The hyperbola branch, with its `cosh` and `sinh`, is
+Q2697's.
 
-**The chain, as `walk.rs` computes it at `7485253e`.** `where_a_plane_cuts_a_cone`
-(`walk.rs:4972-5067`) rounds `reach = n·apex − d`, `n·n`, `w·w` and `up = n·w`
-once each from exact sums (`walk.rs:4984-5001`), then `normal_length` and
-`along_length` by `sqrt` (5008-5009), `foot = apex − n·(reach / n·n)` (5011),
-`standing_off = reach / normal_length` (5026), `axis_up = up /
-(normal_length·along_length)` (5027), `bend_up = and.dot(w) / along_length`
-(5028), `K = 2·(1 + t·t)·h·axis_up·bend_up`, left to right (5029), and `C =
-h·h·(1 − (1 + t·t)·axis_up·axis_up)` (5031-5032).
-`the_parabola_a_plane_along_a_ruling_cuts` (5078-5094) makes `off = C / K`,
-`vertex = foot − and·off` and `bend = and·(−(1/K))`, and `Parabola::at`
-(2758-2760) is `vertex + across·s + (bend·s)·s`. `s` is walked over `±1 /
-‖bend‖`, or between the ends a run names (`walk_an_endless_bend`,
-2608-2614).
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, unchanged. The scripts' `restates` lines name `7485253e`.
+`walk.rs` there differs from the base `68949f13` only by `c4a2384f`'s 22 doc
+lines, all in hunks at or before `7485253e`'s line 2161: `git diff --stat
+7485253e 68949f135 -- crates/rcad-geom/src/walk.rs Cargo.lock` printed `1 file
+changed, 22 insertions(+)`, so `Cargo.lock` is unchanged. Line numbers below
+are `walk.rs`'s at `68949f13`. `u` is `2⁻⁵³` and `ε` is `2u`.
 
-**What the first lane found by reading, not yet run.**
+**1. What the proof guards.** `POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF`
+(`walk.rs:116-220`) bounds how far a point `walk` hands back can sit off the
+parabola, or the branch of a hyperbola, a plane cuts a cone in, as a multiple
+of `L`. `L` (`walk.rs:137-140`) is the largest of the vertex's and the apex's
+coordinates, `|K|`, `|C/K|` and `|h|`; `how_big_this_is`
+(`walk.rs:6133-6143`) is handed that list at line 5114. The arithmetic it
+guards, on the parabola:
 
-- `bend_up` is not an exactly-summed dot, as the doc's second bullet
-  (`walk.rs:144-146`) says: `Vector::dot` is nalgebra's plain one. And on the
-  parabola `and·ŵ = −1/√(1 + t²)`, from terms as large as `|w|`, so its
-  relative error is an absolute one over `1/√(1 + t²)`: about `δB·√(1 + t²)`
-  for `|Bw − and*·w| ≤ δB·|w|`. That grows with the slope, and `K`'s with it.
-  The doc counts a fixed `10u`.
-- The doc's evaluation bullet takes `|s| ≤ |K|` (`walk.rs:159-162`). A run that
-  names its ends walks between `along_of` of each (2609-2614), which nothing
-  holds to `|K|`, and the ends are not in `how_big_this_is`'s list (5092).
+- `where_a_plane_cuts_a_cone` (`walk.rs:4994-5089`) takes exact sums, each
+  rounded once, at 5006-5023; the `sqrt` calls at 5030-5031,
+  `two_directions_in` at 5032 and the foot at 5033; `h`, how far the apex
+  stands off the plane, at 5048, `axis_up` at 5049, `bend_up` at 5050, and `K`,
+  worked left to right, at 5051. It tests `leaning == 0.0` at 5052 and works
+  `C` out at 5053-5054.
+- `the_parabola_a_plane_along_a_ruling_cuts` (`walk.rs:5100-5116`) works
+  `off = C/K` out at 5108, the vertex at 5109 and `bend = and·(−1/K)` at 5113.
+- `Parabola::at` (`walk.rs:2780-2782`) is `vertex + across·s + (bend·s)·s`.
+- `walk_an_endless_bend` (`walk.rs:2611`) walks `s` over
+  `±how_far_out_it_is_walked`, which is `1/‖bend‖` (`walk.rs:2788-2790`), or
+  between `along_of` (`walk.rs:2784-2786`) of the two named ends
+  (`walk.rs:2630-2636`). It works each `s` out at 2648.
+- `Vector::dot` is nalgebra's (`point.rs:296-298`), a plain `f64` dot.
 
-**`k.g`, the scalar chain, as it ran.** `hs` the true height, `nN` and `wW` the
-true lengths of `n` and `w`, `t` the slope; `E = 0` enters through `As =
-t/√(1 + t²)` and `Bs = −1/√(1 + t²)`. `Bw` is the `f64` dot `and·w`, taken
-within `3u·|w|` of `and*·w` by hypothesis.
+**2. The scripts, and how they are cut.** `P(s)` is the point `Parabola::at`
+works out. `Q(s) = foot* − and*·offS + across*·s − and*·s²/KS` is the true
+parabola's point at the same `f64` `s`, where a name with a `*`, or ending in
+`S`, is the same quantity worked out without rounding. The curve's nearest
+point to `P(s)` is no farther than `Q(s)`, so `‖P − Q‖` bounds how far `P(s)`
+sits off it. `P − Q` is four kinds of term, each bounded by its norm:
 
-```gappa
-@rnd = float<ieee_64, ne>;
+- **Ten coordinate roundings**, each at most `u` times the norm of what it
+  rounds: `n·q`, `1`, since `h ≤ L`; `apex − n·q`, `√3 + 1`; `and·off`, `1`;
+  `foot − and·off`, `√3`; `bend`'s own rounding, times `s²`, `1`; `across·s`,
+  `1`; `bend·s` and `(bend·s)·s`, `2`; the first add, `√3 + 1`; the second add,
+  `√3 + 2`. That is `10 + 4√3 = 16.93u·L`, using `‖apex‖` and `‖vertex‖ ≤
+  √3·L`, and `h`, `|off|`, `|s|` and `|mrk|·s²` all `≤ L`, where `mrk` is the
+  computed `1/K`.
+- **The foot's quotient**, `n·(q − qS)`, whose norm is `h·|(q − qS)/qS| ≤
+  3.125u·L`.
+- **The two directions**: `(and − and*)·(off + mrk·s²)`, at `8u·L`, and
+  `(across − across*)·s`, at `4u·L`, both on the doc's `4u` for each
+  (`walk.rs:161-162`).
+- **The scalars' share along `and*`**, `(off − offS) + s²·(mrk − 1/KS)`. Over
+  `|KS|` it is `G = (off − offS)/KS + r²·(m − 1)`, with `r = s/KS` and
+  `m = mrk·KS`. Below `t = 7/16` the scripts take it over `|offS|` instead,
+  where `KS/offS = 4t²/(1 − t²)`; `|KS|` and `|offS|` are equal at
+  `t = 1/√5 ≈ 0.447`. `|K|` and `|off|` are in `L`, so `|G| ≤ 84u` puts the
+  share at `84u·L`.
 
-t = rnd(t_);
-Bw = rnd(Bw_);
+The total is `16.928 + 3.125 + 8 + 4 + 84 = 116.05u·L`. The factors `1 + 2⁻⁴⁰`
+and `1 + 84u` between the true `|KS|`, `|offS|` and `|s|` and what `L` holds
+move that by under `0.01u·L`.
 
-Ts = 1 + t * t;
-As = t / sqrt(Ts);
-Bs = -1 / sqrt(Ts);
+The scripts cut `t` in five, where the share changes the length it is taken
+over and where Gappa needs a finer split:
 
-R = hs * nN;
-Nn = nN * nN;
-Ww = wW * wW;
-U = As * (nN * wW);
-Bws = Bs * wW;
+- `s1.g`, `t` in `[2⁻⁵⁰⁰, 1/4]`, over `|offS|`, with no split;
+- `s2.g`, `[1/4, 7/16]`, over `|offS|`, split in 16;
+- `s3.g`, `[7/16, 1]`, over `|KS|`, split in 32;
+- `s4.g`, `[1, 2]`, over `|KS|`, split in 8;
+- `s5.g`, `[2, 5]`, over `|KS|`, split in 8.
 
-reach = rnd(R); sqn = rnd(Nn); sqw = rnd(Ww); up = rnd(U);
-nl = rnd(sqrt(sqn)); wl = rnd(sqrt(sqw));
-h = rnd(reach / nl);
-nw = rnd(nl * wl);
-au = rnd(up / nw);
-bu = rnd(Bw / wl);
-tt = rnd(t * t);
-t2 = rnd(1 + tt);
-k1 = rnd(2 * t2);
-k2 = rnd(k1 * h);
-k3 = rnd(k2 * au);
-K = rnd(k3 * bu);
-hh = rnd(h * h);
-c1 = rnd(t2 * au);
-c2 = rnd(c1 * au);
-br = rnd(1 - c2);
-C = rnd(hh * br);
-off = rnd(C / K);
-mrk = rnd(1 / K);
+Each proves `|G| ≤ 84u`, `|(q − qS)/qS| ≤ 3.125u` and `|(K − KS)/KS| ≤ 2⁻⁴⁴`.
+The third is what holds `r` (5). The goal on `G` alone does not, since `r²`'s
+factor `4t²/(1 − t²)` on `s1.g` goes down to `2⁻⁹⁹⁸`.
 
-nlS = sqrt(Nn); wlS = sqrt(Ww);
-hS = R / nlS;
-nwS = nlS * wlS;
-auS = U / nwS;
-buS = Bws / wlS;
-t2S = 1 + t * t;
-k1S = 2 * t2S;
-k2S = k1S * hS;
-k3S = k2S * auS;
-KS = k3S * buS;
-hhS = hS * hS;
-c1S = t2S * auS;
-c2S = c1S * auS;
-brS = 1 - c2S;
-CS = hhS * brS;
-offS = CS / KS;
+The hints: `~` ties each computed name to its true twin. `hS`, `auS`, `buS`,
+`c2S` and `KS` are rewritten to their closed forms, `hs`, `t/√(1 + t²)`,
+`−1/√(1 + t²)`, `t²` and `−2·hs·t`. `C`'s error is split into `hh`'s, `br`'s
+and the product's, and `m − 1` into `mrk`'s and `K`'s. `BIG_HINTS` and
+`SMALL_HINTS` split `G` over `|KS|` and over `|offS|`.
 
-{
-     hs in [1, 2]
-  /\ nN in [0.99, 1.01] /\ wW in [0.99, 1.01]
-  /\ t in [0.5, 2]
-  /\ (Bw - Bws) / wW in [-3b-53, 3b-53]
-->
-  (h - hS) / hS in ? /\ (au - auS) / auS in ? /\ (bu - buS) / buS in ?
-  /\ (K - KS) / KS in ? /\ (mrk - 1 / KS) * KS in ?
-  /\ (C - CS) / (hS * hS) in ?
-  /\ (off - offS) / KS in ?
-}
+**3. The shares.** `G`'s range with no goal and no split, on a stretch of `t`,
+as `all.sh` printed it (8), in `u`:
 
-reach ~ R; sqn ~ Nn; sqw ~ Ww; up ~ U; Bw ~ Bws;
-nl ~ nlS; wl ~ wlS; h ~ hS; nw ~ nwS; au ~ auS; bu ~ buS;
-tt ~ t * t; t2 ~ t2S; k1 ~ k1S; k2 ~ k2S; k3 ~ k3S; K ~ KS;
-hh ~ hhS; c1 ~ c1S; c2 ~ c2S;
+- `p_s1`, `t` in `[2⁻⁵⁰⁰, 1/4]`: `51.69u`;
+- `p_s4`, `[1, 2]`: `48.28u`;
+- `p_7_16_below`, `[0.4296875, 0.4375]`: `76.07u`;
+- `p_7_16_above`, `[0.4375, 0.4453125]`: `80.52u`;
+- `p_5`, `[4.96875, 5]`: `76.21u`;
+- `p_8`, `[7.9375, 8]`: `110.33u`;
+- `p_16`, `[15.875, 16]`: `200.95u`;
+- `p_32`, `[31.75, 32]`: `381.12u`.
 
-hS -> hs;
-auS -> As;
-buS -> Bs;
-c2S -> t * t;
-KS -> -2 * hs * t;
+`84u` is above the largest of those up to `t = 5`, `80.52u`, just above `7/16`.
+Past 5 the bound nearly doubles with each doubling of `t`. The other terms of 2
+leave `128 − 32.05 = 95.947u` for `G`, and a straight line between `p_5` and
+`p_8` passes `95.947u` at `t = 6.735`. That is a line through two probes, not
+a probe at 6.735. `c_s5_to8.g` (6), `s5.g` with `t` up to 8, fails with a best
+of `84u` to `115.74u`. Whether the kernel's points stray that far past 5 is
+not run (9).
 
-(C - CS) / (hS * hS) -> ((C - hh * br) / (hh * br)) * ((hh * br) / (hS * hS)) + ((hh - hhS) / hhS) * br + (br - brS);
-br - brS -> (br - (1 - c2)) - (c2 - c2S);
-c2 - c2S -> ((c2 - c2S) / c2S) * (t * t);
-(off - offS) / KS -> ((off - C / K) / (C / K)) * ((C / K) / KS) + ((C - CS) / (hS * hS)) * ((hS * hS) / (K * KS)) - (offS / KS) * ((K - KS) / K);
-offS / KS -> (1 - t * t) / (4 * t * t);
-(hS * hS) / (K * KS) -> 1 / ((1 + (K - KS) / KS) * (4 * t * t));
-(C / K) / KS -> (C - CS) / (K * KS) + (offS / KS) * (KS / K);
-```
+**4. What the doc counts differently.** The doc (`walk.rs:142-167`) charges
+the foot `12u·L` (142-143); `n̂·ŵ` and `and·ŵ` a relative `10u` each (144-146);
+`K` `25u` (147-148); `C` `2u·L` (149-154); `C/K` `25u·L`, which with the
+vertex's own roundings makes the vertex `43u·L` (155-157); `bend` `27u` (158);
+evaluating, `15u·L` plus `across`'s `4u` and `bend`'s `27u` (159-162); and the
+parameter `9u·L` (163-165): about `98u·L` in all (167). `116.05u·L` is a
+bound, not a measurement, so it does not show `98u` wrong. Where the two part:
 
-Gappa 1.8.0, `-Eprecision=200`, printed (the decimal halves only; the hints'
-"not trivially equal" warnings are the identities `hS = hs`, `auS = As`, `buS =
-Bs`, `c2S = t²` and `KS = −2·hs·t`, true for `nN, wW > 0` and not yet checked
-by hand):
+- (i) `bend_up` is a plain `f64` dot (`walk.rs:5050`, through
+  `point.rs:296-298`), not the exactly-summed dot lines 144-146 say. The
+  scripts take the computed `and·w` within `7.5u·|w|` of the true one: the
+  doc's `4u` on `and`, the plain dot's `3u`, and `0.5u` over. Over
+  `|and*·w| = |w|/√(1 + t²)` that is a relative `7.5u·√(1 + t²)`, which is
+  `38u` at `t = 5`, where the doc has `10u`.
+- (ii) The parameter's `9u·L` drops out. The proof compares `P(s)` with `Q(s)`
+  at the same `s`, so an error in `s` slides the point along the curve and not
+  off it, which is what lines 102-103 already say of the angle.
+- (iii) The doc counts a coordinate and the proof a norm, so a rounding of a
+  point is `u` times up to `√3·L`, where the doc has `u·L`.
+- (iv) The doc's `C`, `C/K` and `bend` terms come to `2 + 25 + 27 = 54u·L`.
+  `G`, which holds all three, reaches `80.52u` just above `t = 7/16`.
 
-```text
-(h - hS) / hS in {-3.88578e-16, 3.88578e-16}
-(au - auS) / auS in {-6.66134e-16, 6.66134e-16}
-(bu - buS) / buS in {-1.03736e-15, 1.03736e-15}
-(K - KS) / KS in {-2.62498e-15, 2.62498e-15}
-(mrk - 1 / KS) * KS in {-2.1888e-14, 2.1888e-14}
-(C - CS) / hhS in {-1.02363e-14, 1.02363e-14}
-(off - offS) / KS in {-1.6875, 1.6875}
-```
+**5. The hypotheses.** Each script's, in its order:
 
-That is `3.5u`, `6u`, `9.35u` and `23.6u` for `h`, `axis_up`, `bend_up` and
-`K`, with `u = 2⁻⁵³` and Gappa's rounding at `u` relative. The last three are
-not yet right: `mrk`'s `197u` and `off`'s `1.6875` are hints that did not take,
-and `C`'s `92u·h²` is not yet checked against a count by hand. The relaying
-lane had written, and not run, `gen.py`'s hints for them (its handoff), with
-`Bw` within `7u·|w|` and `t` in `[0.5, 2]`, `[2, 8]` and `[8, 32]`.
+- `hs`, `nN` and `wW` in `[1, 2]`. Scaling any of them by a power of two
+  leaves `G` and both ratios as they are, while every value stays normal. `hh`
+  leaves the normal range for `|h|` below `2⁻⁵¹¹` (9).
+- They are positive. Negating `h`, `n·w` or `and·w` negates the computed and
+  the true value of each name it reaches, exactly, since round-to-nearest is
+  symmetric, and leaves `G` as it is. That was checked through `c1`, `c2`,
+  `br`, `C`, `K`, `off`, `mrk` and `m`.
+- `t` an `f64` in the script's range, as `t = rnd(t_)` says.
+- `(Bw − Bws)/wW` within `±7.5u`, the computed `and·w` of 4 (i). This is where
+  the doc's `4u` on `and` comes in, unproved (9).
+- `r` within `±(1 + 2⁻⁴⁰)`, written `1099511627777b-40`. A run with no named
+  ends walks `|s| ≤ 1/‖bend‖`, which is within about `10u` of `|K|` by hand,
+  with three roundings at line 2648 on top, and the third goal gives
+  `|K/KS − 1| ≤ 2⁻⁴⁴`. With named ends nothing holds `s` (9).
+- `E = 0` is written in, through `As` and `Bs`: the plane lies exactly along a
+  ruling. A leaning that is not zero but rounds to `0.0` takes the parabola
+  branch at line 5052, and is not modelled (9).
 
-**The second lane's runs, draft too.** `gen.py`'s hints (the first lane's
-handoff), run unchanged as `k1.g`, `k2.g` and `k3.g` with `Bw` within
-`7u·|w|`, all exit 0 and print, for `t` in `[0.5, 2]`, `[2, 8]` and `[8, 32]`:
-`bend_up` `2.05044e-15`, `6.66977e-15`, `2.56613e-14`; `K` `3.63806e-15`,
-`8.27788e-15`, `2.72711e-14`; `(mrk − 1/KS)·KS` `3.74908e-15`, `8.3889e-15`,
-`2.73821e-14`; `(C − CS)/hhS` `1.02363e-14`, `1.8008e-13`, `2.8979e-12`; and
-`(off − offS)/KS` `1.3751e-14`, `1.1819e-14`, `3.02893e-14`. `off`'s `124u` at
-`[0.5, 2]` is interval width over `t`, not a bound worth keeping: its two terms
-both peak at `t = 0.5`, where `C` is about `11u·h²`, not the `92u·h²` it
-reaches at `t = 2`. The ranges need cutting finer, with explicit goals, since
-Gappa does not split for an `in ?` goal.
+**6. The controls.** Each changes one thing and exits 1, as `all.sh` printed
+(8):
 
-A first point script, one coordinate in units of `L`, proves each rounding but
-the bend's: `bd = rnd(nd·(−mrk))` with `mrk` up to `2¹⁰⁰⁰` leaves `(bd −
-z5)·s²/L` at `±2.4e285`, and `$ z5 in (-1b-1022, 1b-1022)` prints "case split
-on z5 has not produced any interesting new result".
+- `c_s4_40.g`, `s4.g` with its goal on `G` at `40u`, after 266.16 s, with a
+  best of `40u` to `48.28u`. So `s4.g`'s hypotheses do not contradict each
+  other.
+- `c_s1_nobw.g`, `s1.g` without the hypothesis on `Bw`, with a best of
+  `[-inf, inf]` on `|G|` and on `|(K − KS)/KS|`.
+- `c_s1_nor.g`, `s1.g` without the range on `r`, with a best of `[-inf, inf]`
+  on `|G|`.
+- `c_s5_to8.g`, `s5.g` with `t` up to 8, with a best of `84u` to `115.74u`
+  (3).
 
-**The third lane's runs, draft too.** The point script is no longer needed.
-Measure `P(s)` against the true parabola's point `Q(s)` at the same `f64` `s`.
-Then `P − Q` is the sum of four kinds of term, each bounded as a vector norm
-and not coordinate by coordinate:
+The goal control on the small shape, `s1.g` at `40u`, ran past `one.sh`'s
+600 s, so it is not here. `s1.g`'s hypotheses meet at a point instead:
+`hs = nN = wW = 1`, `t = 1/8`, `Bw` the `f64` nearest `−8/√65`, and `r = 0`.
+The hypotheses are ranges on six independent inputs, and this point is inside
+each. The same point with `t` moved into each range, and `Bw` the `f64`
+nearest `−1/√(1 + t²)`, meets `s2.g` to `s5.g`'s.
 
-- the ten coordinate-wise roundings. Each is at most `u` times the norm of the
-  vector it rounds. With `‖apex‖` and `‖vertex‖` at most `√3·L`, and `|off|`,
-  `|s|`, `|mrk|·s²` and `h` at most `L`, they come to `16.93u·L`;
-- the foot's `n·(q − qS)`, with norm `h·|(q − qS)/qS| ≤ 3.125u·L`;
-- `(and − and*)·(off + mrk·s²)` and `(across − across*)·s`. Under the doc's
-  `4u` for each direction (an unproved hypothesis, `two_directions_in`'s
-  chain), they come to `8u·L` and `4u·L`;
-- along `and*`, the scalar `(off − offS) + s²·(mrk − 1/KS)`. Over `|KS|` this
-  is `G = (off − offS)/KS + r²(m − 1)`, with `r = s/KS` and `m = mrk·KS`.
+Earlier runs, whose files are not appended and which `all.sh` does not run:
+`c_s1_40`, `s1.g` at `40u`, exited 124 at 600.02 s; `c_s2_72` and `c_s3_76`,
+`s2.g` at `72u` and `s3.g` at `76u`, exited 124 at 600.03 s; `c_s5_nobw`
+exited 1 at 464.38 s and `c_s3_nor` exited 1 at 403.78 s.
 
-For `t` below 7/16, `G` is taken over `offS` instead, since `L ≥ |offS|`.
+**7. Coq checks all five, modulo their hints.** `gappa -Bcoq` and `coqc`,
+through `one.sh`, exit 0 on all five. On the last run of `all.sh` (8) their
+`.v` files came to 5393 lines with 14 hints, 6683 with 14, 9842 with 15, 7508
+with 15 and 11388 with 15, and every `.coqc` file, which holds what `coqc`
+printed, is empty.
 
-`gen2.py` (in `target/q2693/` of the third lane's tree) writes `k.g`'s chain
-with `Bw` within `7.5u·|w|` (the doc's `4u` plus the plain dot's `γ₃`), `nN`
-and `wW` in `[1, 2]`, and `r` in `±(1 + 2⁻⁴⁰)`. Its goal is `|G| ≤ 84u` and
-`|(q − qS)/qS| ≤ 3.125u`, on five slope ranges: `[2⁻⁵⁰⁰, 1/4]` and
-`[1/4, 7/16]` over `offS`, then `[7/16, 1]`, `[1, 2]` and `[2, 5]` over `KS`.
-Each range is split on `t` where needed. All five exit 0 through 464.13's
-`one.sh` with `coq`, and `coqc` exits 0 on each: `s1` 1.41s, `s2` 1.44s, `s3`
-15.38s (`coqc` 70.27s), `s4` 2.02s and `s5` 9.63s, with 14 or 15 hints. Every
-hint is an identity once `√(nN²) = nN`, `√(wW²) = wW` and `√(1+t²)² = 1+t²`.
-That is not yet checked by a script.
+As in 464.22's 7, each hint enters the `.v` as a hypothesis with no condition,
+so a proof stands on its hints and on the divisors Gappa took to be nonzero.
+`ids.py` (8) works out each difference Gappa prints for a hint it calls "not
+trivially equal", in exact rationals, at twenty points, with the square roots
+taken. It finds 7, 7, 9, 9 and 9 such hints in `s1.out` to `s5.out`, and every
+one zero at all twenty points. Its control is `s3.out` with only line 22,
+`hS`'s difference, changed from `(hs) * (nN)` to `(hs) * (wW)`. On it,
+`ids.py` prints `9 hints not trivially equal, 8 of them zero at all twenty
+points ['hS']`.
 
-The four terms then total `16.93 + 3.125 + 8 + 4 + 84 ≈ 116u·L`, under the
-`128u·L` of `64 ε`, for `t ≤ 5`. Without a split, `G` is at most `80.5u` on `t`
-in `[7/16, 0.4453]`, `76.2u` at `[4.97, 5]`, `110u` at `[7.94, 8]`, `201u` at
-`[15.9, 16]` and `381u` at `[31.75, 32]`. It grows like `7.5u·t`, so past `t`
-of about 6 this chain does not reach `64 ε`.
+`grep -c 'assumed to be nonzero'` counts 75 in each of `s1.out` and `s2.out`,
+and 90 in each of `s3.out` to `s5.out`. `s1.out`'s, by divisor:
+`√(1 + t²)` 18, `nlS·wlS` 12, `K` 9, `nlS` 8, `wlS` 6, `hs²·nN²` 4;
+`−2t·hs·nN²·wW²·(1 + t²)`, expanded, 3; `1 − t²` 2; `t²·(1 + t²)·nN²·wW²`,
+expanded, 2; `√(1 + t²)⁴·K·nlS⁴·wlS⁴` 2; `hh·br` 2; three expansions of
+`(1 + t²)(1 − t²)` times a positive factor, 2, 2 and 1; `1 − c2` 1; and `C` 1.
+`s2.out`'s are the same. `s3.out`'s: `√(1 + t²)` 22, `nlS·wlS` 13, `K` 13,
+`nlS` 10, `wlS` 9, `−2t·hs·nN²·wW²·(1 + t²)` 8, `hs²·nN²` 4, `4t²` 3, the same
+`−2t·…` times `K` 3, `√(1 + t²)⁴·K·nlS⁴·wlS⁴` 2, `t²·(1 + t²)·nN²·wW²` 1,
+`hh·br` 1 and `C` 1, and `s4.out`'s and `s5.out`'s are the same. Each is
+nonzero under its script's hypotheses but `hh·br` and `C` in `s3.g` to `s5.g`.
+Those are zero where `c2` rounds to exactly 1, near `t = 1`. There `C = 0` and
+`off = 0`, so both sides of the hint `(off − C/K)/KS -> …` are 0, and both
+sides of `(C − CS)/hhS -> …` are `−brS`, whatever `x/0` is taken to be.
 
-**The fourth lane's runs, draft too.** `parabola.py`, below, writes the five
-scripts again with a third goal, `|(K − KS)/KS| ≤ 2⁻⁴⁴`. That is what puts the
-walk's `|s|`, at most `1/‖bend‖` and so within about `10u` of `|K|` by hand,
-inside `r`'s `1 + 2⁻⁴⁰` on every range. `G`'s goal alone gives it only where
-`r²`'s factor is not small, and on `s1` that factor is down to `2⁻⁹⁹⁸`. `r` is
-now written exactly, `1099511627777b-40`. A first `all.sh`, which ran the five
-with `coq` and an earlier list of controls, printed, at a load of about 13 on
-24 cores:
+**8. The scripts, whole, as they ran.** To run them again, save
+`parabola.py`, `ids.py` and `all.sh` in one directory with 464.13's `one.sh`,
+and run `bash all.sh` there. `parabola.py` writes the five scripts, the
+controls of 6 and the probes of 3. The `.g` files are not appended:
+`parabola.py` writes them, and `same.py` checks that what it writes is what
+ran. The longest run, `c_s4_40.g`, took 266.16 s, as `all.sh`'s print shows.
+`same.py` is a check, and `all.sh` does not need it.
 
-```text
-s1 exit 0 2.60s
-s1 coq -Bcoq exit 0 coqc exit 0 8.83s lines 5255 hints 14
-s2 exit 0 2.87s
-s2 coq -Bcoq exit 0 coqc exit 0 13.25s lines 6803 hints 14
-s3 exit 0 33.97s
-s3 coq -Bcoq exit 0 coqc exit 0 129.27s lines 9571 hints 15
-s4 exit 0 2.86s
-s4 coq -Bcoq exit 0 coqc exit 0 12.30s lines 6698 hints 15
-s5 exit 0 18.20s
-s5 coq -Bcoq exit 0 coqc exit 0 56.39s lines 10895 hints 15
-c_s2_72 exit 124 600.03s
-c_s3_76 exit 124 600.03s
-c_s5_nobw exit 1 464.38s
-c_s3_nor exit 1 403.78s
-c_s5_to8 exit 1 236.87s
-p_7_16_below exit 0 4.02s
-  G in {-8.44565e-15, -2^(-46.7507)}, {8.44565e-15, 2^(-46.7507)}]
-p_7_16_above exit 0 4.30s
-  G in {-8.93913e-15, -2^(-46.6688)}, {8.93913e-15, 2^(-46.6688)}]
-p_5 exit 0 4.36s
-  G in {-8.46127e-15, -2^(-46.748)}, {8.46127e-15, 2^(-46.748)}]
-p_8 exit 0 4.14s
-  G in {-1.22487e-14, -2^(-46.2144)}, {1.22487e-14, 2^(-46.2144)}]
-p_16 exit 0 3.74s
-  G in {-2.23102e-14, -2^(-45.3493)}, {2.23102e-14, 2^(-45.3493)}]
-p_32 exit 0 3.79s
-  G in {-4.23131e-14, -2^(-44.4259)}, {4.23131e-14, 2^(-44.4259)}]
-```
-
-A failing goal is slow here. `c_s2_72` and `c_s3_76`, a goal under the reach
-on scripts that split on `t`, ran to `one.sh`'s 600 s limit. So `parabola.py`
-as appended writes other controls, and a second run of them printed:
-`c_s1_40 exit 124 600.02s`, `c_s4_40 exit 1 295.17s` with best `BND(|G|)
-[4.44089e-15, 5.35968e-15]`, `c_s1_nobw exit 1 252.74s` and `c_s1_nor exit 1
-167.52s`. With no goal, `s1` and `s4` bound `G` by `5.73909e-15` (`51.7u`) and
-`5.35968e-15` (`48.3u`), without a split. Gappa's bound on `G` grows about
-linearly in `t`, and past `t` of about 6.7 it is over the `95.9u` the other
-terms leave.
-
-`ids.py`, below, finds each hint Gappa could not prove by itself in the five
-`.out` files and works out the difference Gappa prints, in exact rationals, at
-twenty points with `1 + t²` a square. It printed:
-
-```text
-s1.out 7 hints not trivially equal, 7 of them zero at all twenty points 
-s2.out 7 hints not trivially equal, 7 of them zero at all twenty points 
-s3.out 9 hints not trivially equal, 9 of them zero at all twenty points 
-s4.out 9 hints not trivially equal, 9 of them zero at all twenty points 
-s5.out 9 hints not trivially equal, 9 of them zero at all twenty points 
-```
-
-On a copy of `s3.out` with `nN` written `wW` in `hS`'s difference, it printed
-`bad_s3.out 9 hints not trivially equal, 8 of them zero at all twenty points
-['hS']`. `grep -c 'assumed to be nonzero'` counts 75 in `s1.out` and `s2.out`,
-and 90 in each of the other three; they are not yet sorted by divisor.
-
-`parabola.py`, as appended:
+`parabola.py`:
 
 ```python
 """Write 464.23's five scripts, s1.g to s5.g, their controls and the probes
@@ -16259,11 +16218,12 @@ SCRIPTS = {
 for name, text in SCRIPTS.items():
     write(name, text)
 
-# The controls. A goal under what each shape reaches, to see that the
-# hypotheses do not contradict each other; then a hypothesis dropped or
-# widened, to see that the proof needs it.
+# The controls. A goal under what s4 reaches, to see that its hypotheses do
+# not contradict each other; then a hypothesis dropped or widened, to see that
+# the proof needs it. The small shape's goal control, s1.g at 40u, ran past
+# one.sh's 600 s, so it is not here: 464.23's 6 gives a point that meets every
+# hypothesis instead.
 G84 = "|G| <= 84b-53"
-write("c_s1_40.g", sub(SCRIPTS["s1.g"], G84, "|G| <= 40b-53"))
 write("c_s4_40.g", sub(SCRIPTS["s4.g"], G84, "|G| <= 40b-53"))
 write("c_s1_nobw.g", sub(SCRIPTS["s1.g"], BW, ""))
 write("c_s1_nor.g", sub(SCRIPTS["s1.g"], RS, ""))
@@ -16284,7 +16244,7 @@ for name, lo, hi, small in (
     write(name, sub(script(lo, hi, small, None), GOAL, PROBE_GOAL))
 ```
 
-`ids.py`, as it ran:
+`ids.py`, the check on the hints of 7:
 
 ```python
 """Check that each hint Gappa could not prove by itself is an identity once the
@@ -16338,20 +16298,223 @@ for out in sys.argv[1:]:
           "of them zero at all twenty points", nonzero if nonzero else "")
 ```
 
-**Still to do**, in order:
+`all.sh`:
 
-1. `all.sh` brought in line with `parabola.py`'s controls, and run once more.
-   Each failing control takes minutes, and `c_s1_40` ran to the 600 s limit,
-   so a goal control on the small shape still needs a quicker form or a longer
-   limit.
-2. `same.py`, on 464.22's model.
-3. This subsection written again on 464.22's model, as one proof: what it
-   guards; the scripts and their cut; the hand decomposition, each term with
-   its norm (the third lane's paragraph); the hypotheses; the controls; Coq;
-   the scripts; what this leaves.
-4. The rows: restate `walk.rs:144-146` and the per-term count; a kernel probe
-   of the parabola at slopes past 6; a probe of a run whose ends lie past
-   `|K|`; a probe of `|h|` below `2⁻⁵¹¹`, and of an exact `leaning` that is
-   not zero but rounds to it; a proof or a probe of `two_directions_in`'s
-   error against the true directions, whose cross product has length
-   `1/√(1 + t²)` on a parabola.
+```bash
+#!/bin/bash
+# Write the five scripts, the controls and the probes, then run every one at
+# once, each through 464.13's one.sh: the five with coq, the controls and the
+# probes without. A control's line is followed by the best range Gappa found
+# for what it could not prove, and a probe's by the range it printed for G.
+# Last, ids.py checks the hints of the five that Gappa could not prove itself.
+cd "$(dirname "$0")"
+python3 parabola.py
+for f in s1.g s2.g s3.g s4.g s5.g; do
+  ./one.sh "$f" coq > "${f%.g}.run" 2>&1 &
+done
+for f in c_s4_40.g c_s1_nobw.g c_s1_nor.g c_s5_to8.g \
+         p_s1.g p_s4.g p_7_16_below.g p_7_16_above.g p_5.g p_8.g p_16.g p_32.g; do
+  ./one.sh "$f" > "${f%.g}.run" 2>&1 &
+done
+wait
+for c in c_s4_40 c_s1_nobw c_s1_nor c_s5_to8; do
+  grep ', best: ' "$c.out" >> "$c.run"
+done
+for p in p_s1 p_s4 p_7_16_below p_7_16_above p_5 p_8 p_16 p_32; do
+  grep '^  G in ' "$p.out" \
+    | sed -E 's/\[[-0-9]+b[-0-9]+ \{([^,]+), [^}]*\}, [-0-9]+b[-0-9]+ \{([^,]+), [^}]*\}\]/[\1, \2]/' >> "$p.run"
+done
+cat s1.run s2.run s3.run s4.run s5.run \
+    c_s4_40.run c_s1_nobw.run c_s1_nor.run c_s5_to8.run \
+    p_s1.run p_s4.run p_7_16_below.run p_7_16_above.run p_5.run p_8.run p_16.run p_32.run
+python3 ids.py s1.out s2.out s3.out s4.out s5.out
+```
+
+It printed, on the last run:
+
+```text
+s1 exit 0 2.40s
+s1 coq -Bcoq exit 0 coqc exit 0 5.39s lines 5393 hints 14
+s2 exit 0 2.45s
+s2 coq -Bcoq exit 0 coqc exit 0 6.52s lines 6683 hints 14
+s3 exit 0 18.95s
+s3 coq -Bcoq exit 0 coqc exit 0 69.44s lines 9842 hints 15
+s4 exit 0 1.99s
+s4 coq -Bcoq exit 0 coqc exit 0 6.27s lines 7508 hints 15
+s5 exit 0 10.21s
+s5 coq -Bcoq exit 0 coqc exit 0 27.97s lines 11388 hints 15
+c_s4_40 exit 1 266.16s
+  BND(|G|), best: [4.44089e-15, 5.35968e-15]
+c_s1_nobw exit 1 219.55s
+  BND(|G|), best: [-inf, inf]
+  BND(|(K - KS) / KS|), best: [-inf, inf]
+c_s1_nor exit 1 153.53s
+  BND(|G|), best: [-inf, inf]
+c_s5_to8 exit 1 158.81s
+  BND(|G|), best: [9.32587e-15, 1.285e-14]
+p_s1 exit 0 2.98s
+  G in [-5.73909e-15, 5.73909e-15]
+p_s4 exit 0 21.06s
+  G in [-5.35968e-15, 5.35968e-15]
+p_7_16_below exit 0 3.58s
+  G in [-8.44565e-15, 8.44565e-15]
+p_7_16_above exit 0 3.62s
+  G in [-8.93913e-15, 8.93913e-15]
+p_5 exit 0 3.74s
+  G in [-8.46127e-15, 8.46127e-15]
+p_8 exit 0 3.67s
+  G in [-1.22487e-14, 1.22487e-14]
+p_16 exit 0 2.81s
+  G in [-2.23102e-14, 2.23102e-14]
+p_32 exit 0 3.13s
+  G in [-4.23131e-14, 4.23131e-14]
+s1.out 7 hints not trivially equal, 7 of them zero at all twenty points 
+s2.out 7 hints not trivially equal, 7 of them zero at all twenty points 
+s3.out 9 hints not trivially equal, 9 of them zero at all twenty points 
+s4.out 9 hints not trivially equal, 9 of them zero at all twenty points 
+s5.out 9 hints not trivially equal, 9 of them zero at all twenty points 
+```
+
+`same.py`, a check that what this subsection appends is what ran:
+
+```python
+"""Check that each script 464.23 appends whole is byte for byte the file that
+was run, in q2693/ran/; that one.sh is 464.13's block; that all.log is the
+print 464.23 gives for all.sh; and that parabola.py, run again in a fresh
+directory from the appended text, writes every .g file that ran.
+Run as: python3 same.py <doc> <q2693/ran dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, ran = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+sec = section(23)
+blocks = FENCED.findall(sec)
+print("code blocks in 464.23:", len(blocks))
+assert len(re.findall(r"^```", sec, re.M)) == 2 * len(blocks)
+
+# Which appended block is which file: by its first lines.
+marks = {
+    "parabola.py": '"""Write 464.23\'s five scripts',
+    "ids.py": '"""Check that each hint Gappa could not prove',
+    "all.sh": "#!/bin/bash\n# Write the five scripts, the controls and the probes",
+    "same.py": '"""Check that each script 464.23 appends whole',
+}
+found = {}
+for lang, body in blocks:
+    for name, mark in marks.items():
+        if not body.startswith(mark):
+            continue
+        assert name not in found, name
+        found[name] = body
+for name in marks:
+    if name not in found:
+        print(name, "not appended")
+        continue
+    path = os.path.abspath(__file__) if name == "same.py" else os.path.join(ran, name)
+    print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+
+def block_of(n, first):
+    got = [body for lang, body in FENCED.findall(section(n)) if body.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+def printed(first):
+    got = [body for lang, body in blocks if lang == "text" and body.startswith(first)]
+    assert len(got) == 1, (first, len(got))
+    return got[0]
+
+
+print("one.sh is 464.13's block:", open(os.path.join(ran, "one.sh")).read()
+      == block_of(13, "#!/bin/bash\n# Run one Gappa script under 464.4's pin"))
+print("all.log is what 464.23 gives:",
+      open(os.path.join(ran, "all.log")).read() == printed("s1 exit "))
+
+fresh = tempfile.mkdtemp()
+open(os.path.join(fresh, "parabola.py"), "w").write(found["parabola.py"])
+subprocess.run(["python3", "parabola.py"], cwd=fresh, check=True)
+written = sorted(f for f in os.listdir(fresh) if f.endswith(".g"))
+for name in written:
+    print(name, "written again is the one that ran:",
+          filecmp.cmp(os.path.join(fresh, name), os.path.join(ran, name), shallow=False))
+print(".g files that ran and are not written again:",
+      sorted(f for f in os.listdir(ran) if f.endswith(".g") and f not in written))
+shutil.rmtree(fresh)
+```
+
+It prints:
+
+```text
+code blocks in 464.23: 6
+parabola.py same
+ids.py same
+all.sh same
+same.py same
+one.sh is 464.13's block: True
+all.log is what 464.23 gives: True
+c_s1_nobw.g written again is the one that ran: True
+c_s1_nor.g written again is the one that ran: True
+c_s4_40.g written again is the one that ran: True
+c_s5_to8.g written again is the one that ran: True
+p_16.g written again is the one that ran: True
+p_32.g written again is the one that ran: True
+p_5.g written again is the one that ran: True
+p_7_16_above.g written again is the one that ran: True
+p_7_16_below.g written again is the one that ran: True
+p_8.g written again is the one that ran: True
+p_s1.g written again is the one that ran: True
+p_s4.g written again is the one that ran: True
+s1.g written again is the one that ran: True
+s2.g written again is the one that ran: True
+s3.g written again is the one that ran: True
+s4.g written again is the one that ran: True
+s5.g written again is the one that ran: True
+.g files that ran and are not written again: []
+```
+
+**9. What this leaves.** Rows, filed from this write-up when it merges, each
+from Q2693:
+
+- Restate `POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF` (`walk.rs:116-220`) against 2
+  to 4: `bend_up` is a plain `f64` dot (`walk.rs:5050`), not the
+  exactly-summed dot lines 144-146 say, and its relative error grows like
+  `√(1 + t²)`; the per-term count becomes 2's, which reaches `64 ε` for slopes
+  up to 5; and the parameter's `9u·L` (163-165) goes, since an error in `s`
+  slides a point along the curve and not off it. It is a row of its own
+  because `walk.rs` is outside this row's write set.
+- Probe the kernel on the parabola at slopes from 6 to 32, where 3's chain
+  does not prove `64 ε`: walk a plane along a ruling of such a cone, and
+  measure each point against the true parabola in exact arithmetic.
+- Probe a parabola run whose named ends lie past `K`: nothing holds its `s` to
+  `|K|` (5), and the doc's evaluating term assumes it (159-162).
+- Probe the parabola branch where its arithmetic leaves the normal range: `|h|`
+  below `2⁻⁵¹¹`, where `hh` underflows (5053-5054); a slope below `2⁻⁵⁰⁰`,
+  where the scripts stop; and a plane and cone whose exact leaning is not zero
+  but rounds to `0.0`, so the parabola branch is taken (5052) for a curve that
+  is not a parabola.
+- Prove or probe `two_directions_in` (`walk.rs:5346-5369`) against the true
+  directions on a parabola. 2 takes the doc's `4u` for `and` and `across` as a
+  hypothesis, and the cross product they are built from has length
+  `1/√(1 + t²)` of `|w|·|n|` there, so their error may grow with the slope.
+
+And what is not a row: Q2700, which moves these scripts into `proofs/gappa/`
+with the rest of 464's and already waits on Q2693; the hyperbola branch, which
+is Q2697's; and a run whose values overflow, which no script here models,
+since Gappa's `float<ieee_64, ne>` has no largest number. Nobody has run the
+kernel on any of these shapes, so none of them has a class (§360.5).
