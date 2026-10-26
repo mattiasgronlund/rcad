@@ -218,6 +218,50 @@ segments after the row lands. If "write the briefs" and "check a row
 against the code" together have not fallen by half, add a dated note here
 that says so, and why.
 
+**2026-10-26, Q1700:** Yes for three of the four numbers; the fourth fell by
+only a third, and the gap is in how the counting sorts calls, not in what
+prep does.
+
+By today, 135 of the 139 dispatcher segments that sent a lane since Q840
+landed (2026-10-11T12:26:45Z) had sent at least one short-form lane through
+prep. The ten earliest, by when each first did so, are sessions `aec37d77`,
+`8a5234d9`, `42a1f000`, `70df2354`, `61c90cad`, `599295de`, `abdb89fa`,
+`9500e8ec`, `a6e49354` and `a01f9d4d`, each ended within a day of Q840
+landing. `just spend`'s `lane` argument takes one substring, not a list, so
+no single `just spend start <since> <until>` call names exactly these ten;
+the comparison instead called `spend.load()` and `spend.report_start()` —
+the functions the recipe itself runs — on the window's responses filtered to
+those ten session ids, the same counting §396.1 and Q819 used, over a chosen
+set of sessions rather than a chosen date range. A follow-up row gives the
+recipe a session-id list so this does not need a scratch script next time.
+
+Before the first lane: write the briefs fell from 5 183 to 2 005 output
+tokens and from 15 642 to 6 606 result characters; check a row against the
+code fell from 4 459 to 986 tokens and from 12 663 to 6 009 characters.
+Together, 9 642 to 2 991 tokens (a fall of 69%) and 28 305 to 12 615
+characters (55%) — both past half.
+
+Over the whole segment: write the briefs fell from 10 247 to 6 662 tokens
+and from 21 061 to 17 966 characters; check a row from 8 602 to 2 650 tokens
+and from 25 561 to 13 720 characters. Together, 18 849 to 9 312 tokens
+(51%, at half) but only 46 622 to 31 686 characters (32%, short of half).
+
+The number that did not halve is result characters, check a row against the
+code, over the whole segment. `purpose_of` sorts every `just decision`, `just
+decisions-find`, `just src` and every read under `crates/` or
+`docs/decisions.d/` into that bucket by the file or command alone, whether it
+is the per-fill write-set check prep now owns or something else the
+dispatcher still does by hand later in the same segment: deciding a returned
+lane, filing a new row, chasing a fuzz finding, reading a section to write a
+brief's facts for an exception row. Of the 13 720 characters the bucket holds
+over a whole segment in the new sample, 7 711 (56%) land after the first lane
+is sent — in this sample, a 14 467-character `git show` of an old decisions
+file for session `9500e8ec`'s dated note, and 8 482- and 5 629-character runs
+of `just decision` reading sections 352.3, 360.5, 418.3 and 437.1-437.9 for
+session `a6e49354`. None of that moved to prep, because prep runs once per
+fill, before a lane starts; the rest of a long dispatcher segment goes on
+reading the record exactly as it did before Q840.
+
 ### 396.6 What was not chosen
 
 - **The lane checks its own write set and stops if it is wrong.** The
