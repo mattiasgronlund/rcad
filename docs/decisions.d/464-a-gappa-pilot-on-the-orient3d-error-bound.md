@@ -16523,10 +16523,11 @@ kernel on any of these shapes, so none of them has a class (§360.5).
 
 Q2694 asked whether 464.9's `signed.g` and `shiftplane.g` still hold with `L`
 at least `2⁻¹⁰²²` and one of the three products below `2⁻¹⁰²²`, which 464.9
-left unrun. Three lanes took it on 2026-10-26. The first wrote the first
+left unrun. Four lanes took it on 2026-10-26. The first wrote the first
 `signedcases.py`, whose runs failed (6). The second made every case prove, and
 ran the controls, `coqc` and a probe through the kernel. The third ran all of
-it again and wrote this.
+it again and wrote this. The fourth ran the cases, the controls and `coqc` a
+third time.
 
 With one product below the normals and the other two normal, both bounds hold
 at the code's constants: `signed_distance_to` within `8u·L`, and a plane's or a
@@ -16619,16 +16620,16 @@ proves, and `coqc` accepts it.
 
 **4. Coq checks all twelve, modulo their hints.** `allcoq.sh` runs `gappa
 -Bcoq` and `coqc` through `one.sh` on the twelve and on the twelve `_anyl`
-controls, and both exit 0 on all 24. Over the second and third lanes' runs the
-`.v` files came to 3275 to 4896 lines, with 18 hints for `k` 0 or 1 and 19 for
-`k = 2`, and the two steps took 1.55 to 4.06 s a script. As in 464.22's 7,
-each hint enters the `.v` as a hypothesis with no condition, so a proof stands
-on its hints and on the divisors Gappa took to be nonzero. No `.out` holds
-anything but those divisor warnings and the results, so Gappa checked every
-hint's two sides equal by algebra. The divisors, 65 to 71 warnings a run, are
-`S01`, `S012` and `y`, which a hypothesis keeps from zero; and `L`, `N`,
-`|nᵢ|`, `|nᵢ|·L`, each product `nᵢ·pᵢ`, the `tᵢ` of a normal product, and
-`D`'s expansions, each of which is not zero since no factor is.
+controls, and both exit 0 on all 24. Over the second, third and fourth lanes'
+runs the `.v` files came to 3200 to 5018 lines, with 18 hints for `k` 0 or 1
+and 19 for `k = 2`, and the two steps took 1.55 to 4.06 s a script. As in
+464.22's 7, each hint enters the `.v` as a hypothesis with no condition, so a
+proof stands on its hints and on the divisors Gappa took to be nonzero. No
+`.out` holds anything but those divisor warnings and the results, so Gappa
+checked every hint's two sides equal by algebra. The divisors, 65 to 71
+warnings a run, are `S01`, `S012` and `y`, which a hypothesis keeps from zero;
+and `L`, `N`, `|nᵢ|`, `|nᵢ|·L`, each product `nᵢ·pᵢ`, the `tᵢ` of a normal
+product, and `D`'s expansions, each of which is not zero since no factor is.
 
 **5. A half-space through the kernel.** A probe test, appended to
 `crates/rcad-geom/tests/reading_a_distance_off_a_plane_stays_inside_its_bound.rs`,
