@@ -13959,3 +13959,1198 @@ And what is not a row: the hypotheses 464.19 already leaves, the nine
 products below the normals (Q2802) and the route through
 `From<na::Isometry3<f64>>` (Q2803), which `vector.g` shares with `point.g`;
 Q2700, which moves these scripts into `proofs/gappa/` with 464.19's.
+
+### 464.21 CORNER_AFTER_MOVING_ROUNDOFF
+
+Q2691 proved `CORNER_AFTER_MOVING_ROUNDOFF` in Gappa on 2026-10-26 at
+`f95bb965`, on 464.19's `point.g` and 464.20's `vector.g`, for four of the
+five kinds of surface. A corner exactly on a plane, a ball, a pipe or a torus,
+once moved, is within `222.5u · L`, `148.7u · L`, `230.6u · L` and `213.0u · L`
+of the moved surface as the code stores it, and the box the code draws round
+the moved corner meets that surface whenever it is within `256u · L` (1, 3).
+The pipe gets there only with the slips at the `25u` that `point.g` reaches,
+not at `POINT_ROUNDOFF`'s `36u`. The cone is not proved: the same argument, on
+paper, comes to about `290u`, past the bound, and nobody has searched for a
+corner that gets there (3). The doc's own count miscounts in three ways (4).
+Coq checks the four proofs, modulo their hints (7).
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, unchanged, against `moved_corner.rs`, `plane.rs`,
+`sphere.rs`, `cylinder.rs`, `torus.rs`, `point.rs` and `isometry.rs` at
+`f95bb965` and nalgebra 0.35.0. `u` is `2⁻⁵³` and `ε` is `f64::EPSILON = 2u`.
+Every length the scripts work with is per unit of `L`.
+
+**1. What the proof guards.** `where_a_corner_lands_after_moving`
+(`moved_corner.rs:208-244`) moves a corner by `Isometry::apply_to_point` and,
+unless the move rounded nothing, hands back a box round the moved corner of
+half-width `CORNER_AFTER_MOVING_ROUNDOFF · L` on each coordinate. `L` is
+`the_largest_number_involved` (`moved_corner.rs:423-441`): the largest
+magnitude among the corner before and after the move, the shift, and what
+`how_big_a_surface_is` (`moved_corner.rs:443-468`) gives for each surface
+before and after — a plane's offset, a ball's centre and radius, a pipe's
+axis origin and radius, a cone's apex and slope, a torus's centre and `ring +
+tube`. The box is to meet the moved surface as the code stores it,
+`Surface::transformed`. It does whenever the moved corner is within `128ε · L
+= 256u · L` of that surface, since a ball of that radius lies inside the box,
+and that distance is each script's goal. The doc (`moved_corner.rs:38-97`)
+counts five `POINT_ROUNDOFF`s for the worst kind, a plane, and publishes
+seven.
+
+**2. The scripts.** Each script takes the corner exactly on the surface,
+bounds a few shares of the moved corner's distance from the moved surface,
+and proves their sum within `256u`. What joins the shares to the distance is
+done by hand, below, and `sos.py` (8) checks the six identities the scripts
+rest on, in exact rationals at 1000 random points each. `Ex` is nalgebra's
+turn worked without rounding. It is linear (identity 1), so a moved corner
+less a moved centre or axis origin is `Ex(y) + k`, with `y` the corner less
+the centre or origin and `k = kp − ko` the two slips `point.g` proves.
+
+- `ball.g`: `Sphere::transformed` (`sphere.rs:78`) moves the centre and
+  carries the radius `r` over. By the triangle inequality the distance is at
+  most `|k| + r · ||Ex(y / r)| − 1|`, and the second share is the turn's
+  length share of 464.20's 3, for a unit vector.
+- `plane.g`: `Plane::transformed` (`plane.rs:544`) turns the normal to `n' =
+  Ex(n) + dn`, `dn` what `vector.g` proves, and gives the offset `off' = off +
+  n'·s + dd` by `shiftplane.g`'s arithmetic (464.9). With the moved corner
+  `Ex(x) + s + dp`, identity 2 makes `n'·p' − off'` exactly `4(q·q − 1)(v ×
+  n)·(v × x) + dn·Ex(x) + n'·dp − dd`, and the distance is that over `|n'|`.
+  Gappa bounds the whole quotient, and no inequality is taken by hand.
+- `pipe.g` and `torus.g`: `Cylinder::transformed` (`cylinder.rs:74`) and
+  `Torus::transformed` (`torus.rs:152`) carry the radii over and move the axis
+  by `Axis::transformed` (`point.rs:784`): the origin by `apply_to_point`, and
+  the direction by `apply_to_vector`, to `Ex(a) + da`. With `e` the unit
+  `Ex(a)` and `θ` the angle `da` tilts it by, the distance is at most `|k| +
+  θ · |Ex(y)| + |(ρ' − ρ, t' − t)|`, by three steps by hand:
+  - moving a point by `k` moves its distance from a surface by at most `|k|`;
+  - turning the axis by `θ` about the moved origin moves a point `|Ex(y)|`
+    from it by at most `θ · |Ex(y)|`, and `θ ≤ tan θ ≤ |da| / (|Ex(a)| −
+    |da|)`, which makes the scripts' `TI`;
+  - with `(ρ, t)` how far the corner is from the axis and along it, and `(ρ',
+    t')` the same of `Ex(y)` about `e`, the distance from the surface in the
+    plane of across and along is 1-Lipschitz. For a pipe it is `|ρ − r|`,
+    which leaves `|ρ' − ρ|`, `pipe.g`'s `DR`. For a torus it is `||(ρ − R, t)|
+    − r|`, and `|(ρ' − R, t')| − |(ρ − R, t)| ≤ |(ρ' − ρ, t' − t)|`,
+    `torus.g`'s `DR`.
+
+  Identities 5 and 6 let the two scripts put the axis along `z` and the corner
+  in the `xz` plane. `Ex` turns with the frame (identity 5), so there `w` and
+  `v` are the turn's quaternion in the turned frame, reals with `q·q`
+  unchanged, and `ρ' = ρ · sqrt(NUMQ / DENQ)` and `t' = t · sqrt(DENQ) −
+  4(q·q − 1)v₀v₂ρ / sqrt(DENQ)` (identity 6). Turning the frame turns `k` and
+  `da` too, and that is sound because the two enter the scripts only by their
+  lengths, `S = sqrt(KK)` and `DA = sqrt(DADA)`. `point.g`'s and `vector.g`'s
+  boxes, on each coordinate in the world's frame, bound `|k|` by `√3` times
+  twice a slip's bound and `|da|` by `√3 · 20u`, and the scripts' boxes, read
+  in the turned frame, hold a `k` and a `da` of every such length.
+
+**3. The shares.** Gappa's bounds, as each script printed them:
+
+- ball, at `36u` slips: the slips' `S` `1.38453e-14` (`124.7u`, `√3 · 72u`)
+  and the radius's `T` `2.66454e-15` (`24.0u`), so `148.7u`;
+- plane, at `36u`: the turn's length share `T1` within `±9.23022e-15`
+  (`83.14u`), the normal's slip against the turned corner `T2` within
+  `±6.66134e-15` (`60u`), the corner's slip against the turned normal `T3`
+  within `±6.92267e-15` (`62.35u`), and the offset's `17u` taken from
+  `shiftplane.g`'s goal, all over `|n'|`, with `n'·n' − 1` within
+  `±2.72318e-14` (`245.3u`): about `222.5u`, where `c_plane_222.g` finds the
+  best `±2.47016e-14`;
+- pipe, at `25u`: `S` `9.61481e-15` (`86.6u`), the tilt `TI` `1.33227e-14`
+  (`120.0u`, `2√3 · √3 · 20u`) and the drift `DR` `2.66454e-15` (`24.0u`), so
+  `230.6u`; at `36u`, `r_pipe_36.g` fails with best `2.98325e-14`, `268.7u`;
+- torus, at `36u`: `S` `1.38453e-14` (`124.7u`), `TI` `3.84593e-15`
+  (`34.6u`) and `DR` `5.95808e-15` (`53.7u`), from `DRr` within
+  `±2.66454e-15` and `DRt` within `±5.32907e-15`, so `213.0u`.
+
+A torus's tilt and drift are small because its corner is within about `L` of
+its centre, where a pipe's can be `2√3 L` from its origin. Each axis script
+also proves `DENQ − 1` within `±5.32907e-15`, `48u`, which keeps its one
+divisor off zero.
+
+The cone is on paper and was not run. `Cone::transformed` (`cone.rs:156-161`)
+is `Axis::transformed` too, and its distance in the plane of across and along
+is `|ρ − st| / h`, `h = sqrt(1 + s²)`, also 1-Lipschitz. To first order in `η
+= q·q − 1`, identity 6's `ρ'` and `t'` take a corner on the cone off it by
+`2ηρ(v₂² − v₀² + 2s v₀v₂) / h`. The form's eigenvalues are `±h`, since `h(v₀² +
+v₂²)` less it is `((h + 1)v₀ − s v₂)² / (h + 1)` and `h(v₀² + v₂²)` plus it is
+`((h + 1)v₂ + s v₀)² / (h + 1)`, so the drift is at most `2|η|ρ · q·q`, about
+`24u · ρ`. A cone's `L` counts its apex and slope and not how far it reaches
+(`moved_corner.rs:456-460`), so `ρ ≤ |y| ≤ 2√3 L` and the drift reaches
+`83.1u`. With the pipe's `86.6u` and `120u` that is about `290u`, past `256u`,
+even at `25u` slips. That is an argument and not a demonstration that the
+bound fails (§16.10): the three shares need not reach their worst at once.
+The test that searches,
+`a_corner_read_out_of_a_model_and_moved_is_a_box_around_where_it_lands.rs`,
+finds about `5ε` (its lines 44-46), and nobody has searched for a corner on a
+cone past `256u`. One of the rows 9 files is that search.
+
+**4. What the doc counts wrong.** The doc (`moved_corner.rs:38-97`) counts
+one `POINT_ROUNDOFF · L` for the point, one more for a ball, three for a pipe
+and four for a plane, and takes the plane's four and the point's one, `90ε ·
+L`, as the worst. The 128 holds for the four kinds Gappa proved, but not by
+that count, which is wrong in three ways:
+
+- It treats `POINT_ROUNDOFF`, a bound on each coordinate, as a bound on a
+  length. `point.g` bounds each coordinate of a slip by `36u · L`, so a slip
+  is up to `√3 · 36u · L = 62.35u · L` long, and the two slips a ball's
+  distance adds up to `124.7u · L`, where the doc gives them `72u · L`.
+- It leaves the turn's length share out. Even worked without rounding,
+  nalgebra's turn keeps a length only when `q·q` is exactly one (464.20's 3),
+  and `|q·q − 1|` can be `6ε`. That share is `83.14u` for a plane, `24u` for a
+  ball, the drift `DR`, `24u` for a pipe and `53.7u` for a torus, and on paper
+  about `24u · ρ` for a cone.
+- Its worst is not the plane. On the counts Gappa proved, the pipe's `230.6u`
+  is over the plane's `222.5u`, and the pipe gets there only with `point.g`'s
+  `25u` slips: with `POINT_ROUNDOFF`'s `36u` its argument comes to `268.7u`.
+  The doc's "a point at most `2L` away" misses that `|y|` can reach `2√3 L`,
+  which, with `vector.g`'s `20u` on each component, makes the tilt `120u`
+  where the doc has `72u`. The cone's `290u` on paper is past them both.
+
+**5. The hypotheses.** Each script takes `point.g`'s goal as the bound on its
+slips, and each but `ball.g` takes `vector.g`'s as the bound on its turned
+normal or direction, so they stand on `point.g`'s hypotheses (464.19's 5) and
+`vector.g`'s (464.20's 5). Their own, in each script's order:
+
+- in every script, a stored turn's `|q·q − 1| ≤ 6ε`, worked out exactly, as
+  464.19's 5 has it; in `pipe.g` and `torus.g`, each of `|w|` and `|vᵢ|` at
+  most two, since each square is at most `q·q` in any frame;
+- `ball.g`: `y` a unit vector, each slip coordinate within `36u`, and `L` at
+  least the radius;
+- `plane.g`: the stored normal's components at most one and `n·n` within
+  `NORMAL_LENGTH_ROUNDOFF`, `64ε`, of one; the corner's coordinates at most
+  `L`; `dn` within `vector.g`'s `20u`; the corner's slip within `36u`; and the
+  offset's rounding within `shiftplane.g`'s `16u` times the larger of `|n'|`
+  and one, under `17u`;
+- `pipe.g`: the stored direction's `a·a` within `64ε` of one; `L` at least the
+  radius, and `|y| ≤ 2√3 L`, since `L` is at least every coordinate of the
+  corner and of the origin; the six slip coordinates within `25u`; and `da`
+  within `vector.g`'s `20u`. The `25u` rests on `r_point_25.g`,
+  `r_point1_25.g` and `r_point2_25.g`, 464.19's `point.g` and its `y` and `z`
+  with the goal at `25u`, which prove under `point.g`'s own hypotheses with
+  `D / L` at most `24.8`;
+- `torus.g`: the axis as `pipe.g`'s; `|y| / L ≤ 1 + u`, since the corner is at
+  most `ring + tube` from the centre and `L` is at least `ring + tube` as
+  `f64` adds them (`moved_corner.rs:463-466`), taken with room as `ρ / L` and
+  `|t| / L` at most `1 + 2u` and `|y|² / L²` at most `1 + 8u`; and the slips
+  within `36u`. The draft before this run took `|y| / L ≤ 1`, which the
+  rounded sum does not promise; every bound it printed is unchanged to the six
+  digits Gappa prints.
+
+Two hypotheses are left unproved:
+
+- `vector.g` takes each component of the vector it turns at most one. A
+  normal a constructor stores has that, but a stored axis direction is only
+  within `64ε` of length one, so a component can be about `1 + 64u`, and
+  `pipe.g` and `torus.g` take `da` from `vector.g` all the same. Q2826 asks the
+  like of a normal, and one of the rows 9 files asks it of an axis.
+- `point.g` and `vector.g` are proved away from their zero branches and with
+  their products normal, as 464.19's 5 says; Q2801, Q2825 and Q2802 run them
+  there.
+
+**6. The controls.** Each changes one thing and exits 1. A goal just under
+what the script reaches shows its hypotheses do not contradict each other,
+and a hypothesis dropped shows the proof needs it.
+
+- `c_ball_148.g`, the goal at `148u`: best `1.65099e-14`, `148.7u`;
+- `c_ball_non4.g`, without the turn near length one: best `2.23899e+617`;
+- `c_ball_nok.g`, without `point.g`'s slips: best `[-inf, inf]`, with `S`
+  unproved;
+- `c_plane_222.g`, the goal at `±222u`: best `±2.47016e-14`, `222.49u`;
+- `c_plane_non4.g`, without the turn near length one: best `[-inf, inf]`;
+- `c_plane_nodn.g`, without `vector.g`'s `dn`: best `[-inf, inf]`, with `T2`,
+  `T3` and `n'·n' − 1` unproved;
+- `c_plane_nodp.g`, without `point.g`'s slip: best `[-inf, inf]`, with `T3`
+  unproved;
+- `c_plane_nodd.g`, without `shiftplane.g`'s offset: best `[-inf, inf]`;
+- `c_pipe_230.g`, the goal at `230u`: best `2.5602e-14`, `230.6u`;
+- `c_pipe_non4.g`, `q·q` only within `[0, 16]`, what the bounds on `w` and `v`
+  allow: best `[-inf, inf]`, with `TI`, `DR` and `NUMQ / DENQ − 1` unproved
+  and `DENQ − 1` within `[-1, 480]`;
+- `c_pipe_nobound.g`, without `|w|` and each `|vᵢ|` at most two, the first run
+  of `pipe.g`: best `[-inf, inf]`, with every share but `S` unproved;
+- `c_pipe_noda.g`, without `vector.g`'s `da`: best `[-inf, inf]`, with `TI`
+  unproved;
+- `c_torus_212.g`, the goal at `212u`: best `2.36493e-14`, `213.0u`;
+- `c_torus_non4.g`, `q·q` only within `[0, 16]`: best `[-inf, inf]`, with
+  `TI`, `DRr`, `DRt`, `DR` and `NUMQ / DENQ − 1` unproved.
+
+`r_pipe_36.g` is a run and not a control: the pipe with the slips at `36u`,
+best `2.98325e-14`, `268.7u` (3).
+
+**7. Coq checks the proofs, modulo their hints.** `gappa -Bcoq` and `coqc`,
+through `one.sh`, exit 0 on `ball.g`, `plane.g`, `pipe.g`, `torus.g`,
+`r_point_25.g`, `r_point1_25.g` and `r_point2_25.g`. `coqc` printed nothing,
+and `gappa -Bcoq` only its results and warnings. On the last run of `all.sh`
+(8) the `.v` files came to 1347 lines with 3 hints, 8504 with 17, 3422 with 8,
+3556 with 11, and 8222, 8162 and 8195 with 34 each. The lines are that run's
+and no other's (464.20's 7): the run before it, of the same `ball.g`,
+`plane.g`, `pipe.g` and `r_point` scripts, wrote 1347, 8503, 3280, 8215, 8244
+and 8199, with the same hints.
+
+`pipe.g` and `torus.g` needed `a` and `y` written in place. With the names
+`a0 = 0; a1 = 0; a2 = al;` and `y0 = RL; y1 = 0; y2 = TL;`, `gappa -Bcoq`
+stopped after it had written every hint, with ``src/parser/ast.cpp:255:
+std::string dump_real(const ast_real*, unsigned int): Assertion `false'
+failed``. `one.sh` printed `pipe coq -Bcoq exit 134 coqc exit 1 1.74s lines 166
+hints 8`, and the torus the same with 188 lines and 11 hints, and `coqc` said
+`Error: The section Generated_by_Gappa needs to be closed.` Two variants of
+`pipe.g` were run. `p_inline.g`, with the six names dropped and each written
+in place, printed `p_inline exit 0 0.36s` and `p_inline coq -Bcoq exit 0 coqc
+exit 0 2.31s lines 3280 hints 8`, with the same six bounds. `p_named.g`, meant
+to put the hint on `NUMQ / DENQ` on a name of its own, tested nothing: it
+defined that name from `NUMQ` above `NUMQ`'s own line, and Gappa stopped with
+`Error: redefinition of identifier 'NUMQ' at line 62 column 4`. `pipe.g` and
+`torus.g` in 8 are the in-place form. Which of the six names `-Bcoq` trips on
+was not looked for.
+
+As in 464.19's 8, each hint enters the Coq file as a hypothesis with no
+condition, so a proof stands on its hints and on the divisors Gappa took to be
+nonzero. `grep -c 'assumed to be nonzero'` counts 0 in `ball.out` and
+`plane.out`; 2 each in `pipe.out` and `torus.out`, for `DENQ`, which the two
+scripts prove within `48u` of one; and 163 in each `r_point` run's. None says a
+hint's two sides are "not trivially equal". `plane.out` says there is "no need
+for the rewriting at line 114 column 13" and "at line 126 column 13", the
+hints `T2 -> F2 / 2` and `T3 -> F3 / 2`. The controls and `r_pipe_36.g` ran
+without `-Bcoq`.
+
+**8. The scripts, whole, as they ran.** To run them again, save `ball.g`,
+`plane.g`, `pipe.g`, `torus.g`, `controls.py` and `all.sh` in one directory
+with 464.13's `one.sh` and 464.19's `point.g`, and run `bash all.sh` there.
+`controls.py` writes the controls, `r_pipe_36.g` and the three runs at `25u`
+from them. The longest run, `r_point2_25.g` with `coqc`, took 102.15 s, as
+`all.sh`'s print shows. `sos.py` and `same.py` are checks, and `all.sh` needs
+neither.
+
+`ball.g`:
+
+```gappa
+# restates: crates/rcad-geom/src/moved_corner.rs CORNER_AFTER_MOVING_ROUNDOFF at f95bb965
+# restates: crates/rcad-geom/src/moved_corner.rs the_largest_number_involved at f95bb965
+# restates: crates/rcad-geom/src/sphere.rs transformed at f95bb965
+# restates: crates/rcad-geom/src/isometry.rs apply_to_point at f95bb965
+# CORNER_AFTER_MOVING_ROUNDOFF for a corner on a ball,
+# crates/rcad-geom/src/moved_corner.rs at f95bb965: a corner x exactly on a
+# ball of centre c and radius r, moved, is within 128 * f64::EPSILON * L of
+# the moved ball. Sphere::transformed moves the centre by apply_to_point and
+# carries r over. Ex, nalgebra's turn without rounding, is linear (sos.py),
+# so the moved corner less the moved centre is Ex(x - c) + kp - kc, kp and kc
+# the two slips point.g proves. By the triangle inequality the distance to
+# the moved ball is at most |kp - kc| + r * | |Ex(y)| - 1 |, y = (x - c) / r,
+# which is what this bounds, per unit of L.
+@rnd = float<ieee_64, ne>;
+
+# The quaternion (w, v), each an f64, and q.q worked out exactly.
+w = rnd(w_); v0 = rnd(v0_); v1 = rnd(v1_); v2 = rnd(v2_);
+N4 = w * w + v0 * v0 + v1 * v1 + v2 * v2;
+
+# nalgebra's turn of the unit vector y without rounding, as point.g's Ex
+# writes x, and its length squared.
+Ex0 = 2 * w * (v1 * y2 - v2 * y1)
+    + v1 * (2 * (v0 * y1 - v1 * y0)) - v2 * (2 * (v2 * y0 - v0 * y2)) + y0;
+Ex1 = 2 * w * (v2 * y0 - v0 * y2)
+    + v2 * (2 * (v1 * y2 - v2 * y1)) - v0 * (2 * (v0 * y1 - v1 * y0)) + y1;
+Ex2 = 2 * w * (v0 * y1 - v1 * y0)
+    + v0 * (2 * (v2 * y0 - v0 * y2)) - v1 * (2 * (v1 * y2 - v2 * y1)) + y2;
+EE = Ex0 * Ex0 + Ex1 * Ex1 + Ex2 * Ex2;
+YY = y0 * y0 + y1 * y1 + y2 * y2;
+
+# v x y and v . y, without rounding, and v.v.
+X0 = v1 * y2 - v2 * y1; X1 = v2 * y0 - v0 * y2; X2 = v0 * y1 - v1 * y0;
+VY = X0 * X0 + X1 * X1 + X2 * X2;
+VD = v0 * y0 + v1 * y1 + v2 * y2;
+VV = v0 * v0 + v1 * v1 + v2 * v2;
+
+# The two slips, the moved corner's and the moved centre's, per unit of L.
+k0 = kp0 - kc0; k1 = kp1 - kc1; k2 = kp2 - kc2;
+KK = k0 * k0 + k1 * k1 + k2 * k2;
+
+# The distance's two shares, per unit of L: the slips', and the radius's
+# times how far the turn's arithmetic takes a unit vector off length one.
+S = sqrt(KK);
+T = RL * |sqrt(EE) - 1|;
+
+{
+  # Every quaternion component is a finite f64.
+     |w| <= 1b1024 /\ |v0| <= 1b1024 /\ |v1| <= 1b1024 /\ |v2| <= 1b1024
+  # A stored turn has |q.q - 1| <= 6 epsilon (held_near_length_one), and
+  # 6 epsilon is 12b-53.
+  /\ N4 in [9007199254740980b-53, 9007199254741004b-53]
+  # y is the corner less the centre over r, a unit vector.
+  /\ YY in [1, 1]
+  /\ y0 in [-1, 1] /\ y1 in [-1, 1] /\ y2 in [-1, 1]
+  # What point.g, point1.g and point2.g prove of the moved corner and the
+  # moved centre, L at least every coordinate of either and of the shift.
+  /\ kp0 in [-36b-53, 36b-53] /\ kp1 in [-36b-53, 36b-53]
+  /\ kp2 in [-36b-53, 36b-53]
+  /\ kc0 in [-36b-53, 36b-53] /\ kc1 in [-36b-53, 36b-53]
+  /\ kc2 in [-36b-53, 36b-53]
+  # r / L: L is at least the radius.
+  /\ RL in [0, 1]
+->
+  EE - 1 in ? /\ S in ? /\ T in ?
+  /\ S + T in [0, 256b-53]
+}
+
+# |Ex(y)|^2 is |y|^2 and the turn's length share (464.20's 3), and |v x y|^2
+# is at least zero, a sum of squares, and at most v.v y.y; v.v is q.q less w^2.
+EE -> YY + 4 * (N4 - 1) * VY;
+VY -> VV * YY - VD * VD;
+VV -> N4 - w * w;
+```
+
+`plane.g`:
+
+```gappa
+# restates: crates/rcad-geom/src/moved_corner.rs CORNER_AFTER_MOVING_ROUNDOFF at f95bb965
+# restates: crates/rcad-geom/src/moved_corner.rs the_largest_number_involved at f95bb965
+# restates: crates/rcad-geom/src/plane.rs transformed at f95bb965
+# restates: crates/rcad-geom/src/plane.rs NORMAL_LENGTH_ROUNDOFF at f95bb965
+# restates: crates/rcad-geom/src/isometry.rs apply_to_point at f95bb965
+# restates: crates/rcad-geom/src/isometry.rs apply_to_vector at f95bb965
+# CORNER_AFTER_MOVING_ROUNDOFF for a corner on a plane,
+# crates/rcad-geom/src/moved_corner.rs at f95bb965: a corner x exactly on
+# the plane n.x = off, moved, is within 128 * f64::EPSILON * L of the moved
+# plane. Plane::transformed turns the normal, n' = Ex(n) + dn, and gives the
+# offset off' = off + n'.s + dd by shiftplane.g's arithmetic; the moved
+# corner is Ex(x) + s + dp. Then n'.p' - off' is
+#   4 (q.q - 1) (v x n) . (v x x) + dn . Ex(x) + n' . dp - dd,
+# with Ex nalgebra's turn without rounding (sos.py), and the distance is that
+# over |n'|. Every length is per unit of L, which divides nothing that rounds.
+@rnd = float<ieee_64, ne>;
+
+# The quaternion (w, v), each an f64, and q.q worked out exactly.
+w = rnd(w_); v0 = rnd(v0_); v1 = rnd(v1_); v2 = rnd(v2_);
+N4 = w * w + v0 * v0 + v1 * v1 + v2 * v2;
+VV = v0 * v0 + v1 * v1 + v2 * v2;
+
+# The stored normal n, and the corner over L.
+NN = n0 * n0 + n1 * n1 + n2 * n2;
+XX = X0 * X0 + X1 * X1 + X2 * X2;
+
+# nalgebra's turn of n and of the corner without rounding, as vector.g's Ex
+# writes x.
+An0 = 2 * w * (v1 * n2 - v2 * n1)
+    + v1 * (2 * (v0 * n1 - v1 * n0)) - v2 * (2 * (v2 * n0 - v0 * n2)) + n0;
+An1 = 2 * w * (v2 * n0 - v0 * n2)
+    + v2 * (2 * (v1 * n2 - v2 * n1)) - v0 * (2 * (v0 * n1 - v1 * n0)) + n1;
+An2 = 2 * w * (v0 * n1 - v1 * n0)
+    + v0 * (2 * (v2 * n0 - v0 * n2)) - v1 * (2 * (v1 * n2 - v2 * n1)) + n2;
+E0 = 2 * w * (v1 * X2 - v2 * X1)
+   + v1 * (2 * (v0 * X1 - v1 * X0)) - v2 * (2 * (v2 * X0 - v0 * X2)) + X0;
+E1 = 2 * w * (v2 * X0 - v0 * X2)
+   + v2 * (2 * (v1 * X2 - v2 * X1)) - v0 * (2 * (v0 * X1 - v1 * X0)) + X1;
+E2 = 2 * w * (v0 * X1 - v1 * X0)
+   + v0 * (2 * (v2 * X0 - v0 * X2)) - v1 * (2 * (v1 * X2 - v2 * X1)) + X2;
+AnAn = An0 * An0 + An1 * An1 + An2 * An2;
+EE = E0 * E0 + E1 * E1 + E2 * E2;
+
+# v x n and v x x, v . n and v . x, without rounding.
+a0 = v1 * n2 - v2 * n1; a1 = v2 * n0 - v0 * n2; a2 = v0 * n1 - v1 * n0;
+b0 = v1 * X2 - v2 * X1; b1 = v2 * X0 - v0 * X2; b2 = v0 * X1 - v1 * X0;
+VN = a0 * a0 + a1 * a1 + a2 * a2;
+VX = b0 * b0 + b1 * b1 + b2 * b2;
+VDn = v0 * n0 + v1 * n1 + v2 * n2;
+VDx = v0 * X0 + v1 * X1 + v2 * X2;
+
+# The turned normal as the code stores it, and the slips.
+np0 = An0 + dn0; np1 = An1 + dn1; np2 = An2 + dn2;
+NPNP = np0 * np0 + np1 * np1 + np2 * np2;
+DNDN = dn0 * dn0 + dn1 * dn1 + dn2 * dn2;
+DPDP = DP0 * DP0 + DP1 * DP1 + DP2 * DP2;
+
+# The four shares of n'.p' - off', per unit of L, and twice the three dot
+# products they and n'.n' are written with below.
+T1 = 4 * (N4 - 1) * (a0 * b0 + a1 * b1 + a2 * b2);
+T2 = dn0 * E0 + dn1 * E1 + dn2 * E2;
+T3 = np0 * DP0 + np1 * DP1 + np2 * DP2;
+T4 = -DD;
+F1 = 2 * (a0 * b0 + a1 * b1 + a2 * b2);
+F2 = 2 * (dn0 * E0 + dn1 * E1 + dn2 * E2);
+F3 = 2 * (np0 * DP0 + np1 * DP1 + np2 * DP2);
+F4 = 2 * (An0 * dn0 + An1 * dn1 + An2 * dn2);
+T = T1 + T2 + T3 + T4;
+
+{
+  # Every quaternion component is a finite f64.
+     |w| <= 1b1024 /\ |v0| <= 1b1024 /\ |v1| <= 1b1024 /\ |v2| <= 1b1024
+  # A stored turn has |q.q - 1| <= 6 epsilon (held_near_length_one), and
+  # 6 epsilon is 12b-53.
+  /\ N4 in [9007199254740980b-53, 9007199254741004b-53]
+  # A stored normal has every component at most one and n.n within
+  # NORMAL_LENGTH_ROUNDOFF, 64 epsilon, of one.
+  /\ n0 in [-1, 1] /\ n1 in [-1, 1] /\ n2 in [-1, 1]
+  /\ NN in [9007199254740864b-53, 9007199254741120b-53]
+  # L is at least every coordinate of the corner.
+  /\ X0 in [-1, 1] /\ X1 in [-1, 1] /\ X2 in [-1, 1]
+  # What vector.g, vector1.g and vector2.g prove of the turned normal.
+  /\ dn0 in [-20b-53, 20b-53] /\ dn1 in [-20b-53, 20b-53]
+  /\ dn2 in [-20b-53, 20b-53]
+  # What point.g, point1.g and point2.g prove of the moved corner, over L.
+  /\ DP0 in [-36b-53, 36b-53] /\ DP1 in [-36b-53, 36b-53]
+  /\ DP2 in [-36b-53, 36b-53]
+  # What shiftplane.g proves of the offset's rounding over L, 16u times
+  # the larger of |n'| and one, with |n'| within 124u of one: under 17u.
+  /\ DD in [-17b-53, 17b-53]
+->
+  T1 in ? /\ T2 in ? /\ T3 in ? /\ NPNP - 1 in ?
+  /\ T / sqrt(NPNP) in [-256b-53, 256b-53]
+}
+
+# The turn's length share: Ex(n) . Ex(x) - n . x is 4 (q.q - 1)
+# (v x n) . (v x x) (sos.py), and 2ab is c a^2 + b^2 / c less (c a - b)^2 / c,
+# and (c a + b)^2 / c less c a^2 + b^2 / c, with c near sqrt(3), which makes
+# c |v x n|^2 + |v x x|^2 / c smallest for n.n near one and x.x at most 3.
+T1 -> 2 * (N4 - 1) * F1;
+F1 -> (1732/1000 * VN + VX / (1732/1000))
+      - ((1732/1000 * a0 - b0) * (1732/1000 * a0 - b0)
+       + (1732/1000 * a1 - b1) * (1732/1000 * a1 - b1)
+       + (1732/1000 * a2 - b2) * (1732/1000 * a2 - b2)) / (1732/1000);
+F1 -> ((1732/1000 * a0 + b0) * (1732/1000 * a0 + b0)
+     + (1732/1000 * a1 + b1) * (1732/1000 * a1 + b1)
+     + (1732/1000 * a2 + b2) * (1732/1000 * a2 + b2)) / (1732/1000)
+      - (1732/1000 * VN + VX / (1732/1000));
+VN -> VV * NN - VDn * VDn;
+VX -> VV * XX - VDx * VDx;
+VV -> N4 - w * w;
+
+# The normal's slip against the turned corner, c = 20u.
+T2 -> F2 / 2;
+F2 -> (20b-53 * EE + DNDN / 20b-53)
+      - ((20b-53 * E0 - dn0) * (20b-53 * E0 - dn0)
+       + (20b-53 * E1 - dn1) * (20b-53 * E1 - dn1)
+       + (20b-53 * E2 - dn2) * (20b-53 * E2 - dn2)) / 20b-53;
+F2 -> ((20b-53 * E0 + dn0) * (20b-53 * E0 + dn0)
+     + (20b-53 * E1 + dn1) * (20b-53 * E1 + dn1)
+     + (20b-53 * E2 + dn2) * (20b-53 * E2 + dn2)) / 20b-53
+      - (20b-53 * EE + DNDN / 20b-53);
+EE -> XX + 4 * (N4 - 1) * VX;
+
+# The corner's slip against the turned normal, c = sqrt(3) * 36u.
+T3 -> F3 / 2;
+F3 -> (62354b-53 / 1000 * NPNP + DPDP / (62354b-53 / 1000))
+      - ((62354b-53 / 1000 * np0 - DP0) * (62354b-53 / 1000 * np0 - DP0)
+       + (62354b-53 / 1000 * np1 - DP1) * (62354b-53 / 1000 * np1 - DP1)
+       + (62354b-53 / 1000 * np2 - DP2) * (62354b-53 / 1000 * np2 - DP2))
+        / (62354b-53 / 1000);
+F3 -> ((62354b-53 / 1000 * np0 + DP0) * (62354b-53 / 1000 * np0 + DP0)
+     + (62354b-53 / 1000 * np1 + DP1) * (62354b-53 / 1000 * np1 + DP1)
+     + (62354b-53 / 1000 * np2 + DP2) * (62354b-53 / 1000 * np2 + DP2))
+        / (62354b-53 / 1000)
+      - (62354b-53 / 1000 * NPNP + DPDP / (62354b-53 / 1000));
+
+# n'.n' as square.g writes it: n.n, the turn's length share, 2 Ex(n) . dn
+# with c = sqrt(3) * 20u, and dn . dn.
+NPNP -> AnAn + F4 + DNDN;
+AnAn -> NN + 4 * (N4 - 1) * VN;
+F4 -> (34641b-53 / 1000 * AnAn + DNDN / (34641b-53 / 1000))
+      - ((34641b-53 / 1000 * An0 - dn0) * (34641b-53 / 1000 * An0 - dn0)
+       + (34641b-53 / 1000 * An1 - dn1) * (34641b-53 / 1000 * An1 - dn1)
+       + (34641b-53 / 1000 * An2 - dn2) * (34641b-53 / 1000 * An2 - dn2))
+        / (34641b-53 / 1000);
+F4 -> ((34641b-53 / 1000 * An0 + dn0) * (34641b-53 / 1000 * An0 + dn0)
+     + (34641b-53 / 1000 * An1 + dn1) * (34641b-53 / 1000 * An1 + dn1)
+     + (34641b-53 / 1000 * An2 + dn2) * (34641b-53 / 1000 * An2 + dn2))
+        / (34641b-53 / 1000)
+      - (34641b-53 / 1000 * AnAn + DNDN / (34641b-53 / 1000));
+```
+
+`sos.py` printed:
+
+```text
+identities 1 to 4 hold at 1000 random points
+identity 5 holds at 1000 random points
+identity 6 holds at 1000 random points
+```
+
+`sos.py`:
+
+```python
+"""Check, in exact rationals at random points, the identities 464.21's scripts
+rest on, for nalgebra's turn worked without rounding, Ex(y) = t w + v x t + y
+with t = 2 (v x y), N4 = q.q and eta = N4 - 1:
+
+1. Ex is linear: Ex(a) - Ex(b) = Ex(a - b), so a shift added after it cancels
+   from a difference of two moved points exactly.
+2. Ex(a) . Ex(b) - a . b = 4 eta (v x a) . (v x b), 464.20's identity polarized.
+3. |Ex(y) x Ex(a)|^2 = |W|^2 + 4 eta (|v|^2 |W|^2 + (v . W)^2)
+                       + 16 eta^2 |v|^2 (v . W)^2, with W = y x a.
+4. (v x a) . (v x b) = (v . v)(a . b) - (v . a)(v . b), Lagrange's identity,
+   which with a = b is 464.20's |v x n|^2 = |v|^2 |n|^2 - (v . n)^2.
+5. Ex turns with the frame: for a rotation G, Ex with v turned to G v, of
+   G y, is G Ex(y). So pipe.g and torus.g may put the axis along z and the
+   corner in the xz plane.
+6. In that frame, a = (0, 0, al) and y = (rho, 0, t), with
+   DENQ = 1 + 4 eta (v0^2 + v1^2) and NUMQ = 1 + 4 eta (v.v + v1^2)
+   + 16 eta^2 (v.v) v1^2:
+   |Ex(a)|^2 = al^2 DENQ, |Ex(y) x Ex(a)|^2 = rho^2 al^2 NUMQ, and
+   Ex(y) . Ex(a) = al (t DENQ - 4 eta v0 v2 rho)."""
+
+from fractions import Fraction as F
+import random
+
+random.seed(1)
+
+
+def r():
+    return F(random.randint(-10**6, 10**6), 10**6)
+
+
+def cross(a, b):
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+
+
+def dot(a, b):
+    return sum(x * y for x, y in zip(a, b))
+
+
+def ex(w, v, y):
+    t = [2 * c for c in cross(v, y)]
+    k = cross(v, t)
+    return [t[i] * w + k[i] + y[i] for i in range(3)]
+
+
+for _ in range(1000):
+    w, v = r(), [r(), r(), r()]
+    a, b = [r(), r(), r()], [r(), r(), r()]
+    eta = w * w + dot(v, v) - 1
+    assert [p - q for p, q in zip(ex(w, v, a), ex(w, v, b))] == ex(w, v, [p - q for p, q in zip(a, b)])
+    assert dot(ex(w, v, a), ex(w, v, b)) - dot(a, b) == 4 * eta * dot(cross(v, a), cross(v, b))
+    W = cross(a, b)
+    big = cross(ex(w, v, a), ex(w, v, b))
+    assert dot(big, big) == (dot(W, W) + 4 * eta * (dot(v, v) * dot(W, W) + dot(v, W) ** 2)
+                             + 16 * eta * eta * dot(v, v) * dot(v, W) ** 2)
+    assert dot(cross(v, a), cross(v, b)) == dot(v, v) * dot(a, b) - dot(v, a) * dot(v, b)
+print("identities 1 to 4 hold at 1000 random points")
+
+
+def rotation(g):
+    """The rotation matrix of the rational quaternion g, which is rational."""
+    s, x, y, z = g
+    n = s * s + x * x + y * y + z * z
+    return [[(s * s + x * x - y * y - z * z) / n, 2 * (x * y - s * z) / n, 2 * (x * z + s * y) / n],
+            [2 * (x * y + s * z) / n, (s * s - x * x + y * y - z * z) / n, 2 * (y * z - s * x) / n],
+            [2 * (x * z - s * y) / n, 2 * (y * z + s * x) / n, (s * s - x * x - y * y + z * z) / n]]
+
+
+def apply(m, y):
+    return [dot(row, y) for row in m]
+
+
+for _ in range(1000):
+    w, v, y = r(), [r(), r(), r()], [r(), r(), r()]
+    G = rotation([r(), r(), r(), r()])
+    assert dot(apply(G, [1, 0, 0]), apply(G, [0, 1, 0])) == 0
+    assert dot(apply(G, [1, 0, 0]), apply(G, [1, 0, 0])) == 1
+    assert ex(w, apply(G, v), apply(G, y)) == apply(G, ex(w, v, y))
+print("identity 5 holds at 1000 random points")
+
+for _ in range(1000):
+    w, v = r(), [r(), r(), r()]
+    al, rho, t = r(), r(), r()
+    eta = w * w + dot(v, v) - 1
+    a, y = [0, 0, al], [rho, 0, t]
+    DENQ = 1 + 4 * eta * (v[0] ** 2 + v[1] ** 2)
+    NUMQ = 1 + 4 * eta * (dot(v, v) + v[1] ** 2) + 16 * eta * eta * dot(v, v) * v[1] ** 2
+    ea, ey = ex(w, v, a), ex(w, v, y)
+    assert dot(ea, ea) == al * al * DENQ
+    c = cross(ey, ea)
+    assert dot(c, c) == rho * rho * al * al * NUMQ
+    assert dot(ey, ea) == al * (t * DENQ - 4 * eta * v[0] * v[2] * rho)
+print("identity 6 holds at 1000 random points")
+```
+
+`pipe.g`:
+
+```gappa
+# restates: crates/rcad-geom/src/moved_corner.rs CORNER_AFTER_MOVING_ROUNDOFF at f95bb965
+# restates: crates/rcad-geom/src/moved_corner.rs the_largest_number_involved at f95bb965
+# restates: crates/rcad-geom/src/cylinder.rs transformed at f95bb965
+# restates: crates/rcad-geom/src/point.rs transformed at f95bb965
+# restates: crates/rcad-geom/src/isometry.rs apply_to_point at f95bb965
+# restates: crates/rcad-geom/src/isometry.rs apply_to_vector at f95bb965
+# CORNER_AFTER_MOVING_ROUNDOFF for a corner on a pipe,
+# crates/rcad-geom/src/moved_corner.rs at f95bb965: a corner exactly on a
+# pipe of radius r about the line through o along a, moved, is within
+# 128 * f64::EPSILON * L of the moved pipe. Cylinder::transformed carries r
+# over, and Axis::transformed moves o by apply_to_point and turns a by
+# apply_to_vector. With y the corner less o, the moved corner less the moved
+# origin is Ex(y) + k, k the two slips point.g proves, and the moved
+# direction is Ex(a) + da, da the slip vector.g proves, Ex nalgebra's turn
+# without rounding (sos.py). By hand, the distance to the moved pipe is at
+# most |k| + |Ex(y)| tan(th) + | |Ex(y) x e| - r |, th the angle da tilts
+# Ex(a) by and e the unit Ex(a), which is what this bounds, per unit of L.
+# Ex turns with the frame (sos.py), so here a is along z and y in the xz
+# plane, and w and v are the turn's quaternion in that frame: reals, not f64.
+@rnd = float<ieee_64, ne>;
+
+# The quaternion (w, v) in that frame, q.q, v.v and two sums of its squares.
+N4 = w * w + v0 * v0 + v1 * v1 + v2 * v2;
+VV = v0 * v0 + v1 * v1 + v2 * v2;
+S01 = v0 * v0 + v1 * v1;
+S12 = v1 * v1 + v2 * v2;
+
+# The stored direction a is (0, 0, al), and y over L is (RL, 0, TL): RL is r
+# over L, the corner's distance from the axis, and TL how far along it the
+# corner is. Both are written in place below, coordinate by coordinate, since
+# gappa -Bcoq aborts in dump_real when names hold them (464.21's 7).
+AA = al * al;
+YY = RL * RL + 0 * 0 + TL * TL;
+
+# nalgebra's turn of y and of a without rounding, as point.g's Ex writes x,
+# and their lengths squared.
+Ex0 = 2 * w * (v1 * TL - v2 * 0)
+    + v1 * (2 * (v0 * 0 - v1 * RL)) - v2 * (2 * (v2 * RL - v0 * TL)) + RL;
+Ex1 = 2 * w * (v2 * RL - v0 * TL)
+    + v2 * (2 * (v1 * TL - v2 * 0)) - v0 * (2 * (v0 * 0 - v1 * RL)) + 0;
+Ex2 = 2 * w * (v0 * 0 - v1 * RL)
+    + v0 * (2 * (v2 * RL - v0 * TL)) - v1 * (2 * (v1 * TL - v2 * 0)) + TL;
+Ea0 = 2 * w * (v1 * al - v2 * 0)
+    + v1 * (2 * (v0 * 0 - v1 * 0)) - v2 * (2 * (v2 * 0 - v0 * al)) + 0;
+Ea1 = 2 * w * (v2 * 0 - v0 * al)
+    + v2 * (2 * (v1 * al - v2 * 0)) - v0 * (2 * (v0 * 0 - v1 * 0)) + 0;
+Ea2 = 2 * w * (v0 * 0 - v1 * 0)
+    + v0 * (2 * (v2 * 0 - v0 * al)) - v1 * (2 * (v1 * al - v2 * 0)) + al;
+EE = Ex0 * Ex0 + Ex1 * Ex1 + Ex2 * Ex2;
+EaEa = Ea0 * Ea0 + Ea1 * Ea1 + Ea2 * Ea2;
+
+# v x y and v . y, without rounding.
+X0 = v1 * TL - v2 * 0; X1 = v2 * RL - v0 * TL; X2 = v0 * 0 - v1 * RL;
+VY = X0 * X0 + X1 * X1 + X2 * X2;
+VD = v0 * RL + v1 * 0 + v2 * TL;
+
+# In this frame |Ex(a)|^2 is al^2 DENQ and |Ex(y) x Ex(a)|^2 is
+# RL^2 al^2 NUMQ (sos.py), so the distance of Ex(y) from the turned axis is
+# RL sqrt(NUMQ / DENQ).
+DENQ = 1 + 4 * (N4 - 1) * S01;
+NUMQ = 1 + 4 * (N4 - 1) * (VV + v1 * v1) + 16 * (N4 - 1) * (N4 - 1) * VV * (v1 * v1);
+
+# The two slips, the moved corner's and the moved origin's, per unit of L,
+# and the moved direction's.
+k0 = kp0 - ko0; k1 = kp1 - ko1; k2 = kp2 - ko2;
+KK = k0 * k0 + k1 * k1 + k2 * k2;
+DADA = da0 * da0 + da1 * da1 + da2 * da2;
+DA = sqrt(DADA);
+
+# The distance's three shares, per unit of L: the slips', the tilt's, and
+# how far the turn's arithmetic takes the corner off the pipe.
+S = sqrt(KK);
+TI = sqrt(EE) * DA / (sqrt(EaEa) - DA);
+DR = RL * |sqrt(NUMQ / DENQ) - 1|;
+
+{
+  # A stored turn has |q.q - 1| <= 6 epsilon (held_near_length_one), and
+  # 6 epsilon is 12b-53. Turning the frame turns v and keeps q.q.
+     N4 in [9007199254740980b-53, 9007199254741004b-53]
+  # Each of w^2, v0^2, v1^2 and v2^2 is at most q.q, under 1 + 12u, so each
+  # of w, v0, v1 and v2 is at most 2 in size.
+  /\ |w| <= 2 /\ |v0| <= 2 /\ |v1| <= 2 /\ |v2| <= 2
+  # A stored direction has a.a within NORMAL_LENGTH_ROUNDOFF, 64 epsilon, of
+  # one.
+  /\ AA in [9007199254740864b-53, 9007199254741120b-53]
+  /\ al in [0, 2]
+  # L is at least every coordinate of the corner and of the axis origin, and
+  # the radius.
+  /\ RL in [0, 1] /\ TL in [-4, 4] /\ YY in [0, 12]
+  # What r_point_25.g, r_point1_25.g and r_point2_25.g prove of the moved
+  # corner and the moved origin, L at least every coordinate of either and
+  # of the shift: 25u.
+  /\ kp0 in [-25b-53, 25b-53] /\ kp1 in [-25b-53, 25b-53]
+  /\ kp2 in [-25b-53, 25b-53]
+  /\ ko0 in [-25b-53, 25b-53] /\ ko1 in [-25b-53, 25b-53]
+  /\ ko2 in [-25b-53, 25b-53]
+  # What vector.g, vector1.g and vector2.g prove of the turned direction.
+  /\ da0 in [-20b-53, 20b-53] /\ da1 in [-20b-53, 20b-53]
+  /\ da2 in [-20b-53, 20b-53]
+->
+  DENQ - 1 in ? /\ EaEa - 1 in ? /\ NUMQ / DENQ - 1 in ?
+  /\ S in ? /\ TI in ? /\ DR in ?
+  /\ S + TI + DR in [0, 256b-53]
+}
+
+# |Ex(y)|^2 is |y|^2 and the turn's length share (464.20's 3), and |v x y|^2
+# is at least zero, a sum of squares, and at most v.v y.y; v.v is q.q less
+# w^2. |Ex(a)|^2 is the same with a along z.
+EE -> YY + 4 * (N4 - 1) * VY;
+VY -> VV * YY - VD * VD;
+VV -> N4 - w * w;
+EaEa -> AA * DENQ;
+S01 -> N4 - w * w - v2 * v2;
+
+# NUMQ / DENQ off one: the two differ by 4 (q.q - 1) (v1^2 + v2^2) and a
+# share in (q.q - 1)^2.
+NUMQ / DENQ -> 1 + (NUMQ - DENQ) / DENQ;
+NUMQ - DENQ -> 4 * (N4 - 1) * S12 + 16 * (N4 - 1) * (N4 - 1) * VV * (v1 * v1);
+S12 -> N4 - w * w - v0 * v0;
+```
+
+`torus.g`:
+
+```gappa
+# restates: crates/rcad-geom/src/moved_corner.rs CORNER_AFTER_MOVING_ROUNDOFF at f95bb965
+# restates: crates/rcad-geom/src/moved_corner.rs the_largest_number_involved at f95bb965
+# restates: crates/rcad-geom/src/torus.rs transformed at f95bb965
+# restates: crates/rcad-geom/src/point.rs transformed at f95bb965
+# restates: crates/rcad-geom/src/isometry.rs apply_to_point at f95bb965
+# restates: crates/rcad-geom/src/isometry.rs apply_to_vector at f95bb965
+# CORNER_AFTER_MOVING_ROUNDOFF for a corner on a torus,
+# crates/rcad-geom/src/moved_corner.rs at f95bb965: a corner exactly on a
+# torus of ring radius R and tube radius r about the centre o and the axis a,
+# moved, is within 128 * f64::EPSILON * L of the moved torus.
+# Torus::transformed carries R and r over, and Axis::transformed moves o by
+# apply_to_point and turns a by apply_to_vector. With y the corner less o, the
+# moved corner less the moved centre is Ex(y) + k, k the two slips point.g
+# proves, and the moved axis is Ex(a) + da, da the slip vector.g proves, Ex
+# nalgebra's turn without rounding (sos.py). The distance from a torus is
+# | |(rho - R, t)| - r |, rho how far from the axis and t how far along it. By
+# hand, the distance to the moved torus is at most |k| + |Ex(y)| tan(th) +
+# |(rho' - rho, t' - t)|, th the angle da tilts Ex(a) by, and rho' and t' those
+# of Ex(y) about the unit Ex(a); this bounds that, per unit of L. Ex turns
+# with the frame (sos.py), so here a is along z and y in the xz plane, and w
+# and v are the turn's quaternion in that frame: reals, not f64.
+@rnd = float<ieee_64, ne>;
+
+# The quaternion (w, v) in that frame, q.q, v.v and three sums of its squares.
+N4 = w * w + v0 * v0 + v1 * v1 + v2 * v2;
+VV = v0 * v0 + v1 * v1 + v2 * v2;
+S01 = v0 * v0 + v1 * v1;
+S12 = v1 * v1 + v2 * v2;
+S02 = v0 * v0 + v2 * v2;
+P02 = 2 * v0 * v2;
+
+# The stored axis a is (0, 0, al), and y over L is (RL, 0, TL): RL is how far
+# the corner is from the axis, and TL how far along it. Both are written in
+# place below, coordinate by coordinate, since gappa -Bcoq aborts in dump_real
+# when names hold them (464.21's 7).
+AA = al * al;
+YY = RL * RL + 0 * 0 + TL * TL;
+
+# nalgebra's turn of y and of a without rounding, as point.g's Ex writes x,
+# and their lengths squared.
+Ex0 = 2 * w * (v1 * TL - v2 * 0)
+    + v1 * (2 * (v0 * 0 - v1 * RL)) - v2 * (2 * (v2 * RL - v0 * TL)) + RL;
+Ex1 = 2 * w * (v2 * RL - v0 * TL)
+    + v2 * (2 * (v1 * TL - v2 * 0)) - v0 * (2 * (v0 * 0 - v1 * RL)) + 0;
+Ex2 = 2 * w * (v0 * 0 - v1 * RL)
+    + v0 * (2 * (v2 * RL - v0 * TL)) - v1 * (2 * (v1 * TL - v2 * 0)) + TL;
+Ea0 = 2 * w * (v1 * al - v2 * 0)
+    + v1 * (2 * (v0 * 0 - v1 * 0)) - v2 * (2 * (v2 * 0 - v0 * al)) + 0;
+Ea1 = 2 * w * (v2 * 0 - v0 * al)
+    + v2 * (2 * (v1 * al - v2 * 0)) - v0 * (2 * (v0 * 0 - v1 * 0)) + 0;
+Ea2 = 2 * w * (v0 * 0 - v1 * 0)
+    + v0 * (2 * (v2 * 0 - v0 * al)) - v1 * (2 * (v1 * al - v2 * 0)) + al;
+EE = Ex0 * Ex0 + Ex1 * Ex1 + Ex2 * Ex2;
+EaEa = Ea0 * Ea0 + Ea1 * Ea1 + Ea2 * Ea2;
+
+# v x y and v . y, without rounding.
+X0 = v1 * TL - v2 * 0; X1 = v2 * RL - v0 * TL; X2 = v0 * 0 - v1 * RL;
+VY = X0 * X0 + X1 * X1 + X2 * X2;
+VD = v0 * RL + v1 * 0 + v2 * TL;
+
+# In this frame |Ex(a)|^2 is al^2 DENQ, |Ex(y) x Ex(a)|^2 is
+# RL^2 al^2 NUMQ and Ex(y) . Ex(a) is al (TL DENQ - 2 (q.q - 1) P02 RL)
+# (sos.py), so Ex(y) is RL sqrt(NUMQ / DENQ) from the turned axis and
+# TL sqrt(DENQ) - 2 (q.q - 1) P02 RL / sqrt(DENQ) along it.
+DENQ = 1 + 4 * (N4 - 1) * S01;
+NUMQ = 1 + 4 * (N4 - 1) * (VV + v1 * v1) + 16 * (N4 - 1) * (N4 - 1) * VV * (v1 * v1);
+
+# The two slips, the moved corner's and the moved centre's, per unit of L,
+# and the moved axis's.
+k0 = kp0 - ko0; k1 = kp1 - ko1; k2 = kp2 - ko2;
+KK = k0 * k0 + k1 * k1 + k2 * k2;
+DADA = da0 * da0 + da1 * da1 + da2 * da2;
+DA = sqrt(DADA);
+
+# The distance's three shares, per unit of L: the slips', the tilt's, and
+# how far the turn's arithmetic takes the corner off the torus, from how far
+# it moves the corner off the axis and along it.
+S = sqrt(KK);
+TI = sqrt(EE) * DA / (sqrt(EaEa) - DA);
+DRr = RL * (sqrt(NUMQ / DENQ) - 1);
+DRt = TL * (sqrt(DENQ) - 1) - 2 * (N4 - 1) * P02 * RL / sqrt(DENQ);
+DR = sqrt(DRr * DRr + DRt * DRt);
+
+{
+  # A stored turn has |q.q - 1| <= 6 epsilon (held_near_length_one), and
+  # 6 epsilon is 12b-53. Turning the frame turns v and keeps q.q.
+     N4 in [9007199254740980b-53, 9007199254741004b-53]
+  # Each of w^2, v0^2, v1^2 and v2^2 is at most q.q, under 1 + 12u, so each
+  # of w, v0, v1 and v2 is at most 2 in size.
+  /\ |w| <= 2 /\ |v0| <= 2 /\ |v1| <= 2 /\ |v2| <= 2
+  # A stored axis has a.a within NORMAL_LENGTH_ROUNDOFF, 64 epsilon, of one.
+  /\ AA in [9007199254740864b-53, 9007199254741120b-53]
+  /\ al in [0, 2]
+  # The corner is at most ring + tube from the centre, and L is at least
+  # ring + tube as f64 adds them, which is at least (ring + tube) / (1 + u).
+  # So |y| / L is at most 1 + u: RL and TL within 1 + 2u, and YY within
+  # (1 + u)^2, under 1 + 8u.
+  /\ RL in [0, 4503599627370497b-52]
+  /\ TL in [-4503599627370497b-52, 4503599627370497b-52]
+  /\ YY in [0, 1125899906842625b-50]
+  # What point.g, point1.g and point2.g prove of the moved corner and the
+  # moved centre, L at least every coordinate of either and of the shift.
+  /\ kp0 in [-36b-53, 36b-53] /\ kp1 in [-36b-53, 36b-53]
+  /\ kp2 in [-36b-53, 36b-53]
+  /\ ko0 in [-36b-53, 36b-53] /\ ko1 in [-36b-53, 36b-53]
+  /\ ko2 in [-36b-53, 36b-53]
+  # What vector.g, vector1.g and vector2.g prove of the turned axis.
+  /\ da0 in [-20b-53, 20b-53] /\ da1 in [-20b-53, 20b-53]
+  /\ da2 in [-20b-53, 20b-53]
+->
+  DENQ - 1 in ? /\ EaEa - 1 in ? /\ NUMQ / DENQ - 1 in ? /\ P02 in ?
+  /\ S in ? /\ TI in ? /\ DRr in ? /\ DRt in ? /\ DR in ?
+  /\ S + TI + DR in [0, 256b-53]
+}
+
+# |Ex(y)|^2 is |y|^2 and the turn's length share (464.20's 3), and |v x y|^2
+# is at least zero, a sum of squares, and at most v.v y.y; v.v is q.q less
+# w^2. |Ex(a)|^2 is the same with a along z.
+EE -> YY + 4 * (N4 - 1) * VY;
+VY -> VV * YY - VD * VD;
+VV -> N4 - w * w;
+EaEa -> AA * DENQ;
+S01 -> N4 - w * w - v2 * v2;
+
+# NUMQ / DENQ off one: the two differ by 4 (q.q - 1) (v1^2 + v2^2) and a
+# share in (q.q - 1)^2.
+NUMQ / DENQ -> 1 + (NUMQ - DENQ) / DENQ;
+NUMQ - DENQ -> 4 * (N4 - 1) * S12 + 16 * (N4 - 1) * (N4 - 1) * VV * (v1 * v1);
+S12 -> N4 - w * w - v0 * v0;
+
+# 2 v0 v2 is v0^2 + v2^2 less a square, and a square less v0^2 + v2^2, so at
+# most v0^2 + v2^2 in size, which is at most q.q.
+P02 -> S02 - (v0 - v2) * (v0 - v2);
+P02 -> (v0 + v2) * (v0 + v2) - S02;
+S02 -> N4 - w * w - v1 * v1;
+```
+
+`controls.py`:
+
+```python
+"""Write the controls of ball.g, plane.g, pipe.g and torus.g, pipe.g's run with
+the slips at POINT_ROUNDOFF's 36u, and point.g's runs at 25u. Each control
+changes one thing: a smaller bound, to see whether the script proved its goal
+from hypotheses that contradict each other; or a hypothesis dropped or
+weakened, to see whether the proof needs it. r_point_25.g is 464.19's point.g
+with its goal at 25u, and r_point1_25.g and r_point2_25.g are its y and z,
+turned as 464.19's turn.py turns point.g."""
+
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+def write(name, src):
+    open(name, "w").write(src)
+
+
+N4 = "  /\\ N4 in [9007199254740980b-53, 9007199254741004b-53]\n"
+# pipe.g and torus.g open their hypotheses with q.q, so it has no /\.
+N4_FIRST = "     N4 in [9007199254740980b-53, 9007199254741004b-53]\n"
+# q.q only as large as the bounds on w and v let it be.
+N4_WIDE = "     N4 in [0, 16]\n"
+WV = ("  # Each of w^2, v0^2, v1^2 and v2^2 is at most q.q, under 1 + 12u, so each\n"
+      "  # of w, v0, v1 and v2 is at most 2 in size.\n"
+      "  /\\ |w| <= 2 /\\ |v0| <= 2 /\\ |v1| <= 2 /\\ |v2| <= 2\n")
+AXIS_GOAL = "/\\ S + TI + DR in [0, 256b-53]"
+
+ball = open("ball.g").read()
+# 148u, below the 124.7u + 24u the two shares reach.
+write("c_ball_148.g", sub(ball, "/\\ S + T in [0, 256b-53]", "/\\ S + T in [0, 148b-53]"))
+# Without |q.q - 1| <= 6 epsilon.
+write("c_ball_non4.g", sub(ball, N4, ""))
+# Without what point.g proves of the two slips.
+write("c_ball_nok.g", sub(ball, (
+    "  # What point.g, point1.g and point2.g prove of the moved corner and the\n"
+    "  # moved centre, L at least every coordinate of either and of the shift.\n"
+    "  /\\ kp0 in [-36b-53, 36b-53] /\\ kp1 in [-36b-53, 36b-53]\n"
+    "  /\\ kp2 in [-36b-53, 36b-53]\n"
+    "  /\\ kc0 in [-36b-53, 36b-53] /\\ kc1 in [-36b-53, 36b-53]\n"
+    "  /\\ kc2 in [-36b-53, 36b-53]\n"), ""))
+
+plane = open("plane.g").read()
+# 222u, below the 83.14u + 60u + 62.35u + 17u the four shares reach.
+write("c_plane_222.g", sub(plane, "/\\ T / sqrt(NPNP) in [-256b-53, 256b-53]",
+                           "/\\ T / sqrt(NPNP) in [-222b-53, 222b-53]"))
+# Without |q.q - 1| <= 6 epsilon: the turn's length share.
+write("c_plane_non4.g", sub(plane, N4, ""))
+# Without what vector.g proves of the turned normal.
+write("c_plane_nodn.g", sub(plane, (
+    "  # What vector.g, vector1.g and vector2.g prove of the turned normal.\n"
+    "  /\\ dn0 in [-20b-53, 20b-53] /\\ dn1 in [-20b-53, 20b-53]\n"
+    "  /\\ dn2 in [-20b-53, 20b-53]\n"), ""))
+# Without what point.g proves of the moved corner.
+write("c_plane_nodp.g", sub(plane, (
+    "  # What point.g, point1.g and point2.g prove of the moved corner, over L.\n"
+    "  /\\ DP0 in [-36b-53, 36b-53] /\\ DP1 in [-36b-53, 36b-53]\n"
+    "  /\\ DP2 in [-36b-53, 36b-53]\n"), ""))
+# Without what shiftplane.g proves of the offset.
+write("c_plane_nodd.g", sub(plane, (
+    "  # What shiftplane.g proves of the offset's rounding over L, 16u times\n"
+    "  # the larger of |n'| and one, with |n'| within 124u of one: under 17u.\n"
+    "  /\\ DD in [-17b-53, 17b-53]\n"), ""))
+
+pipe = open("pipe.g").read()
+# 230u, below the 86.6u + 120u + 24u the three shares reach.
+write("c_pipe_230.g", sub(pipe, AXIS_GOAL, "/\\ S + TI + DR in [0, 230b-53]"))
+write("c_pipe_non4.g", sub(pipe, N4_FIRST, N4_WIDE))
+# Without the bounds on w and v: the first run of pipe.g.
+write("c_pipe_nobound.g", sub(pipe, WV, ""))
+# Without what vector.g proves of the turned direction.
+write("c_pipe_noda.g", sub(pipe, (
+    "  # What vector.g, vector1.g and vector2.g prove of the turned direction.\n"
+    "  /\\ da0 in [-20b-53, 20b-53] /\\ da1 in [-20b-53, 20b-53]\n"
+    "  /\\ da2 in [-20b-53, 20b-53]\n"), ""))
+# The six slips at POINT_ROUNDOFF's 36u, as the published constant has them.
+assert pipe.count("[-25b-53, 25b-53]") == 6
+write("r_pipe_36.g", pipe.replace("[-25b-53, 25b-53]", "[-36b-53, 36b-53]"))
+
+torus = open("torus.g").read()
+# 212u, below the 124.7u + 34.6u + 53.7u the three shares reach.
+write("c_torus_212.g", sub(torus, AXIS_GOAL, "/\\ S + TI + DR in [0, 212b-53]"))
+write("c_torus_non4.g", sub(torus, N4_FIRST, N4_WIDE))
+
+# 464.19's turn.py, whole but for reading and writing the files.
+TURNED = {"v", "p", "s", "P", "q", "C", "c", "rq", "rc", "t", "k", "rk"}
+NAME = re.compile(r"\b([A-Za-z]+)(\d)(\d?)(_?)\b")
+
+
+def turn(src):
+    def one(m):
+        prefix, index, rest, under = m.groups()
+        if prefix not in TURNED:
+            return m.group(0)
+        return prefix + str((int(index) + 1) % 3) + rest + under
+
+    return NAME.sub(one, src)
+
+
+point = open("point.g").read()
+point = sub(point, "x is within 18 * f64::EPSILON", "x is within 12.5 * f64::EPSILON")
+point = sub(point, "/\\ (out - Ex) / L in [-36b-53, 36b-53]", "/\\ (out - Ex) / L in [-100b-55, 100b-55]")
+write("r_point_25.g", point)
+once = turn(point)
+twice = turn(once)
+assert turn(twice) == point
+X = "# moved point's x is within"
+for name, src, axis in (("r_point1_25.g", once, "y"), ("r_point2_25.g", twice, "z")):
+    write(name, sub(src, X, "# moved point's " + axis + " is within"))
+```
+
+`all.sh`:
+
+```sh
+#!/bin/bash
+# Write the controls and point.g's runs at 25u, then run every script at once,
+# each through 464.13's one.sh: the four surfaces and the three runs at 25u
+# with coq, and the controls and r_pipe_36.g without.
+cd "$(dirname "$0")"
+python3 controls.py
+for f in ball.g plane.g pipe.g torus.g r_point_25.g r_point1_25.g r_point2_25.g; do
+  ./one.sh "$f" coq > "${f%.g}.run" 2>&1 &
+done
+for f in c_ball_148.g c_ball_non4.g c_ball_nok.g \
+         c_plane_222.g c_plane_non4.g c_plane_nodn.g c_plane_nodp.g c_plane_nodd.g \
+         c_pipe_230.g c_pipe_non4.g c_pipe_nobound.g c_pipe_noda.g r_pipe_36.g \
+         c_torus_212.g c_torus_non4.g; do
+  ./one.sh "$f" > "${f%.g}.run" 2>&1 &
+done
+wait
+cat ball.run plane.run pipe.run torus.run r_point_25.run r_point1_25.run r_point2_25.run \
+    c_ball_148.run c_ball_non4.run c_ball_nok.run \
+    c_plane_222.run c_plane_non4.run c_plane_nodn.run c_plane_nodp.run c_plane_nodd.run \
+    c_pipe_230.run c_pipe_non4.run c_pipe_nobound.run c_pipe_noda.run r_pipe_36.run \
+    c_torus_212.run c_torus_non4.run
+```
+
+It printed, on the last run:
+
+```text
+ball exit 0 0.13s
+ball coq -Bcoq exit 0 coqc exit 0 1.00s lines 1347 hints 3
+plane exit 0 0.93s
+plane coq -Bcoq exit 0 coqc exit 0 3.40s lines 8504 hints 17
+pipe exit 0 0.24s
+pipe coq -Bcoq exit 0 coqc exit 0 1.55s lines 3422 hints 8
+torus exit 0 0.30s
+torus coq -Bcoq exit 0 coqc exit 0 1.76s lines 3556 hints 11
+r_point_25 exit 0 45.85s
+r_point_25 coq -Bcoq exit 0 coqc exit 0 78.49s lines 8222 hints 34
+r_point1_25 exit 0 48.21s
+r_point1_25 coq -Bcoq exit 0 coqc exit 0 73.58s lines 8162 hints 34
+r_point2_25 exit 0 45.56s
+r_point2_25 coq -Bcoq exit 0 coqc exit 0 102.15s lines 8195 hints 34
+c_ball_148 exit 1 0.16s
+c_ball_non4 exit 1 0.12s
+c_ball_nok exit 1 0.13s
+c_plane_222 exit 1 1.36s
+c_plane_non4 exit 1 1.21s
+c_plane_nodn exit 1 0.79s
+c_plane_nodp exit 1 1.25s
+c_plane_nodd exit 1 1.07s
+c_pipe_230 exit 1 0.24s
+c_pipe_non4 exit 1 0.25s
+c_pipe_nobound exit 1 0.23s
+c_pipe_noda exit 1 0.23s
+r_pipe_36 exit 1 0.23s
+c_torus_212 exit 1 0.35s
+c_torus_non4 exit 1 0.30s
+```
+
+`same.py`, a check that what this subsection appends is what ran:
+
+```python
+"""Check that each script 464.21 appends whole is byte for byte the file that
+was run, in q2691/; that one.sh is 464.13's block and point.g 464.19's; that
+sos.py, run again, prints what 464.21 gives, and that all.log is the print
+464.21 gives for all.sh; and that controls.py, run again in a fresh directory
+beside the four surface scripts from the appended text and point.g from
+464.19's, writes the scripts that ran.
+Run as: python3 same.py <doc> <q2691 dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, ran = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+sec = section(21)
+blocks = FENCED.findall(sec)
+print("code blocks in 464.21:", len(blocks))
+assert len(re.findall(r"^```", sec, re.M)) == 2 * len(blocks)
+
+# Which appended block is which file: by its first lines.
+HEAD = ("# restates: crates/rcad-geom/src/moved_corner.rs CORNER_AFTER_MOVING_ROUNDOFF at f95bb965\n"
+        "# restates: crates/rcad-geom/src/moved_corner.rs the_largest_number_involved at f95bb965\n")
+marks = {
+    "ball.g": HEAD + "# restates: crates/rcad-geom/src/sphere.rs",
+    "plane.g": HEAD + "# restates: crates/rcad-geom/src/plane.rs",
+    "pipe.g": HEAD + "# restates: crates/rcad-geom/src/cylinder.rs",
+    "torus.g": HEAD + "# restates: crates/rcad-geom/src/torus.rs",
+    "sos.py": '"""Check, in exact rationals at random points, the identities 464.21',
+    "controls.py": '"""Write the controls of ball.g, plane.g, pipe.g and torus.g',
+    "all.sh": "#!/bin/bash\n# Write the controls and point.g's runs at 25u",
+    "same.py": '"""Check that each script 464.21 appends whole',
+}
+found = {}
+for lang, body in blocks:
+    for name, mark in marks.items():
+        if not body.startswith(mark):
+            continue
+        assert name not in found, name
+        found[name] = body
+for name in marks:
+    if name not in found:
+        print(name, "not appended")
+        continue
+    path = os.path.abspath(__file__) if name == "same.py" else os.path.join(ran, name)
+    print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+
+def block_of(n, first):
+    got = [body for lang, body in FENCED.findall(section(n)) if body.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+def printed(first):
+    got = [body for lang, body in blocks if lang == "text" and body.startswith(first)]
+    assert len(got) == 1, (first, len(got))
+    return got[0]
+
+
+print("one.sh is 464.13's block:", open(os.path.join(ran, "one.sh")).read()
+      == block_of(13, "#!/bin/bash\n# Run one Gappa script under 464.4's pin"))
+point = block_of(19, "# restates: crates/rcad-geom/src/isometry.rs apply_to_point at ba0a654e\n")
+print("point.g is 464.19's block:", open(os.path.join(ran, "point.g")).read() == point)
+again = subprocess.run(["python3", os.path.join(ran, "sos.py")], capture_output=True, text=True,
+                       check=True).stdout
+print("sos.py run again prints what 464.21 gives:", again == printed("identities 1 to 4 hold"))
+print("all.log is what 464.21 gives:",
+      open(os.path.join(ran, "all.log")).read() == printed("ball exit "))
+
+fresh = tempfile.mkdtemp()
+for name in ("ball.g", "plane.g", "pipe.g", "torus.g", "controls.py"):
+    open(os.path.join(fresh, name), "w").write(found[name])
+open(os.path.join(fresh, "point.g"), "w").write(point)
+subprocess.run(["python3", "controls.py"], cwd=fresh, check=True)
+written = sorted(f for f in os.listdir(fresh) if f.endswith(".g") and f not in found and f != "point.g")
+for name in written:
+    print(name, "written again is the one that ran:",
+          filecmp.cmp(os.path.join(fresh, name), os.path.join(ran, name), shallow=False))
+print(".g files that ran and are neither appended, 464.19's nor written again:",
+      sorted(f for f in os.listdir(ran)
+             if f.endswith(".g") and f not in found and f != "point.g" and f not in written))
+shutil.rmtree(fresh)
+```
+
+It prints:
+
+```text
+code blocks in 464.21: 11
+ball.g same
+plane.g same
+pipe.g same
+torus.g same
+sos.py same
+controls.py same
+all.sh same
+same.py same
+one.sh is 464.13's block: True
+point.g is 464.19's block: True
+sos.py run again prints what 464.21 gives: True
+all.log is what 464.21 gives: True
+c_ball_148.g written again is the one that ran: True
+c_ball_nok.g written again is the one that ran: True
+c_ball_non4.g written again is the one that ran: True
+c_pipe_230.g written again is the one that ran: True
+c_pipe_nobound.g written again is the one that ran: True
+c_pipe_noda.g written again is the one that ran: True
+c_pipe_non4.g written again is the one that ran: True
+c_plane_222.g written again is the one that ran: True
+c_plane_nodd.g written again is the one that ran: True
+c_plane_nodn.g written again is the one that ran: True
+c_plane_nodp.g written again is the one that ran: True
+c_plane_non4.g written again is the one that ran: True
+c_torus_212.g written again is the one that ran: True
+c_torus_non4.g written again is the one that ran: True
+r_pipe_36.g written again is the one that ran: True
+r_point1_25.g written again is the one that ran: True
+r_point2_25.g written again is the one that ran: True
+r_point_25.g written again is the one that ran: True
+.g files that ran and are neither appended, 464.19's nor written again: []
+```
+
+**9. What this leaves.** Rows, filed from this write-up when it merges, each
+from Q2691:
+
+- Restate `CORNER_AFTER_MOVING_ROUNDOFF`'s doc (`moved_corner.rs:38-97`)
+  against this subsection: the shares of 3, the three miscounts of 4, the
+  pipe's need of `point.g`'s `25u`, and the cone left unproved.
+- Search for a corner on a cone that a move puts past `128ε · L`, or prove the
+  cone within it by a sharper argument than 3's. Not run, so no class
+  (§360.5).
+- Run `vector.g` with each component up to about `1 + 64u`, as a stored axis
+  direction can have, and say whether its `20u` holds; `pipe.g` and `torus.g`
+  take it. Not run, so no class. Q2826 is its twin for a normal.
+
+And what is not a row: the zero branches (Q2801, Q2825), the products below
+normal (Q2802) and the route through `From<na::Isometry3<f64>>` (Q2803), which
+these scripts share with `point.g` and `vector.g`; and Q2700, which moves these
+scripts into `proofs/gappa/` with the rest of 464's.
