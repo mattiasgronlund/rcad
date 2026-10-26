@@ -119,6 +119,8 @@ pub mod a_bar_turned_a_quarter_by_rotation_across_an_upright_bar;
 pub mod a_bar_turned_three_quarter_turns_and_halved;
 #[path = "a_bar_whose_wall_is_two_faces.rs"]
 pub mod a_bar_whose_wall_is_two_faces;
+#[path = "a_bar_with_a_leaning_cap_cut_beside_its_rim_corner.rs"]
+pub mod a_bar_with_a_leaning_cap_cut_beside_its_rim_corner;
 #[path = "a_bend_less_a_turned_copy_of_itself.rs"]
 pub mod a_bend_less_a_turned_copy_of_itself;
 #[path = "a_bend_round_a_slanted_axis.rs"]
