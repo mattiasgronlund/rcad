@@ -594,6 +594,40 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_both_turned_so_it_rounds_inside_is_re
     }
 }
 
+/// The thin bar at `x = −1`, opposite the thick seam, with both bars turned
+/// 0.7, 2.5 and 3 about `z`, where the thin pipe lies a rounding inside the
+/// thick one and `intersect` names no curve either way round. Every fuse
+/// answers as the unturned bars' do.
+///
+/// The union both ways round and the thick bar less the thin one were refused
+/// `CannotMeshAFace` with `BoundaryCrossesItself` (Q2764), on the answer's
+/// thick floor and roof: each is a disc of radius 2 with the thin bar's hole
+/// of radius 1 in it, and the hole's rim comes within `2.4e−17` of the outline
+/// at `(−2c, −2s)` with no corner of either loop there. Every chord of the
+/// outline sags into the face, so one across that point passes outside the
+/// hole's points within about half a chord of it. Walking both loops finer at
+/// once leaves a point of the hole in that stretch at every rung.
+#[test]
+fn a_thin_bar_up_the_inside_of_a_thick_one_opposite_its_seam_both_turned_so_it_rounds_inside_answers_every_fuse()
+ {
+    let turned: [(f64, Pair); 3] = [
+        (0.7, |model| both_bars_turned_about_z(model, -1.0, 0.7)),
+        (2.5, |model| both_bars_turned_about_z(model, -1.0, 2.5)),
+        (3.0, |model| both_bars_turned_about_z(model, -1.0, 3.0)),
+    ];
+    for (angle, build) in turned {
+        let mut model = a_model();
+        let [thick, thin] = build(&mut model).map(|solid| the_wall(&model, solid));
+        assert_eq!(curves(&thick, &thin), Ok(0), "turn {angle}");
+        assert_eq!(curves(&thin, &thick), Ok(0), "turn {angle}");
+        every_fuse_answers(
+            build,
+            [16.0 * PI, 6.0 * PI, 4.0 * PI],
+            [&[7], &[3], &[4], &[3, 3]],
+        );
+    }
+}
+
 /// [`a_thin_bar_up_the_inside_of_a_thick_one_rests_on_it_along_its_seam_and_every_fuse_answers`]
 /// with the thin bar turned `lean` about `x`: `4e−16`, `1e−15`, `1e−14` and
 /// `1e−8`. Its axis then runs `(x, −lean·z)`, so the thin pipe touches the
