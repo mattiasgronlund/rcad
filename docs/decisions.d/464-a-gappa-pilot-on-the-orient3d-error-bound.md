@@ -18093,3 +18093,24 @@ def main():
 
 main()
 ```
+
+**What this leaves.**
+
+- One or two of `first`, `second` and `third` cancelling to zero together with
+  one or more of the differences at zero, past the one minor with one
+  difference run here. Q2862, filed after Q2748.
+- Nothing more for `t1 + t2` cancelling while neither is zero (Q2863, from
+  464.25): in these pairs block 1's hypothesis on it costs nothing, as above.
+- The row that moves the scripts into `proofs/gappa/`, Q2700, takes
+  `make_minor_zero_too.py` and what it writes too. It already waits on Q2748.
+- Why `P −/ Phat` is wider in the new ones, and why `third` with `cdx`,
+  `cdy`, `adz` or `bdz` needs none of the six hints 464.7 added for `third`.
+  No row: each branch proves at the code's `B` either way, and nothing reads
+  the answer.
+- 464.25's `make_differences_zero.py` ends a comment with
+  `Each of  is zero.`, naming nothing, in the six `dz_<difference>.g` for an
+  x or y difference, and wherever else no term is zero by its shape. It is a
+  Gappa comment and moves no proof, and 464.25 quotes the script as it ran,
+  so it stays. In the `dm_` scripts written from those six,
+  `make_minor_zero_too.py` puts a line such as
+  `Nothing checks r1, since first is zero.` in its place.
