@@ -898,10 +898,11 @@ fn where_a_spout_line_meets_the_funnel(
 /// are such a pair, turned `0.3` about a point four up, and touch at
 /// `(±1.5954, 0.1209, 3.2)`, inside both faces. There the turn's `sin` and
 /// `cos` are rounded, so they are no longer exact mirror images, and the two
-/// branches pass about `3e-8` apart instead of through each other.
+/// branches pass about `3e-8` apart instead of through each other:
+/// [`two_cones_turned_by_a_rounded_angle_are_not_mirror_images_and_are_refused_as_any_overlap_is`].
 ///
-/// Their directions overlap, since the turn is less than a right angle, and
-/// the pair is refused as a degree-four curve.
+/// The pair is refused as a crossing that touches itself, by the namer and by
+/// the walker, whichever cone comes first.
 #[test]
 fn two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points() {
     let upright = ([0, 0, 0], [0, 0, 1]);
@@ -930,13 +931,78 @@ fn two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_t
             "the two cones are square to one direction at ({x}, 51, 85): {one:?} and {other:?}"
         );
     }
+    assert_refused_as_touching_itself(
+        &the_right_angled_cone(),
+        &a_cone([0.0, 150.0, 90.0], [0.0, -15.0, 8.0], 1.0),
+    );
+}
+
+/// Two cones of one slope, the second the first turned a quarter about the
+/// line along `x` through `(0, 0, 4)`, which puts its apex at `(0, 4, 4)` and
+/// its axis along `-y`, every number exact: mirror images across the flat
+/// surface `y + z = 4` halfway between their apexes.
+///
+/// **They touch where each apex is outside the other cone, and only there.**
+/// Of slope a half, half-angle `0.46`, the turn is less than `π` less twice
+/// that, the apex `(0, 4, 4)` is outside the upright cone, and the two touch at
+/// `(±√1.92, 0.8, 3.2)`, inside both pointed cones eight high. Of slope two,
+/// half-angle `1.11`, the apex is inside it, and the line along `x` through
+/// `(0, 3.2, 0.8)`, the only place they could touch, stays outside the upright
+/// cone, where `x² + y² − 5z²` is `x² + 7.04`: they cross without touching,
+/// and are refused as any other overlap is.
+#[test]
+fn two_cones_of_one_slope_a_quarter_turn_apart_touch_only_where_each_apex_is_outside_the_other() {
+    let upright = |slope| a_cone([0.0; 3], [0.0, 0.0, 1.0], slope);
+    let turned = |slope| a_cone([0.0, 4.0, 4.0], [0.0, -1.0, 0.0], slope);
+    assert_refused_as_touching_itself(&upright(0.5), &turned(0.5));
     assert_eq!(
-        named(
-            &the_right_angled_cone(),
-            &a_cone([0.0, 150.0, 90.0], [0.0, -15.0, 8.0], 1.0)
-        ),
+        named(&upright(2.0), &turned(2.0)),
         Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
     );
+}
+
+/// The two pointed cones of `rcad-topo`'s `a_funnel_with_a_leaning_spout.rs`:
+/// slope a half, the second turned `0.3` about the line along `x` through
+/// `(0, 0, 4)`, written out with the turn's `sin` and `cos` rounded once each.
+/// The second's axis is then not exactly the mirror image of the first's
+/// across the flat surface halfway between the apexes, so the two do not touch
+/// and their branches pass about `3e-8` apart. Nothing proves their crossing
+/// one loop and two branches, and they are refused as a degree-four curve, by
+/// the namer and by the walker, and not as a crossing that touches itself.
+#[test]
+fn two_cones_turned_by_a_rounded_angle_are_not_mirror_images_and_are_refused_as_any_overlap_is() {
+    let (sin, cos) = 0.3_f64.sin_cos();
+    let upright = a_cone([0.0; 3], [0.0, 0.0, 1.0], 0.5);
+    let turned = a_cone([0.0, 4.0 * sin, 4.0 - 4.0 * cos], [0.0, -sin, cos], 0.5);
+    let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("a whole loop needs nothing picking it");
+    assert_eq!(
+        named(&upright, &turned),
+        Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+    );
+    for along in [[&upright, &turned], [&turned, &upright]] {
+        assert_eq!(
+            where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new()).err(),
+            Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+        );
+    }
+}
+
+/// `intersect` refuses the pair as a crossing that touches itself whichever
+/// comes first, and so does `walk` for a loop stated on it.
+fn assert_refused_as_touching_itself(one: &Surface, other: &Surface) {
+    assert_eq!(
+        named(one, other),
+        Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
+    );
+    let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("a whole loop needs nothing picking it");
+    for along in [[one, other], [other, one]] {
+        assert_eq!(
+            where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new()).err(),
+            Some(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
+        );
+    }
 }
 
 /// Two apexes one ulp apart along the diagonal, `1e150` out: the nearer circle
