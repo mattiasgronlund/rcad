@@ -839,6 +839,38 @@ fn a_wedge_over_the_minus_y_edge_through_the_apex_shifted_after_a_turn_about_min
     );
 }
 
+/// **The wedge over the `−y` edge at the plain shift `(7, −5, 2.5)`, and the
+/// wedge over the `+y` edge at that shift after the turn 2.9 about `(0.3, −1,
+/// 2)`, unite with the pyramid under `tolerant(100)`**, as their differences
+/// and intersections answer. Queue row Q2583's sweep at Q2744's tip found the
+/// two unions refused `ResultIsNotManifold`, `{ count: 6 }` and
+/// `{ count: 4 }` (queue row Q2784). The union keeps every speck the four side
+/// planes cut out of each wedge face by the apex, and corners of those specks
+/// a rounding apart come out one corner: at the plain shift one piece of the
+/// face `y = −x/2` walks out to a corner and back along one edge, and that
+/// edge, a rounding long, is claimed by four darts of that face and two of the
+/// face `y = −2x`, each face's on both sides of it.
+#[test]
+fn two_wedges_through_the_apex_unite_with_the_placed_pyramid_under_tolerant() {
+    let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a plain translation");
+    let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.3, -1.0, 2.0)).expect("an axis");
+    let turned = shift.compose(&Isometry::rotation(&axis, 2.9).expect("a turn"));
+    for (wedge, placement) in [
+        (A_WEDGE_OVER_THE_MINUS_Y_EDGE, shift),
+        (A_WEDGE_OVER_THE_PLUS_Y_EDGE, turned),
+    ] {
+        for rule in [Rule::Difference, Rule::Intersection, Rule::Union] {
+            let policy = Policy::tolerant(100.0);
+            let case = format!("{policy:?}, {placement:?}, {wedge:?} {rule:?}");
+            assert_eq!(
+                what_the_wedge_through_the_apex_came_to(wedge, placement, rule, &policy),
+                Came::AnsweredPastTheRangeCheck,
+                "{case}"
+            );
+        }
+    }
+}
+
 /// **Placed, the pyramid has four apexes a rounding apart, and where a wedge
 /// plane runs between two of them the fuse reads the side planes as running
 /// through one.** Each three of the four side planes meet in an apex of their
