@@ -103,7 +103,8 @@ pub use crate::intersect::{
     WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_BALL_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS,
     WHERE_A_PLANE_AND_A_TORUS_CROSS, WHERE_TWO_BALLS_CROSS, WHERE_TWO_PIPES_CROSS,
     WHERE_TWO_PLANES_CROSS, how_a_plane_leans_against_a_cone, how_a_plane_leans_against_a_pipe,
-    intersect, where_a_cones_apex_stands_against_a_plane,
+    how_the_flat_surfaces_where_two_cones_cross_meet_them, intersect,
+    where_a_cones_apex_stands_against_a_plane,
 };
 pub use crate::isometry::Isometry;
 pub use crate::knot_vector::{KnotVector, MAX_DEGREE};

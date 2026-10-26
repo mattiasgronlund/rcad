@@ -5959,6 +5959,35 @@ fn the_rulings_two_cones_on_one_apex_share(one: &Cone, other: &Cone) -> Result<S
     Ok(SurfaceMeet::Curves(runs))
 }
 
+/// How each of the two flat surfaces through the apex that two cones on one
+/// apex cross on meets them, the one square to `a₁·w₁ + a₂·w₂` first and the
+/// one square to `a₁·w₁ − a₂·w₂` second: in two rulings ([`Decision::Pos`]),
+/// along one ruling the two cones touch along ([`Decision::Zero`]), or at the
+/// apex alone ([`Decision::Neg`]). These are the signs [`intersect`] names the
+/// rulings two such cones share by, and they are exact: an enclosure is read
+/// only where it decides. [`Decision::Undecidable`] where the exact sign needs
+/// a product outside `f64`'s range, and `intersect` refuses the pair there.
+///
+/// Only the axes' directions and the slopes are read, not the apexes. The
+/// answer is the same whichever cone comes first, since swapping the two
+/// turns `a₁·w₁ − a₂·w₂` into its opposite, square to the same flat surface;
+/// the pair is sorted as `intersect` sorts it all the same, so that the
+/// arithmetic is the same too.
+pub fn how_the_flat_surfaces_where_two_cones_cross_meet_them(
+    one: &Cone,
+    other: &Cone,
+) -> [Decision; 2] {
+    let (first, second) = match Surface::Cone(*one).how_it_sorts_against(&Surface::Cone(*other)) {
+        Ordering::Greater => (other, one),
+        Ordering::Less | Ordering::Equal => (one, other),
+    };
+    [1.0, -1.0].map(|side| {
+        let normal = square_to_where_two_cones_on_one_apex_cross(first, second, side);
+        let spread = how_far_apart_two_rulings_through_a_cones_apex_spread(normal, first);
+        how_a_flat_surface_where_two_cones_cross_meets_them(spread, first, second, side)
+    })
+}
+
 /// An enclosure of `n± = a₁·w₁ ± a₂·w₂`, `side` choosing the sign, for
 /// [`the_rulings_two_cones_on_one_apex_share`]: `√((1 + s₁²)‖w₂‖²)` and
 /// `√((1 + s₂²)‖w₁‖²)` are `a₁` and `a₂`, so no length is divided out.
