@@ -467,7 +467,7 @@ fn a_thinner_bar_resting_inside_a_thick_one_where_a_cut_across_its_wall_runs_ans
 /// ([`a_thin_bar_up_the_inside_of_a_thick_one_both_turned_a_radian_about_its_axis_answers_every_fuse`]).
 /// Turned 0.7, 2.5 or 3, it rounds the axis inside that circle, and they
 /// cross nowhere
-/// ([`a_thin_bar_up_the_inside_of_a_thick_one_both_turned_so_it_rounds_inside_is_refused_only_meshing_a_face`]).
+/// ([`a_thin_bar_up_the_inside_of_a_thick_one_both_turned_so_it_rounds_inside_is_refused_reading_a_corner_inside_the_thin_pipe`]).
 ///
 /// What they share is the thin bar between the thick bar's caps, `4π`.
 #[test]
@@ -541,10 +541,23 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_both_turned_a_radian_about_its_axis_a
 ///
 /// What they share and the thin bar less the thick one answer as the unturned
 /// bars' do. The union both ways round and the thick bar less the thin one are
-/// refused `CannotMeshAFace` with `BoundaryCrossesItself`, as they are with
-/// the thin bar at `x = −1` at these turns (Q2764).
+/// refused `TheFuseWroteABrokenAnswer` with
+/// `AClosedEdgeIsWalkedAgainstItsSurface`, a refusal of a sound answer. With
+/// the union, the thick bar first and the turn 0.7, the face it is asked of is
+/// the answer's thick floor, a disc of radius 2 with the thin bar's hole in it,
+/// at the hole's rim. `validate` reads which side of the thin pipe the floor
+/// lies on off its one corner not on that pipe, the outline's `(2c, 2s, −2)`.
+/// That corner is `(c, s)` from the thin axis, and `c² + s²` is under 1, so
+/// it reads inside the thin pipe, where the floor is not.
+///
+/// These were refused `CannotMeshAFace` with `BoundaryCrossesItself` as the
+/// shells were sorted, before the answer was checked, as they were with the thin
+/// bar at `x = −1`
+/// ([`a_thin_bar_up_the_inside_of_a_thick_one_opposite_its_seam_both_turned_so_it_rounds_inside_answers_every_fuse`]).
+/// The mesh now walks a crossed flat face's outline alone finer once walking
+/// every side finer has run out (Q2764).
 #[test]
-fn a_thin_bar_up_the_inside_of_a_thick_one_both_turned_so_it_rounds_inside_is_refused_only_meshing_a_face()
+fn a_thin_bar_up_the_inside_of_a_thick_one_both_turned_so_it_rounds_inside_is_refused_reading_a_corner_inside_the_thin_pipe()
  {
     let turned: [(f64, Pair); 3] = [
         (0.7, |model| both_bars_turned_about_z(model, 1.0, 0.7)),
@@ -583,14 +596,49 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_both_turned_so_it_rounds_inside_is_re
             assert!(
                 matches!(
                     said,
-                    Err(rcad_topo::Error::CannotMeshAFace {
-                        why: rcad_mesh::CannotTriangulate::BoundaryCrossesItself { .. },
-                        ..
+                    Err(rcad_topo::Error::TheFuseWroteABrokenAnswer {
+                        broken: rcad_topo::Invalid::AClosedEdgeIsWalkedAgainstItsSurface
                     })
                 ),
                 "turn {angle}: {rule:?} (thick first: {thick_first}): {said:?}"
             );
         }
+    }
+}
+
+/// The thin bar at `x = −1`, opposite the thick seam, with both bars turned
+/// 0.7, 2.5 and 3 about `z`, where the thin pipe lies a rounding inside the
+/// thick one and `intersect` names no curve either way round. Every fuse
+/// answers as the unturned bars' do.
+///
+/// The union both ways round and the thick bar less the thin one were refused
+/// `CannotMeshAFace` with `BoundaryCrossesItself` (Q2764), on the answer's
+/// thick floor and roof: each is a disc of radius 2 with the thin bar's hole
+/// of radius 1 in it, and the hole's rim comes within `2.4e−17` of the outline
+/// at `(−2c, −2s)` with no corner of either loop there. Every chord of the
+/// outline sags into the face, so one across that point passes outside the
+/// hole's points within about half a chord of it. Walking both loops finer at
+/// once leaves a point of the hole in that stretch at every rung. Walking the
+/// outline alone finer shrinks the stretch and leaves the hole's points where
+/// they are, and that clears.
+#[test]
+fn a_thin_bar_up_the_inside_of_a_thick_one_opposite_its_seam_both_turned_so_it_rounds_inside_answers_every_fuse()
+ {
+    let turned: [(f64, Pair); 3] = [
+        (0.7, |model| both_bars_turned_about_z(model, -1.0, 0.7)),
+        (2.5, |model| both_bars_turned_about_z(model, -1.0, 2.5)),
+        (3.0, |model| both_bars_turned_about_z(model, -1.0, 3.0)),
+    ];
+    for (angle, build) in turned {
+        let mut model = a_model();
+        let [thick, thin] = build(&mut model).map(|solid| the_wall(&model, solid));
+        assert_eq!(curves(&thick, &thin), Ok(0), "turn {angle}");
+        assert_eq!(curves(&thin, &thick), Ok(0), "turn {angle}");
+        every_fuse_answers(
+            build,
+            [16.0 * PI, 6.0 * PI, 4.0 * PI],
+            [&[7], &[3], &[4], &[3, 3]],
+        );
     }
 }
 
