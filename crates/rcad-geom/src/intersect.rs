@@ -5313,16 +5313,26 @@ pub(crate) struct TwoConesOffOneAxis {
 ///
 /// # Errors
 ///
+/// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] where none of
+/// the four proves the crossing either way round and the two are of one slope,
+/// exactly mirror images across the flat surface halfway between their apexes,
+/// and touch, as [`two_mirror_images_that_touch`] asks. A turn of one about a
+/// line through a point of the other's axis makes such a pair. Their crossing
+/// is two flat cuts of either cone that meet where the two touch, and a touch
+/// is a double root on some line, which none of the four can prove, since each
+/// proves its roots simple.
+///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where none of the
-/// four proves the crossing either way round: two cones whose own directions
-/// overlap with `Y`'s apex inside `X`, or with `d·w` taking both signs, where
-/// each kind of branch may come in two, and every pair the enclosures above
-/// are too loose for. A **gap** where the crossing is two loops, or a loop and
-/// two branches, and the curve is there whatever its shape. Among the pairs
-/// refused are two cones of one slope, one turned about a line through a point
-/// of the other's axis: mirror images, which can touch at two points, as
-/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] says. A touch is a
-/// double root on some line, which `q(0) > 0 > q(t')` rules out.
+/// four proves the crossing either way round otherwise: two cones whose own
+/// directions overlap with `Y`'s apex inside `X`, or with `d·w` taking both
+/// signs, where each kind of branch may come in two, and every pair the
+/// enclosures above are too loose for. A **gap** where the crossing is two
+/// loops, or a loop and two branches, and the curve is there whatever its
+/// shape. Among the pairs refused are mirror images that do not touch, whose
+/// two flat cuts stay apart, and a cone turned off another of its slope whose
+/// turned axis was rounded when written or stored, so that the two are not
+/// exactly mirror images, do not touch, and pass close by each other where the
+/// exact pair would touch.
 ///
 /// [`Error::Undecidable`] where a sign asked exactly could not be settled.
 pub(crate) fn how_two_cones_off_one_axis_cross(

@@ -316,6 +316,14 @@ pub enum Error {
     /// pipes that it can prove neither apart nor meeting, since it has nowhere
     /// to put the node where they meet.
     ///
+    /// **`intersect` and `walk` give this for two cones of one slope off one
+    /// axis that are exactly mirror images and touch** (Q2813), as one turned
+    /// about a line through a point of the other's axis is. Their crossing is
+    /// two flat cuts of either cone, which meet where the two touch, and nothing
+    /// names those cuts yet. `rcad-topo`'s `a_funnel_with_a_leaning_spout.rs`
+    /// fuses two pointed cones a quarter turn apart, which touch inside both
+    /// faces, and every fuse is refused with this.
+    ///
     /// **A gap** (§16.10, §31.9). [`EdgeRun`](crate::EdgeRun) *can* say this:
     /// the two loops of a pinch are the two sides of one half-space through the
     /// tangent point, and for the ball and pipe in
@@ -418,15 +426,21 @@ pub enum Error {
     /// enclosures are too loose for. Two cones of **one slope**, one turned
     /// about a line through a point of the other's axis, are mirror images
     /// across the flat surface halfway between their apexes, and can **touch**
-    /// at two points, where their crossing runs through itself.
-    /// `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs` pins one of each, the
-    /// second a pair whose numbers are exact and which touch. Where
-    /// the turn's `sin` and `cos` are rounded, as for `rcad-topo`'s funnel with
-    /// a leaning spout, the two are not quite mirror images, and the branches
-    /// pass about `3e-8` apart instead of through each other, so that pair
-    /// needs more than the branches that run off for ever walked: something
-    /// that tells two branches that close apart, or names where they nearly
-    /// meet.
+    /// at two points, where their crossing runs through itself. Where the
+    /// numbers stored are exactly mirror images and the two touch, the pair is
+    /// refused as
+    /// [`ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`](Self::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
+    /// instead (Q2813). Mirror images that do not touch stay here, and so do
+    /// pairs whose turned axis was rounded, which are not quite mirror images:
+    /// the turn's `sin` and `cos` rounded, as for `rcad-topo`'s funnel with a
+    /// leaning spout turned `0.3`, whose branches pass about `3e-8` apart instead
+    /// of through each other, and an apex at `(0, 150, 90)` with its axis along
+    /// `(0, -15, 8)` against slope one about `z`, whose numbers as written are
+    /// exact but whose axis `Axis::new` rounds when it stores it at length one.
+    /// `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs` pins each kind. The
+    /// rounded pairs need more than the branches that run off for ever walked:
+    /// something that tells two branches that close apart, or names where they
+    /// nearly meet.
     ///
     /// **A ball through the apex is the one coaxial pair left here**, and it is
     /// not a degree-four curve: the crossing is one circle and the apex apart
