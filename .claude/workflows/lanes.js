@@ -509,6 +509,7 @@ function reachesTests(report) {
 function unproven(lane, kind, check) {
   const why = []
   if (check.files_outside_write_set && check.files_outside_write_set.length) why.push(`the branch touches ${check.files_outside_write_set.join(', ')}, outside the write set`)
+  if (check.write_set_mismatch && check.write_set_mismatch.length) why.push(`the write set does not match just queue show at the base: ${check.write_set_mismatch.join(', ')}`)
   const runs = linesThatRun(check.lines_that_run)
   if (runs === null) why.push('the lines-that-run print the verifier reported does not end in its count, lines that run: N')
   if (squeezed(check.lines_that_run_command) !== squeezed(linesThatRunCommand(lane))) why.push('the verifier ran another command than the lines-that-run command it was given')
