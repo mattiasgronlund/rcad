@@ -361,6 +361,12 @@ pub enum Error {
     /// that existed and were not found, which is a gap. This variant carries
     /// nothing that tells the two apart. The families of fixes
     /// weighed are on `two_lines_along_a_pipe`.
+    ///
+    /// Two cones on one apex that a stored axis puts a rounding past touching
+    /// along a ruling are refused with this too, a **gap**: they cross in two
+    /// rulings next to the touch, and the enclosure of how far apart those two
+    /// spread holds nothing, so their four halves are not told apart.
+    /// `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs` pins it.
     #[error(
         "this crossing comes in two pieces and no half-space square to both surfaces can be \
          written down in f64 to tell them apart"
@@ -404,9 +410,10 @@ pub enum Error {
     /// apexes for one slope, or the apex alone for one apex —
     /// `where_two_cones_cross`. (c′) **Two cones that share an apex with their
     /// axes leaning apart are done**, and are not refused here any more: they
-    /// meet in two or four rulings through it, or at it alone, which
-    /// `the_rulings_two_cones_on_one_apex_share` names as the halves the apex
-    /// cuts them into. `rcad-topo`'s `assemble.rs` answers *this crossing holds
+    /// meet in one ruling through it to four — they cross along two or four,
+    /// touch along one or two, or touch along one and cross along two — or at
+    /// it alone, which `the_rulings_two_cones_on_one_apex_share` names as the
+    /// halves the apex cuts them into. `rcad-topo`'s `assemble.rs` answers *this crossing holds
     /// a straight line* for that pair and for no other cone-and-cone pair
     /// (§50.2 item 4). (d) **A pipe or a ball off the axis is done where its
     /// shape is proved**, and it took no eighth-degree discriminant: a pipe is

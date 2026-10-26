@@ -4463,19 +4463,30 @@ fn the_four_ways_two_rulings_leave_a_cones_apex(
     if under_the_root.hi() < 0.0 {
         return None;
     }
-    let along = exactly(cone.axis().direction().components());
-    let squared_axis = squared_length_enclosing(along);
-    let up = dot_enclosing(normal, along);
-    let across = cross_enclosing(normal, along);
+    let across = cross_enclosing(normal, exactly(cone.axis().direction().components()));
     let spread = root_enclosing(under_the_root);
-    let squared_normal = squared_length_enclosing(normal);
-    let down: [Interval; 3] = core::array::from_fn(|axis| {
-        squared_axis * (squared_normal * along[axis] - up * normal[axis])
-    });
+    let down = the_axis_laid_into_a_flat_surface_through_a_cones_apex(normal, cone);
     let [ahead, other] =
         [spread, -spread].map(|side| core::array::from_fn(|axis| down[axis] + across[axis] * side));
     let back = |way: [Interval; 3]| way.map(|component| -component);
     Some([ahead, other, back(ahead), back(other)])
+}
+
+/// `‖w‖²·p` for `p = ‖n‖²·w − (n·w)·n`, as an enclosure, where `normal`
+/// encloses `n`: the cone's axis laid into the flat surface through its apex
+/// square to `n`. Half-way between the two rulings that surface cuts where it
+/// cuts two, and along the one it touches the cone along where it touches: the
+/// flat surface touching a cone along a ruling is square to the one through the
+/// axis and that ruling, so the axis lies in that one and lands on the ruling.
+fn the_axis_laid_into_a_flat_surface_through_a_cones_apex(
+    normal: [Interval; 3],
+    cone: &Cone,
+) -> [Interval; 3] {
+    let along = exactly(cone.axis().direction().components());
+    let squared_axis = squared_length_enclosing(along);
+    let up = dot_enclosing(normal, along);
+    let squared_normal = squared_length_enclosing(normal);
+    core::array::from_fn(|axis| squared_axis * (squared_normal * along[axis] - up * normal[axis]))
 }
 
 /// `−E·‖w‖²`, for `E = (n·w)² − s²‖n × w‖²`, as an enclosure, where `normal`
@@ -5116,7 +5127,8 @@ fn how_far_along_the_axis_the_two_circles_sit(cone: &Cone, pipe: &Cylinder) -> I
 ///
 /// **And none of them holds a straight line.** Two cones meet along a ruling
 /// only where they share an apex and their axes lean apart, and then that is
-/// all they meet in: two rulings or four through the apex, or the apex alone —
+/// all they meet in: one ruling through the apex to four, which they cross or
+/// touch along, or the apex alone —
 /// [`the_rulings_two_cones_on_one_apex_share`], asked once the first question
 /// below has found the axes apart. That is the one pair `rcad-topo`'s
 /// `the_crossing_of_these_runs_straight` answers straight, and it asks the
@@ -5785,7 +5797,7 @@ fn where_a_point_stands_against_a_cone(point: Point, cone: &Cone) -> impl Predic
 }
 
 /// What two cones on one apex with their axes leaning apart share: the halves
-/// the apex cuts two rulings or four into, or the apex alone.
+/// the apex cuts one ruling, two, three or four into, or the apex alone.
 ///
 /// # Where the rulings are
 ///
@@ -5797,9 +5809,24 @@ fn where_a_point_stands_against_a_cone(point: Point, cone: &Cone) -> impl Predic
 /// `a₂ = √((1 + s₂²)‖w₁‖²)`. So the crossing is what those two cut out of the
 /// first cone, and each cuts what a plane through a cone's apex does: two
 /// rulings where `−E·‖w₁‖²` of [`two_lines_through_a_cones_apex`], worked out
-/// with `n±`, is above nothing, and the apex alone where it is below. No ruling
-/// is on both flat surfaces, since that takes `d·w₁ = d·w₂ = 0`, and no way
-/// square to a cone's axis is on it.
+/// with `n±`, is above nothing, the one ruling it touches the cone along where
+/// that is nothing, and the apex alone where it is below. No ruling is on both
+/// flat surfaces, since that takes `d·w₁ = d·w₂ = 0`, and no way square to a
+/// cone's axis is on it.
+///
+/// **Which of the three a flat surface is, is read off the enclosure first and
+/// worked out exactly only where it holds nothing**, by
+/// [`how_a_flat_surface_where_two_cones_cross_meets_them`]. The enclosure holds
+/// nothing wherever the two cones touch along a ruling, because `n±` carries
+/// two roots — the pitch cones of a pair of mitre gears are such a pair — and
+/// where it decides, the pair is named as it was before the exact sign was
+/// here.
+///
+/// The ruling a flat surface touches the first cone along is its axis laid
+/// into that surface, [`the_axis_laid_into_a_flat_surface_through_a_cones_apex`],
+/// and it is on the second cone too, since on either flat surface a way is on
+/// one cone exactly where it is on the other. There the two cones touch: each
+/// flat surface holds the crossing twice over, and this one ruling is both.
 ///
 /// # How the halves are told apart
 ///
@@ -5809,15 +5836,22 @@ fn where_a_point_stands_against_a_cone(point: Point, cone: &Cone) -> impl Predic
 /// it, and each half is strictly on one side of it, as in
 /// [`four_half_rulings_through_a_cones_apex`]. The flat surface square to `w₁`
 /// parts the first cone's two nappes, so the four halves of one flat surface
-/// are in four different corners of those two. Where both cut, the halves on
-/// `n₋` read `d·w₁` and `d·w₂` of one sign and those on `n₊` of opposite signs,
-/// so a third surface, square to `w₂`, puts all eight in eight corners.
+/// are in four different corners of those two. Where both hold rulings, the
+/// halves on `n₋` read `d·w₁` and `d·w₂` of one sign and those on `n₊` of
+/// opposite signs, so a third surface, square to `w₂`, puts all eight in eight
+/// corners.
 ///
-/// What is proved, rather than taken from the paragraph above, is what
+/// **A ruling the two cones touch along is its own mirror image**, so it lies
+/// in the flat surface facing `w₁ × w₂`, and that surface cannot pick it. Its
+/// two halves are picked by the surface square to `w₁` alone, which parts
+/// them, and by the one square to `w₂` as well where the other flat surface
+/// holds rulings too, which parts them from those by the signs above.
+///
+/// What is proved, rather than taken from the paragraphs above, is what
 /// [`four_half_rulings_through_a_cones_apex`] proves: every picking surface
-/// passes exactly through the apex, and each half's enclosure reads strictly
-/// one side of each, in a corner of its own. `n±` itself is an enclosure, since
-/// `a₁` and `a₂` are roots.
+/// passes exactly through the apex, each half's enclosure reads strictly one
+/// side of each of its own, and every other half reads strictly outside one of
+/// them. `n±` itself is an enclosure, since `a₁` and `a₂` are roots.
 ///
 /// **The pair is sorted first**, by [`Surface::how_it_sorts_against`], so the
 /// cone whose rulings and nappes are read is the same whichever way round the
@@ -5825,30 +5859,39 @@ fn where_a_point_stands_against_a_cone(point: Point, cone: &Cone) -> impl Predic
 ///
 /// # Errors
 ///
-/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where the enclosure of
-/// `−E·‖w₁‖²` for either flat surface holds nothing — which is where the two
-/// cones touch along a ruling, and where they nearly do — and where anything
-/// above cannot be shown; and whatever [`HalfSpace::through_a_point_facing`]
-/// refuses.
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where the exact sign says a
+/// flat surface cuts two rulings and the enclosure of `−E·‖w₁‖²` still holds
+/// nothing, which is where the two cones are a rounding or so off touching — a
+/// **gap**, since the four halves are there; where the exact sign needs a
+/// product outside `f64`'s range; and where anything above cannot be shown; and
+/// whatever [`HalfSpace::through_a_point_facing`] refuses.
 fn the_rulings_two_cones_on_one_apex_share(one: &Cone, other: &Cone) -> Result<SurfaceMeet> {
     let (first, second) = match Surface::Cone(*one).how_it_sorts_against(&Surface::Cone(*other)) {
         Ordering::Greater => (other, one),
         Ordering::Less | Ordering::Equal => (one, other),
     };
     let mut halves = Vec::new();
+    let mut flat_surfaces_holding_rulings = 0;
     for side in [1.0, -1.0] {
         let normal = square_to_where_two_cones_on_one_apex_cross(first, second, side);
         let spread = how_far_apart_two_rulings_through_a_cones_apex_spread(normal, first);
-        if spread.hi() < 0.0 {
-            continue;
+        match how_a_flat_surface_where_two_cones_cross_meets_them(spread, first, second, side) {
+            Decision::Neg => continue,
+            Decision::Zero => {
+                let along = the_axis_laid_into_a_flat_surface_through_a_cones_apex(normal, first);
+                halves.extend([(along, false), (along.map(|component| -component), false)]);
+            }
+            Decision::Pos if spread.lo() > 0.0 => {
+                let Some(ways) = the_four_ways_two_rulings_leave_a_cones_apex(normal, first) else {
+                    unreachable!("a spread above nothing leaves the apex four ways");
+                };
+                halves.extend(ways.map(|way| (way, true)));
+            }
+            Decision::Pos | Decision::Undecidable { .. } | _ => {
+                return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+            }
         }
-        if spread.lo() <= 0.0 {
-            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
-        }
-        let Some(ways) = the_four_ways_two_rulings_leave_a_cones_apex(normal, first) else {
-            unreachable!("a spread above nothing leaves the apex four ways");
-        };
-        halves.extend(ways);
+        flat_surfaces_holding_rulings += 1;
     }
 
     let apex = first.apex();
@@ -5858,49 +5901,59 @@ fn the_rulings_two_cones_on_one_apex_share(one: &Cone, other: &Cone) -> Result<S
         });
     }
     let [along_the_first, along_the_second] = [first, second].map(|cone| cone.axis().direction());
-    let mut surfaces = vec![
-        HalfSpace::through_a_point_facing(apex, along_the_first.cross(along_the_second))?,
-        HalfSpace::through_a_point_facing(apex, along_the_first)?,
-    ];
-    if halves.len() == 8 {
-        surfaces.push(HalfSpace::through_a_point_facing(apex, along_the_second)?);
-    }
-    if !surfaces
+    let mirror = halves
         .iter()
+        .any(|&(_, crosses)| crosses)
+        .then(|| HalfSpace::through_a_point_facing(apex, along_the_first.cross(along_the_second)))
+        .transpose()?;
+    let nappes = HalfSpace::through_a_point_facing(apex, along_the_first)?;
+    let nappes_of_the_second = (flat_surfaces_holding_rulings == 2)
+        .then(|| HalfSpace::through_a_point_facing(apex, along_the_second))
+        .transpose()?;
+    if !mirror
+        .iter()
+        .chain([&nappes])
+        .chain(&nappes_of_the_second)
         .all(|surface| it_passes_exactly_through(surface, apex))
     {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     }
 
-    let mut corners: Vec<Vec<Decision>> = Vec::new();
+    let reads = |surface: &HalfSpace, half: [Interval; 3]| {
+        dot_enclosing(exactly(surface.normal().components()), half).sign()
+    };
     let mut runs = Vec::new();
-    for half in halves {
-        let corner: Vec<Decision> = surfaces
+    for (which, &(half, crosses)) in halves.iter().enumerate() {
+        let mut facing = Vec::new();
+        for surface in mirror
             .iter()
-            .map(|surface| dot_enclosing(exactly(surface.normal().components()), half).sign())
-            .collect();
-        if !corner
-            .iter()
-            .all(|sign| matches!(sign, Decision::Pos | Decision::Neg))
-            || corners.contains(&corner)
+            .filter(|_| crosses)
+            .chain([&nappes])
+            .chain(&nappes_of_the_second)
         {
+            facing.push(match reads(surface, half) {
+                Decision::Pos => *surface,
+                Decision::Neg => surface.reversed(),
+                Decision::Zero | Decision::Undecidable { .. } | _ => {
+                    return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+                }
+            });
+        }
+        let it_holds_no_other_half = halves
+            .iter()
+            .enumerate()
+            .filter(|&(other, _)| other != which)
+            .all(|(_, &(other, _))| {
+                facing
+                    .iter()
+                    .any(|surface| reads(surface, other) == Decision::Neg)
+            });
+        if !it_holds_no_other_half {
             return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
         }
-        let picked_by = surfaces
-            .iter()
-            .zip(&corner)
-            .map(|(surface, sign)| {
-                Picker::from(if *sign == Decision::Pos {
-                    *surface
-                } else {
-                    surface.reversed()
-                })
-            })
-            .collect();
-        corners.push(corner);
         runs.push(NamedRun::the_whole_of(EdgeRun::PartOfWhereItCrosses {
             and: Surface::Cone(*second),
-            picked_by,
+            picked_by: facing.into_iter().map(Picker::from).collect(),
         })?);
     }
     Ok(SurfaceMeet::Curves(runs))
@@ -5926,6 +5979,77 @@ fn square_to_where_two_cones_on_one_apex_cross(
     let by_the_second = widened(second, along_the_first) * Interval::exactly(side);
     core::array::from_fn(|axis| {
         by_the_first * along_the_first[axis] + by_the_second * along_the_second[axis]
+    })
+}
+
+/// Whether the flat surface square to `n±`, `side` choosing the sign, cuts the
+/// two cones of [`the_rulings_two_cones_on_one_apex_share`] in two rulings
+/// ([`Decision::Pos`]), touches them along one ([`Decision::Zero`]), or meets
+/// them at the apex alone ([`Decision::Neg`]). That is the sign of `spread`,
+/// the enclosure of `−E·‖w₁‖²`, read off it where it decides and worked out
+/// exactly where it holds nothing; [`Decision::Undecidable`] where the exact
+/// sign needs a product outside `f64`'s range.
+///
+/// # The sign without the roots
+///
+/// With `W₁ = ‖w₁‖²`, `W₂ = ‖w₂‖²`, `c = w₁·w₂` and `K = (1 + s₁²)(1 + s₂²)`, so
+/// that `a₁·a₂ = √(K·W₁·W₂)`, putting `n±` into `E` gives
+///
+/// ```text
+/// E  =  W₁·(L − R),    L  =  ±2c·√(K·W₁·W₂),    R  =  (s₁²s₂² − 1)·W₁·W₂ − K·c²
+/// ```
+///
+/// so `−E·W₁ = W₁²·(R − L)` has the sign of `R − L`, the same whichever cone
+/// is first. Only `L` holds a root, and its sign is that of `±c`. Where `L` is
+/// nothing, where `R` is, and where the two are of opposite signs, `R − L` has
+/// the sign of `R ∓ c`. Where they share a sign it has the sign of `R² − L²`
+/// times that one, and `L² = 4c²·K·W₁·W₂` holds no root.
+fn how_a_flat_surface_where_two_cones_cross_meets_them(
+    spread: Interval,
+    first: &Cone,
+    second: &Cone,
+    side: f64,
+) -> Decision {
+    if spread.lo() > 0.0 {
+        return Decision::Pos;
+    }
+    if spread.hi() < 0.0 {
+        return Decision::Neg;
+    }
+    let worked_out_exactly = || {
+        let [along_the_first, along_the_second] =
+            [first, second].map(|cone| cone.axis().direction().components());
+        let first_slope = Exact::product_of(first.slope(), first.slope())?;
+        let second_slope = Exact::product_of(second.slope(), second.slope())?;
+        let one = Exact::of(1.0);
+        let k = one.plus(&first_slope).times(&one.plus(&second_slope))?;
+        let lengths = Exact::dot_of(along_the_first, along_the_first)?
+            .times(&Exact::dot_of(along_the_second, along_the_second)?)?;
+        let c = Exact::dot_of(along_the_first, along_the_second)?;
+        let k_c_squared = k.times(&c.times(&c)?)?;
+        let r = first_slope
+            .times(&second_slope)?
+            .minus(&one)
+            .times(&lengths)?
+            .minus(&k_c_squared);
+        let leaning = c.times(&Exact::of(side))?;
+        let (r_sign, l_sign) = (r.sign(), leaning.sign());
+        if !(r_sign.is_certified() && l_sign.is_certified()) {
+            return None;
+        }
+        if l_sign == Decision::Zero || r_sign != l_sign {
+            return Some(r.minus(&leaning).sign());
+        }
+        let l_squared = Exact::of(4.0).times(&k_c_squared)?.times(&lengths)?;
+        let apart = r.square_minus(&l_squared)?;
+        Some(if r_sign == Decision::Pos {
+            apart.sign()
+        } else {
+            Exact::of(0.0).minus(&apart).sign()
+        })
+    };
+    worked_out_exactly().unwrap_or(Decision::Undecidable {
+        enclosure: spread.hi() - spread.lo(),
     })
 }
 
