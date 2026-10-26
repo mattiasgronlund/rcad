@@ -1162,31 +1162,28 @@ fn a_placed_pyramid_cut_by_a_wedge_through_its_apex_answers_under_tolerant_where
 }
 
 /// **Turned a tenth of a radian about `(−2, 1, 0.5)`, the sound pyramid and
-/// the wedge on one side of the `x` axis built there answer with a speck on
-/// the `+y` side face that the true planes do not make.** Before Q2575, at
-/// `a6e9e5d5b`, `certified` answered the intersection in 4 faces and 12 sides
-/// and the difference in 7 faces and 28 sides, with nothing in the log.
+/// the wedge on one side of the `x` axis built there answer as the true planes
+/// do, under `certified` and `tolerant(100)` alike**: the intersection in 4
+/// faces and 12 sides and the difference in 7 faces and 28 sides, with nothing
+/// in the log, as `certified` answered them before Q2575, at `a6e9e5d5b`.
 ///
 /// The wedge's edge crosses the `+x` side plane at a point which, worked out
 /// exactly, is behind each of the other three side planes, as the test
 /// checks. Exact fractions on the printed planes put it behind `+y` by
 /// `1.8e−17` of that plane's value. So in the true planes the intersection is
-/// four faces whose top corner is that point. A print put in `derive_a_corner` in `fuse/bake.rs` and taken out
-/// found the apex solved from the `−y`, `+x` and `−x` planes, so
-/// `ACornerReadAsOnePoint` in `fuse/arrange.rs` reads `+y` as moved through
-/// that apex (§448.8). The same fractions put the point `2.6e−16` in front of
-/// the moved `+y`, so the moved plane cuts off the top a triangle whose
-/// corners are within `2e−15` of one another. The intersection keeps it as a
-/// fifth face, 5 faces and 18 sides under `tolerant(100)`, the difference
-/// keeps a stretch of it in its `+y` face, 8 faces and 34 sides, and
-/// `certified` refuses both at the range check for it. Moved through the apex
-/// the other three meet in instead, `−y`, `+x` or `−x` would leave the point
-/// behind every other side plane, so whether the speck is made rests on which
-/// three planes `bake` solved the apex from. The answer of the true planes
-/// exists, so this is a gap and not the limit §448.7 settled: Q2758 filed a
-/// row for it.
+/// four faces whose top corner is that point. The apex has the least box
+/// where the `−y`, `+x` and `−x` planes meet, and read round it with `+y`
+/// moved through that point (§448.8), the point is `2.6e−16` in front of the
+/// moved `+y`: the moved plane cut off the top a triangle whose corners are
+/// within `2e−15` of one another. Up to Q2815 the intersection kept it as a
+/// fifth face, 5 faces and 18 sides under `tolerant(100)`, the difference kept
+/// a stretch of it in its `+y` face, 8 faces and 34 sides, and `certified`
+/// refused both at the range check for it. Moved through the apex the other
+/// three meet in instead, `−y`, `+x` or `−x` leaves the point behind every
+/// other side plane, so `bake` solves the apex from three planes that put no
+/// such point on another side of a plane than the true planes do (§448.8).
 #[test]
-fn a_pyramid_turned_and_cut_on_one_side_of_the_x_axis_keeps_a_speck_the_true_planes_do_not_make() {
+fn a_pyramid_turned_and_cut_on_one_side_of_the_x_axis_answers_as_the_true_planes_do() {
     let wedge = A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS;
     let placement = the_turn_that_keeps_a_speck_on_the_plus_y_face();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -1226,30 +1223,27 @@ fn a_pyramid_turned_and_cut_on_one_side_of_the_x_axis_keeps_a_speck_the_true_pla
         (
             Rule::Intersection,
             FacesAndSides {
-                faces: 5,
-                sides: 18,
+                faces: 4,
+                sides: 12,
             },
         ),
         (
             Rule::Difference,
             FacesAndSides {
-                faces: 8,
-                sides: 34,
+                faces: 7,
+                sides: 28,
             },
         ),
     ] {
-        let case = format!("{wedge:?} {rule:?}");
-        match the_wedge_through_the_apex_and_its_faces(
-            wedge,
-            placement,
-            rule,
-            &Policy::tolerant(100.0),
-        ) {
-            Ok((named, faces)) => {
-                assert_eq!(named, [DYNAMIC_RANGE_CHECK], "{case}");
-                assert_eq!(faces, left, "{case}");
+        for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+            let case = format!("{policy:?}, {wedge:?} {rule:?}");
+            match the_wedge_through_the_apex_and_its_faces(wedge, placement, rule, &policy) {
+                Ok((named, faces)) => {
+                    assert_eq!(named, Vec::<&str>::new(), "{case}");
+                    assert_eq!(faces, left, "{case}");
+                }
+                Err(refused) => panic!("{case} came back {refused:?}"),
             }
-            Err(refused) => panic!("{case} came back {refused:?}"),
         }
     }
 }

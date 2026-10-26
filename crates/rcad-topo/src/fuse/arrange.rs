@@ -16529,6 +16529,89 @@ impl ACornerReadAsOnePoint {
         the_room_holds(self.room, point)
     }
 
+    /// Whether the reading moves into or out of a convex corner a point where
+    /// three planes meet, of those round the corner and `near`, two or more of
+    /// them from `near`: whether it lies behind or on every plane round the
+    /// corner but its own, in the true planes or as read, and not in the
+    /// other. `true` too where a side cannot be worked out exactly. `outward`
+    /// is the planes round the corner, in the order of `around`, each turned
+    /// to face out of the solid, which round a convex corner is what lies
+    /// behind them all. A plane of `near` that is one round the corner, either
+    /// way round, is left out.
+    ///
+    /// **Three with two or more round the corner are left to the reading.**
+    /// They meet where an edge of the corner, or the corner itself, crosses
+    /// the third, so asking where that is asks where the corner is, and the
+    /// reading settles that. Three with two or more from `near` meet at a
+    /// point the other solid makes, where the line two of them cross along
+    /// meets a third, and a plane the reading moves can sweep across it.
+    ///
+    /// **A meet in front of a plane round the corner, truly and as read, is
+    /// outside the solid both times**, and which side of the other planes it
+    /// lies on changes nothing the solid holds. Turned a tenth of a radian
+    /// about `(−2, 1, 0.5)`, the pyramid of
+    /// `tests/a_broken_three_surface_corner_read_back_from_bytes.rs` has the
+    /// wedge's edge cross its `+x` side plane behind the other three, behind
+    /// `+y` by `1.8e−17` of that plane's value: that is where the edge enters
+    /// the pyramid. Solved from `−y`, `+x` and `−x`, the reading moves `+y`
+    /// and that crossing lands `2.6e−16` in front of it, outside. Solved from
+    /// `+x`, `+y` and `−x`, the reading moves `−y`, which turns round the
+    /// order the edge crosses `−y` and `−x` in, but both crossings are in
+    /// front of `+x`, truly and as read, so this reading moves nothing in or
+    /// out (§448.8).
+    pub(super) fn lets_a_crossing_in_through_a_face_it_does_not_cut(
+        &self,
+        outward: &[Plane],
+        crossing: &[Plane],
+    ) -> bool {
+        assert_eq!(
+            outward.len(),
+            self.around.len(),
+            "one plane facing out of the solid for each plane round the corner"
+        );
+        for (at, one) in crossing.iter().enumerate() {
+            for other in &crossing[at + 1..] {
+                for face in 0..self.around.len() {
+                    if self.lets_in_through(face, [*one, *other], outward) != Some(false) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Whether, as read, the line the two planes of `pair` cross along comes
+    /// into the corner through the face of the plane `around[face]`, and one
+    /// of the two does not cut that face further from the corner
+    /// ([`the_plane_cuts_the_face_away_from_the_corner`]). `Some(false)`
+    /// where the three do not meet at a point, or meet in front of another
+    /// plane round the corner, and `None` where a side cannot be worked out
+    /// exactly.
+    fn lets_in_through(&self, face: usize, pair: [Plane; 2], outward: &[Plane]) -> Option<bool> {
+        let meet = [self.around[face], pair[0], pair[1]];
+        let crossing = exactly_determinant(meet.map(|plane| normal_of(plane.coefficients())))?;
+        if expansion_sign(&crossing) == Decision::Zero {
+            return Some(false);
+        }
+        for (at, (plane, facing_out)) in self.around.iter().zip(outward).enumerate() {
+            if at == face {
+                continue;
+            }
+            let side = signs_multiplied([
+                self.side_of_a_meet(meet, *plane)?,
+                turned_to_face_out(*plane, *facing_out),
+                Decision::Pos,
+            ])?;
+            if side == Decision::Pos {
+                return Some(false);
+            }
+        }
+        let [one, other] =
+            pair.map(|plane| the_plane_cuts_the_face_away_from_the_corner(plane, face, outward));
+        Some(!(one? && other?))
+    }
+
     /// Which of two nodes on the line the `line`'s two planes cross in comes
     /// first along it, walked along `n₀ × n₁`, against the meet of those two
     /// and `cut`: [`Decision::Pos`] when `node` does, [`Decision::Zero`] when
@@ -16556,24 +16639,35 @@ impl ACornerReadAsOnePoint {
 
     /// Which side of `plane`, as read, the point `node` is read at lies on.
     pub(super) fn side_of(&self, node: &ANodeReadRoundACorner, plane: Plane) -> Option<Decision> {
-        let (value, turned) = match node {
-            ANodeReadRoundACorner::TheCorner => (self.where_it_runs(&plane)?, Decision::Pos),
-            ANodeReadRoundACorner::AMeet(three) => {
-                let [one, two, three] = *three;
-                let offsets = [
-                    self.where_it_runs(&one)?,
-                    self.where_it_runs(&two)?,
-                    self.where_it_runs(&three)?,
-                    self.where_it_runs(&plane)?,
-                ];
-                let normals = [one, two, three, plane].map(|plane| normal_of(plane.coefficients()));
-                (
-                    three_planes_against_a_fourth(normals, offsets.each_ref().map(Vec::as_slice))?,
-                    expansion_sign(&exactly_determinant([normals[0], normals[1], normals[2]])?),
-                )
-            }
-        };
-        signs_multiplied([expansion_sign(&value), turned, self.handed])
+        match node {
+            ANodeReadRoundACorner::TheCorner => signs_multiplied([
+                expansion_sign(&self.where_it_runs(&plane)?),
+                Decision::Pos,
+                self.handed,
+            ]),
+            ANodeReadRoundACorner::AMeet(three) => self.side_of_a_meet(*three, plane),
+        }
+    }
+
+    /// Which side of `plane`, as read, the point the three planes of `meet`
+    /// cross at, as read, lies on.
+    fn side_of_a_meet(&self, meet: [Plane; 3], plane: Plane) -> Option<Decision> {
+        let [one, two, three] = meet;
+        let offsets = [
+            self.where_it_runs(&one)?,
+            self.where_it_runs(&two)?,
+            self.where_it_runs(&three)?,
+            self.where_it_runs(&plane)?,
+        ];
+        let normals = [one, two, three, plane].map(|plane| normal_of(plane.coefficients()));
+        signs_multiplied([
+            expansion_sign(&three_planes_against_a_fourth(
+                normals,
+                offsets.each_ref().map(Vec::as_slice),
+            )?),
+            expansion_sign(&exactly_determinant([normals[0], normals[1], normals[2]])?),
+            self.handed,
+        ])
     }
 
     /// `ω` for `plane` as read: nothing for a plane round the corner, and its
@@ -16594,6 +16688,81 @@ impl ACornerReadAsOnePoint {
             [one, two, three, fourth].map(normal_of),
             [&[one[3]], &[two[3]], &[three[3]], &[fourth[3]]],
         )
+    }
+}
+
+/// [`Decision::Pos`] where `facing_out` is `plane`, and [`Decision::Neg`]
+/// where it is `plane` the other way round.
+fn turned_to_face_out(plane: Plane, facing_out: Plane) -> Decision {
+    if facing_out == plane {
+        return Decision::Pos;
+    }
+    assert_eq!(
+        facing_out,
+        plane.reversed(),
+        "a plane facing out of the solid is one round the corner, either way round"
+    );
+    Decision::Neg
+}
+
+/// Whether `plane` cuts the face of `outward[face]` further from a convex
+/// corner: whether it parts the far ends of that face's two edges at the
+/// corner. `outward` is the planes round the corner, each facing out of the
+/// solid. Moving a plane without turning it moves none of this, so it is the
+/// same in every reading of the corner and in the true planes.
+///
+/// An edge of the face is where its plane crosses another plane round the
+/// corner, `Q`, when every third plane round it leans the same way across
+/// that line: the sign `σ` of `det(n_R, n_face, n_Q)` is one for every third
+/// plane `R`, and the edge runs from the corner along `−σ·(n_face × n_Q)`,
+/// behind every `R`. `plane`'s side of its far end is then the sign of
+/// `−σ·det(n_plane, n_face, n_Q)`. `None` where a determinant is nought or
+/// cannot be worked out exactly, or the face has other than two edges.
+fn the_plane_cuts_the_face_away_from_the_corner(
+    plane: Plane,
+    face: usize,
+    outward: &[Plane],
+) -> Option<bool> {
+    let normals: Vec<[f64; 3]> = outward
+        .iter()
+        .map(|round| normal_of(round.coefficients()))
+        .collect();
+    let sign = |rows: [[f64; 3]; 3]| exactly_determinant(rows).map(|value| expansion_sign(&value));
+    let mut far_ends = Vec::new();
+    for other in (0..normals.len()).filter(|&other| other != face) {
+        let mut leaning: Option<Decision> = None;
+        let mut an_edge = true;
+        for third in (0..normals.len()).filter(|&third| third != face && third != other) {
+            let side = sign([normals[third], normals[face], normals[other]])?;
+            match side {
+                Decision::Pos | Decision::Neg => (),
+                Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+            }
+            if leaning.is_some_and(|so_far| so_far != side) {
+                an_edge = false;
+                break;
+            }
+            leaning = Some(side);
+        }
+        if !an_edge {
+            continue;
+        }
+        far_ends.push(signs_multiplied([
+            sign([
+                normal_of(plane.coefficients()),
+                normals[face],
+                normals[other],
+            ])?,
+            leaning?,
+            Decision::Neg,
+        ])?);
+    }
+    match far_ends.as_slice() {
+        [one, other] => Some(matches!(
+            (one, other),
+            (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos)
+        )),
+        _ => None,
     }
 }
 
