@@ -166,7 +166,9 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// apart by a flat surface, where every straight line of one cone is proved to
 /// cross the other twice, once each side of it, or one loop and two branches
 /// that run off for ever, held apart by two flat surfaces (Q2812) — see
-/// [`how_two_cones_off_one_axis_cross`] for which shapes stay refused. Two cones
+/// [`how_two_cones_off_one_axis_cross`] for which shapes stay refused, and why
+/// two cones of one slope that are mirror images and touch are refused as a
+/// crossing that touches itself (Q2813). Two cones
 /// with one apex, one slope and their axes along one line are the same surface
 /// and come back as one, **whichever way each axis points** — see
 /// [`one_cone_either_way_round`].
@@ -183,11 +185,15 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when a crossing comes in two
 /// pieces and no half-space that `f64` can write down provably holds them apart.
 ///
-/// **Nothing is refused for running through itself.** A ball resting on the
-/// far inside of a pipe and a thin pipe resting on the inside of a wider one
-/// are each tangent at a point of the curve they cross in, and each is named as
-/// two loops that meet there, picked out by the two sides of one flat surface
-/// through that point.
+/// A ball resting on the far inside of a pipe and a thin pipe resting on the
+/// inside of a wider one are each tangent at a point of the curve they cross
+/// in, and each is named as two loops that meet there, picked out by the two
+/// sides of one flat surface through that point.
+///
+/// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] for two cones
+/// of one slope off one axis that are exactly mirror images and touch, where
+/// their crossing is two flat cuts that meet. That is the one pair refused for
+/// running through itself.
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a cone against a
 /// second cone that shares neither its axis nor its apex, for a ball whose skin
@@ -5127,7 +5133,9 @@ fn how_far_along_the_axis_the_two_circles_sit(cone: &Cone, pipe: &Cylinder) -> I
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the two share
 /// neither an axis nor an apex and [`how_two_cones_off_one_axis_cross`] proves
-/// their crossing neither two loops nor one loop and two branches.
+/// their crossing neither two loops nor one loop and two branches, and
+/// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] where it finds
+/// them of one slope, mirror images, and touching.
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where two circles are not
 /// held apart by more than the picking half-space's own rounding, and where
