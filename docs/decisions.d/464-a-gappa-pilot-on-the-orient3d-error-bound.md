@@ -16521,308 +16521,192 @@ kernel on any of these shapes, so none of them has a class (§360.5).
 
 ### 464.24 A distance off a plane, and a plane's shift, with one product below the normals
 
-DRAFT, Q2694's second lane, handed over at its budget (§416) with every run
-done and the write-up not. The lane that finishes the row rewrites this
-subsection from the runs listed here, and drops the first generator.
+Q2694 asked whether 464.9's `signed.g` and `shiftplane.g` still hold with `L`
+at least `2⁻¹⁰²²` and one of the three products below `2⁻¹⁰²²`, which 464.9
+left unrun. Three lanes took it on 2026-10-26. The first wrote the first
+`signedcases.py`, whose runs failed (6). The second made every case prove, and
+ran the controls, `coqc` and a probe through the kernel. The third ran all of
+it again and wrote this.
 
-Second lane's runs, 2026-10-26, under 464.13's `one.sh`, of the scripts
-`signedcases.py` writes as it proves (the last blocks here):
+With one product below the normals and the other two normal, both bounds hold
+at the code's constants: `signed_distance_to` within `8u·L`, and a plane's or a
+half-space's shifted offset within `16u·|n|·L` (2). They need no condition on
+`L` of their own, since the two normal products already keep `L`, or `|n|·L`
+for the shift, near `2⁻¹⁰²²` or above (3). Coq checks all twelve, modulo their
+hints (4). A half-space whose normal is `2⁻⁶⁰` long, shifted by `(2⁻¹⁰²², 0,
+0)`, does not move at all where it should move `0.6·L`: for a half-space, `L`
+normal is not enough (5). Two or three products below the normals, and a zero
+factor, are not run (What this leaves).
 
-- Two things failed in the first runs. Gappa cannot check the hint `|n2| * L
-  -> |n2 * p2| / |p2 / L|`; it is replaced by `a0 / (|n2| * L) -> (a0 / t2) *
-  rp2 * ((n2 / |n2|) * (p2 / L))`, which it checks by algebra and which needs
-  only `|t2| >= 1b-1022`. And the case's own factors were not hypothesised
-  nonzero, so its share `|n_k|·L` could be zero and the averaging did not
-  happen; with all six factors at least `2⁻¹⁰⁷⁴`, which `X_k ≥ 2⁻²¹⁴⁸`
-  implies, every case proves. The amount is now `a<k>`, not `d<k>`.
-- `allcases.sh`: all twelve exit 0, in 0.58 to 0.93 s. Each prints `a<k>`
-  within `±2⁻¹⁰⁷⁵` and `(value − Ex) / D` within `±2⁻⁵¹`.
-- `allcontrols.sh`: each case asked below its bound exits 1, best
-  `±8.80372e-16` (`7.93u`) for `k` 0 and 1 and `±8.51749e-16` (`7.67u`) for
-  `k = 2`, signed and shift alike. `c_signeds2_sumonly.g` and
-  `c_signeds2n_sumonly.g`, the weighted sum bounded only to the `9/8 ·
-  1774/1024` the plain sum gives, exit 1, best `±9.76541e-16` (`8.8u`); the
-  shift's two exit 0, its goal being `16u`. Every case with `L in [1b-1074,
-  1b1024]` exits 0: with one product below the normals and two normal, the
-  bound needs no condition on `L`.
-- `allcoq.sh`: `gappa -Bcoq` and `coqc` exit 0 on the twelve and on the twelve
-  `_anyl` controls, 1.55 to 2.06 s each, 3275 to 4896 lines, 18 hints for `k`
-  0 or 1 and 19 for `k = 2`.
-- A kernel probe, the last block here, run with `just t` and removed, printed
-  `normal [5.204170427930421e-19, 6.938893903907229e-19, 0.0], |n| / 2^-60 1,
-  L = 2^-1022, offset after 0e0 (bits 0x0), true offset / (|n| L) 0.6,
-  SURFACE_AFTER_SHIFTING_ROUNDOFF 1.7763568394002505e-15`: a half-space whose
-  normal is `2⁻⁶⁰` long, shifted by `(2⁻¹⁰²², 0, 0)`, slips `0.6·|n|·L` with
-  `L` normal. One product is below the normals and two are zero. So for a
-  half-space `L` normal is not enough; wrong/D.
-- Not run: two or three products below the normals, or a zero factor, for
-  `signed.g` with `L` normal, and for the shift with `|n|·L` normal: a row.
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, unchanged, and `coqc` under 464.5's pins with gappalib
+1.8.0. The code is the base `d084a409`'s. `signed_distance_to`
+(`plane.rs:398-400`), `HalfSpace::shifted` (`half_space.rs:244-249`) and the
+two constants (`plane.rs:85-112`, `moved_corner.rs:99-143`) do the same
+arithmetic there as at 464.9's `c3b2160e`: `git diff --stat c3b2160e d084a409`
+on `plane.rs`, `half_space.rs` and `moved_corner.rs` names only `plane.rs`, and
+its hunks touch doc comments and one code comment. `u` is `2⁻⁵³` and `ε` is
+`2u`.
 
-The row asks whether `signed.g` and `shiftplane.g` (464.9) hold with `L` at
-least `2⁻¹⁰²²` and a product below `2⁻¹⁰²²`. The plan, not yet run to a proof:
+**1. The cases.** `signedcases.py` (below) writes one script for each product
+`k` in 0, 1, 2 and each sign, as 464.8's `planecases.py` did for `plane.g`:
+`signeds<k><sign>.g` from `signed.g` and `shifts<k><sign>.g` from
+`shiftplane.g`, `<sign>` empty for positive and `n` for negative. Twelve in
+all. In each:
 
-- One script per product `k` and sign, the other two products normal, as
-  464.8's `planecases.py`: `signeds<k><sign>.g` and `shifts<k><sign>.g`.
-- What rounding `X_k` cost is an amount `d_k`, at most `2⁻¹⁰⁷⁵`, spent out of
-  another product's share of the bound, which that product being normal keeps
-  at least `2⁻¹⁰²²`: product 2's for `k` 0 or 1, since product 2 meets one
-  rounding fewer than the `4u` a share is given; for `k = 2`, half each out of
-  products 0 and 1, whose shares become `9/8·|nᵢ|·L`, with product 2's `1/2`
-  of `|n₂|·L`. On paper that bounds `signed.g`'s error by `7.93u·L` for `k` 0
-  or 1 and `7.67u·L` for `k = 2`, the second by Cauchy-Schwarz with the
-  weights `(9/8, 9/8, 1/2)` on a unit normal; with only `Σ|nᵢ| ≤ 1774/1024`,
-  the paper count for `k = 2` reaches `8.8u·L`, over the code's `8u·L`.
-- With two products normal, `L` is at least `2⁻¹⁰²²/1.733` whatever the row
-  assumes, and a half-space's `|n|·L` at least `2⁻¹⁰²²`: so the one-product
-  case may need no condition on `L` at all, and the row's `L` normal matters
-  for two or three products below the normals.
+- the exact product `X_k = n_k·p_k` (`n_k·d_k` for the shift) is in `[2⁻²¹⁴⁸,
+  2⁻¹⁰²²]`, or its negative;
+- the other two products round to at least `2⁻¹⁰²²`, and each carries 464.5's
+  lemma;
+- no factor of the three products is zero, which the first two already say,
+  since a double that is not zero is at least `2⁻¹⁰⁷⁴`;
+- the rest is `signed.g`'s or `shiftplane.g`'s: `L` at least `2⁻¹⁰²²` and at
+  least every coordinate and the offset, no sum cancelling to zero, and the
+  bound on `|n₀| + |n₁| + |n₂|`.
 
-First runs of `signedcases.py` below, under 464.13's `one.sh`: `signeds0.g`
-and `signeds2.g` exit 1, `d_k` within `±2⁻¹⁰⁷⁵` but `(value − Ex) / D` near
-`±2¹⁹⁹⁸`; Gappa prints a `Difference` warning on the hint `|n2| * L -> |n2 *
-p2| / |p2 / L|`, which it cannot check, so the lower bound on `|n₂|·L` does
-not reach the proof. `shifts0.g` and `shifts2.g` do not parse: `d0` and `d2`
-name both the shift and the amount.
+Below `2⁻¹⁰²²` a rounding is no longer a slip relative to what it rounds, so
+what rounding `X_k` costs is carried as an amount: `a_k`, which is `t_k − X_k`
+times the roundings after it, and so at most `2⁻¹⁰⁷⁵` times them. 464.9's
+averaging gives each term a share of the bound `D`, `|nᵢ|·L` for a product and
+`L/4` for the offset, and proves each term's error within `4u` of its share.
+The amount is paid out of the share of a product that is normal, since only a
+normal product holds its `|nᵢ|·L` at least `2⁻¹⁰²²`, give or take a rounding:
 
-`signedcases.py`, as first run:
+- For `k` 0 or 1, out of product 2's. Product 2 meets three roundings, its
+  own, `s012`'s and `value`'s, where products 0 and 1 meet four, so `u·|n₂|·L`
+  of its share is unused, and that is at least `u·2⁻¹⁰²² = 2⁻¹⁰⁷⁵` give or
+  take a rounding. The shares are 464.9's, so `D/L ≤ 1774/1024 + 1/4`, and
+  `4u·D` is `7.93u·L`.
+- For `k = 2`, half out of product 0's and half out of product 1's, each grown
+  to `9/8·|nᵢ|·L`. Product 2's own rounding is now the amount, so it meets two
+  roundings and its share drops to `|n₂|·L/2`. Then `D/L = 9/8·|n₀| +
+  9/8·|n₁| + 1/2·|n₂| + 1/4`, and Cauchy-Schwarz with those weights, on a
+  normal whose `n·n` is within `64ε` of one, puts the first three under
+  `√178/8·√(1 + 64ε) < 1708/1024`. So `4u·D` is `7.67u·L`.
 
-```python
-"""Write signed.g's and shiftplane.g's cases with one product below the
-normals, as 464.8's planecases.py did for plane.g: signeds<k><sign>.g and
-shifts<k><sign>.g for product k in 0, 1, 2 and its sign, "" positive or "n"
-negative, the other two products normal, and what rounding product k cost
-carried as an amount d<k>, not a ratio.
+The shift's scripts are the same with `|n|·L` for `L`, as `shiftplane.g` is
+`signed.g`'s, and both sums are bounded over `|n|`.
 
-That amount is at most 2^-1075, and it is spent out of another product's
-share of the bound, which that product being normal keeps at least 2^-1022:
-product 2's for k 0 or 1, since product 2 meets one rounding fewer than the
-bound gives it; for k 2, half each out of products 0 and 1, whose shares are
-then 9/8 of |n_i| L, with product 2's, which meets two roundings, 1/2.
+**2. They prove.** `allcases.sh` writes the twelve and runs them through
+`runall.sh`. Each exits 0, in under a second, and prints `a_k` within
+`±2⁻¹⁰⁷⁵`, and `(value − Ex) / D` within `±2⁻⁵¹` as Gappa rounds it to print,
+which is `4u` and a term of order `u²`. So `signed_distance_to` is within
+`7.93u·L` for `k` 0 or 1 and `7.67u·L` for `k = 2`, under the code's `8u·L`,
+and the shifted offset within the same multiples of `|n|·L`, under the code's
+`16u·|n|·L`. The first lane also ran 464.9's `signed.g` at the base: it still
+proves, and `coqc` accepts it.
 
-Run as: python3 signedcases.py; it writes beside itself."""
-import os
+**3. The controls.** `casecontrols.py` changes one thing in each case, and
+`allcontrols.sh` runs them:
 
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+- `c_<case>_below.g` asks for just under what the averaging reaches, `63b-56`
+  (`7.875u`) for `k` 0 or 1 and `61b-56` (`7.625u`) for `k = 2`. All twelve
+  exit 1, with a best of `±8.80372e-16`, which is `7.93u`, for `k` 0 or 1, and
+  `±8.51749e-16`, `7.67u`, for `k = 2`, signed and shift alike. So the
+  hypotheses do not contradict each other, and the bound proved is the
+  averaging's.
+- `c_<case>_sumonly.g`, for `k = 2`, bounds the weighted sum only by `9/8` of
+  the plain sum's `1774/1024`, which is all that bound gives. The two signed
+  ones exit 1, best `±9.76541e-16`, `8.8u`, over the code's `8u`. The two shift
+  ones exit 0, since their goal is `16u`. So the signed `k = 2` case needs the
+  weighted Cauchy-Schwarz bound, that is, a `Plane`'s normal being near unit
+  length.
+- `c_<case>_anyl.g` lets `L` go down to `2⁻¹⁰⁷⁴`. All twelve exit 0. A normal
+  product, `|nᵢ·pᵢ| ≥ 2⁻¹⁰²²` with `|pᵢ| ≤ L` and `|nᵢ| ≤ 1774/1024`, keeps `L`
+  at least about `2⁻¹⁰²²/1.733`; for the shift, `|nᵢ|·L ≥ |nᵢ·dᵢ|` keeps
+  `|n|·L` at least about `2⁻¹⁰²²`. So with one product below the normals the
+  condition is the other two being normal, and nothing on `L` besides.
 
-LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
-# What each product meets after its own rounding: two sums and value for
-# products 0 and 1, one sum and value for product 2.
-AFTER = {0: "rv * rs012 * rs01", 1: "rv * rs012 * rs01", 2: "rv * rs012"}
+**4. Coq checks all twelve, modulo their hints.** `allcoq.sh` runs `gappa
+-Bcoq` and `coqc` through `one.sh` on the twelve and on the twelve `_anyl`
+controls, and both exit 0 on all 24. Over the second and third lanes' runs the
+`.v` files came to 3275 to 4896 lines, with 18 hints for `k` 0 or 1 and 19 for
+`k = 2`, and the two steps took 1.55 to 4.06 s a script. As in 464.22's 7,
+each hint enters the `.v` as a hypothesis with no condition, so a proof stands
+on its hints and on the divisors Gappa took to be nonzero. No `.out` holds
+anything but those divisor warnings and the results, so Gappa checked every
+hint's two sides equal by algebra. The divisors, 65 to 71 warnings a run, are
+`S01`, `S012` and `y`, which a hypothesis keeps from zero; and `L`, `N`,
+`|nᵢ|`, `|nᵢ|·L`, each product `nᵢ·pᵢ`, the `tᵢ` of a normal product, and
+`D`'s expansions, each of which is not zero since no factor is.
 
-SIGNED = {
-    "name": "signeds",
-    "about": "signed.g",
-    "q": "p",
-    "check": "signed_distance_to does not check",
-    "y": "y = s012 - off;",
-    "ex_off": " - off",
-    "e3": "e3 = -(off * W3);",
-    "e3_hint": "e3 / c3 -> -(4 * (off / L) * W3);",
-    "size": "L",
-    "c3": "c3 = 1b-2 * L;",
-    "off_bound": "off / L in [-1, 1]",
-    "sum": "|n0| + |n1| + |n2| in [0, 1774b-10]",
-    "sum_why": [
-        "  # A stored normal has n.n within NORMAL_LENGTH_ROUNDOFF = 64 epsilon of",
-        "  # one, so |n0| + |n1| + |n2| <= sqrt(3 (1 + 64 epsilon)) < 1774 / 1024.",
-    ],
-    "ratio": "D / L -> |n0| + |n1| + |n2| + 1b-2;",
-    "goal": "(value - Ex) / L in [-1b-50, 1b-50]",
-    "pre": "",
-}
+**5. A half-space through the kernel.** A probe test, appended to
+`crates/rcad-geom/tests/reading_a_distance_off_a_plane_stays_inside_its_bound.rs`,
+run with `just t q2694_probe_a_short_normal_shifted_by_the_least_normal
+--no-capture` and removed, by the second lane and again by the third, printed:
 
-SHIFT = {
-    "name": "shifts",
-    "about": "shiftplane.g",
-    "q": "d",
-    "check": "neither caller checks",
-    "y": "y = off + s012;",
-    "ex_off": "",
-    "e3": "e3 = off * W3;",
-    "e3_hint": "e3 / c3 -> 4 * (off / (N * L)) * W3;",
-    "size": "(N * L)",
-    "c3": "c3 = 1b-2 * (N * L);",
-    "off_bound": "off / (N * L) in [-1, 1]",
-    "sum": "(|n0| + |n1| + |n2|) / N in [0, 1774b-10]",
-    "sum_why": [
-        "  # |n0| + |n1| + |n2| <= sqrt(3) |n| < 1774 / 1024 |n|, by Cauchy-Schwarz.",
-    ],
-    "ratio": "D / (N * L) -> (|n0| + |n1| + |n2|) / N + 1b-2;",
-    "goal": "(value - Ex) / (N * L) in [-1b-49, 1b-49]",
-    "pre": "off + ",
-}
-
-
-def make(s, k, neg):
-    q = s["q"]
-    size = s["size"]
-    others = [i for i in (0, 1, 2) if i != k]
-    sign_word = "negative" if neg else "positive"
-    prod = {i: f"X{k}" if i == k else f"n{i} * {q}{i}" for i in (0, 1, 2)}
-    lines = [
-        f"# {s['about']} where n{k} * {q}{k} may be below the normals, which",
-        f"# {s['check']}: n{k} * {q}{k} is under 2^-1022 and {sign_word}, and the",
-        "# other two products are normal.",
-        "@rnd = float<ieee_64, ne>;",
-        "",
-        "n0 = rnd(n0_); n1 = rnd(n1_); n2 = rnd(n2_);",
-        f"{q}0 = rnd({q}0_); {q}1 = rnd({q}1_); {q}2 = rnd({q}2_);",
-        "off = rnd(off_);",
-        "",
-        f"X{k} = n{k} * {q}{k};",
-        "; ".join(f"t{i} = rnd({prod[i]})" for i in (0, 1, 2)) + ";",
-        "S01 = t0 + t1;",
-        "s01 = rnd(S01);",
-        "S012 = s01 + t2;",
-        "s012 = rnd(S012);",
-        s["y"],
-        "value = rnd(y);",
-        "",
-    ]
-    if s is SIGNED:
-        lines.append("Ex = " + " + ".join(prod[i] for i in (0, 1, 2)) + " - off;")
-    else:
-        lines.append("Ex = off + " + " + ".join(prod[i] for i in (0, 1, 2)) + ";")
-        lines.append("N = sqrt(n0 * n0 + n1 * n1 + n2 * n2);")
-    lines += [
-        "",
-        "; ".join(f"rp{i} = t{i} / (n{i} * {q}{i})" for i in others) + ";",
-        "rs01 = s01 / S01; rs012 = s012 / S012; rv = value / y;",
-        "",
-        f"# Each term's error as a fraction of the term, for X{k} and not t{k}, and",
-        f"# what rounding X{k} cost, as an amount.",
-    ]
-    for i in (0, 1, 2):
-        lines.append(f"W{i} = {AFTER[i]} - 1;" if i == k else f"W{i} = {AFTER[i]} * rp{i} - 1;")
-    lines.append("W3 = rv - 1;")
-    lines.append("; ".join(f"e{i} = {prod[i]} * W{i}" for i in (0, 1, 2)) + "; " + s["e3"])
-    lines.append(f"d{k} = (t{k} - X{k}) * ({AFTER[k]});")
-    lines.append("")
-    if k == 2:
-        lines += [
-            "# Each term's share of the bound. d2 is spent half out of product 0's",
-            "# share and half out of product 1's, each 9/8 of |n_i| L; product 2",
-            "# meets two roundings, so 1/2 of |n2| L is its share.",
-            "c0 = 9b-3 * (|n0| * L); c1 = 9b-3 * (|n1| * L); c2 = 1b-1 * (|n2| * L); " + s["c3"],
-        ]
-    else:
-        lines += [
-            f"# Each term's share of the bound, as in {s['about']}. d{k} is spent out of",
-            "# product 2's share, since product 2 meets one rounding fewer.",
-            "c0 = |n0| * L; c1 = |n1| * L; c2 = |n2| * L; " + s["c3"],
-        ]
-    lines += [
-        "D = c0 + c1 + c2 + c3;",
-        "",
-        "{",
-        "     |n0| <= 1b1024 /\\ |n1| <= 1b1024 /\\ |n2| <= 1b1024",
-        f"  /\\ |{q}0| <= 1b1024 /\\ |{q}1| <= 1b1024 /\\ |{q}2| <= 1b1024",
-        "  /\\ |off| <= 1b1024",
-        "  # No factor of the two normal products is zero.",
-        "  /\\ " + " /\\ ".join(f"|n{i}| >= 1b-1074" for i in others),
-        "  /\\ " + " /\\ ".join(f"|{q}{i}| >= 1b-1074" for i in others),
-        "  # No sum cancels to zero.",
-        "  /\\ |S01| >= 1b-1074 /\\ |S012| >= 1b-1074 /\\ |y| >= 1b-1074",
-        f"  # The case: X{k} is {sign_word} and below the normals, the other two",
-        "  # products are normal. A product of two doubles that are not zero is at",
-        "  # least 2^-2148.",
-        f"  /\\ X{k} in " + ("[-1b-1022, -1b-2148]" if neg else "[1b-2148, 1b-1022]"),
-        "  /\\ " + " /\\ ".join(f"|t{i}| >= 1b-1022" for i in others),
-        "  # What lemma.g proves each of those two gives.",
-    ]
-    for i in others:
-        lines.append(f"  /\\ t{i} -/ n{i} * {q}{i} {LEMMA}")
-    lines += [
-        "  # L is at least 2^-1022, and at least every coordinate and the offset.",
-        "  /\\ L in [1b-1022, 1b1024]",
-        f"  /\\ {q}0 / L in [-1, 1] /\\ {q}1 / L in [-1, 1] /\\ {q}2 / L in [-1, 1]",
-        "  /\\ " + s["off_bound"],
-    ]
-    lines += s["sum_why"]
-    lines.append("  /\\ " + s["sum"])
-    if k == 2:
-        if s is SIGNED:
-            lines += [
-                "  # By Cauchy-Schwarz the same way, 9/8 |n0| + 9/8 |n1| + 1/2 |n2| <=",
-                "  # sqrt(178) / 8 sqrt(1 + 64 epsilon) < 1708 / 1024.",
-                "  /\\ 9b-3 * |n0| + 9b-3 * |n1| + 1b-1 * |n2| in [0, 1708b-10]",
-            ]
-        else:
-            lines += [
-                "  # By Cauchy-Schwarz the same way, 9/8 |n0| + 9/8 |n1| + 1/2 |n2| <=",
-                "  # sqrt(178) / 8 |n| < 1708 / 1024 |n|.",
-                "  /\\ (9b-3 * |n0| + 9b-3 * |n1| + 1b-1 * |n2|) / N in [0, 1708b-10]",
-            ]
-    lines += [
-        "  # x / |x| is in [-1, 1] for any x that is not zero.",
-        "  /\\ n0 / |n0| in [-1, 1] /\\ n1 / |n1| in [-1, 1] /\\ n2 / |n2| in [-1, 1]",
-        "->",
-        f"  d{k} in ? /\\ (value - Ex) / D in ?",
-        "  /\\ " + s["goal"],
-        "}",
-        "",
-        "# How far each rounding is from the identity.",
-    ]
-    for i in others:
-        lines.append(f"t{i} / (n{i} * {q}{i}) -> 1 + (t{i} - n{i} * {q}{i}) / (n{i} * {q}{i});")
-    lines += [
-        "s01 / S01 -> 1 + (s01 - S01) / S01;",
-        "s012 / S012 -> 1 + (s012 - S012) / S012;",
-        "value / y -> 1 + (value - y) / y;",
-        "",
-        f"# The error is the sum of the four terms' errors and d{k}, each a fraction",
-        "# of its share of D; add_rr then averages them.",
-        f"(value - Ex) / {size} -> ((value - Ex) / D) * (D / {size});",
-    ]
-    if k == 2:
-        if s is SIGNED:
-            lines.append("D / L -> 9b-3 * |n0| + 9b-3 * |n1| + 1b-1 * |n2| + 1b-2;")
-        else:
-            lines.append("D / (N * L) -> (9b-3 * |n0| + 9b-3 * |n1| + 1b-1 * |n2|) / N + 1b-2;")
-    else:
-        lines.append(s["ratio"])
-    lines.append("(value - Ex) / D -> ((D + (value - Ex)) - D) / D;")
-    if k == 2:
-        lines += [
-            "D + (value - Ex) -> (c0 + (e0 + 1b-1 * d2)) + (c1 + (e1 + 1b-1 * d2)) + (c2 + e2) + (c3 + e3);",
-            "(c0 + (e0 + 1b-1 * d2)) - c0 -> e0 + 1b-1 * d2;",
-            "(c1 + (e1 + 1b-1 * d2)) - c1 -> e1 + 1b-1 * d2;",
-            "(c2 + e2) - c2 -> e2;",
-            "(c3 + e3) - c3 -> e3;",
-            f"(e0 + 1b-1 * d2) / c0 -> 8 / 9 * ((n0 / |n0|) * ({q}0 / L) * W0) + 4 / 9 * (d2 / (|n0| * L));",
-            f"(e1 + 1b-1 * d2) / c1 -> 8 / 9 * ((n1 / |n1|) * ({q}1 / L) * W1) + 4 / 9 * (d2 / (|n1| * L));",
-            f"e2 / c2 -> 2 * ((n2 / |n2|) * ({q}2 / L) * W2);",
-            s["e3_hint"],
-            "# Product i being normal keeps |n_i| L at least |n_i * " + q + "_i|.",
-            f"|n0| * L -> |n0 * {q}0| / |{q}0 / L|;",
-            f"|n1| * L -> |n1 * {q}1| / |{q}1 / L|;",
-        ]
-    else:
-        lines += [
-            f"D + (value - Ex) -> (c0 + e0) + (c1 + e1) + (c2 + (e2 + d{k})) + (c3 + e3);",
-            "(c0 + e0) - c0 -> e0;",
-            "(c1 + e1) - c1 -> e1;",
-            f"(c2 + (e2 + d{k})) - c2 -> e2 + d{k};",
-            "(c3 + e3) - c3 -> e3;",
-            f"e{others[0]} / c{others[0]} -> (n{others[0]} / |n{others[0]}|) * ({q}{others[0]} / L) * W{others[0]};",
-            f"e{k} / c{k} -> (n{k} / |n{k}|) * ({q}{k} / L) * W{k};",
-            f"(e2 + d{k}) / c2 -> (n2 / |n2|) * ({q}2 / L) * W2 + d{k} / (|n2| * L);",
-            s["e3_hint"],
-            "# Product 2 being normal keeps |n2| L at least |n2 * " + q + "2|.",
-            f"|n2| * L -> |n2 * {q}2| / |{q}2 / L|;",
-        ]
-    lines = [l for l in lines]
-    return "\n".join(lines) + "\n"
-
-
-for s in (SIGNED, SHIFT):
-    for k in (0, 1, 2):
-        for neg in (False, True):
-            name = f"{s['name']}{k}{'n' if neg else ''}"
-            open(f"{name}.g", "w").write(make(s, k, neg))
+```text
+normal [5.204170427930421e-19, 6.938893903907229e-19, 0.0], |n| / 2^-60 1, L = 2^-1022, offset after 0e0 (bits 0x0), true offset / (|n| L) 0.6, SURFACE_AFTER_SHIFTING_ROUNDOFF 1.7763568394002505e-15
 ```
 
-`signedcases.py`, as it proves, whole:
+```rust
+#[test]
+fn q2694_probe_a_short_normal_shifted_by_the_least_normal() {
+    let short = 2f64.powi(-60);
+    let half =
+        rcad_geom::HalfSpace::new(rcad_geom::Vector::new(0.6 * short, 0.8 * short, 0.0), 0.0)
+            .unwrap();
+    let least_normal = f64::MIN_POSITIVE;
+    let shifted = half.shifted(rcad_geom::Vector::new(least_normal, 0.0, 0.0));
+    let n = half.normal().components();
+    let length = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+    println!(
+        "normal {n:?}, |n| / 2^-60 {}, L = 2^-1022, offset after {:e} (bits {:#x}), true offset / (|n| L) {}, SURFACE_AFTER_SHIFTING_ROUNDOFF {:?}",
+        length / short,
+        shifted.offset(),
+        shifted.offset().to_bits(),
+        n[0] / length,
+        rcad_geom::SURFACE_AFTER_SHIFTING_ROUNDOFF
+    );
+}
+```
+
+`HalfSpace::new` stores the normal `(0.6, 0.8, 0)·2⁻⁶⁰` and the offset 0 as
+given (`half_space.rs:72-90`), and `HalfSpace::shifted` adds `normal·by` to the
+offset. The true new offset is `0.6·2⁻¹⁰⁸²`, under half of `2⁻¹⁰⁷⁴`, so it
+rounds to 0. The offset slips `0.6·|n|·L`, which is `0.6·L` as a distance,
+against the `16u·|n|·L` the constant promises, with `L = 2⁻¹⁰²²` normal. One
+product, `n₀·d₀`, is below the normals and the other two are zero, so the case
+is outside the twelve, which ask the other two to be normal. For a half-space,
+whose normal is any length, the condition on a shift has to be on `|n|·L` or
+on the products, not on `L`. Whether a `Plane`, whose normal is near unit
+length, misses with two or three products below the normals is the row below.
+This is class wrong/D (§352.3): a product below `2⁻¹⁰²²` needs numbers far
+outside §3.5's envelope, here `L = 2⁻¹⁰²²`, `2.2e-310` times its nominal `100`,
+and `|n| = 2⁻⁶⁰`. What it makes false is the doc on `moved_corner.rs:99-143`,
+which Q2695 restates.
+
+**6. Why the first runs failed.** The first `signedcases.py`, which is not
+appended, made `signeds0.g` and `signeds2.g` exit 1 with `(value − Ex) / D`
+near `±2¹⁹⁹⁸`: its hint `|n2| * L -> |n2 * p2| / |p2 / L|` needs `|ab| =
+|a|·|b|`, which Gappa cannot check, so the floor under `|n₂|·L` never reached
+the proof, and the case's own factors were not held nonzero, so its share
+`|n_k|·L` could be zero. The hint is now `a0 / (|n2| * L) -> (a0 / t2) * rp2 *
+((n2 / |n2|) * (p2 / L))`, which Gappa checks by algebra, every factor is held
+at least `2⁻¹⁰⁷⁴`, and the amount is named `a<k>`, since `d0` and `d2` had
+named the shift too, and `shifts0.g` and `shifts2.g` did not parse.
+
+**What this leaves.**
+
+- Two or three products below `2⁻¹⁰²²`, or a zero factor, for `signed.g` with
+  `L` at least `2⁻¹⁰²²` and for `shiftplane.g` with `|n|·L` at least
+  `2⁻¹⁰²²`, split by where each product lands as 464.18's `planeall.py` split
+  `plane.g`: a row. The half-space of 5 is one such case.
+- Q2695 restates the doc comments of `plane.rs:85-112` and
+  `moved_corner.rs:99-143` with the condition the proofs need, and now waits on
+  that row. For a half-space that condition is on `|n|·L` or on the products,
+  not on `L` (5). That is Q2695's to state, not a new row.
+- Q2700 moves these scripts into `proofs/gappa/` with the rest of §464's.
+
+**The scripts, whole, as they ran.** To run them again, save
+`signedcases.py`, `casecontrols.py`, `allcases.sh`, `runall.sh`,
+`allcontrols.sh` and `allcoq.sh` in one directory with 464.13's `one.sh`, make
+the `.sh` files executable, and run `./allcases.sh`, then `./allcontrols.sh`
+and `./allcoq.sh`, in that order, since `casecontrols.py` reads the cases
+`signedcases.py` writes. The `.g` files are not appended: `signedcases.py`
+writes them.
+
+`signedcases.py`, whole:
 
 ```python
 """Write signed.g's and shiftplane.g's cases with one product below the
@@ -17153,31 +17037,4 @@ for f in signeds0.g signeds0n.g signeds1.g signeds1n.g signeds2.g signeds2n.g \
   c_shifts0_anyl.g c_shifts0n_anyl.g c_shifts1_anyl.g c_shifts1n_anyl.g c_shifts2_anyl.g c_shifts2n_anyl.g; do
   ./one.sh "$f" coq
 done
-```
-
-The kernel probe, appended to
-`crates/rcad-geom/tests/reading_a_distance_off_a_plane_stays_inside_its_bound.rs`,
-run with `just t q2694_probe_a_short_normal_shifted_by_the_least_normal
---no-capture`, and removed:
-
-```rust
-#[test]
-fn q2694_probe_a_short_normal_shifted_by_the_least_normal() {
-    let short = 2f64.powi(-60);
-    let half =
-        rcad_geom::HalfSpace::new(rcad_geom::Vector::new(0.6 * short, 0.8 * short, 0.0), 0.0)
-            .unwrap();
-    let least_normal = f64::MIN_POSITIVE;
-    let shifted = half.shifted(rcad_geom::Vector::new(least_normal, 0.0, 0.0));
-    let n = half.normal().components();
-    let length = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
-    println!(
-        "normal {n:?}, |n| / 2^-60 {}, L = 2^-1022, offset after {:e} (bits {:#x}), true offset / (|n| L) {}, SURFACE_AFTER_SHIFTING_ROUNDOFF {:?}",
-        length / short,
-        shifted.offset(),
-        shifted.offset().to_bits(),
-        n[0] / length,
-        rcad_geom::SURFACE_AFTER_SHIFTING_ROUNDOFF
-    );
-}
 ```
