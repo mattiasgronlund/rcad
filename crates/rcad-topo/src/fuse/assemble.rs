@@ -40,6 +40,16 @@
 //! different solid on each side stays refused: §80.9 leaves two touching
 //! solids unbuilt.
 //!
+//! A line flat faces still crowd after that, since Q2784, is parted where
+//! each face's dart pairs with one of another face on its plane facing the
+//! same way, walking the line the other way, and at most one dart each way on
+//! two planes is left over to be the line's own edge.
+//! [`Assembly::part_each_line_more_faces_walk_into_pairs_on_one_plane`] does
+//! it, for an edge a rounding long by the placed pyramid's apex that pieces of
+//! a wedge's faces walk six or four times in the union of the two. Each pair on
+//! one plane is two pieces of one flat region, and the joining dissolves the
+//! line between them.
+//!
 //! # Two pieces on one plane are one face
 //!
 //! Selection can keep two pieces that lie on the same plane facing the same way
@@ -1553,6 +1563,11 @@ impl Assembly {
     /// the skin's edge and not to the wall's, which is dissolved, and the
     /// prism's edge goes to the prism's; the line is no edge of the wall or the
     /// top face, so theirs takes none.
+    ///
+    /// A line this leaves with more than two darts along it, whether more than
+    /// four or four pieces of one input face, goes on to
+    /// [`Assembly::part_each_line_more_faces_walk_into_pairs_on_one_plane`],
+    /// which parts it where its darts pair up on planes facing one way.
     ///
     /// # Panics
     ///

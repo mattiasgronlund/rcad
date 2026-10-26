@@ -62,7 +62,13 @@
 //! the difference and the union `TheFuseWroteABrokenAnswer`, for a speck whose
 //! corners, stored at the middles of the boxes they were solved as, wound
 //! against its normal, until the fuse walked one of them a few roundings
-//! further inside its box (Q2783).
+//! further inside its box (Q2783). Shifted to `(7, −5, 2.5)` and no more, the
+//! union with the wedge over the `−y` edge was refused `ResultIsNotManifold`,
+//! and so was the one with the wedge over the `+y` edge at that shift after
+//! the turn 2.9 about `(0.3, −1, 2)`: pieces of the wedge's faces walked an
+//! edge a rounding long by the apex six and four times. `tolerant(100)`
+//! answers both now that the fuse pairs those up, each with one of another
+//! piece on its plane walking the edge the other way (Q2784).
 //! Turned a tenth of a radian about `(0.3, −1, 2)`, the wedge
 //! round the `x` axis keeps an edge a rounding long by the apex, as the cut
 //! through it does: `certified` refuses every rule for it, and
@@ -849,7 +855,11 @@ fn a_wedge_over_the_minus_y_edge_through_the_apex_shifted_after_a_turn_about_min
 /// a rounding apart come out one corner: at the plain shift one piece of the
 /// face `y = −x/2` walks out to a corner and back along one edge, and that
 /// edge, a rounding long, is claimed by four darts of that face and two of the
-/// face `y = −2x`, each face's on both sides of it.
+/// face `y = −2x`, each face's on both sides of it. Turned, four darts of one
+/// wedge face claim such an edge, one piece walking out along it and back.
+/// The fuse now pairs each dart with one of another piece on its plane that
+/// walks the edge the other way, gives each pair an edge of its own, and
+/// dissolves each as the line between two pieces of one flat region.
 #[test]
 fn two_wedges_through_the_apex_unite_with_the_placed_pyramid_under_tolerant() {
     let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a plain translation");
