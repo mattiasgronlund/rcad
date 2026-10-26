@@ -17643,9 +17643,10 @@ change.
 `adz` with `second` and `bdz` with `first` zero both `t1` and `t2`, one by its
 shape and one by cancelling. Each script without what `both_first_terms_zero`
 adds, so with `P`, `Phat` and the goal as block 1 writes them and the hints
-`dz_<difference>.g` has, fails at `REL(P, Phat)`: `adz` with `second` with
-best `[-2.10534e+465, 6.2623e+421]`, and `bdz` with `first` with
-`[-1.77847e+476, 1.93842e+419]`. `both_first_terms_zero` does what 464.7 does
+`dz_<difference>.g` has, fails at `REL(P, Phat)`, with the goal's best
+`[-2.10534e+465, 6.2623e+421]` for `adz` with `second` and
+`[-1.77847e+476, 1.93842e+419]` for `bdz` with `first`. Gappa finds no
+bound on `P −/ Phat` at all. `both_first_terms_zero` does what 464.7 does
 for `third` at zero. It asks for `(P − Phat) / Phat`, splits `Phat` into
 `Phat1`, `Phat2` and `Phat3`, and adds six hints, which carry the cancelled
 term's `r` as an amount against `Phat`, since it may be below the normals, and
