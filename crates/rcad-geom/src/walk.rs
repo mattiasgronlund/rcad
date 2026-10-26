@@ -2180,8 +2180,9 @@ fn the_two_corners_of_an_open_run(run: &NamedRun) -> Option<[PredicatePoint; 2]>
 /// [`intersect`](crate::intersect) refuses for the pair, for a run whose two
 /// corners are on different seeds' sides.
 ///
-/// [`Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces`] when settling
-/// a seed lands detectably off one of the two surfaces
+/// [`Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces`],
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] and
+/// [`Error::CannotWorkOutHowBigACrossingIs`], all from settling a seed
 /// ([`settled_with_a_bound`]).
 fn the_seed_this_run_is_picked_up_at(
     run: &NamedRun,
