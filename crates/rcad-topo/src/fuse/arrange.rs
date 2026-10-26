@@ -18675,10 +18675,12 @@ fn a_pair_that_crosses_in_a_conic(
         // and no run of any other family exists to be asked.
         | (Surface::Plane(_), Surface::Torus(_))
         | (Surface::Torus(_), Surface::Plane(_))
-        // A cone against a pipe, a second cone or a ball: off one axis each
-        // crosses in a quartic, and `intersect` refuses all three by name
-        // there. On one axis they cross in circles square to it, and those are
-        // the only runs of these pairs `intersect` names.
+        // A cone against a pipe or a ball, off one axis, crosses in a
+        // quartic `intersect` refuses by name. A cone against a second
+        // cone, off one axis, crosses in two loops instead, each ordered
+        // round the ruled cone's axis since Q2807, and `intersect` decides
+        // that pair rather than refusing it, since Q2667. On one axis all
+        // three pairs cross in circles square to it.
         | (Surface::Cone(_), Surface::Cylinder(_) | Surface::Cone(_) | Surface::Sphere(_))
         | (Surface::Cylinder(_) | Surface::Sphere(_), Surface::Cone(_)) => true,
         // Two planes cross in a straight line and are answered one step up, so
