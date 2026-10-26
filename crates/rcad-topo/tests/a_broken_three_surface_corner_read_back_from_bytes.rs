@@ -58,9 +58,11 @@
 //! here is refused so: under `certified` 30 are refused at the range check
 //! §448.7 settled for the cut through the apex and 9 answer. At the eight
 //! placements where the order along a side face's edge went round in a loop
-//! by the apex, `tolerant(100)` answers every rule at seven. At the eighth it
-//! answers the intersection and refuses the difference and the union
-//! `TheFuseWroteABrokenAnswer`, a face that winds against its normal.
+//! by the apex, `tolerant(100)` answers every rule. At the eighth it refused
+//! the difference and the union `TheFuseWroteABrokenAnswer`, for a speck whose
+//! corners, stored at the middles of the boxes they were solved as, wound
+//! against its normal, until the fuse walked one of them a few roundings
+//! further inside its box (Q2783).
 //! Turned a tenth of a radian about `(0.3, −1, 2)`, the wedge
 //! round the `x` axis keeps an edge a rounding long by the apex, as the cut
 //! through it does: `certified` refuses every rule for it, and
@@ -757,28 +759,23 @@ fn a_tilted_wall_is_one_plane_whether_a_prism_or_the_hole_it_fills_stands_on_it(
 /// 2)` was refused `Undecidable` under both, for a speck by the apex that the
 /// lines where side planes cross a wedge face cut out of it (the test below).
 /// Now `certified` refuses it at the range check by every rule, and
-/// `tolerant(100)` answers the intersection with that check in the log and
-/// refuses the difference and the union `TheFuseWroteABrokenAnswer`, a face
-/// whose outline winds against its normal; why is not traced.
+/// `tolerant(100)` answers every rule with that check in the log. The
+/// difference and the union were refused `TheFuseWroteABrokenAnswer`. The
+/// corners of a speck of a side face by the apex, stored at the middles of
+/// the boxes they were solved as, wound it against its normal, where the
+/// planes it was cut from, worked out exactly, do not, and no move of a
+/// rounding turned it. The fuse now walks one corner four roundings further
+/// inside its box (Q2783).
 #[test]
 fn a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_tells_its_cells_apart() {
-    use Came::{
-        Answered, AnsweredPastTheRangeCheck, RefusedAtTheRangeCheck, WroteAFaceAgainstItsNormal,
-    };
+    use Came::{Answered, AnsweredPastTheRangeCheck, RefusedAtTheRangeCheck};
     // Under `tolerant(100)`, by `Difference`, `Intersection` and `Union`.
     let under_each_policy = [
         (Answered, [Answered; 3]),
         (RefusedAtTheRangeCheck, [AnsweredPastTheRangeCheck; 3]),
         (Answered, [Answered; 3]),
         (RefusedAtTheRangeCheck, [AnsweredPastTheRangeCheck; 3]),
-        (
-            RefusedAtTheRangeCheck,
-            [
-                WroteAFaceAgainstItsNormal,
-                AnsweredPastTheRangeCheck,
-                WroteAFaceAgainstItsNormal,
-            ],
-        ),
+        (RefusedAtTheRangeCheck, [AnsweredPastTheRangeCheck; 3]),
         (RefusedAtTheRangeCheck, [AnsweredPastTheRangeCheck; 3]),
         (RefusedAtTheRangeCheck, [AnsweredPastTheRangeCheck; 3]),
         (RefusedAtTheRangeCheck, [AnsweredPastTheRangeCheck; 3]),
@@ -804,6 +801,42 @@ fn a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_tells_its_cells_ap
             }
         }
     }
+}
+
+/// **Shifted to `(7, −5, 2.5)` after the turn 0.7 about `(−2, 1, 0.5)`, the
+/// wedge over the `−y` edge leaves a speck of a side face by the apex as well,
+/// and `tolerant(100)` answers every rule.** Queue row Q2583's sweep at Q2744's
+/// tip found the difference and the union refused `TheFuseWroteABrokenAnswer`,
+/// the speck's outline winding against its normal, where `5afdb494` refused
+/// them `ResultIsNotManifold { count: 1 }`. As at the turn about `(0.3, −1,
+/// 2)` (the test above), no move of a rounding turned it, and the fuse now
+/// walks one corner two roundings further inside the box it was solved as
+/// (queue row Q2783). `certified` refuses every rule at the range check.
+#[test]
+fn a_wedge_over_the_minus_y_edge_through_the_apex_shifted_after_a_turn_about_minus_2_1_half_answers_under_tolerant()
+ {
+    use Came::{AnsweredPastTheRangeCheck, RefusedAtTheRangeCheck};
+    let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a plain translation");
+    let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(-2.0, 1.0, 0.5)).expect("an axis");
+    let placement = shift.compose(&Isometry::rotation(&axis, 0.7).expect("a turn"));
+    let came: Vec<[Came; 2]> = [Rule::Difference, Rule::Intersection, Rule::Union]
+        .into_iter()
+        .map(|rule| {
+            [Policy::certified(), Policy::tolerant(100.0)].map(|policy| {
+                what_the_wedge_through_the_apex_came_to(
+                    A_WEDGE_OVER_THE_MINUS_Y_EDGE,
+                    placement,
+                    rule,
+                    &policy,
+                )
+            })
+        })
+        .collect();
+    assert_eq!(
+        came,
+        [[RefusedAtTheRangeCheck, AnsweredPastTheRangeCheck]; 3],
+        "by difference, intersection and union, each under certified and tolerant(100)"
+    );
 }
 
 /// **Placed, the pyramid has four apexes a rounding apart, and where a wedge
