@@ -2304,11 +2304,15 @@ fn two_bars_on_one_axis_joined(
 /// them again, since a chord would have to sag less than the ring is wide, so
 /// the mesh is refused naming the ring.
 ///
-/// **What this pins is what running out of finer walks costs.** The crossing
-/// handed back is the eighth walk's, at the side leaving corner 1864 of a
-/// boundary each walk makes about `√2` times longer. When the mesh walked a
-/// crossed face sixteen times it was corner 20766, and the refusal took 126 s
-/// where eight take 0.8 s and the same solid meshes at `0.1` in 8 ms (Q2384).
+/// **What this pins is what running out of finer walks costs.** Since Q2764,
+/// `SolidView::mesh` walks the ring's outline alone eight more times after
+/// its sides have run out of finer walks, and the crossing handed back is
+/// that outline's eighth rung — the sixteenth rung overall — at corner 1836
+/// of a boundary each walk makes about `√2` times longer (measured at
+/// `7c576f11`). When the sides alone were walked sixteen times it was corner
+/// 20766, and the refusal took 126 s where eight take 0.8 s and the same
+/// solid meshes at `0.1` in 8 ms (Q2384); with the outline's own eight walks
+/// counted in, the whole test takes about 3.3 s.
 #[test]
 fn a_ring_a_rounding_wide_is_refused_before_its_rims_are_walked_into_tens_of_thousands_of_points() {
     for the_half_ball_first in [true, false] {
