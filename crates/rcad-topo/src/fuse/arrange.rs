@@ -16529,6 +16529,83 @@ impl ACornerReadAsOnePoint {
         the_room_holds(self.room, point)
     }
 
+    /// Whether the reading puts a meet of three planes on another side of a
+    /// fourth than the true planes put it, for any four of the planes round
+    /// the corner and `near` with two or more of them from `near`, or cannot
+    /// work a side out exactly. A plane of `near` that is one round the
+    /// corner, either way round, is left out.
+    ///
+    /// **Four with three round the corner are left to the reading.** The meet
+    /// of those three is the corner, which the reading puts at the one point
+    /// they all run through, so asking which side of the fourth it lies on
+    /// asks where the corner is. Four with two or more from `near` ask of a
+    /// point the other planes make: where the line two of them cross along
+    /// meets a third, and a moved plane can sweep across it. Turned a tenth of
+    /// a radian about `(−2, 1, 0.5)`, the pyramid of
+    /// `tests/a_broken_three_surface_corner_read_back_from_bytes.rs` has the
+    /// wedge's edge cross its `+x` side plane behind its `+y` side plane by
+    /// `1.8e−17` of that plane's value, and `2.6e−16` in front of `+y` moved
+    /// through the meet of the other three.
+    pub(super) fn moves_a_meet_across_a_plane(&self, near: &[Plane]) -> bool {
+        let round_it = |plane: &Plane| {
+            self.around
+                .iter()
+                .any(|around| around == plane || *around == plane.reversed())
+        };
+        let mut planes = self.around.clone();
+        let first_near = planes.len();
+        for plane in near {
+            if !round_it(plane) && !planes.contains(plane) {
+                planes.push(*plane);
+            }
+        }
+        let count = planes.len();
+        for one in 0..count {
+            for two in (one + 1)..count {
+                for three in (two + 1)..count {
+                    for four in (three + 1)..count {
+                        if [one, two, three, four]
+                            .iter()
+                            .filter(|&&at| at >= first_near)
+                            .count()
+                            < 2
+                        {
+                            continue;
+                        }
+                        let planes = [planes[one], planes[two], planes[three], planes[four]];
+                        if !self.keeps_the_side_of(planes) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Whether the four by four determinant of `planes` has the same sign as
+    /// read as in the true planes; `false` where either cannot be worked out
+    /// exactly.
+    fn keeps_the_side_of(&self, planes: [Plane; 4]) -> bool {
+        let normals = planes.map(|plane| normal_of(plane.coefficients()));
+        let sign = |offsets: [Option<Vec<f64>>; 4]| {
+            let [Some(one), Some(two), Some(three), Some(four)] = offsets else {
+                return None;
+            };
+            Some(expansion_sign(&three_planes_against_a_fourth(
+                normals,
+                [&one, &two, &three, &four],
+            )?))
+        };
+        match (
+            sign(planes.map(|plane| self.where_it_truly_runs(&plane))),
+            sign(planes.map(|plane| self.where_it_runs(&plane))),
+        ) {
+            (Some(truly), Some(as_read)) => truly == as_read,
+            (None, _) | (_, None) => false,
+        }
+    }
+
     /// Which of two nodes on the line the `line`'s two planes cross in comes
     /// first along it, walked along `n₀ × n₁`, against the meet of those two
     /// and `cut`: [`Decision::Pos`] when `node` does, [`Decision::Zero`] when
