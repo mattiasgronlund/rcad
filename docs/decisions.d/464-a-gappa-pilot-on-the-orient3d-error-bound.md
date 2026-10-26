@@ -271,8 +271,10 @@ with the pattern known, each of the eight should take less.
 zero, and `on_floats` does not. A difference of two doubles rounds to zero only
 when it is zero, and a product with a zero factor is exactly zero, so a zero
 difference zeroes its terms in both `y` and `Ex`. Q2675 runs each of the nine,
-one at a time, and each proves (464.11). The branch where `t1 + t2` is
-zero was run: the goal proves, with `|y − Ex| / P6 ≤ 6u + 13u²`. The branch
+one at a time, and each proves (464.11). Q2747 runs each set of two or more
+that leaves `y` not zero by its shape, and each proves (464.25). The branch
+where `t1 + t2` is zero was run: the goal proves, with `|y − Ex| / P6 ≤ 6u +
+13u²`. The branch
 where `first` is zero was not. There `bdxcdy == cdxbdy`, so the first term of
 `y` is zero while the matching term of `Ex` need not be, and the identity block
 1 rests on still holds with `rm1 = rt1 = 1`. But `product_is_normal(adz,
@@ -583,8 +585,9 @@ zero is run. Since 464.10 the 39 equalities are proved, and what Coq takes on
 trust is 35 facts that a number is not zero, each one step on paper from block
 1's hypotheses. The branches where one of the nine differences is zero were on
 paper, as 464.4 argues them; since 464.11 each is run, and proves at the code's
-bound. Two differences at zero at once are still on paper, and so is the step
-from `y` to the sign.
+bound. Since 464.25 each set of two or more differences at zero at once that
+leaves `y` not zero is run too, and proves at the code's bound. The step from
+`y` to the sign is still on paper.
 
 ### 464.7 value past the bound, and every minor at zero run
 
@@ -2839,8 +2842,8 @@ Q2675 ran block 1 with one of the nine differences `adx` to `cdz` at zero, in
 three lanes on 2026-10-24. 464.4's paper argument holds there. Each of the
 nine branches proves at the code's `B` and fails at `6u`, and Coq checks each
 proof, modulo its hints. Nothing in `orient3d.rs` needs to change for it. Two
-differences at zero at once, and a difference at zero with a minor at zero, are
-still not run.
+or more differences at zero at once are run in 464.25. A difference at zero
+with a minor at zero is still not run (Q2748).
 
 Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200` and the code's
 `B = 7u + 56u²`, against `on_floats` as 464.4 read it at `d9f931e8`: no line of
@@ -3094,7 +3097,8 @@ for name in sys.argv[1:]:
 **What this leaves.**
 
 - Two or more of the nine differences at zero at once. Some pairs zero a
-  minor too: `adx` and `bdx` zero both of `third`'s products. A row.
+  minor too: `adx` and `bdx` zero both of `third`'s products. A row. Done, in
+  464.25: each of the 237 branches proves at the code's bound.
 - One difference at zero with one minor at zero, 464.7's case, such as `adx`
   with `first`. A row.
 - The row that moves the scripts into `proofs/gappa/` after the fourteen of
@@ -17042,3 +17046,538 @@ for f in signeds0.g signeds0n.g signeds1.g signeds1n.g signeds2.g signeds2n.g \
   ./one.sh "$f" coq
 done
 ```
+
+### 464.25 Two or more of the nine differences at zero
+
+Q2747 ran block 1 with two or more of the nine differences `adx` to `cdz` at
+zero at once, in three lanes on 2026-10-26. Each of the 237 branches proves at
+the code's `B` and fails below the bound it proves, and Coq checks each proof,
+modulo its hints. Nothing in `orient3d.rs` needs to change for it.
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, with `block1.g` lines 358 to 534 of this file, against
+`on_floats` as 464.4 read it at `d9f931e8`: no commit touches `orient3d.rs`
+between 464.11's `ca9b6493` and `492b00d2`.
+
+**Which sets are branches.** Of the 502 sets of two or more differences, 237
+leave `y` not zero by its shape: all 36 pairs, 78 of the 84 threes, 81 of the
+126 fours, 36 of the 126 fives, 6 of the 84 sixes, and none of seven or more.
+In the other 265 every term is zero by its shape, so `value` is zero and
+`decide` certifies no sign. A term is zero by its shape when its z difference
+is zero, or when both products of its minor have a zero factor, as `adx` and
+`bdx` do for `third`.
+
+**The scripts.** `make_differences_zero.py`, below, writes each branch as
+464.11's `make_one_difference_zero.py` writes one difference: on each axis
+with a zero difference, `d`'s coordinate is the same double as the point's;
+each zero difference, each product with it, and each term zero by its shape is
+left unrounded; and a term whose product is zero stays in `P6` and in the
+split of `P6 + (y − Ex)` as a bare `c_k`, with no error of its own. A minor
+whose two products are both zero is zero, and it and its `q` are left
+unrounded. A minor with one product zero rounds a double less a zero, and its
+`q` a double plus a zero, as in 464.11. The generator does two things more.
+
+1. **A `q` that rounds a double plus a zero where its term is zero too.**
+   464.11 takes such a `q`'s rounding as off by at most `u + 2u²`, as a
+   hypothesis, and a goal checks that `|q| ≥ 2⁻¹⁰²²`, for a minor whose term
+   is not zero. Here a z difference can zero the term of a minor with one
+   product zero, as `bdz` with `adx` does to `second`. Gappa still needs that
+   `q`'s rounding, since `P −/ Phat` sets `r2 = q2 × |bdz|` against
+   `(|cdxady| + |adxcdy|) × |bdz|`, both zero. 86 of the 237 sets have such a
+   minor and not both of `t1` and `t2` zero. With the hypothesis only where
+   the term is not zero, as the generator stood at `84462b71`, 82 of them ran
+   and each failed at `REL(P, Phat)`; the other 4 did not run. Run again,
+   `dz_adx_bdz` fails after 52.91 s with best `[-9.62462e+494, 3.16494e+451]`
+   and `dz_adz_bdx` after 52.27 s with best `[-1.54015e+453, 4.31583e+451]`.
+   `dz_adx_bdz` with `q2 −/ (|cdxady| + |adxcdy|)` and `r2 −/ Phat2` asked as
+   goals, in place of the one on `eb`, fails at those two and then at
+   `REL(P, Phat)`, as 464.11's `REL(q2, ...)` did. The 28 other sets with such
+   a minor proved, since they have `t1` and `t2` both zero and carry `r1` and
+   `r2` as amounts (2 below). With the hypothesis and its goal wherever a
+   minor has one product zero, `dz_adx_bdz` proves in 2.19 s and `dz_adz_bdx`
+   in 2.39 s, and so does each of the 86.
+2. **`t1` and `t2` both zero**, in 57 sets. `P` then adds two zeros first, and
+   Gappa finds no `REL(P, Phat)`: two of the three parts it would average are
+   zero. The script asks for `(P − Phat) / Phat` in its place, splits `Phat`
+   into `Phat1`, `Phat2` and `Phat3`, and carries `r1` and `r2` as amounts
+   against `Phat`, which `Phat3` keeps away from zero, as `make_two_zero.py`
+   does. With block 1's hints alone, `dz_adz_bdz` failed at `REL(P, Phat)`.
+   With `P` written `rnd((r1 + r2) + r3)` and `(P − Phat) / Phat` asked for,
+   but without the amounts, it proved only by leaning on the goal's own
+   interval: asked as `(y − Ex) / eb in ?` it got `±1.39141e+1218`, and the
+   goals `(P − Phat) / Phat in [-1b-50, 1b-50]` and `Phat / P in [0, 2]` each
+   ran out the 600 s timeout. With the amounts it proves in 4.46 s.
+
+**What runs, at the code's `B`.** Each of the 237 proves, with `(y − Ex) / P6`
+within:
+
+- `7.77156e-16`, `7u` and some `u²`, for 4: `adx` with `cdz`, `ady` with
+  `cdz`, `bdx` with `cdz` and `bdy` with `cdz`. At `6u` each fails with best
+  `±1.16667`, and at `5u` with `±1.4`.
+- `6.66134e-16`, `6u` and some `u²`, for 51, such as `adx` with `bdx` and
+  `adz` with `bdz`. At `6u` each fails with best `±1`, and at `5u` with
+  `±1.2`.
+- `5.55112e-16`, `5u` and some `u²`, for 182. At `6u` each proves, and at `5u`
+  each fails with best `±1`.
+
+In each of the 237 the count of `u` is the count of roundings on the longest
+path through a term of `y` that is not zero: the three differences, the
+product, the minor where its other product is not zero, the term, and the sum
+of the first two terms where the term is one of them and the other is not
+zero. Seven is block 1's own count (464.4). `summarize.py`, below, works the
+count out from the set alone, and its groups split the 237 the same way the
+printed bounds do.
+
+`P −/ Phat` is within `4.44089e-16` in the 180 that ask for it, and
+`(P − Phat) / Phat` within `3.33067e-16` in the 57 with `t1` and `t2` both
+zero.
+
+Every one of the 237 fails at `5u`, and the 55 whose bound is above `6u` fail
+there too, so each fails below the bound it proves, and none proves its goal
+from hypotheses that contradict each other (464.7). The 222 `dzq_` scripts,
+each a script with its `q` hypotheses taken out and only its `|q|` goals left,
+each prove: no goal leans on the hypothesis it backs.
+
+`gappa -Bcoq` writes each of the 237 proofs, 4017 to 10070 lines with 16 to
+31 hints, and `coqc` under 464.5's commands accepts each, exit 0. Gappa takes
+1.17 to 9.11 s on a script, and `-Bcoq` and `coqc` together 3.39 to 17.16 s.
+`field` has not been run on these hints (464.10).
+
+`make_differences_zero.py`, run as `python3 make_differences_zero.py` beside
+`block1.g`:
+
+```python
+"""Write block 1 with two or more of the nine differences adx to cdz zero.
+
+With no arguments, write dz_<names>.g for every set of two or more whose y is
+not zero by its shape, and print the names. With arguments, each a set
+written as adx_bdx, write that set alone. Beside each, write the controls
+c_dz_<names>_6u.g and c_dz_<names>_5u.g, the script at B = 6u and 5u, and,
+where a minor rounds a double less a zero, dzq_<names>.g: the script with
+its q hypotheses taken out and only its |q| goals left.
+"""
+import itertools
+import sys
+
+DIFFERENCES = ["adx", "ady", "adz", "bdx", "bdy", "bdz", "cdx", "cdy", "cdz"]
+# The six products: name, the two differences it multiplies, the minor it is in.
+PRODUCT = {
+    1: ("bdxcdy", "bdx", "cdy", 1),
+    2: ("cdxbdy", "cdx", "bdy", 1),
+    3: ("cdxady", "cdx", "ady", 2),
+    4: ("adxcdy", "adx", "cdy", 2),
+    5: ("adxbdy", "adx", "bdy", 3),
+    6: ("bdxady", "bdx", "ady", 3),
+}
+MINOR = {1: "first", 2: "second", 3: "third"}
+NOTE = {1: "|bdxcdy| + |cdxbdy|", 2: "|cdxady| + |adxcdy|", 3: "|adxbdy| + |bdxady|"}
+# The z difference each term multiplies its minor by.
+Z_OF = {1: "adz", 2: "bdz", 3: "cdz"}
+BOUND = "in [-4503599627370497b-105, 4503599627370497b-105]\n"
+
+
+def main():
+    if sys.argv[1:]:
+        sets = [arg.split("_") for arg in sys.argv[1:]]
+    else:
+        sets = [
+            list(zero)
+            for n in range(2, 10)
+            for zero in itertools.combinations(DIFFERENCES, n)
+            if zero_terms(set(zero)) != {1, 2, 3}
+        ]
+    for zero in sets:
+        name = "dz_" + "_".join(zero)
+        src = make(set(zero))
+        write(f"{name}.g", src)
+        write(f"c_{name}_6u.g", sub(src, "B = 7b-53 + 7b-103;", "B = 6b-53;"))
+        write(f"c_{name}_5u.g", sub(src, "B = 7b-53 + 7b-103;", "B = 5b-53;"))
+        if "  /\\ q" in src:
+            write(f"dzq_{'_'.join(zero)}.g", q_goals_alone(src))
+        print(name)
+
+
+def write(path, text):
+    with open(path, "w") as f:
+        f.write(text)
+
+
+def dead_products(zero):
+    return {k for k, (_, f, g, _) in PRODUCT.items() if f in zero or g in zero}
+
+
+def zero_terms(zero):
+    """The terms that are zero by their shape: a z difference zero, or both
+    products of the minor zero."""
+    dead = dead_products(zero)
+    return {m for m in (1, 2, 3) if Z_OF[m] in zero or {2 * m - 1, 2 * m} <= dead}
+
+
+def make(zero):
+    names = [d for d in DIFFERENCES if d in zero]
+    dead = dead_products(zero)
+    terms = zero_terms(zero)
+    # A minor that is not zero but has one product zero rounds a double less
+    # a zero, or a zero less a double.
+    half = [m for m in (1, 2, 3) if m not in terms and len({2 * m - 1, 2 * m} & dead) == 1]
+    # Its q rounds a double plus a zero, whether its term is zero or not.
+    half_q = [m for m in (1, 2, 3) if len({2 * m - 1, 2 * m} & dead) == 1]
+    src = open("block1.g").read()
+    src = sub(
+        src,
+        "# Orient3d::on_floats and ORIENT3D_ERROR_BOUND,\n"
+        "# crates/rcad-predicates/src/orient3d.rs at d9f931e8.\n",
+        f"# Block 1 where {' and '.join(names)} are zero. A zero rounds to itself,\n"
+        "# and so does a product with a zero factor.\n",
+    )
+    for axis in "xyz":
+        points = [p for p in "abc" if f"{p}d{axis}" in zero]
+        if points:
+            src = sub(src, f"d{axis} = rnd(d{axis}_);", f"d{axis} = {points[0]}{axis};")
+            for p in points[1:]:
+                src = sub(src, f"{p}{axis} = rnd({p}{axis}_);", f"{p}{axis} = {points[0]}{axis};")
+    for name in names:
+        exact = name[0].upper() + name[1:]
+        src = sub(src, f"{name} = rnd({exact});", f"{name} = {exact};")
+        src = drop_def(src, f"r{name} = {name} / {exact};")
+        src = drop_conj(src, f"|{name}| >= 1b-1074")
+        src = sub(src, f"{name} / {exact} -> 1 + ({name} - {exact}) / {exact};\n", "")
+        if name in Z_OF.values():
+            src = drop_conj(src, f"{name} / |{name}| in [-1, 1]")
+    for k in sorted(dead):
+        prod, f, g, _ = PRODUCT[k]
+        factors = f"{f} * {g}"
+        src = sub(src, f"{prod} = rnd({factors});", f"{prod} = {factors};")
+        src = drop_def(src, f"rp{k} = {prod} / ({factors});")
+        src = drop_conj(src, f"|{prod}| >= 1b-1022")
+        src = sub(src, f"  /\\ {prod} -/ {factors} {BOUND}", "")
+        src = drop_conj(src, f"{prod} / |{prod}| in [-1, 1]")
+        src = sub(src, f"{prod} / ({factors}) -> 1 + ({prod} - {factors}) / ({factors});\n", "")
+    for m in sorted(terms):
+        minor = MINOR[m]
+        if {2 * m - 1, 2 * m} <= dead:
+            src = sub(src, f"{minor} = rnd(M{m});", f"{minor} = M{m};")
+            src = sub(src, f"q{m} = rnd({NOTE[m]});", f"q{m} = {NOTE[m]};")
+        src = sub(src, f"t{m} = rnd(U{m});", f"t{m} = U{m};")
+        src = sub(src, f"r{m} = rnd(R{m});", f"r{m} = R{m};")
+        src = drop_def(src, f"rm{m} = {minor} / M{m};")
+        src = drop_def(src, f"rt{m} = t{m} / U{m};")
+        src = drop_conj(src, f"|{minor}| >= 1b-1074")
+        src = drop_conj(src, f"|t{m}| >= 1b-1022")
+        src = drop_conj(src, f"|r{m}| >= 1b-1022")
+        src = sub(src, f"  /\\ t{m} -/ U{m} {BOUND}", "")
+        src = sub(src, f"  /\\ r{m} -/ R{m} {BOUND}", "")
+        src = sub(src, f"{minor} / M{m} -> 1 + ({minor} - M{m}) / M{m};\n", "")
+        src = sub(src, f"t{m} / U{m} -> 1 + (t{m} - U{m}) / U{m};\n", "")
+    alive = [m for m in (1, 2, 3) if m not in terms]
+    src = sub(
+        src,
+        "  # The permanent's own three products are normal too. The comment above\n"
+        "  # stays_accurate argues it from the nine.\n",
+        f"  # Each of {', '.join(f'r{m}' for m in alive)} is normal, because its t is and its minor is\n"
+        f"  # at most its q. Each of {', '.join(f'r{m}' for m in sorted(terms))} is zero.\n",
+    )
+    src = sub(
+        src,
+        "  # No factor of the nine products is zero. For an f64 that is the same as\n"
+        "  # being at least the smallest subnormal.\n",
+        f"  # No factor of the nine products is zero but {' and '.join(names)}. For an\n"
+        "  # f64 that is the same as being at least the smallest subnormal.\n",
+    )
+    src = sub(
+        src,
+        "  # §12.2's first condition: product_is_normal on the nine products.\n",
+        "  # §12.2's first condition: product_is_normal on the nine products. Those\n"
+        "  # on a zero pass, and say nothing.\n",
+    )
+    tail = ""
+    if {1, 2} <= terms:
+        # Both of t1 and t2 are zero, so s12 is too and nothing rounds; and
+        # both of r1 and r2, so their sum in P rounds nothing either.
+        src = sub(src, "s12 = rnd(S);", "s12 = S;")
+        src = sub(src, "P = rnd(rnd(r1 + r2) + r3);", "P = rnd((r1 + r2) + r3);")
+        src = sub(src, "rs = s12 / S;\n", "")
+        src = sub(src, "  # The first two terms do not cancel to zero.\n  /\\ |t1 + t2| >= 1b-1074\n", "")
+        src = sub(src, "s12 / S -> 1 + (s12 - S) / S;\n", "")
+    elif terms & {1, 2}:
+        (m,) = terms & {1, 2}
+        other = 3 - m
+        tail += f"\n# t{m} is zero, so t1 + t2 is the double t{other} and rounds to itself.\nt1 + t2 -> t{other};\n"
+    if half_q:
+        last = f"  /\\ eb -/ B * P {BOUND}"
+        qs = " and ".join(f"q{m}" for m in half_q)
+        src = sub(
+            src,
+            last,
+            last + f"  # {qs} each round a double plus a zero, so each is at least 2^-1022\n"
+            "  # as that double is, and lemma.g gives the same of it. The goals\n"
+            "  # check the first part.\n"
+            + "".join(f"  /\\ q{m} -/ ({NOTE[m]}) {BOUND}" for m in half_q),
+        )
+        goal = "  (y - Ex) / P6 in ? /\\ P -/ Phat in ?\n"
+        src = sub(src, goal, goal + "".join(f"  /\\ |q{m}| >= 1b-1022\n" for m in half_q))
+    if half:
+        hints = []
+        for m in half:
+            left, right = PRODUCT[2 * m - 1][0], PRODUCT[2 * m][0]
+            gone = 2 * m - 1 if 2 * m - 1 in dead else 2 * m
+            hints.append(f"{left} - {right} -> -{right};\n" if gone == 2 * m - 1 else f"{left} - {right} -> {left};\n")
+        mins = " and ".join(MINOR[m] for m in half)
+        tail += (
+            f"\n# {mins} each round a double less a zero, or a zero less a double,\n"
+            "# and so round to themselves.\n" + "".join(hints)
+        )
+    if {1, 2} <= terms:
+        # Gappa finds no REL(P, Phat) here: two of the three parts it would
+        # average are zero. So ask for the ratio as an expression, and carry
+        # r1 and r2 as amounts against Phat, as make_two_zero.py does.
+        src = sub(src, "/\\ P -/ Phat in ?\n", "/\\ (P - Phat) / Phat in ?\n")
+        src = sub(
+            src,
+            "Phat = (|bdxcdy| + |cdxbdy|) * |adz|\n"
+            "     + (|cdxady| + |adxcdy|) * |bdz|\n"
+            "     + (|adxbdy| + |bdxady|) * |cdz|;\n",
+            "Phat1 = (|bdxcdy| + |cdxbdy|) * |adz|;\n"
+            "Phat2 = (|cdxady| + |adxcdy|) * |bdz|;\n"
+            "Phat3 = (|adxbdy| + |bdxady|) * |cdz|;\n"
+            "Phat = Phat1 + Phat2 + Phat3;\n",
+        )
+        x = "((r1 + r2) + r3)"
+        tail += (
+            "\n# r1 and r2 are zero, and so are Phat1 and Phat2. Carry each as an\n"
+            "# amount against Phat, which Phat3 keeps away from zero.\n"
+            f"(P - Phat) / Phat -> ((P - {x}) / {x}) * (1 + ({x} - Phat) / Phat) + ({x} - Phat) / Phat;\n"
+            f"({x} - Phat) / Phat -> (r1 - Phat1) / Phat + (r2 - Phat2) / Phat"
+            " + ((r3 - Phat3) / Phat3) * (Phat3 / Phat);\n"
+            "Phat3 / Phat -> 1 / (1 + (Phat1 + Phat2) / Phat3);\n"
+        )
+    # A term whose product is zero carries no error: it is zero in y and in
+    # Ex alike, and stays in P6 only as the zero it is.
+    for k in sorted(dead | {k for m in terms for k in (2 * m - 1, 2 * m)}):
+        src = sub(src, line_starting(src, f"W{k} = ") + "\n", "")
+        line = line_starting(src, "", f"e{k} = ")
+        part = line[line.index(f"e{k} = "):]
+        src = drop_def(src, part[: part.index(";") + 1])
+        src = sub(src, f"(c{k} + e{k}) - c{k} -> e{k};\n", "")
+        src = sub(src, line_starting(src, f"e{k} / c{k} -> ") + "\n", "")
+        src = sub(src, f"(c{k} + e{k})", f"c{k}")
+    return src + tail
+
+
+def q_goals_alone(src):
+    """The script with its q hypotheses out and its |q| goals alone left."""
+    lines = src.split("\n")
+    lines = [l for l in lines if not l.startswith("  /\\ q")]
+    start = lines.index("->")
+    end = lines.index("}", start)
+    goals = [l for l in lines[start + 1 : end] if l.startswith("  /\\ |q")]
+    goals[0] = "  " + goals[0][len("  /\\ ") :]
+    return "\n".join(lines[: start + 1] + goals + lines[end:])
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+def drop_conj(src, item):
+    """Take one conjunct out of a hypothesis line, and the line with it when
+    nothing is left on it."""
+    if src.count("\n  /\\ " + item + "\n") == 1:
+        return src.replace("\n  /\\ " + item + "\n", "\n")
+    if src.count(item + " /\\ ") == 1:
+        return src.replace(item + " /\\ ", "")
+    if src.count(" /\\ " + item + "\n") == 1:
+        return src.replace(" /\\ " + item + "\n", "\n")
+    return sub(src, "  /\\ " + item + "\n", "")
+
+
+def drop_def(src, item):
+    """Take one definition out of a line of definitions."""
+    if src.count(item + " ") == 1:
+        return src.replace(item + " ", "")
+    if src.count(" " + item + "\n") == 1:
+        return src.replace(" " + item + "\n", "\n")
+    return sub(src, item + "\n", "")
+
+
+def line_starting(src, start, containing=""):
+    (line,) = [l for l in src.split("\n") if l.startswith(start) and containing in l]
+    return line
+
+
+main()
+```
+
+`run_all.sh` runs every script the generator wrote, beside `block1.g` and
+464.13's `one.sh`. It runs after `python3 make_differences_zero.py >
+names.txt`, which writes the scripts and keeps the names `summarize.py` reads:
+
+```sh
+#!/bin/bash
+# Run every script make_differences_zero.py wrote, sixteen at a time: each
+# dz_ script with its proof checked by coqc, then each control and each
+# dzq_ check without. One line per run, as one.sh prints it.
+cd "$(dirname "$0")"
+rm -f run_done.txt
+ls dz_*.g | xargs -P 16 -I{} ./one.sh {} coq > run_dz.txt 2>&1
+ls c_dz_*.g dzq_*.g | xargs -P 16 -I{} ./one.sh {} > run_c.txt 2>&1
+echo finished > run_done.txt
+```
+
+`stats.py` prints the counts of exit codes above, and the ranges of times,
+proof lines and hints:
+
+```python
+"""Count and range what run_dz.txt and run_c.txt printed."""
+import collections
+
+gappa = []
+coq = []
+for line in open("run_dz.txt"):
+    w = line.split()
+    if w[1] == "exit":
+        gappa.append((w[0], int(w[2]), float(w[3].rstrip("s"))))
+    elif w[1] == "coq":
+        coq.append((w[0], int(w[4]), int(w[7]), float(w[8].rstrip("s")), int(w[10]), int(w[12])))
+print("dz runs", len(gappa), "exit codes", collections.Counter(e for _, e, _ in gappa))
+print("dz seconds", min(s for *_, s in gappa), "to", max(s for *_, s in gappa))
+print("coq runs", len(coq), "-Bcoq exits", collections.Counter(c[1] for c in coq),
+      "coqc exits", collections.Counter(c[2] for c in coq))
+print("coq seconds", min(c[3] for c in coq), "to", max(c[3] for c in coq))
+print("proof lines", min(c[4] for c in coq), "to", max(c[4] for c in coq))
+print("hints", min(c[5] for c in coq), "to", max(c[5] for c in coq))
+ctl = collections.Counter()
+for line in open("run_c.txt"):
+    w = line.split()
+    kind = "dzq" if w[0].startswith("dzq_") else w[0].rsplit("_", 1)[1]
+    ctl[(kind, w[2])] += 1
+for key in sorted(ctl):
+    print("control", key, ctl[key])
+```
+
+`summarize.py` prints the groups above, each with the count of roundings it
+works out from the set:
+
+```python
+"""Read every run of the 237 branches and group them by what they printed.
+
+For each branch: the exit codes of its script, its -Bcoq and its coqc, the
+bounds Gappa printed for (y - Ex) / P6 and for P against Phat, the exit code
+and best of each control, the exit code of its dzq_ check if it has one, and
+the number of roundings on its longest path, counted from the set alone.
+"""
+import collections
+import re
+
+DIFFERENCES = ["adx", "ady", "adz", "bdx", "bdy", "bdz", "cdx", "cdy", "cdz"]
+PRODUCT = {
+    1: ("bdx", "cdy", 1),
+    2: ("cdx", "bdy", 1),
+    3: ("cdx", "ady", 2),
+    4: ("adx", "cdy", 2),
+    5: ("adx", "bdy", 3),
+    6: ("bdx", "ady", 3),
+}
+Z_OF = {1: "adz", 2: "bdz", 3: "cdz"}
+
+
+def longest_path(zero):
+    dead = {k for k, (f, g, _) in PRODUCT.items() if f in zero or g in zero}
+    terms = {m for m in (1, 2, 3) if Z_OF[m] in zero or {2 * m - 1, 2 * m} <= dead}
+    longest = 0
+    for k, (f, g, m) in PRODUCT.items():
+        if k in dead or m in terms:
+            continue
+        other = 2 * m if k == 2 * m - 1 else 2 * m - 1
+        n = 3 + 1 + (other not in dead) + 1
+        if m in (1, 2) and (3 - m) not in terms:
+            n += 1
+        longest = max(longest, n)
+    return longest
+
+
+def exits(path):
+    out = {}
+    coq = {}
+    for line in open(path):
+        w = line.split()
+        if w[1] == "exit":
+            out[w[0]] = int(w[2])
+        elif w[1] == "coq":
+            coq[w[0]] = (int(w[4]), int(w[7]))
+    return out, coq
+
+
+def upper(line):
+    found = re.findall(r"\{(-?[\d.]+(?:e[-+]?\d+)?),", line)
+    if found:
+        return found[-1]
+    return line.rsplit(",", 1)[1].strip(" ]")
+
+
+def bound(text, start):
+    for line in text.split("\n"):
+        if line.strip().startswith(start):
+            return upper(line)
+    return "-"
+
+
+def best(text):
+    m = re.search(r"best: \[([^\]]*)\]", text)
+    return m.group(1).split(",")[1].strip() if m else "-"
+
+
+def main():
+    names = [l.strip() for l in open("names.txt") if l.strip()]
+    dz, coq = exits("run_dz.txt")
+    c, _ = exits("run_c.txt")
+    groups = collections.defaultdict(list)
+    for name in names:
+        zero = set(name[3:].split("_"))
+        text = open(f"{name}.out").read()
+        y = bound(text, "(y - Ex) / P6 in")
+        p = bound(text, "P -/ Phat in")
+        if p == "-":
+            p = bound(text, "(P - Phat) / Phat in") + " as (P - Phat) / Phat"
+        c6 = f"c_{name}_6u"
+        c5 = f"c_{name}_5u"
+        q = "dzq_" + name[3:]
+        row = (
+            longest_path(zero),
+            dz.get(name, "missing"),
+            coq.get(name, "none"),
+            y,
+            p,
+            c.get(c6, "missing"),
+            best(open(f"{c6}.out").read()),
+            c.get(c5, "missing"),
+            best(open(f"{c5}.out").read()),
+            c.get(q, "no dzq"),
+        )
+        groups[row].append(name)
+    print("roundings | exit | (-Bcoq, coqc) | (y-Ex)/P6 | P vs Phat | 6u exit, best | 5u exit, best | dzq exit | count")
+    for row, members in sorted(groups.items(), key=lambda kv: tuple(str(x) for x in kv[0])):
+        k, e, cq, y, p, e6, b6, e5, b5, eq = row
+        print(f"{k} | {e} | {cq} | {y} | {p} | {e6}, {b6} | {e5}, {b5} | {eq} | {len(members)}")
+        print("    " + " ".join(m[3:] for m in members))
+    print("total", sum(len(m) for m in groups.values()))
+
+
+main()
+```
+
+**What this leaves.**
+
+- One or two of `first`, `second` and `third` cancelling to zero, their two
+  products the same double as in 464.7, together with one or more of the
+  differences at zero, past Q2748's one minor with one difference. A row after
+  Q2748.
+- `t1 + t2` cancelling to zero while neither is zero, with one or more of the
+  differences at zero. Block 1 assumes it away with `|t1 + t2| ≥ 2⁻¹⁰⁷⁴`.
+  464.4 runs it with no difference at zero, and it proves at `6u + 13u²`;
+  464.11 and this section keep the hypothesis wherever `t1` and `t2` are both
+  alive. Where `t3` is zero too, `y` is zero (464.7), so nothing is left to
+  run there. A row.
+- The row that moves the scripts into `proofs/gappa/`, Q2700, now waits on
+  those two as well, since they append here too.
