@@ -17045,8 +17045,9 @@ done
 
 ### 464.25 Two or more of the nine differences at zero
 
-UNFINISHED: Q2747's first lane handed over here (§416). What follows is what
-it ran, for the next lane to carry on and rewrite as the finished section.
+UNFINISHED: Q2747's first and second lanes handed over here (§416). What
+follows is what they ran, for the next lane to carry on and rewrite as the
+finished section.
 
 Q2747 runs block 1 with two or more of the nine differences `adx` to `cdz` at
 zero at once. Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`,
@@ -17069,8 +17070,25 @@ is zero, or when both products of its minor have a zero factor, as `adx` and
 `7u + 46u²`, `8u`, `16u` and `2⁻⁴⁰`, but Gappa bounds `(P − Phat) / Phat`
 only within `[-1, 5.4067e+1202]`, and at `6u` it fails with best
 `±1.39141e+1218`, not near 1. Why it proves at all with that bound on `P` is
-not yet traced, and must be before any of these runs is written down as a
-proof.
+not traced: asked as `(y - Ex) / eb in ?` it gets only `±1.39141e+1218`, so the
+proof leans on the goal's own interval, and the goals `(P - Phat) / Phat in
+[-1b-50, 1b-50]` and `Phat / P in [0, 2]` each run out the 600 s timeout.
+
+The second lane split `Phat` into `Phat1`, `Phat2` and `Phat3` when `t1` and
+`t2` are both zero, and carried `r1` and `r2` as amounts against `Phat`, as
+`make_two_zero.py` does (the `{1, 2} <= terms` block below). Then
+`dz_adz_bdz` proves in 3.44 s with `(y − Ex) / P6` within `6.66134e-16` and
+`(P − Phat) / Phat` within `3.33067e-16`, and its 6u control fails with best
+`[-1, 1]`, as 464.11's 6u scripts do. 57 of the 237 sets have `t1` and `t2`
+both zero.
+
+A first run of every `dz_` script, stopped at the second lane's budget after
+233 of the 237, had 151 prove, each with `coqc` exit 0, and 82 exit 1. The
+three it read fail at `REL(P, Phat)` with `(y − Ex) / P6` still bounded. Each
+of the 82 zeroes at least one of `adz`, `bdz` and `cdz` and at least one x or
+y difference: `dz_adx_bdz`, `dz_adx_cdz`, `dz_adz_bdx`, `dz_bdx_cdz` and 78
+more. `dz_adx_bdz` printed best `[-1.22787e+1205, 1.88277e+1206]`. They may
+want `P` carried as amounts the same way; that is not yet tried.
 
 `make_differences_zero.py`, as it stands, run as `python3
 make_differences_zero.py` beside `block1.g`:
@@ -17254,9 +17272,29 @@ def make(zero):
             "# and so round to themselves.\n" + "".join(hints)
         )
     if {1, 2} <= terms:
-        # Gappa finds no REL(P, Phat) here, though it bounds the same ratio
-        # as an expression, which is the form the last hints use.
+        # Gappa finds no REL(P, Phat) here: two of the three parts it would
+        # average are zero. So ask for the ratio as an expression, and carry
+        # r1 and r2 as amounts against Phat, as make_two_zero.py does.
         src = sub(src, "/\\ P -/ Phat in ?\n", "/\\ (P - Phat) / Phat in ?\n")
+        src = sub(
+            src,
+            "Phat = (|bdxcdy| + |cdxbdy|) * |adz|\n"
+            "     + (|cdxady| + |adxcdy|) * |bdz|\n"
+            "     + (|adxbdy| + |bdxady|) * |cdz|;\n",
+            "Phat1 = (|bdxcdy| + |cdxbdy|) * |adz|;\n"
+            "Phat2 = (|cdxady| + |adxcdy|) * |bdz|;\n"
+            "Phat3 = (|adxbdy| + |bdxady|) * |cdz|;\n"
+            "Phat = Phat1 + Phat2 + Phat3;\n",
+        )
+        x = "((r1 + r2) + r3)"
+        tail += (
+            "\n# r1 and r2 are zero, and so are Phat1 and Phat2. Carry each as an\n"
+            "# amount against Phat, which Phat3 keeps away from zero.\n"
+            f"(P - Phat) / Phat -> ((P - {x}) / {x}) * (1 + ({x} - Phat) / Phat) + ({x} - Phat) / Phat;\n"
+            f"({x} - Phat) / Phat -> (r1 - Phat1) / Phat + (r2 - Phat2) / Phat"
+            " + ((r3 - Phat3) / Phat3) * (Phat3 / Phat);\n"
+            "Phat3 / Phat -> 1 / (1 + (Phat1 + Phat2) / Phat3);\n"
+        )
     # A term whose product is zero carries no error: it is zero in y and in
     # Ex alike, and stays in P6 only as the zero it is.
     for k in sorted(dead | {k for m in terms for k in (2 * m - 1, 2 * m)}):
