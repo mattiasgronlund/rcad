@@ -4057,6 +4057,17 @@ check-lanes-workflow:
         'lines that run: 7')
     runs_empty='git diff printed nothing, so it shows nothing'
     many_want=$(echo 'test code lines removed: 0'; seq -f 'crates/k/src/lib.rs: +pub fn f%g() {}' 1 10; echo 'lines that run: 15')
+    cfg_want=$(printf '%s\n' \
+        'removed.rs: -#[cfg(test)]' \
+        'removed.rs: -mod stuff {' \
+        'removed.rs: -    #[test]' \
+        'removed.rs: -    fn t() {' \
+        'removed.rs: -        assert_eq!(super::kept(), 1);' \
+        'removed.rs: -    }' \
+        'removed.rs: -}' \
+        'test code lines removed: 7' \
+        'toggled.rs: +#[cfg(test)]' \
+        'lines that run: 1')
     notes_bound="    notes: { type: 'string', description: 'at most five lines, for the merger:"
     notes_rule='`notes` is at most five lines, for the merger: what it must act on and what no'
     runs_note_field="    lines_that_run_note: { type: 'string', description: 'your own note about the print above, if any"
@@ -4217,6 +4228,17 @@ check-lanes-workflow:
     commit "$many" base
     seq -f 'pub fn f%g() {}' 1 15 >> "$many/crates/k/src/lib.rs"
     commit "$many" branch
+    cfgtest="$dir/cfgtest"
+    mkdir -p "$cfgtest"
+    git -C "$cfgtest" init -q
+    printf '%s\n' 'pub fn kept() -> u32 {' '    1' '}' '' '#[cfg(test)]' 'mod stuff {' '    #[test]' \
+        '    fn t() {' '        assert_eq!(super::kept(), 1);' '    }' '}' \
+        > "$cfgtest/removed.rs"
+    printf '%s\n' 'pub fn helper() -> u32 {' '    5' '}' > "$cfgtest/toggled.rs"
+    commit "$cfgtest" base
+    printf '%s\n' 'pub fn kept() -> u32 {' '    1' '}' '' > "$cfgtest/removed.rs"
+    printf '%s\n' '#[cfg(test)]' 'pub fn helper() -> u32 {' '    5' '}' > "$cfgtest/toggled.rs"
+    commit "$cfgtest" branch
     scan() {
         local n t at prev line types prog got failed
         n=$(grep -cxF -- "$create" "$1" || true)
@@ -4427,6 +4449,15 @@ check-lanes-workflow:
             printf '%s\n' "$got"
             echo "and should have printed the first ten, then 'lines that run: 15'; a verifier copies the whole print into its report (§382)"
             return 17
+        fi
+        got=$(git -C "$cfgtest" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+        if [ "$got" != "$cfg_want" ]; then
+            echo "the lines-that-run recipe in $4 printed, on a commit that removes a whole #[cfg(test)] module and separately gates an existing function behind one:"
+            printf '%s\n' "$got"
+            echo "and should have printed exactly:"
+            printf '%s\n' "$cfg_want"
+            echo "the #[cfg(test)] attribute line must be skipped when the item it heads is removed or added with it, and counted when it changes alone (§375)"
+            return 23
         fi
         if ! grep -qF -- "$notes_bound" "$1" || ! grep -qF -- "$notes_rule" "$2/verifier.md"; then
             echo "$1's verdict schema or $2/verifier.md no longer holds a verifier's notes to five lines; unbounded, they were about a third of its report (§382)"
@@ -5029,6 +5060,14 @@ check-lanes-workflow:
 # header above a changed line. The prefixes and the flags are spelled out so no
 # one's git config can change what it reads.
 #
+# A column-0 `#[cfg(test)]` line holds its own decision until the item right
+# below it resolves: when that item is removed or added on the same side as
+# the attribute, the whole pair moved into or out of test code together and
+# the attribute line counts as test code, not as a line that runs. When the
+# item is unchanged (a context line) and only the attribute differs, the
+# attribute alone moved code into or out of the build, and still counts as a
+# line that runs (§375).
+#
 # **It prints the first ten lines of each list, then how many there are in
 # each** (§382). A verifier copies the print into its report, and before the
 # cap one ran to 199 lines. Both count lines are always printed, so there is
@@ -5044,7 +5083,7 @@ lines-that-run base branch:
     #!/usr/bin/env bash
     set -euo pipefail
     git diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 "$1" "$2" \
-        | awk 'function show_run(line) { run_shown++; if (run_shown <= 10) run_buf[run_shown] = line } function show_test(line) { test_shown++; if (test_shown <= 10) test_buf[test_shown] = line } function test_path(p) { return p ~ /^crates\/[^\/]+\/tests\// || p ~ /^fuzz\/corpus\// } function whole_test_path(p) { return p ~ /^crates\/[^\/]+\/tests\// } function is_comment(c) { return (slash && c ~ /^[ \t]*(\/\/.*)?$/) || (hash && c ~ /^[ \t]*(#([^!].*)?)?$/) } function rust_test(s, c) { if (in_test[s]) { if (c ~ /^}/) in_test[s] = 0; return 1 } if (c ~ /^([ \t]|$)/) return 0; if (c ~ /^#\[cfg\(test\)\][ \t]*$/) { pending[s] = 1; return 0 } if (c ~ /^(\/\/|#\[)/) return 0; if (pending[s]) { pending[s] = 0; in_test[s] = c ~ /\{[ \t]*$/; return 1 } return 0 } function recipe_test(s, c) { if (c ~ /^([ \t]|$)/) return in_check[s]; in_check[s] = c ~ /^@?check-[A-Za-z0-9_-]+[^:]*:([^=]|$)/; return 0 } /^diff --git / { seen = 1; hunk = 0; a = $3; b = $4; sub(/^a\//, "", a); sub(/^b\//, "", b); skip = (a ~ /\.md$/ && b ~ /\.md$/) || (test_path(a) && test_path(b)); whole = whole_test_path(a) && whole_test_path(b); rust = b ~ /\.rs$/; slash = b ~ /\.(rs|js)$/; just = b ~ /(^|\/)justfile$/; hash = just || b ~ /\.(toml|sh|py|ya?ml)$/; for (s = 0; s < 2; s++) { pending[s] = 0; in_test[s] = 0; in_check[s] = 0 } next } skip && !whole { next } /^@@/ { hunk = 1; next } !hunk { if (!skip && $0 ~ /^(rename (from|to)|old mode|new mode|Binary files)/) show_run(b ": " $0); next } /^\\/ { next } { m = substr($0, 1, 1); c = substr($0, 2); if (whole) { if (m == "-" && !is_comment(c)) show_test(a ": -" c); next } for (s = 0; s < 2; s++) { if (m == (s ? "-" : "+")) continue; t[s] = rust ? rust_test(s, c) : (just ? recipe_test(s, c) : 0) } if (m == "-" && t[0] && !is_comment(c)) show_test(a ": -" c); if (m == " ") next; if (t[m == "+"]) next; if (is_comment(c)) next; show_run(b ": " m c) } END { if (!seen) { print "git diff printed nothing, so it shows nothing"; exit 1 } for (i = 1; i <= test_shown && i <= 10; i++) print test_buf[i]; print "test code lines removed: " (test_shown + 0); for (i = 1; i <= run_shown && i <= 10; i++) print run_buf[i]; print "lines that run: " (run_shown + 0) }'
+        | awk 'function show_run(line) { run_shown++; if (run_shown <= 10) run_buf[run_shown] = line } function show_test(line) { test_shown++; if (test_shown <= 10) test_buf[test_shown] = line } function test_path(p) { return p ~ /^crates\/[^\/]+\/tests\// || p ~ /^fuzz\/corpus\// } function whole_test_path(p) { return p ~ /^crates\/[^\/]+\/tests\// } function is_comment(c) { return (slash && c ~ /^[ \t]*(\/\/.*)?$/) || (hash && c ~ /^[ \t]*(#([^!].*)?)?$/) } function rust_test(s, c) { if (in_test[s]) { if (c ~ /^}/) in_test[s] = 0; return 1 } if (c ~ /^([ \t]|$)/) return 0; if (c ~ /^#\[cfg\(test\)\][ \t]*$/) { pending[s] = 1; return 0 } if (c ~ /^(\/\/|#\[)/) return 0; if (pending[s]) { pending[s] = 0; in_test[s] = c ~ /\{[ \t]*$/; return 1 } return 0 } function resolve_defer(s, mnow) { if (!defer_show[s]) return; if (defer_m[s] == mnow) { if (defer_m[s] == "-") show_test(defer_a[s] ": -" defer_c[s]) } else show_run(defer_b[s] ": " defer_m[s] defer_c[s]); defer_show[s] = 0 } function flush_defer(s) { if (defer_show[s]) { show_run(defer_b[s] ": " defer_m[s] defer_c[s]); defer_show[s] = 0 } } function recipe_test(s, c) { if (c ~ /^([ \t]|$)/) return in_check[s]; in_check[s] = c ~ /^@?check-[A-Za-z0-9_-]+[^:]*:([^=]|$)/; return 0 } /^diff --git / { seen = 1; hunk = 0; flush_defer(0); flush_defer(1); a = $3; b = $4; sub(/^a\//, "", a); sub(/^b\//, "", b); skip = (a ~ /\.md$/ && b ~ /\.md$/) || (test_path(a) && test_path(b)); whole = whole_test_path(a) && whole_test_path(b); rust = b ~ /\.rs$/; slash = b ~ /\.(rs|js)$/; just = b ~ /(^|\/)justfile$/; hash = just || b ~ /\.(toml|sh|py|ya?ml)$/; for (s = 0; s < 2; s++) { pending[s] = 0; in_test[s] = 0; in_check[s] = 0 } next } skip && !whole { next } /^@@/ { hunk = 1; next } !hunk { if (!skip && $0 ~ /^(rename (from|to)|old mode|new mode|Binary files)/) show_run(b ": " $0); next } /^\\/ { next } { m = substr($0, 1, 1); c = substr($0, 2); if (whole) { if (m == "-" && !is_comment(c)) show_test(a ": -" c); next } for (s = 0; s < 2; s++) { if (m == (s ? "-" : "+")) continue; op = pending[s]; t[s] = rust ? rust_test(s, c) : (just ? recipe_test(s, c) : 0); if (rust && op == 1 && pending[s] == 0 && t[s] == 1) resolve_defer(s, m); else if (rust && m != " " && op == 0 && pending[s] == 1 && t[s] == 0) { defer_c[s] = c; defer_m[s] = m; defer_a[s] = a; defer_b[s] = b; defer_show[s] = 1; next } } if (m == "-" && t[0] && !is_comment(c)) show_test(a ": -" c); if (m == " ") next; if (t[m == "+"]) next; if (is_comment(c)) next; show_run(b ": " m c) } END { if (!seen) { print "git diff printed nothing, so it shows nothing"; exit 1 } flush_defer(0); flush_defer(1); for (i = 1; i <= test_shown && i <= 10; i++) print test_buf[i]; print "test code lines removed: " (test_shown + 0); for (i = 1; i <= run_shown && i <= 10; i++) print run_buf[i]; print "lines that run: " (run_shown + 0) }'
 
 # kache must be the wrapper here and no wrapper on a runner (`mise.toml`).
 #
