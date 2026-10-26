@@ -2309,8 +2309,12 @@ impl Assembly {
     /// block met no face of the frustum (Q2170). **Only on a cone or a pipe,
     /// and only where every ring goes right round**, but for a ring of one
     /// side on a cone. A cone face with a ring right round beside a hole is
-    /// refused by the mesher, which takes islands only on a pipe's ring or a
-    /// ball's cap (`AWireWillNotLieFlatOnItsFace`, in
+    /// refused by the mesher outside two cases it now takes islands in: a
+    /// pipe's ring or a cone's band clear of its apex, and a ball's cap or a
+    /// cone's cap round its apex (`a_ring_on_a_pipe_or_a_cone_with_islands_in_it`
+    /// and `a_cap_on_a_ball_or_a_cone_with_islands_in_it`, in `mesh.rs`;
+    /// `docs/decisions.md` §212.6). Elsewhere it is still refused
+    /// (`AWireWillNotLieFlatOnItsFace`, in
     /// `pieces_of_one_curved_surface.rs` and `a_walk_neither_winding_nor_the_axis_places.rs`).
     /// **Not where the group was joined only across whole closed curves**
     /// ([`Assembly::joined_only_across_whole_rings`]): a frustum beside a block
