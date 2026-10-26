@@ -797,6 +797,39 @@ fn a_sound_pyramid_placed_and_cut_by_a_wedge_through_its_apex_tells_its_cells_ap
     }
 }
 
+/// **Shifted to `(7, −5, 2.5)` after the turn 0.7 about `(−2, 1, 0.5)`, the
+/// wedge over the `−y` edge leaves a speck of a side face by the apex as well,
+/// and `tolerant(100)` answers every rule.** Queue row Q2583's sweep at Q2744's
+/// tip found the difference and the union refused `TheFuseWroteABrokenAnswer`,
+/// the speck's outline winding against its normal, where `5afdb494` refused
+/// them `ResultIsNotManifold { count: 1 }` (queue row Q2783).
+#[test]
+fn a_wedge_over_the_minus_y_edge_through_the_apex_shifted_after_a_turn_about_minus_2_1_half_answers_under_tolerant()
+ {
+    use Came::{AnsweredPastTheRangeCheck, RefusedAtTheRangeCheck};
+    let shift = Isometry::translation(Vector::new(7.0, -5.0, 2.5)).expect("a plain translation");
+    let axis = Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(-2.0, 1.0, 0.5)).expect("an axis");
+    let placement = shift.compose(&Isometry::rotation(&axis, 0.7).expect("a turn"));
+    let came: Vec<[Came; 2]> = [Rule::Difference, Rule::Intersection, Rule::Union]
+        .into_iter()
+        .map(|rule| {
+            [Policy::certified(), Policy::tolerant(100.0)].map(|policy| {
+                what_the_wedge_through_the_apex_came_to(
+                    A_WEDGE_OVER_THE_MINUS_Y_EDGE,
+                    placement,
+                    rule,
+                    &policy,
+                )
+            })
+        })
+        .collect();
+    assert_eq!(
+        came,
+        [[RefusedAtTheRangeCheck, AnsweredPastTheRangeCheck]; 3],
+        "by difference, intersection and union, each under certified and tolerant(100)"
+    );
+}
+
 /// **Placed, the pyramid has four apexes a rounding apart, and where a wedge
 /// plane runs between two of them the fuse reads the side planes as running
 /// through one.** Each three of the four side planes meet in an apex of their
