@@ -15990,7 +15990,41 @@ the bend's: `bd = rnd(nd·(−mrk))` with `mrk` up to `2¹⁰⁰⁰` leaves `(bd
 z5)·s²/L` at `±2.4e285`, and `$ z5 in (-1b-1022, 1b-1022)` prints "case split
 on z5 has not produced any interesting new result".
 
-**Still to do**, in order: the scalar chain over slope ranges, a script for one
-coordinate of the point against the true parabola at the same `s`, the
-controls, `coqc` through 464.13's `one.sh`, and the rows for what this
-leaves.
+**The third lane's runs, draft too.** The point script is no longer needed.
+Measure `P(s)` against the true parabola's point `Q(s)` at the same `f64` `s`.
+Then `P − Q` is the sum of four kinds of term, each bounded as a vector norm
+and not coordinate by coordinate:
+
+- the ten coordinate-wise roundings. Each is at most `u` times the norm of the
+  vector it rounds. With `‖apex‖` and `‖vertex‖` at most `√3·L`, and `|off|`,
+  `|s|`, `|mrk|·s²` and `h` at most `L`, they come to `16.93u·L`;
+- the foot's `n·(q − qS)`, with norm `h·|(q − qS)/qS| ≤ 3.125u·L`;
+- `(and − and*)·(off + mrk·s²)` and `(across − across*)·s`. Under the doc's
+  `4u` for each direction (an unproved hypothesis, `two_directions_in`'s
+  chain), they come to `8u·L` and `4u·L`;
+- along `and*`, the scalar `(off − offS) + s²·(mrk − 1/KS)`. Over `|KS|` this
+  is `G = (off − offS)/KS + r²(m − 1)`, with `r = s/KS` and `m = mrk·KS`.
+
+For `t` below 7/16, `G` is taken over `offS` instead, since `L ≥ |offS|`.
+
+`gen2.py` (in `target/q2693/` of the third lane's tree) writes `k.g`'s chain
+with `Bw` within `7.5u·|w|` (the doc's `4u` plus the plain dot's `γ₃`), `nN`
+and `wW` in `[1, 2]`, and `r` in `±(1 + 2⁻⁴⁰)`. Its goal is `|G| ≤ 84u` and
+`|(q − qS)/qS| ≤ 3.125u`, on five slope ranges: `[2⁻⁵⁰⁰, 1/4]` and
+`[1/4, 7/16]` over `offS`, then `[7/16, 1]`, `[1, 2]` and `[2, 5]` over `KS`.
+Each range is split on `t` where needed. All five exit 0 through 464.13's
+`one.sh` with `coq`, and `coqc` exits 0 on each: `s1` 1.41s, `s2` 1.44s, `s3`
+15.38s (`coqc` 70.27s), `s4` 2.02s and `s5` 9.63s, with 14 or 15 hints. Every
+hint is an identity once `√(nN²) = nN`, `√(wW²) = wW` and `√(1+t²)² = 1+t²`.
+That is not yet checked by a script.
+
+The four terms then total `16.93 + 3.125 + 8 + 4 + 84 ≈ 116u·L`, under the
+`128u·L` of `64 ε`, for `t ≤ 5`. Without a split, `G` is at most `80.5u` on `t`
+in `[7/16, 0.4453]`, `76.2u` at `[4.97, 5]`, `110u` at `[7.94, 8]`, `201u` at
+`[15.9, 16]` and `381u` at `[31.75, 32]`. It grows like `7.5u·t`, so past `t`
+of about 6 this chain does not reach `64 ε`.
+
+**Still to do**, in order: controls for `s1`–`s5` (a goal under `80u`, `Bw`'s
+hypothesis dropped, `t` widened to 8); a script that evaluates the hint
+differences Gappa prints at rational points with `1 + t²` a square; `same.py`
+and `all.sh`; rewriting this subsection on the model of 464.22; and the rows.
