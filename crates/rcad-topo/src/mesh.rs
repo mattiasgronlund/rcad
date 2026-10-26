@@ -372,7 +372,8 @@ impl SolidView<'_> {
     /// [`CannotTriangulate::BoundaryCrossesItself`], each side of that face that
     /// bends is walked again at half the room it was walked at, and the whole
     /// solid is cut up again. Each face is given `RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER`
-    /// such rungs, and that constant says what it was set from.
+    /// such rungs, then as many again walking its outline alone, and that
+    /// constant says what it was set from.
     ///
     /// - **Flat faces and `BoundaryCrossesItself` only.** Those are the
     ///   crossings this was built for and measured on. A curved face's crossing
@@ -386,12 +387,25 @@ impl SolidView<'_> {
     ///   the box round the face's corners and walked points. A walk never steps
     ///   more than a quarter turn, so halving `f64::MAX` changes no point for
     ///   about a thousand rungs.
-    /// - **A refusal on a finer rung hands back the finest crossing.** The
+    /// - **Then the outline alone, from the room asked.** A hole whose rim
+    ///   comes within a rounding of the outline, where neither has a corner,
+    ///   crosses on every rung that halves both. The outline's chords sag into
+    ///   the face, so one across that place passes inside the hole's points
+    ///   within about half a chord of it, and a hole walked finer puts more of
+    ///   its points there: its own chords sag into the hole, away from the face,
+    ///   so its points are what comes close to the outline. So once those rungs
+    ///   have run out, every side of the face goes back to the room the first
+    ///   pass walked it at, and only the outline is halved, rung after rung.
+    ///   Not from the first rung, because the bowls a rounding off a half ball
+    ///   in `a_piece_grazed_by_a_trimming_nothing_follows.rs`, whose ring clears
+    ///   with both rims halved, were refused when only the outline was, and a
+    ///   mesh that cleared halving both is cut as it was.
+    /// - **A refusal on a finer rung hands back the last crossing.** The
     ///   finer rooms are this function's own numbers, and a refusal at one of
     ///   them is no answer about the deflection the caller asked for — the same
     ///   line `room_a_mesh_has_to_work_in`'s two floors draw. So whether the
     ///   finer walk was refused, its cut-up refused for something else, or the
-    ///   rungs ran out, what comes back is the crossing of the finest rung that
+    ///   rungs ran out, what comes back is the crossing of the last rung that
     ///   crossed. The caller's own deflection was refused for a crossing, and a
     ///   caller who wants the next blocker can ask for a finer one.
     /// - **Only the log of the pass handed back is kept.** The passes before it
@@ -411,7 +425,7 @@ impl SolidView<'_> {
     /// [`Error::MoreMeshPointsThanASolidWillHold`] when it asks for more points
     /// than one mesh holds. [`Error::CannotMeshAFace`] when the triangulator
     /// refuses a face, carrying what it said; for a flat face whose bent sides
-    /// cross, that is the crossing of the finest rung above that crossed.
+    /// cross, that is the crossing of the last rung above that crossed.
     /// [`Error::Undecidable`] when a
     /// predicate inside a triangulation could not settle a sign.
     /// [`Error::TwoPatchesOfTheMeshDrewTheSameSide`] when two patches folded
@@ -498,7 +512,7 @@ impl SolidView<'_> {
         let deflection = self.room_a_mesh_has_to_work_in(deflection, policy, &along_each_edge)?;
         let mut building = BuildingAMesh::new(deflection, along_each_edge);
         let mut walked_again: HashMap<FaceKey, u32> = HashMap::new();
-        let mut finest_crossing: Option<(Error, ProvenanceLog)> = None;
+        let mut last_crossing: Option<(Error, ProvenanceLog)> = None;
         loop {
             let mut said = ProvenanceLog::new();
             let why = match building.walk_and_cut_up(self, policy, &mut said) {
@@ -514,7 +528,7 @@ impl SolidView<'_> {
                             Ok(Self::unless_placing_it_took_away_its_space(mesh, made)?)
                         }
                     });
-                    let (answer, mut said) = match (meshed, finest_crossing) {
+                    let (answer, mut said) = match (meshed, last_crossing) {
                         (Err(_), Some((crossing, its_log))) => (Err(crossing.into()), its_log),
                         (meshed, _) => (meshed, said),
                     };
@@ -537,12 +551,12 @@ impl SolidView<'_> {
                             .again_with_its_outline_walked_finer(face),
                         _ => building.again_with_its_outline_walked_finer(face),
                     };
-                    finest_crossing = Some((why, said));
+                    last_crossing = Some((why, said));
                     continue;
                 }
             }
-            let (why, mut said) = match (crossed, finest_crossing) {
-                (None, Some(finest)) => finest,
+            let (why, mut said) = match (crossed, last_crossing) {
+                (None, Some(last)) => last,
                 _ => (why, said),
             };
             said.drain_into(log);
@@ -712,7 +726,8 @@ fn a_flat_face_whose_bent_sides_crossed<'m>(
 }
 
 /// How many times [`SolidView::mesh`] walks the bent sides of one crossed flat
-/// face again, each time at half the room, before it hands the crossing back.
+/// face again, each time at half the room, and then as many times again its
+/// outline alone, before it hands the crossing back.
 /// A cost bound and not a proof.
 ///
 /// **Set from what cleared.** With a probe at every pass that walked anything
@@ -727,16 +742,28 @@ fn a_flat_face_whose_bent_sides_crossed<'m>(
 /// between seven rungs and sixteen, so eight keeps two over the most any
 /// needed. A rung walks the same points whatever the cap is, so each of those
 /// meshes clears at eight as it did at sixteen, and each that ran out runs out
-/// at eight, handing back its eighth rung's crossing.
+/// at eight and goes on to the outline alone.
+///
+/// **The outline alone gets as many again** (Q2764). With the same probe, `just
+/// t -p rcad-topo` and `just t -p rcad-step` on 35aa8ac8 saw 117 meshes clear
+/// there, every one a thin bar a rounding inside a thick one with both turned
+/// about `z` (`two_curves_of_one_pair_that_meet.rs`), after two to seven of its
+/// rungs, and 45 run out: the two half-disc plates, the ball and the bowl a
+/// rounding off a half ball, and the ring below. So for that shape the cap is
+/// no margin. Swept over 628 turns a hundredth apart, 501 of its meshes cleared
+/// on the outline's eighth rung and 767 ran out, and the fuses at five of those
+/// turns are still refused. It is kept at eight for what running out costs.
 ///
 /// **And what running out costs.** An arc walked to a room `r` takes about
 /// `1/√r` points, so each rung walks about `√2` times the points of the one
 /// before, and cutting a curved face up along that arc costs more than that.
 /// The half ball of radius 5 joined to the ball a rounding smaller has a ring
 /// `8.9e-16` wide that crosses at `0.01` on every rung: at a cap of 16 its
-/// mesh at `0.01` took 126 s to refuse, at 8 it takes 0.8 s, and the same solid
+/// mesh at `0.01` took 126 s to refuse, at 8 it took 0.8 s, and the same solid
 /// meshes at `0.1` in 8 ms
 /// (`a_ring_a_rounding_wide_is_refused_before_its_rims_are_walked_into_tens_of_thousands_of_points`).
+/// Its outline alone walked eight times more, with its inner rim back at the
+/// room asked, that whole test takes 3.3 s.
 /// At a cap of 30 the two half-disc plates' tests took 186 s and 325 s.
 const RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER: u32 = 8;
 
