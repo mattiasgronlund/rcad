@@ -4489,8 +4489,19 @@ impl<'f> Arrangement<'f> {
             .iter()
             .copied()
             .filter(|&each| boxes_overlap(place(each), from));
-        let (Some(held), None) = (holding.next(), holding.next()) else {
-            return None;
+        let held = match (holding.next(), holding.next()) {
+            (Some(held), None) => held,
+            (Some(_), Some(_)) => return None,
+            (None, _) => {
+                let mut inside = on_it
+                    .iter()
+                    .copied()
+                    .filter(|&each| holds_every_point_of(node, place(each)));
+                let (Some(held), None) = (inside.next(), inside.next()) else {
+                    return None;
+                };
+                held
+            }
         };
         if square_to_the_run_at_the_start(wound_as, from, place(held)) {
             return None;

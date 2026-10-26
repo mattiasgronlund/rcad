@@ -46,10 +46,16 @@ fn the_rim_corner_two_ulps_off_the_rims_start_is_counted_first_round_it() {
         .unwrap_or_else(|why| panic!("{why}"));
 }
 
+/// How far a solid's volume may move because its turned corners are each a
+/// rounding off where the turn puts them. The block's mesh is its own flat
+/// faces, so its volume error is about `1.3e-14`, and turned `0.05` it
+/// measured `108.0000000000001`.
+const TURNED_A_ROUNDING_OFF: f64 = 1e-12;
+
 /// The plate of `lean` and the far block, turned by `angle` about `z` and
 /// united under certified; the answer must validate as two solids that
 /// measure the plate's closed form and the block's `108`, each within its
-/// mesh's own volume error.
+/// mesh's own volume error and [`TURNED_A_ROUNDING_OFF`].
 fn unites_with_the_far_block_as_the_two_it_was(lean: [f64; 3], angle: f64) -> Result<(), String> {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
@@ -97,8 +103,8 @@ fn unites_with_the_far_block_as_the_two_it_was(lean: [f64; 3], angle: f64) -> Re
             volumes.len()
         ));
     };
-    if (block - closed_forms[0]).abs() > block_error
-        || (plate - closed_forms[1]).abs() > plate_error
+    if (block - closed_forms[0]).abs() > block_error + TURNED_A_ROUNDING_OFF
+        || (plate - closed_forms[1]).abs() > plate_error + TURNED_A_ROUNDING_OFF
     {
         return Err(format!(
             "lean {lean:?} turned {angle}: measured {block} ± {block_error} and {plate} ± \
