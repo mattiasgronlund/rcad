@@ -10,7 +10,8 @@
 //! against **both** surfaces with the bound the walker publishes for it.
 //!
 //! Two cones on one apex whose axes lean apart are the one pair here off a
-//! shared axis that is named: they cross in straight lines through the apex.
+//! shared axis that is named: they cross, or touch, along straight lines
+//! through the apex.
 //!
 //! A ball off the axis with the apex inside it crosses each nappe in a
 //! degree-four loop, which `walk` marches. So does a second cone off the axis
@@ -416,19 +417,101 @@ fn two_narrow_cones_on_one_apex_at_a_right_angle_touch_there_and_nowhere_else() 
 
 /// Two cones of slope one on one apex at a right angle touch along the two
 /// rulings `(1, 0, ±1)`: `x² + y² = z²` and `y² + z² = x²` take `y² = 0`, a
-/// double root. The enclosure of how far apart the two rulings of that flat
-/// surface spread holds nothing, so the pair is refused rather than named as
-/// four halves that are really two — a **gap**: the two touching rulings are
-/// there.
+/// double root, so the namer names the four halves the apex cuts those two
+/// into. So do any two cones at a right angle whose slopes multiply to one:
+/// slope two about `z` and a half about `x` touch along `(2, 0, ±1)`, and slope
+/// one about `z` and about `(1, 1, 0)` along `(1, 1, ±√2)`, which no three
+/// `f64`s write.
+///
+/// This pair used to be refused, because the enclosure of how far apart the
+/// rulings of each flat surface spread held nothing; the pitch cones of a pair
+/// of mitre gears are this pair.
 #[test]
-fn two_cones_on_one_apex_that_touch_along_two_rulings_are_refused() {
-    assert_eq!(
-        named(
-            &a_cone([0.0; 3], [0.0, 0.0, 1.0], 1.0),
-            &a_cone([0.0; 3], [1.0, 0.0, 0.0], 1.0),
+fn two_cones_on_one_apex_at_a_right_angle_whose_slopes_multiply_to_one_touch_along_two_rulings() {
+    let root = 2.0_f64.sqrt();
+    for (upright, lying, touching) in [
+        (
+            a_cone([0.0; 3], [0.0, 0.0, 1.0], 1.0),
+            a_cone([0.0; 3], [1.0, 0.0, 0.0], 1.0),
+            [[1.0, 0.0, 1.0], [1.0, 0.0, -1.0]],
         ),
-        Err(Error::CannotNameWhichPieceOfACrossingThisIs)
+        (
+            a_cone([0.0; 3], [0.0, 0.0, 1.0], 2.0),
+            a_cone([0.0; 3], [1.0, 0.0, 0.0], 0.5),
+            [[2.0, 0.0, 1.0], [2.0, 0.0, -1.0]],
+        ),
+        (
+            a_cone([0.0; 3], [0.0, 0.0, 1.0], 1.0),
+            a_cone([0.0; 3], [1.0, 1.0, 0.0], 1.0),
+            [[1.0, 1.0, root], [1.0, 1.0, -root]],
+        ),
+    ] {
+        let met = named(&upright, &lying);
+        let Ok(SurfaceMeet::Curves(runs)) = &met else {
+            panic!("the two touching rulings are named: {met:?}");
+        };
+        assert_eq!(runs.len(), 4, "the four halves of two rulings: {runs:?}");
+        assert_these_are_the_halves_of_the_rulings(
+            runs,
+            &both_halves_of_each(&touching),
+            [&upright, &lying],
+        );
+    }
+}
+
+/// Slope one about `z` and slope one half about `(3, 0, 1)`: the second axis
+/// leans `atan 3` off `z`, which is the first cone's half angle `atan 1` and
+/// the second's `atan ½` added, so the two touch along the ruling `(1, 0, 1)`
+/// they share in the flat surface through both axes. The second cone's far
+/// side leans `atan 3 + atan ½` off `z`, about 98°, short of the first cone's
+/// far ruling at 135°, so that is all they share.
+#[test]
+fn two_cones_on_one_apex_leaning_apart_by_their_two_half_angles_touch_along_one_ruling() {
+    let upright = the_right_angled_cone();
+    let leaning = a_cone([0.0; 3], [3.0, 0.0, 1.0], 0.5);
+    let met = named(&upright, &leaning);
+    let Ok(SurfaceMeet::Curves(runs)) = &met else {
+        panic!("the touching ruling is named: {met:?}");
+    };
+    assert_eq!(runs.len(), 2, "the two halves of one ruling: {runs:?}");
+    assert_these_are_the_halves_of_the_rulings(
+        runs,
+        &both_halves_of_each(&[[1.0, 0.0, 1.0]]),
+        [&upright, &leaning],
     );
+}
+
+/// Slope one about `z` and slope two about `(3, 0, −1)`: the second axis leans
+/// `180° − atan 3` off `z`, which less the second cone's half angle `atan 2`
+/// is 45°, so the two touch along `(1, 0, 1)` as the pair above does. The
+/// second cone's far side leans about 172°, past the first cone's far ruling at
+/// 135°, so the two cross there as well, along
+/// `(−1, ±2√2, 3)`: `x² + y² = z²` at `z = 1` puts the second cone's
+/// `5(3x − 1)² = 20` at `x = 1`, the touch, and `x = −⅓`. So the namer names
+/// six halves, two of the touching ruling and four of the crossing ones.
+#[test]
+fn two_cones_on_one_apex_that_touch_along_one_ruling_and_cross_along_two_more() {
+    let upright = the_right_angled_cone();
+    let wide = a_cone([0.0; 3], [3.0, 0.0, -1.0], 2.0);
+    let met = named(&upright, &wide);
+    let Ok(SurfaceMeet::Curves(runs)) = &met else {
+        panic!("three rulings are named: {met:?}");
+    };
+    assert_eq!(runs.len(), 6, "the six halves of three rulings: {runs:?}");
+    let across = 8.0_f64.sqrt();
+    assert_these_are_the_halves_of_the_rulings(
+        runs,
+        &both_halves_of_each(&[[1.0, 0.0, 1.0], [-1.0, across, 3.0], [-1.0, -across, 3.0]]),
+        [&upright, &wide],
+    );
+}
+
+/// The way out of the apex along each of `rulings`, and the way back.
+fn both_halves_of_each(rulings: &[[f64; 3]]) -> Vec<Point> {
+    rulings
+        .iter()
+        .flat_map(|&[x, y, z]| [Point::new(x, y, z), Point::new(-x, -y, -z)])
+        .collect()
 }
 
 /// Each of `halves` is a way out of the apex on both of `pair`, held by exactly
