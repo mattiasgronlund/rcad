@@ -1530,13 +1530,19 @@ fn reading_it_moves_a_meet_into_or_out_of_it(
                 }
             },
         )
+        .filter(|plane| {
+            !corner.around.iter().any(|round| {
+                *round == Surface::Plane(**plane) || *round == Surface::Plane(plane.reversed())
+            })
+        })
         .copied()
         .collect();
     if near.len() < 2 {
         return false;
     }
-    ACornerReadAsOnePoint::of(corner)
-        .is_some_and(|reading| reading.moves_a_meet_into_or_out_of_the_corner(among.outward, &near))
+    ACornerReadAsOnePoint::of(corner).is_some_and(|reading| {
+        reading.lets_a_crossing_in_through_a_face_it_does_not_cut(among.outward, &near)
+    })
 }
 
 /// Which of the places three surfaces meet at this corner is, or `None` when
