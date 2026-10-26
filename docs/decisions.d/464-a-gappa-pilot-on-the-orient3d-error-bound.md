@@ -15828,3 +15828,152 @@ And what is not a row: the sum over fifteen stages, which is Q2696's, in Lean
 since Gappa's `float<ieee_64, ne>` has no largest number, and which nobody has
 run, so it has no class (§360.5); and Q2700, which moves these scripts into
 `proofs/gappa/` with the rest of 464's and already waits on Q2692.
+
+### 464.23 POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF's parabola
+
+**Draft, unfinished.** Q2693's first lane relayed at its budget on
+2026-10-26, at base `7485253e`; the lane after it finishes this subsection or
+rewrites it. Nothing below is a result yet except the one print quoted.
+
+**The chain, as `walk.rs` computes it at `7485253e`.** `where_a_plane_cuts_a_cone`
+(`walk.rs:4972-5067`) rounds `reach = n·apex − d`, `n·n`, `w·w` and `up = n·w`
+once each from exact sums (`walk.rs:4984-5001`), then `normal_length` and
+`along_length` by `sqrt` (5008-5009), `foot = apex − n·(reach / n·n)` (5011),
+`standing_off = reach / normal_length` (5026), `axis_up = up /
+(normal_length·along_length)` (5027), `bend_up = and.dot(w) / along_length`
+(5028), `K = 2·(1 + t·t)·h·axis_up·bend_up`, left to right (5029), and `C =
+h·h·(1 − (1 + t·t)·axis_up·axis_up)` (5031-5032).
+`the_parabola_a_plane_along_a_ruling_cuts` (5078-5094) makes `off = C / K`,
+`vertex = foot − and·off` and `bend = and·(−(1/K))`, and `Parabola::at`
+(2758-2760) is `vertex + across·s + (bend·s)·s`. `s` is walked over `±1 /
+‖bend‖`, or between the ends a run names (`walk_an_endless_bend`,
+2608-2614).
+
+**What the first lane found by reading, not yet run.**
+
+- `bend_up` is not an exactly-summed dot, as the doc's second bullet
+  (`walk.rs:144-146`) says: `Vector::dot` is nalgebra's plain one. And on the
+  parabola `and·ŵ = −1/√(1 + t²)`, from terms as large as `|w|`, so its
+  relative error is an absolute one over `1/√(1 + t²)`: about `δB·√(1 + t²)`
+  for `|Bw − and*·w| ≤ δB·|w|`. That grows with the slope, and `K`'s with it.
+  The doc counts a fixed `10u`.
+- The doc's evaluation bullet takes `|s| ≤ |K|` (`walk.rs:159-162`). A run that
+  names its ends walks between `along_of` of each (2609-2614), which nothing
+  holds to `|K|`, and the ends are not in `how_big_this_is`'s list (5092).
+
+**`k.g`, the scalar chain, as it ran.** `hs` the true height, `nN` and `wW` the
+true lengths of `n` and `w`, `t` the slope; `E = 0` enters through `As =
+t/√(1 + t²)` and `Bs = −1/√(1 + t²)`. `Bw` is the `f64` dot `and·w`, taken
+within `3u·|w|` of `and*·w` by hypothesis.
+
+```gappa
+@rnd = float<ieee_64, ne>;
+
+t = rnd(t_);
+Bw = rnd(Bw_);
+
+Ts = 1 + t * t;
+As = t / sqrt(Ts);
+Bs = -1 / sqrt(Ts);
+
+R = hs * nN;
+Nn = nN * nN;
+Ww = wW * wW;
+U = As * (nN * wW);
+Bws = Bs * wW;
+
+reach = rnd(R); sqn = rnd(Nn); sqw = rnd(Ww); up = rnd(U);
+nl = rnd(sqrt(sqn)); wl = rnd(sqrt(sqw));
+h = rnd(reach / nl);
+nw = rnd(nl * wl);
+au = rnd(up / nw);
+bu = rnd(Bw / wl);
+tt = rnd(t * t);
+t2 = rnd(1 + tt);
+k1 = rnd(2 * t2);
+k2 = rnd(k1 * h);
+k3 = rnd(k2 * au);
+K = rnd(k3 * bu);
+hh = rnd(h * h);
+c1 = rnd(t2 * au);
+c2 = rnd(c1 * au);
+br = rnd(1 - c2);
+C = rnd(hh * br);
+off = rnd(C / K);
+mrk = rnd(1 / K);
+
+nlS = sqrt(Nn); wlS = sqrt(Ww);
+hS = R / nlS;
+nwS = nlS * wlS;
+auS = U / nwS;
+buS = Bws / wlS;
+t2S = 1 + t * t;
+k1S = 2 * t2S;
+k2S = k1S * hS;
+k3S = k2S * auS;
+KS = k3S * buS;
+hhS = hS * hS;
+c1S = t2S * auS;
+c2S = c1S * auS;
+brS = 1 - c2S;
+CS = hhS * brS;
+offS = CS / KS;
+
+{
+     hs in [1, 2]
+  /\ nN in [0.99, 1.01] /\ wW in [0.99, 1.01]
+  /\ t in [0.5, 2]
+  /\ (Bw - Bws) / wW in [-3b-53, 3b-53]
+->
+  (h - hS) / hS in ? /\ (au - auS) / auS in ? /\ (bu - buS) / buS in ?
+  /\ (K - KS) / KS in ? /\ (mrk - 1 / KS) * KS in ?
+  /\ (C - CS) / (hS * hS) in ?
+  /\ (off - offS) / KS in ?
+}
+
+reach ~ R; sqn ~ Nn; sqw ~ Ww; up ~ U; Bw ~ Bws;
+nl ~ nlS; wl ~ wlS; h ~ hS; nw ~ nwS; au ~ auS; bu ~ buS;
+tt ~ t * t; t2 ~ t2S; k1 ~ k1S; k2 ~ k2S; k3 ~ k3S; K ~ KS;
+hh ~ hhS; c1 ~ c1S; c2 ~ c2S;
+
+hS -> hs;
+auS -> As;
+buS -> Bs;
+c2S -> t * t;
+KS -> -2 * hs * t;
+
+(C - CS) / (hS * hS) -> ((C - hh * br) / (hh * br)) * ((hh * br) / (hS * hS)) + ((hh - hhS) / hhS) * br + (br - brS);
+br - brS -> (br - (1 - c2)) - (c2 - c2S);
+c2 - c2S -> ((c2 - c2S) / c2S) * (t * t);
+(off - offS) / KS -> ((off - C / K) / (C / K)) * ((C / K) / KS) + ((C - CS) / (hS * hS)) * ((hS * hS) / (K * KS)) - (offS / KS) * ((K - KS) / K);
+offS / KS -> (1 - t * t) / (4 * t * t);
+(hS * hS) / (K * KS) -> 1 / ((1 + (K - KS) / KS) * (4 * t * t));
+(C / K) / KS -> (C - CS) / (K * KS) + (offS / KS) * (KS / K);
+```
+
+Gappa 1.8.0, `-Eprecision=200`, printed (the decimal halves only; the hints'
+"not trivially equal" warnings are the identities `hS = hs`, `auS = As`, `buS =
+Bs`, `c2S = t²` and `KS = −2·hs·t`, true for `nN, wW > 0` and not yet checked
+by hand):
+
+```text
+(h - hS) / hS in {-3.88578e-16, 3.88578e-16}
+(au - auS) / auS in {-6.66134e-16, 6.66134e-16}
+(bu - buS) / buS in {-1.03736e-15, 1.03736e-15}
+(K - KS) / KS in {-2.62498e-15, 2.62498e-15}
+(mrk - 1 / KS) * KS in {-2.1888e-14, 2.1888e-14}
+(C - CS) / hhS in {-1.02363e-14, 1.02363e-14}
+(off - offS) / KS in {-1.6875, 1.6875}
+```
+
+That is `3.5u`, `6u`, `9.35u` and `23.6u` for `h`, `axis_up`, `bend_up` and
+`K`, with `u = 2⁻⁵³` and Gappa's rounding at `u` relative. The last three are
+not yet right: `mrk`'s `197u` and `off`'s `1.6875` are hints that did not take,
+and `C`'s `92u·h²` is not yet checked against a count by hand. The relaying
+lane had written, and not run, `gen.py`'s hints for them (its handoff), with
+`Bw` within `7u·|w|` and `t` in `[0.5, 2]`, `[2, 8]` and `[8, 32]`.
+
+**Still to do**, in order: the scalar chain over slope ranges, a script for one
+coordinate of the point against the true parabola at the same `s`, the
+controls, `coqc` through 464.13's `one.sh`, and the rows for what this
+leaves.
