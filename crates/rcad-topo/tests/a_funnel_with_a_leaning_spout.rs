@@ -3,7 +3,7 @@
 //!
 //! The two cross in a curve of degree four, and `intersect` used to refuse
 //! every such pair `ACrossingBetweenAConeAndAnotherCurvedSurface`, so every
-//! fuse of the two shapes here refused before any run was walked:
+//! fuse of the first two shapes here refused before any run was walked:
 //!
 //! - a funnel with a narrow spout leaning across it, every straight line of
 //!   which runs into the funnel's skin and out again, so the two cross in two
@@ -17,10 +17,19 @@
 //! is pinned here**, under every rule both ways round, for the row after Q2667
 //! to turn round: the funnel and the spout are refused where a crossing is asked
 //! to be a conic, and the two pointed cones are still refused as a cone
-//! crossing another curved surface. Each answer that comes back is to be
-//! certified, sound, and measure as the others that came back say it must: the
-//! union and the intersection together hold each solid once, and each solid
-//! less the other is that solid less the intersection.
+//! crossing another curved surface.
+//!
+//! A third shape came with row Q2818: two pointed cones of different slopes,
+//! the narrower leaning off the wider, which cross in a loop and two branches
+//! that run off for ever. No one flat surface picks that loop out, so
+//! `intersect` names it with two, and the fuse used to panic at the second.
+//! Since Q2818 a closed crossing is named by every picker it has, and all six
+//! fuses answer.
+//!
+//! Each answer that comes back is to be certified, sound, and measure as the
+//! others that came back say it must: the union and the intersection together
+//! hold each solid once, and each solid less the other is that solid less the
+//! intersection.
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -80,6 +89,27 @@ fn two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule() {
     );
 }
 
+/// **Two pointed cones of different slopes, the narrower leaning off the
+/// wider.** Both are eight high. The upright one has slope a half, the leaning
+/// one a quarter, and the leaning one turns 0.3 radians about the `x` axis
+/// through the point four up the upright one's axis.
+///
+/// The two cross in a loop and in two branches that run off for ever both ways
+/// along the same two rulings, so no one flat surface holds the loop and none
+/// of either branch: `intersect` picks the loop out with two flat surfaces
+/// square to the leaning axis, one through the leaning cone's apex and one,
+/// facing the other way, through the point the turn is about. The fuse
+/// panicked at the second picker before row Q2818.
+///
+/// Every fuse answers, under every rule both ways round.
+#[test]
+fn two_pointed_cones_of_two_slopes_crossing_in_a_loop_named_by_two_flats_answer_every_fuse() {
+    assert_eq!(
+        every_fuse_of(pointed_cones_of_two_slopes).refusals(),
+        [[None; 2]; 3]
+    );
+}
+
 fn funnel_and_spout(model: &mut Model) -> (SolidKey, SolidKey) {
     let funnel = a_frustum(model, 0.5, 2.0, 8.0);
     let spout = a_frustum(model, 0.125, 2.0, 12.0);
@@ -94,6 +124,17 @@ fn funnel_and_spout(model: &mut Model) -> (SolidKey, SolidKey) {
 fn two_pointed_cones(model: &mut Model) -> (SolidKey, SolidKey) {
     let upright = a_pointed_cone(model, 0.5, 8.0);
     let leaning = a_pointed_cone(model, 0.5, 8.0);
+    let through =
+        Axis::new(Point::new(0.0, 0.0, 4.0), Vector::new(1.0, 0.0, 0.0)).expect("an axis");
+    model
+        .place_solid(leaning, &Isometry::rotation(&through, 0.3).expect("a turn"))
+        .expect("this model made the key");
+    (upright, leaning)
+}
+
+fn pointed_cones_of_two_slopes(model: &mut Model) -> (SolidKey, SolidKey) {
+    let upright = a_pointed_cone(model, 0.5, 8.0);
+    let leaning = a_pointed_cone(model, 0.25, 8.0);
     let through =
         Axis::new(Point::new(0.0, 0.0, 4.0), Vector::new(1.0, 0.0, 0.0)).expect("an axis");
     model

@@ -520,7 +520,9 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
                     else {
                         continue;
                     };
-                    let key = ([ends[0].min(ends[1]), ends[0].max(ends[1])], arc);
+                    let mut sorted = ends;
+                    sorted.sort_unstable();
+                    let key = (sorted, arc);
                     let number = arcs_at_one_corner.len();
                     let number = *arcs_at_one_corner.entry(key).or_insert(number);
                     of_this_piece.push(NamedSide {
@@ -8495,19 +8497,19 @@ fn with_the_halves_of_each_whole_curve_joined<'a>(
     let goes_by = the_name_each_closed_curve_goes_by(
         named
             .iter()
-            .map(|&(side, curve, _)| (&side.carried_by, curve, side.ends[0].point())),
+            .map(|(side, curve, _)| (&side.carried_by, curve.clone(), side.ends[0].point())),
         policy,
     );
-    let one_name = |curve: CurveName| goes_by.get(&curve).copied().unwrap_or(curve);
+    let one_name = |curve: &CurveName| goes_by.get(curve).unwrap_or(curve).clone();
     let whole: BTreeSet<CurveName> = named
         .iter()
         .filter(|&&(_, _, closes)| closes)
-        .map(|&(_, curve, _)| one_name(curve))
+        .map(|(_, curve, _)| one_name(curve))
         .collect();
     let to_join: BTreeSet<CurveName> = named
         .iter()
-        .filter(|&&(_, curve, closes)| !closes && whole.contains(&one_name(curve)))
-        .map(|&(_, curve, _)| curve)
+        .filter(|(_, curve, closes)| !closes && whole.contains(&one_name(curve)))
+        .map(|(_, curve, _)| curve.clone())
         .collect();
     if to_join.is_empty() {
         return Ok(wires);
@@ -9422,7 +9424,7 @@ struct OneClosedCurve<'a> {
 /// Never a coordinate. Two faces solving the same three surfaces in a different
 /// order round differently, so comparing what they rounded to would either miss
 /// a join or invent one; comparing the *names* of the surfaces cannot.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum CornerName {
     /// A corner the input already had, unless exactly three planes meet there
     /// ([`input_corners_on_exactly_three_planes`]).
@@ -9523,8 +9525,8 @@ impl Corners {
         let mut corners = Self {
             on_three_planes,
             curves: the_name_each_closed_curve_goes_by(
-                sides.iter().filter_map(|&(meet, curve)| {
-                    Some((&meet.carried_by, curve?, meet.ends[0].point()))
+                sides.iter().filter_map(|(meet, curve)| {
+                    Some((&meet.carried_by, curve.clone()?, meet.ends[0].point()))
                 }),
                 policy,
             ),
@@ -9532,10 +9534,14 @@ impl Corners {
         };
         let mut closes: BTreeMap<VertexSlot, BTreeSet<Option<CurveName>>> = BTreeMap::new();
         let mut on_curve: BTreeMap<CurveName, OneClosedCurve<'_>> = BTreeMap::new();
-        for &(meet, curve) in &sides {
-            let one_name = curve.map(|curve| corners.curve_goes_by(curve));
-            if let (Some(curve), Some(one_name)) = (curve, one_name) {
-                on_curve.entry(one_name).or_default().names.insert(curve);
+        for (meet, curve) in &sides {
+            let one_name = curve.as_ref().map(|curve| corners.curve_goes_by(curve));
+            if let (Some(curve), Some(one_name)) = (curve, &one_name) {
+                on_curve
+                    .entry(one_name.clone())
+                    .or_default()
+                    .names
+                    .insert(curve.clone());
             }
             for end in &meet.ends {
                 let slot = match end {
@@ -9546,14 +9552,14 @@ impl Corners {
                     | MeetPoint::APoleOfAClosedSurface { .. } => continue,
                 };
                 if let Some(slot) = slot {
-                    closes.entry(slot).or_default().insert(one_name);
+                    closes.entry(slot).or_default().insert(one_name.clone());
                 }
-                if let (Some(curve), Some(one_name)) = (curve, one_name) {
-                    on_curve
-                        .entry(one_name)
-                        .or_default()
-                        .starts
-                        .push((slot, curve, end));
+                if let (Some(curve), Some(one_name)) = (curve, &one_name) {
+                    on_curve.entry(one_name.clone()).or_default().starts.push((
+                        slot,
+                        curve.clone(),
+                        end,
+                    ));
                 }
             }
         }
@@ -9568,9 +9574,9 @@ impl Corners {
             if names.len() == 1 && starts.iter().all(|(slot, _, _)| slot.is_none()) {
                 continue;
             }
-            let only_closes_this = |slot: &Option<VertexSlot>| {
-                slot.is_some_and(|slot| closes[&slot] == BTreeSet::from([Some(curve)]))
-            };
+            let only_this = BTreeSet::from([Some(curve)]);
+            let only_closes_this =
+                |slot: &Option<VertexSlot>| slot.is_some_and(|slot| closes[&slot] == only_this);
             let mut round = BTreeSet::new();
             for (_, _, end) in &starts {
                 if matches!(end, MeetPoint::WhereAClosedCurveStarts { .. }) {
@@ -9585,7 +9591,9 @@ impl Corners {
                     .then_with(|| one.cmp(other))
                     .then_with(|| one_named.cmp(other_named))
             });
-            starts.dedup_by_key(|(slot, named, _)| (*slot, slot.is_none().then_some(*named)));
+            starts.dedup_by(|(slot, named, _), (kept_slot, kept_named, _)| {
+                slot == kept_slot && (slot.is_some() || named == kept_named)
+            });
             let (_, _, first) = starts[0];
             let start = corners.of(model, first, policy, log)?;
             for name in round {
@@ -9604,8 +9612,8 @@ impl Corners {
     /// The name every name of `curve`'s closed curve goes by: `curve` itself
     /// unless [`the_name_each_closed_curve_goes_by`] found that curve brought
     /// under more than one name.
-    fn curve_goes_by(&self, curve: CurveName) -> CurveName {
-        self.curves.get(&curve).copied().unwrap_or(curve)
+    fn curve_goes_by(&self, curve: &CurveName) -> CurveName {
+        self.curves.get(curve).unwrap_or(curve).clone()
     }
 
     /// Make every name of one point go by one name, and put the point where
@@ -9640,7 +9648,7 @@ impl Corners {
             let kept = self.name_of(model, &one_point.kept, policy, log)?;
             for (surfaces, which) in &one_point.folded {
                 folds.push([
-                    kept,
+                    kept.clone(),
                     CornerName::Meet(names_of_the_three_surfaces(surfaces), *which),
                 ]);
             }
@@ -9659,7 +9667,7 @@ impl Corners {
                     .is_lt(),
             };
             if lower {
-                self.put_at.insert(name, (point, *vertex));
+                self.put_at.insert(name.clone(), (point, *vertex));
             }
             if let Some(moved) = one_point.moved {
                 let furthest = self.moved.entry(name).or_default();
@@ -9721,14 +9729,14 @@ impl Corners {
         for meet in sides {
             let from = self.goes_by(self.name_of(model, &meet.ends[0], policy, log)?);
             let to = self.goes_by(self.name_of(model, &meet.ends[1], policy, log)?);
-            for (name, end) in [(from, &meet.ends[0]), (to, &meet.ends[1])] {
+            for (name, end) in [(&from, &meet.ends[0]), (&to, &meet.ends[1])] {
                 let point = self.the_corner_it_would_be(model, name, end).point;
-                let lowest = lands_at.entry(name).or_insert(point);
+                let lowest = lands_at.entry(name.clone()).or_insert(point);
                 if is_the_lower_rounding(point, *lowest) {
                     *lowest = point;
                 }
                 if let Some(planes) = self.three_planes_of(model, end) {
-                    on_three_planes.push((planes, name));
+                    on_three_planes.push((planes, name.clone()));
                 }
             }
             if from != to {
@@ -9890,14 +9898,17 @@ impl Corners {
         if let Some(&chosen) = self.taken_over.get(&name) {
             return Ok(chosen);
         }
-        let corner = self.the_corner_it_would_be(model, name, end);
+        let corner = self.the_corner_it_would_be(model, &name, end);
         if let Some(&already) = self.named.get(&name) {
             self.settle_on_the_lower_rounding(already, corner.point, corner.wobble);
             self.made[already].moved_by_the_policy |= corner.moved_by_the_policy;
             return Ok(already);
         }
-        let one_corner = self.one_corner.get(&name).copied();
-        if let Some(&already) = one_corner.and_then(|least| self.made_for_one_corner.get(&least)) {
+        let one_corner = self.one_corner.get(&name).cloned();
+        if let Some(&already) = one_corner
+            .as_ref()
+            .and_then(|least| self.made_for_one_corner.get(least))
+        {
             self.settle_on_the_lower_rounding(already, corner.point, corner.wobble);
             self.made[already].from = self.made[already].from.or(corner.from);
             self.made[already].moved_by_the_policy |= corner.moved_by_the_policy;
@@ -9946,9 +9957,9 @@ impl Corners {
 
     /// The corner [`Corners::of`] makes of `end`, which goes by `name`, where
     /// no corner of that name or at that point is made yet, without making it.
-    fn the_corner_it_would_be(&self, model: &Model, name: CornerName, end: &MeetPoint) -> Corner {
-        let moved = self.moved.get(&name).copied();
-        let (point, wobble, was) = match self.put_at.get(&name) {
+    fn the_corner_it_would_be(&self, model: &Model, name: &CornerName, end: &MeetPoint) -> Corner {
+        let moved = self.moved.get(name).copied();
+        let (point, wobble, was) = match self.put_at.get(name) {
             Some(&(input_corner, vertex)) => (
                 input_corner,
                 input_corner
@@ -10010,7 +10021,7 @@ impl Corners {
             if self.taken_over.contains_key(&name) || self.named.contains_key(&name) {
                 continue;
             }
-            let corner = self.the_corner_it_would_be(model, name, end);
+            let corner = self.the_corner_it_would_be(model, &name, end);
             if !self.at.contains_key(&exactly_at(corner.point)) {
                 starts.push((edge, corner));
             }
@@ -10021,7 +10032,7 @@ impl Corners {
     /// The name every name of `name`'s point goes by: `name` itself unless an
     /// arrangement found the point to be more than one name.
     fn goes_by(&self, name: CornerName) -> CornerName {
-        self.goes_by.get(&name).copied().unwrap_or(name)
+        self.goes_by.get(&name).cloned().unwrap_or(name)
     }
 
     /// What `end` is called, before [`Corners::goes_by`] is asked.
@@ -10283,8 +10294,8 @@ fn the_least_name_of_each_group(
 ) -> BTreeMap<CornerName, CornerName> {
     let mut leads_to: BTreeMap<CornerName, CornerName> = BTreeMap::new();
     let leader = |leads_to: &BTreeMap<CornerName, CornerName>, mut name: CornerName| {
-        while let Some(&next) = leads_to.get(&name) {
-            name = next;
+        while let Some(next) = leads_to.get(&name) {
+            name = next.clone();
         }
         name
     };
@@ -10297,10 +10308,10 @@ fn the_least_name_of_each_group(
         };
     }
     let mut least = BTreeMap::new();
-    for &name in leads_to.keys() {
-        let root = leader(&leads_to, name);
-        least.insert(name, root);
-        least.insert(root, root);
+    for name in leads_to.keys() {
+        let root = leader(&leads_to, name.clone());
+        least.insert(name.clone(), root.clone());
+        least.insert(root.clone(), root);
     }
     least
 }
@@ -10459,8 +10470,8 @@ fn the_name_each_closed_curve_goes_by<'a>(
     }
     let mut leads_to: BTreeMap<CurveName, CurveName> = BTreeMap::new();
     let leader = |leads_to: &BTreeMap<CurveName, CurveName>, mut name: CurveName| {
-        while let Some(&next) = leads_to.get(&name) {
-            name = next;
+        while let Some(next) = leads_to.get(&name) {
+            name = next.clone();
         }
         name
     };
@@ -10487,15 +10498,15 @@ fn the_name_each_closed_curve_goes_by<'a>(
             == name_of_the_plane_at_any_scale(&Surface::Plane(other))
     };
     let named: Vec<(&CurveName, &(Plane, Surface, PredicatePoint))> = cut_out_of.iter().collect();
-    for (at, &(&one, &(flat, mine, _))) in named.iter().enumerate() {
-        for &(&other, &(other_flat, theirs, _)) in &named[at + 1..] {
+    for (at, &(one, &(flat, mine, _))) in named.iter().enumerate() {
+        for &(other, &(other_flat, theirs, _)) in &named[at + 1..] {
             if one_plane(flat, other_flat) && share_more_than_a_point(flat, &mine, &theirs) {
-                join(&mut leads_to, one, other);
+                join(&mut leads_to, one.clone(), other.clone());
             }
         }
     }
-    for (&on_the_ring, &(carried_by, flat, ring)) in &cut_out_of_a_ring {
-        for &(&other, &(other_flat, round, start)) in &named {
+    for (on_the_ring, &(carried_by, flat, ring)) in &cut_out_of_a_ring {
+        for &(other, &(other_flat, round, start)) in &named {
             let the_named_circle_keeps_it = matches!(
                 which_of_the_pairs_closed_crossings_it_is(
                     carried_by,
@@ -10509,15 +10520,15 @@ fn the_name_each_closed_curve_goes_by<'a>(
                 && the_named_circle_keeps_it
                 && share_more_than_a_point(flat, &round, &ring)
             {
-                join(&mut leads_to, on_the_ring, other);
+                join(&mut leads_to, on_the_ring.clone(), other.clone());
             }
         }
     }
     let mut goes_by = BTreeMap::new();
-    for &name in leads_to.keys() {
-        let least = leader(&leads_to, name);
-        goes_by.insert(name, least);
-        goes_by.insert(least, least);
+    for name in leads_to.keys() {
+        let least = leader(&leads_to, name.clone());
+        goes_by.insert(name.clone(), least.clone());
+        goes_by.insert(least.clone(), least);
     }
     goes_by
 }
@@ -10763,7 +10774,7 @@ impl Edges {
             "a piece of a flat face has a side with no length"
         );
         let named = which_curve_it_is(from, to, meet, policy, log)?
-            .map(|curve| corners.curve_goes_by(curve));
+            .map(|curve| corners.curve_goes_by(&curve));
         let key = (
             [from.min(to), from.max(to)],
             named,
@@ -11646,7 +11657,7 @@ fn which_of_the_pairs_closed_crossings_it_is(
                     name[0] = A_CIRCLE_NAMED_BY_ITS_OWN_PLANE;
                     name[1..]
                         .copy_from_slice(&name_of_the_plane_at_any_scale(&Surface::Plane(level)));
-                    name
+                    SmallVec::from_buf([name])
                 }),
             );
         }
@@ -11672,8 +11683,12 @@ fn which_of_the_pairs_closed_crossings_it_is(
     Ok(which_curve_of_the_pair(&[this_circle]))
 }
 
-/// The slot ahead of a ring's circle's plane in its [`WhichCurveOfThePair`],
-/// past the four kinds of picker [`which_curve_of_the_pair`] writes.
+/// The slot ahead of a ring's circle's plane in its [`WhichCurveOfThePair`].
+/// [`which_curve_of_the_pair`] writes the same number ahead of a flat picker
+/// through a point, and the two never meet: a ring against a ball, a pipe or a
+/// cone is named by its circle's plane before any picker is asked
+/// ([`which_of_the_pairs_closed_crossings_it_is`]), every other pair by its
+/// pickers, and the [`CurveName`] each sits in names its two surfaces too.
 const A_CIRCLE_NAMED_BY_ITS_OWN_PLANE: u64 = 4;
 
 /// The planes `intersect` names each circle a ring and a ball, a pipe or a
@@ -11746,10 +11761,11 @@ fn the_plane_of_the_circle_through(levels: &[Plane], point: PredicatePoint) -> O
     }
 }
 
-/// Which curve of its pair a closed crossing's corner is on: what picks the
-/// curve out of the others its two surfaces cross in, written out as bits by
-/// [`which_curve_of_the_pair`], and `None` where nothing picks it.
-type WhichCurveOfThePair = Option<[u64; 10]>;
+/// Which curve of its pair a closed crossing's corner is on: everything that
+/// picks the curve out of the others its two surfaces cross in, each written
+/// out as bits by [`which_curve_of_the_pair`] and the lot sorted, and `None`
+/// where nothing picks it.
+type WhichCurveOfThePair = Option<SmallVec<[[u64; 10]; 1]>>;
 
 /// The name of what picks a closed crossing out of the others its two surfaces
 /// cross in, for the corner it starts at: `None` where the pair crosses in one
@@ -11763,6 +11779,19 @@ type WhichCurveOfThePair = Option<[u64; 10]>;
 /// along it — the band's two wires, the band below and the cone — and both
 /// were refused as not a manifold (`tests/a_pointed_cone_drilled_along_its_axis.rs`).
 ///
+/// **A crossing picked by more than one picker is named by all of them.** Two
+/// pointed cones whose own directions overlap, of slopes a half and a quarter
+/// and height eight, the second turned 0.3 about the `x` axis through
+/// `(0, 0, 4)`, cross in a loop and two branches that run off for ever both
+/// ways along the same two straight lines of the leaning cone. `intersect`
+/// picks the loop as what lies in front of the flat through the leaning cone's
+/// apex and behind the flat through `(0, 0, 4)`, and each branch by one of the
+/// two: no one flat can hold the loop and leave out both branches. While a
+/// curve could be named by one picker only, every fuse of the two panicked
+/// here (`tests/a_funnel_with_a_leaning_spout.rs`). A curve is the part of the
+/// crossing on or inside every one of its pickers, so the name is the set of
+/// them, sorted so it does not hang on the order `intersect` lists them in.
+///
 /// **The same from both faces along the curve and in both argument orders.**
 /// Both faces carry the one pair of surfaces, and `intersect` builds what picks
 /// each curve from the two whichever is handed to it first — the cone's apex
@@ -11775,22 +11804,31 @@ type WhichCurveOfThePair = Option<[u64; 10]>;
 /// the same way as its point and its facing, which is what the two loops a cone
 /// crosses a pipe or a ball off its axis in are picked by. A curved picker is
 /// written as the surface named either way round
-/// ([`name_of_the_surface_either_way_round`]) and which side of it it keeps. The slot ahead of the numbers says which kind of picker it
-/// is, so a ball and a pipe never share a name.
+/// ([`name_of_the_surface_either_way_round`]) and which side of it it keeps.
+/// The slot ahead of the numbers says which kind of picker it is, so a ball and
+/// a pipe never share a name.
 ///
 /// # Panics
 ///
-/// If more than one picker picks the curve, or if the picker is of a kind this
-/// crate has not been taught. `intersect` picks every closed curve it picks out
-/// with one picker, and [`Picker`] is `#[non_exhaustive]` and lives in another
-/// crate, so a change to either arrives with no compile error and this is what
-/// notices. Two curves under one name are a wrong answer; a crash is not.
+/// If a picker is of a kind this crate has not been taught. [`Picker`] is
+/// `#[non_exhaustive]` and lives in another crate, so a new kind arrives with
+/// no compile error and this is what notices. Two curves under one name are a
+/// wrong answer; a crash is not.
 fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
-    let picker = match picked_by {
-        [] => return None,
-        [only] => only,
-        more => panic!("a closed crossing picked out by more than one picker: {more:?}"),
-    };
+    if picked_by.is_empty() {
+        return None;
+    }
+    let mut names: SmallVec<[[u64; 10]; 1]> = picked_by.iter().map(name_of_the_picker).collect();
+    names.sort_unstable();
+    Some(names)
+}
+
+/// One picker of [`which_curve_of_the_pair`], written out as bits.
+///
+/// # Panics
+///
+/// As [`which_curve_of_the_pair`] does.
+fn name_of_the_picker(picker: &Picker) -> [u64; 10] {
     let mut name = [0; 10];
     let (kind, surface) = match picker {
         Picker::InFrontOf(half_space) => {
@@ -11798,7 +11836,7 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
             for (slot, number) in name[1..].iter_mut().zip([x, y, z, half_space.offset()]) {
                 *slot = (number + 0.0).to_bits();
             }
-            return Some(name);
+            return name;
         }
         Picker::InFrontOfAFlatThrough(half_space) => {
             name[0] = 4;
@@ -11810,7 +11848,7 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
             for (slot, number) in name[1..].iter_mut().zip(numbers) {
                 *slot = (number + 0.0).to_bits();
             }
-            return Some(name);
+            return name;
         }
         Picker::OutsideABall(ball) => (1, Surface::Sphere(*ball)),
         Picker::OutsideAPipe(pipe) => (2, Surface::Cylinder(*pipe)),
@@ -11819,7 +11857,7 @@ fn which_curve_of_the_pair(picked_by: &[Picker]) -> WhichCurveOfThePair {
     };
     name[0] = kind;
     name[1..].copy_from_slice(&name_of_the_surface_either_way_round(&surface));
-    Some(name)
+    name
 }
 
 /// Which of the two arcs between its corners a side is of a closed crossing
