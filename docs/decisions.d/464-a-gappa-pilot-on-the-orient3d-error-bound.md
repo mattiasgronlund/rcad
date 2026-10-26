@@ -18407,17 +18407,38 @@ if __name__ == "__main__":
 `python3 flatall.py` prints `722 cases with a normal term, each with a
 control at u / 2, and fa_none.g`.
 
-`prodzero.g`, as run, exits 1; it needs the split at zero before it proves:
+**The second lane's run, still a draft.** The first lane's `prodzero.g`
+asked both directions as implications inside the goal and exited 1, `BND(X)`
+best within `2.22507e-308`. The cover needs one direction only, a product that
+rounds to zero is at most `2⁻¹⁰⁷⁵`, and with `t` zero as a hypothesis it
+proves with no hint, `gappa -Bcoq` and `coqc` exit 0, 101 lines, no hints.
+`c_prodzero.g`, the same asking `2⁻¹⁰⁷⁶`, exits 1. `pmin.g` prints `P` at
+least `2^(-971.585)` with `eb` normal at the code's `B`.
+
+`runall.sh` ran the 722 cases, `fa_none.g` and `prodzero.g` with Coq, 16 at a
+time on a load of 15 to 33 over 24 cores, from 20:42:34Z to 21:07:17Z: `grep
+-c ' exit 0 [0-9.]*s$' list_fa.log` printed 724, and `grep -c 'coq -Bcoq exit
+0 coqc exit 0' list_fa.log` 724. Only `fa_none.out` prints "pointless". The
+proofs of the 722 are 1513 to 6969 lines with 8 to 27 hints; the slowest is
+`fa_nnnnnn`, 92.72 s in Gappa and 104.44 s for `-Bcoq` and `coqc`.
+`summary.py` read every case: `A` within exactly `2⁻¹⁰⁷⁵` for each product
+not normal in all 722, and the largest `(Σ e) / Phat` and `P −/ Phat` `5u +
+7u²` and `5u + 10u²` and a little more, 464.13's for `flat.g`. Its checks
+against `k u + 7u²` per case compare with no room for that little more, so
+they count `5u + 7u²`-and-a-little as over: give them room before quoting
+them. The controls were still running when this lane relayed.
+
+`prodzero.g`, as it proves:
 
 ```gappa
-# prodzero.g: a product of two doubles, of either sign, at or below the
-# normals, rounds to zero exactly when it is at most 2^-1075 in magnitude.
+# prodzero.g: a product of two doubles, of either sign, that rounds to zero
+# is at most 2^-1075 in magnitude.
 @rnd = float<ieee_64, ne>;
 a = rnd(a_); b = rnd(b_);
 X = a * b;
 t = rnd(X);
-{ |a| <= 1b1024 /\ |b| <= 1b1024 /\ |X| <= 1b-1022
-  -> (t in [0, 0] -> X in [-1b-1075, 1b-1075]) /\ (X in [-1b-1075, 1b-1075] -> t in [0, 0]) }
+{ |a| <= 1b1024 /\ |b| <= 1b1024 /\ t in [0, 0]
+  -> X in [-1b-1075, 1b-1075] }
 ```
 
 `runmany.sh` is 464.18's at 16 at a time rather than 8:
