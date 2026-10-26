@@ -24,7 +24,16 @@ rcad-geom's cylinder. 464.16 is Q2681, on the side of rcad-geom's cone, and
 464.17 is Q2682, on the side of rcad-geom's torus. 464.18 is Q2684, on the
 side of a plane with every product anywhere, 464.19 is Q2689, on
 `Isometry::POINT_ROUNDOFF`, and 464.20 is Q2690, on
-`Plane::NORMAL_LENGTH_ROUNDOFF`.*
+`Plane::NORMAL_LENGTH_ROUNDOFF`. 464.21 is Q2691, on
+`CORNER_AFTER_MOVING_ROUNDOFF`, 464.22 is Q2692, on `EVALUATION_ROUNDOFF`'s one
+stage, and 464.23 is Q2693, on the parabola of
+`POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF`. 464.24 is Q2694, on a distance off a
+plane and a plane's shift with one product below the normals. 464.25 is Q2747,
+which runs block 1 with two or more of the nine differences at zero, and 464.26
+is Q2748, which runs it with one difference and one minor at zero. 464.27 is
+Q2760, on the side of a flat surface through a point with every product
+anywhere, and 464.28 is Q2771, on the side of rcad-geom's cylinder with a zero
+factor.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -46,6 +55,14 @@ side of a plane with every product anywhere, 464.19 is Q2689, on
   464.18  The side of a plane with every product anywhere
   464.19  Isometry::POINT_ROUNDOFF
   464.20  Plane::NORMAL_LENGTH_ROUNDOFF
+  464.21  CORNER_AFTER_MOVING_ROUNDOFF
+  464.22  EVALUATION_ROUNDOFF's one stage
+  464.23  POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF's parabola
+  464.24  A distance off a plane, and a plane's shift, with one product below the normals
+  464.25  Two or more of the nine differences at zero
+  464.26  One difference at zero with one minor at zero
+  464.27  The side of a flat surface through a point with every product anywhere
+  464.28  The side of rcad-geom's cylinder with a zero factor
 
 ### 464.1 The bugs a bound prover is for
 
@@ -564,7 +581,7 @@ $ x in (-4503599627370497b-1074, 0, 4503599627370497b-1074);
   of its own. `surface.rs`' `ERROR_BOUND` is done in 464.12,
   `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` in 464.13,
   `SIDE_OF_SPHERE_ERROR_BOUND` in 464.14, and `SIDE_OF_CYLINDER_ERROR_BOUND`
-  in 464.15 where no factor is zero.
+  in 464.15 where no factor is zero and in 464.28 where one is.
 - **Q2660**, the eleven `*_ROUNDOFF` constants: which of them Gappa can state,
   and proofs of those. Done, in 464.9: three are proved at the code's
   constants, two of them false when every number is below `2⁻¹⁰²²`, and each
@@ -5986,7 +6003,10 @@ reach square rounds to. Coq checks each proof, modulo its hints. The claim on
 `value` itself is not proved at the code's constant in either form tried, only
 at `10u + 82u²`, and `decide` does not need it (4). The branches where a
 difference, a direction component or the radius is zero, which
-`product_is_normal` lets through, are not run. And the comments claim more
+`product_is_normal` lets through, were not run here. 464.28 has since run each
+zero difference and direction component, and each proves at the code's
+constant; a zero radius, and a direction zero in all three components, do not
+reach `on_floats`. And the comments claim more
 than is proved. The doc comment on the constant writes `45ε` where it means
 `45ε²` and miscounts its own terms. The comment on the check says that
 checking the components covers the permanent's squares, which is false where a
@@ -6175,7 +6195,9 @@ Against what is proved:
 - "Only while nothing ... falls into the subnormals", enforced "product by
   product": `product_is_normal` lets a zero through (`cascade.rs:67-69`), and
   the branches where a difference, a direction component or the radius is
-  zero are not run (10). A cancelling component gets through too, and its
+  zero were not run here (10). 464.28 has since run the zero differences and
+  direction components, and each proves; a zero radius does not reach
+  `on_floats`. A cancelling component gets through too, and its
   reach square, which nothing checks, can then fall below the normals or
   round to zero, and the bound holds there (6). So the reach squares do not
   need what "only" says.
@@ -7661,7 +7683,9 @@ written:
   radius is zero, the axis-aligned cylinder among them. `product_is_normal(a,
   b)` is true when `a` or `b` is zero (`cascade.rs:67-69`), so these cases pass
   every check `on_floats` makes, and no script here covers them. Not run, so no
-  class (§360.5).
+  class (§360.5). Done, in 464.28: each of the 82 cases proves at the code's
+  constant; a zero radius, or a direction with all three components zero, does
+  not reach `on_floats`.
 - Q2772: restate `cylinder.rs:541-552` and `312-314` by 5. What the `80ε²` has
   to beat is `ε²`, not `ε`, and by the comment's own terms `45 + 60 + 10` make
   115. Checking the components does not cover the permanent's reach squares
@@ -18855,15 +18879,16 @@ no best for (y - Ex) / eb: []
 ### 464.28 The side of rcad-geom's cylinder with a zero factor
 
 Q2771 ran 464.15's `cyl.g` where a difference or a direction component is
-zero, in two lanes on 2026-10-27, at `cc9adf3f`. The first wrote
-`cylzero.py`; its relay ran it and wrote this. The bound is proved on `y`, the
-sum before `value`'s last rounding, at the code's constant in each of the 82
-cases, and Coq checks each proof, modulo its hints. Each control at `u / 2`
-fails. A zero radius, and a direction with all three components zero, do not
-reach `on_floats`. So with 464.15 every pattern of zero and nonzero factors
-that reaches `on_floats` is run, and the bound holds on `y` in each. The doc
-comment on the constant still says these branches have not been run, which is
-a row (6).
+zero, in three lanes on 2026-10-27, at `cc9adf3f`. The first wrote
+`cylzero.py`; its relay ran it and wrote this, and the third brought 464.6,
+464.15 and the list at the head of 464 in line with it. The bound is proved on
+`y`, the sum before `value`'s last rounding, at the code's constant in each of
+the 82 cases, and Coq checks each proof, modulo its hints. Each control at
+`u / 2` fails. A zero radius, and a direction with all three components zero,
+do not reach `on_floats`. So with 464.15 every pattern of zero and nonzero
+factors that reaches `on_floats` is run, and the bound holds on `y` in each.
+The doc comment on the constant still says these branches have not been run,
+which is a row (6).
 
 **1. Which zeros get through.** `product_is_normal(a, b)` is `a == 0.0 || b
 == 0.0 || (a * b).abs() >= f64::MIN_POSITIVE` (`cascade.rs:67` at
