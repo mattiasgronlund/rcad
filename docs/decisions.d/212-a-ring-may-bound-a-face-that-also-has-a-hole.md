@@ -119,6 +119,11 @@ patches, one under the island and one over it
 (`cuts_through_one_island` in `mesh.rs`), and
 `an_island_two_cuts_meet_is_refused_by_name` is renamed
 `an_island_two_cuts_meet_measures_under_every_rule`
-(`a_ball_face_ringing_its_pole_round_a_round_hole.rs`). On a cone this
-section's shape is still refused, and no solid is known to reach it there —
-this paragraph does not change that.
+(`a_ball_face_ringing_its_pole_round_a_round_hole.rs`).
+
+**Since Q2811, a solid reaches it on a cone too.** A pointed cone fused with a
+ball poking out of its side, with a bar leaning through it, or with a pin
+pushed through it square to its axis each leave the cone's face a cap round
+its apex with the crossing loop as an island in it — exactly this section's
+shape — and every fuse of all three answers under every rule
+(`a_tapered_shaft_with_a_cross_hole.rs`).

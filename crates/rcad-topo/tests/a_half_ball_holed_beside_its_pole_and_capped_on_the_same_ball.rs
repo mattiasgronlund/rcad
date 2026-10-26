@@ -15,9 +15,9 @@
 //! beside one that does not (Q583). Q453 (`eba7bec6`) since cuts a cap on a
 //! ball with islands in it up to its pole, each island kept whole in the patch
 //! that holds it (`cut_a_cap_up_to_its_pole` in `mesh.rs`), and this skin takes
-//! that path: with `a_cap_on_a_ball_with_islands_in_it` made to answer `false`,
-//! the builder refuses the skin `AWireWillNotLieFlatOnItsFace` again (Q583's
-//! lane, on the plane facing out with the hole listed second).
+//! that path: with `a_cap_on_a_ball_or_a_cone_with_islands_in_it` made to
+//! answer `false`, the builder refuses the skin `AWireWillNotLieFlatOnItsFace`
+//! again (Q583's lane, on the plane facing out with the hole listed second).
 //!
 //! **Which spellings are right.** At `(0, 3, 4)` the ball's longitude grows
 //! towards `−x`, and walking the rim that way keeps the skin on the left, so

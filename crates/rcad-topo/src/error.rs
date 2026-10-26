@@ -815,9 +815,11 @@ pub enum Error {
     /// two of the rim's cuts up to the pole land on it instead of missing it:
     /// since Q921 the strip between two such cuts is split into two patches
     /// instead (§212.6). The same shape without the ball under it — one wire
-    /// right round beside one that is not — is refused the same way on a
-    /// cone, where no fuse is known to build it; only arena surgery reaches it
-    /// there (§212.6).
+    /// right round beside one that is not — was refused the same way on a
+    /// cone, where only arena surgery reached it; since Q2811 a pointed cone
+    /// fused with a ball poking out of its side, a bar leaning through it, or
+    /// a pin pushed through it square to its axis builds it, and the cap
+    /// round the apex answers under every rule instead (§212.6).
     ///
     /// **A refusal about the solid and not about the request**, and no deflection
     /// avoids it. §31.10 item 5 filed this doc as a claim about today's builders

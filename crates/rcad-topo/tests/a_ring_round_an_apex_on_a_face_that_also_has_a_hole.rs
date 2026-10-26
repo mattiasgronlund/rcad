@@ -32,13 +32,19 @@
 //! `a_curved_pair_obeys_inclusion_and_exclusion_inside_the_error_the_four_declare`
 //! reads a different share of its tolerance now.
 //!
-//! **What is still refused is a face with one wire right round beside one that
-//! is not**, and that is a gap rather than a limit: the answer exists — the
-//! winding loop cuts the chart in two and the other wire lies in one of the
-//! halves — but nothing here works out which, and `cut_a_cap_up_to_its_pole`
-//! hands back patches with one loop each and has nowhere to put an island.
-//! `mesh.rs`'s `a_curved_face_with_a_hole_is_refused_rather_than_asserted_against`
-//! is the demonstration of that refusal.
+//! **A face with one wire right round beside one that is not was refused**,
+//! and that was a gap rather than a limit: the answer exists — the winding
+//! loop cuts the chart in two and the other wire lies in one of the halves —
+//! but `cut_a_cap_up_to_its_pole` handed back patches with one loop each and
+//! had nowhere to put an island. **Since Q2811 that gap is closed on a cone's
+//! own cap round its apex**: `a_cap_on_a_ball_or_a_cone_with_islands_in_it`
+//! (`mesh.rs`) now puts an island there, and `a_tapered_shaft_with_a_cross_hole.rs`
+//! fuses a pointed cone with a ball poking out of its side, with a bar leaning
+//! through it, and with a pin pushed through it square to its axis, and every
+//! one answers under every rule. `mesh.rs`'s
+//! `a_curved_face_with_a_hole_is_refused_rather_than_asserted_against` still
+//! demonstrates the refusal reaching a shape no builder here makes, arrived at
+//! through `Deserialize`-shaped arena surgery instead.
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
