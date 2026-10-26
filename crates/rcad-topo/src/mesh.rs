@@ -918,6 +918,7 @@ impl BuildingAMesh {
         let mut walked_finer = core::mem::take(&mut self.walked_finer);
         let halved: HashMap<EdgeKey, f64> = face
             .wires()
+            .take(1)
             .flat_map(WireView::coedges)
             .map(|coedge| coedge.edge())
             .filter(|edge| *edge.stored_run() != EdgeRun::Straight)
