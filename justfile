@@ -8387,20 +8387,19 @@ fuzz-target target duration corpus_root="" max_len="" fork="0" dict="" step_corp
 # stub sleeps half the time it was granted and logs when it started, so both the
 # clock the recipe runs against and the order it starts things in are real.
 #
-# **It takes about thirty seconds, and arm Twenty-six fails it past 60.** Three
-# runs of `just check-fuzz-overnight-selftest` on 24 idle cores took 29.3, 30.4
-# and 30.4 s, with 12.6 to 13.8 CPU-seconds each by bash's `time`, and two runs
-# of `just gate quiet fresh` gave the step 31.7 and 33.1 s, starting at a load
-# of 10 and 19 (Q709, 2026-10-02). Most arms run beside each other, and the end
-# of the body says which and why; run in turn they took 86 s. About 27 s of the
-# thirty is the stub asleep: eleven seconds while Four overruns with the other
-# arms beside it, then four seconds for each of the four arms run alone that
-# sleep. Load cannot stretch a sleep, only the 13 CPU-seconds, and all of them
-# added one after another to the sleep make 41 s. Reaching 60 takes that and
-# every CPU-second also taking two and a half. On CI's four-core runner the
-# gate runs four steps at once (§372.12), so this step shares four cores with
-# three others; it has not been run there, since the Actions allowance is
-# spent. The shape this replaced fails the bound on its own, by 26 s.
+# **It takes about forty seconds now, and arm Twenty-six's bound is a 90 s
+# backstop (Q1774).** Four runs of `just check-fuzz-overnight-selftest` on
+# this machine under a load average from 4 to 32 (idle, and under six
+# `yes >/dev/null` processes as a stand-in for a fuzz night's contention)
+# took 38.1, 40.0, 42.7 and 38.5 s wall. Most arms run beside each other,
+# and the end of the body says which and why; `overlap`, called after each
+# `beside()` batch settles, checks directly that they did, from the start
+# times the stub logs, so the 90 s bound only has to catch a hang or an
+# overrun no single arm bounds — see arm Twenty-six's own comment, at the
+# end, for the arithmetic and for why that bound is no longer the line
+# doing the real work. On CI's four-core runner the gate runs four steps at
+# once (§372.12), so this step shares four cores with three others; it has
+# not been run there, since the Actions allowance is spent.
 #
 # Two things about the window, and neither can be seen from the clock alone.
 # **It is a deadline and not a budget**: a recipe that gave each of five targets
@@ -9802,6 +9801,11 @@ check-fuzz-overnight-selftest:
     # inode shared by the two nights, and never the tree's own copy, which
     # the next night that meets this name would reopen with `fopen(…, "wb")`
     # and cut short.
+    #
+    # Runs beside Thirty-one and Thirty-two now (Q1774), each under a date
+    # of its own — `beside()` already gives this arm its own `$dir`, so
+    # the three were never going to collide through it, but the earlier
+    # night's name is this arm's own fixture and reads clearer owning one.
     thirty() {
     rm -f fuzz/artifacts/*/slow-unit-"$tag"
     : >"$dir/log"
@@ -9830,10 +9834,13 @@ check-fuzz-overnight-selftest:
     # Thirty-one: a name only tonight holds — the earlier night planted here
     # holds a file for the same target, but under a different name — is a
     # plain copy, with one link and nowhere else to find it.
+    #
+    # Its own date, 2000-01-02, so it never meets Thirty's or Thirty-two's
+    # earlier night now that all three run beside each other (Q1774).
     thirty_one() {
     rm -f fuzz/artifacts/*/slow-unit-"$tag"
     : >"$dir/log"
-    earlier_night="$dir/logs/2000-01-01"
+    earlier_night="$dir/logs/2000-01-02"
     mkdir -p "$earlier_night/artifacts/where_two_surfaces_cross"
     printf 'an older nights unrelated find\n' \
         >"$earlier_night/artifacts/where_two_surfaces_cross/slow-unit-not-tonight-$tag"
@@ -9853,10 +9860,12 @@ check-fuzz-overnight-selftest:
     # half-written file, carried into one night, must not be carried into
     # every night after it. Tonight stays its own copy, with the tree's own
     # bytes.
+    #
+    # Its own date, 2000-01-03, for the same reason as Thirty-one's (Q1774).
     thirty_two() {
     rm -f fuzz/artifacts/*/slow-unit-"$tag"
     : >"$dir/log"
-    earlier_night="$dir/logs/2000-01-01"
+    earlier_night="$dir/logs/2000-01-03"
     mkdir -p "$earlier_night/artifacts/where_two_surfaces_cross"
     printf 'a short copy from a race, not what the tree holds\n' \
         >"$earlier_night/artifacts/where_two_surfaces_cross/slow-unit-$tag"
@@ -9890,6 +9899,10 @@ check-fuzz-overnight-selftest:
     #     Fourteen's timeouts, and whose assertions no extra slow unit or
     #     timeout can change. None of them counts slow units, and none writes
     #     a crash, which would fail every night that asserts it exited 0.
+    #     Thirty, Thirty-one and Thirty-two (Q1774) belong here too: each
+    #     plants its own "earlier night" fixture under `$dir`, which
+    #     `beside()` already gives every arm its own copy of, so the three
+    #     cannot meet each other there either.
     #   - Alone, after them: Three and Twenty-three count slow units exactly,
     #     Twelve and Thirteen write crashes, and Sixteen and Twenty-nine write
     #     a sancov rlib and a clean one beside it, either of which any other
@@ -9904,11 +9917,15 @@ check-fuzz-overnight-selftest:
     # seconds in, and it first copies a second after its night starts it, so
     # a burst of fifteen arms starting beside it is what could make it late.
     # So the rest start only once Ten has returned, while One and Four are
-    # still asleep. None of the rest asserts on the clock.
+    # still asleep. None of the rest asserts on its own clock — `overlap`
+    # below, called once each `beside()` batch has settled, is what asserts
+    # on all of them at once instead (Q1774).
     beside() {
         local name
+        : >"$dir/start-times"
         for name in "$@"; do
             (
+                printf '%s %s\n' "$name" "$(date +%s%N)" >>"$dir/start-times"
                 arm="$name"
                 dir="$dir/$name"
                 tag="$name-$tag"
@@ -9931,6 +9948,23 @@ check-fuzz-overnight-selftest:
         done
         [ "$failed" -eq 0 ] || exit 1
     }
+    # Asks the one question the wall-clock bound at the bottom cannot ask on
+    # its own: did this `beside()` call's own arms actually launch together?
+    # Each logged its own start the instant the kernel ran it, before any of
+    # its own sleeping or work, so a correct `beside()` clusters every line
+    # within a moment regardless of load, and a `beside()` that ran its arms
+    # one after another spreads them across the sleeps those arms make —
+    # seconds apart, not milliseconds. This is what the bound used to stand
+    # in for and could not tell apart from a merely slow machine.
+    overlap() {
+        local times min max spread
+        times=$(awk '{print $2}' "$dir/start-times" | sort -n)
+        min=$(head -n1 <<<"$times")
+        max=$(tail -n1 <<<"$times")
+        spread=$(( (max - min) / 1000000000 ))
+        [ "$spread" -le "$1" ] \
+            || { echo "beside() launched $(grep -c . <<<"$times") arms $spread s apart, over its own bound of $1 s: they ran in turn instead of together"; exit 1; }
+    }
     alone() {
         arm="$1"
         "$1"
@@ -9939,10 +9973,13 @@ check-fuzz-overnight-selftest:
     declare -A running=()
     beside one_and_two four ten
     settle ten
+    overlap 5
     beside two_with_no_step_corpus five six_and_seven eight nine eleven \
         fourteen fifteen seventeen eighteen nineteen twenty twenty_one \
-        twenty_two twenty_four twenty_five twenty_seven twenty_eight
+        twenty_two twenty_four twenty_five twenty_seven twenty_eight \
+        thirty thirty_one thirty_two
     settle
+    overlap 5
     rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*-"$tag"
     alone three
     alone twelve
@@ -9950,9 +9987,6 @@ check-fuzz-overnight-selftest:
     alone sixteen
     alone twenty_nine
     alone twenty_three
-    alone thirty
-    alone thirty_one
-    alone thirty_two
     arm="after the last"
     head_did_not_move
 
@@ -9981,22 +10015,45 @@ check-fuzz-overnight-selftest:
     # accounts for under two of the fifteen-to-eighteen-second wall increase
     # — the lead that named it as the cause was wrong. What does account for
     # it: each of the three new arms is one more `alone` arm with its own
-    # four-second stub sleep, run strictly in turn, so three more seconds of
-    # unavoidable, unoverlapped sleep landed on a bound that never priced
-    # them in, on top of their own CPU work. Q1766's lander gate saw this
-    # step take 66 s against the old bound of 60, with four lanes going —
-    # heavier contention than this session raised on its own. Running these
-    # three beside the others instead would change what they test: all
-    # three share one fixed "earlier night" directory name with each other
-    # and would race on it, so that is a correctness change for a later row
+    # four-second stub sleep, run strictly in turn, so each one lands four
+    # more seconds of unavoidable, unoverlapped sleep on a bound that never
+    # priced it in — twelve seconds for the three together, not the three
+    # this paragraph said until Q1774 caught the arithmetic, on top of
+    # their own CPU work. Q1766's lander gate saw this step take 66 s
+    # against the old bound of 60, with four lanes going — heavier
+    # contention than this session raised on its own. Running these three
+    # beside the others instead would change what they test: all three
+    # share one fixed "earlier night" directory name with each other and
+    # would race on it, so that is a correctness change for a later row
     # (queued below), not a one-line move tonight. The bound moves instead,
     # by the same ratio Q709 set it by — about twice the worst wall time
     # measured — taking the lander's own 66 s rather than this session's
     # smaller ones, since the lander's four-lane night is the closer match
     # to what this bound has to survive.
-    bound=130
+    #
+    # Q1774 is that later row. By then the bound of 130 no longer caught
+    # what its own message named: forcing `beside()` to run
+    # its own arms one after another (a probe, not committed) passed the
+    # bound at 129.5 s wall, under a load average of 2.6 to 8 — one second
+    # of margin on a bash recipe, so a loaded machine or a slightly slower
+    # regression would pass it too. Thirty, Thirty-one and Thirty-two move
+    # beside the rest (each now plants its "earlier night" fixture under a
+    # date of its own, so the three cannot race on it there), which removes
+    # their twelve seconds of serial sleep rather than pricing it in again,
+    # and `overlap` above replaces the clock as the thing that actually
+    # catches arms running in turn: it reads the start times the stub logs
+    # for each `beside()` batch, so it does not need load's effect on CPU
+    # time to be bounded at all, and it failed the same forced-serial probe
+    # in about 25 s rather than needing the whole recipe to finish. What is
+    # left for the wall clock below to catch is a hang or an overrun no
+    # single arm bounds, so it is a backstop now and sized as one: four
+    # runs on this machine (idle, and under six `yes >/dev/null` processes
+    # standing in for a fuzz night, load average 4 to 32) took 38.1, 40.0,
+    # 42.7 and 38.5 s, and 90 clears all four with room left for a slower
+    # machine without coming near the 129.5 s that used to call it close.
+    bound=90
     [ "$SECONDS" -le "$bound" ] \
-        || { echo "check-fuzz-overnight-selftest took $SECONDS s, over its bound of $bound s: arms that should run beside each other are running in turn, or one of them is waiting on something new"; exit 1; }
+        || { echo "check-fuzz-overnight-selftest took $SECONDS s, over its bound of $bound s: one of the arms is waiting on something new, or beside() itself hung"; exit 1; }
 
 # `fuzz/rustc-stand-in.sh`'s crate-name match, which nothing else here runs:
 # `check-fuzz-overnight-selftest` stubs `cargo` itself, so the stand-in script
