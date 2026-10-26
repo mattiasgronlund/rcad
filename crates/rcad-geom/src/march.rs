@@ -2386,14 +2386,14 @@ mod tests {
     fn a_point_a_rounding_under_the_flat_through_a_cones_apex_has_its_normal_enclosed() {
         let (cone, at, truth) = a_cone_and_a_point_a_rounding_under_the_flat_through_its_apex(1.0);
         let (_, normal) = how_far_off_a_cone_enclosing(&cone, at);
-        for axis in 0..3 {
+        for (axis, (enclosed, exact)) in normal.into_iter().zip(truth.normal).enumerate() {
             assert!(
-                holds(normal[axis], truth.normal[axis]),
+                holds(enclosed, exact),
                 "the normal at {at:?} has {:e} along axis {axis}, and its enclosure there is \
                  [{:e}, {:e}]",
-                truth.normal[axis].0,
-                normal[axis].lo(),
-                normal[axis].hi(),
+                exact.0,
+                enclosed.lo(),
+                enclosed.hi(),
             );
         }
     }
