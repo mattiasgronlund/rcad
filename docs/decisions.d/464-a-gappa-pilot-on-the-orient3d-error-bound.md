@@ -13959,3 +13959,398 @@ And what is not a row: the hypotheses 464.19 already leaves, the nine
 products below the normals (Q2802) and the route through
 `From<na::Isometry3<f64>>` (Q2803), which `vector.g` shares with `point.g`;
 Q2700, which moves these scripts into `proofs/gappa/` with 464.19's.
+
+### 464.21 CORNER_AFTER_MOVING_ROUNDOFF
+
+**Draft, unfinished: Q2691's second lane handed it on here (§416).** What
+follows is what ran, on 2026-10-26 at `f95bb965`, through 464.13's `one.sh`,
+unchanged. The cylinder, the torus, the cone, the controls, the Coq runs,
+`all.sh`, `same.py` and the write-up are still to do, and the lane that
+finishes this rewrites the section whole.
+
+The bound is a distance: `where_a_corner_lands_after_moving`
+(`moved_corner.rs:208-244`) boxes the moved corner by `128ε · L` per
+coordinate, so the box meets the moved surface when the moved corner is within
+`128ε · L = 256u · L` of it. `L` is `the_largest_number_involved`
+(`moved_corner.rs:424-468`).
+
+**Done.**
+
+- `sos.py` checks six identities in exact rationals at 1000 points each,
+  printed below. `Ex` is nalgebra's turn without rounding; it is linear, so a
+  moved corner less a moved centre or axis origin is `Ex(x − c)` and the two
+  slips `point.g` proves.
+- `ball.g` proves a corner exactly on a ball within `256u · L` of the moved
+  ball. It printed the slips' share `|kp − kc| ≤ 1.38453e-14`, `124.7u`, and
+  the radius's `r · ||Ex(y)| − 1| ≤ 2.66454e-15`, `24.0u`, so `148.7u` in all.
+  The triangle inequality that splits the distance into those two is by hand.
+- `plane.g` proves a corner exactly on a plane within `256u · L` of the moved
+  plane. Its four shares printed `±9.23022e-15` (`83.14u`, the turn's length,
+  `4(q·q − 1)(v × n)·(v × x)`, which the doc's count leaves out), `±6.66134e-15`
+  (`60u`, the normal's slip), `±6.92267e-15` (`62.35u`, the corner's slip),
+  and the offset's `17u` taken as a hypothesis from `shiftplane.g`'s goal;
+  `n'·n' − 1` printed `±2.72318e-14`, `245.3u`. That is about `222.5u` in all.
+  Gappa warned twice that a rewriting was not needed, for `T2 -> F2 / 2` and
+  `T3 -> F3 / 2`.
+
+**Next, worked on paper and not run.** Cylinder, cone and torus all go
+through `Axis::transformed`. With `y` the corner less the axis origin, `e`
+the unit `Ex(a)`, `â'` the unit stored moved direction and `k` the two point
+slips, the distance is at most `|k| + |Ex(y)| · θ + |f(Ex(y); e)|`, where:
+
+- `θ ≤ |da| / (|Ex(a)| − |da|)` is the tilt;
+- `f` is the surface's distance in the plane of along and across, which is
+  1-Lipschitz there.
+
+Identities 5 and 6 let the scripts put the axis on `z` and the corner in the
+`xz` plane. Then `ρ' = ρ · sqrt(NUMQ / DENQ)` and `t' = t · sqrt(DENQ) − 4η
+v₀v₂ρ / sqrt(DENQ)`. The shares come to:
+
+- a cylinder, `|y| ≤ 2√3 L` and `r ≤ L`: `124.7u + 120u + 24u = 268.7u` at
+  `POINT_ROUNDOFF`'s `36u`, which is over `256u`; `86.6u + 120u + 24u =
+  230.6u` at `25u`, which `point.g` reaches (`D / L ≤ 24.8`, 464.19's 3), and
+  which needs a run of `point.g` with its goal at `100b-55`;
+- a torus, `|y| ≤ ring + tube ≤ L`: `124.7u + 34.6u` and a drift of at most
+  `sqrt((24u + 24u)² + (24u)²) = 53.7u`, so about `213u`;
+- a cone, `|y| ≤ 2√3 L`: the drift is `2η ρ (v₂² − v₀² + 2s v₀v₂) / h` to first
+  order, at most `24u · ρ`, and `ρ` can reach `2√3 L`. So `86.6u + 120u +
+  83u = 290u` even at `25u`. This argument does not reach `128ε` for a cone.
+  Whether an input does, nobody has searched.
+
+`ball.g`, as it ran:
+
+```gappa
+# restates: crates/rcad-geom/src/moved_corner.rs CORNER_AFTER_MOVING_ROUNDOFF at f95bb965
+# restates: crates/rcad-geom/src/moved_corner.rs the_largest_number_involved at f95bb965
+# restates: crates/rcad-geom/src/sphere.rs transformed at f95bb965
+# restates: crates/rcad-geom/src/isometry.rs apply_to_point at f95bb965
+# CORNER_AFTER_MOVING_ROUNDOFF for a corner on a ball,
+# crates/rcad-geom/src/moved_corner.rs at f95bb965: a corner x exactly on a
+# ball of centre c and radius r, moved, is within 128 * f64::EPSILON * L of
+# the moved ball. Sphere::transformed moves the centre by apply_to_point and
+# carries r over. Ex, nalgebra's turn without rounding, is linear (sos.py),
+# so the moved corner less the moved centre is Ex(x - c) + kp - kc, kp and kc
+# the two slips point.g proves. By the triangle inequality the distance to
+# the moved ball is at most |kp - kc| + r * | |Ex(y)| - 1 |, y = (x - c) / r,
+# which is what this bounds, per unit of L.
+@rnd = float<ieee_64, ne>;
+
+# The quaternion (w, v), each an f64, and q.q worked out exactly.
+w = rnd(w_); v0 = rnd(v0_); v1 = rnd(v1_); v2 = rnd(v2_);
+N4 = w * w + v0 * v0 + v1 * v1 + v2 * v2;
+
+# nalgebra's turn of the unit vector y without rounding, as point.g's Ex
+# writes x, and its length squared.
+Ex0 = 2 * w * (v1 * y2 - v2 * y1)
+    + v1 * (2 * (v0 * y1 - v1 * y0)) - v2 * (2 * (v2 * y0 - v0 * y2)) + y0;
+Ex1 = 2 * w * (v2 * y0 - v0 * y2)
+    + v2 * (2 * (v1 * y2 - v2 * y1)) - v0 * (2 * (v0 * y1 - v1 * y0)) + y1;
+Ex2 = 2 * w * (v0 * y1 - v1 * y0)
+    + v0 * (2 * (v2 * y0 - v0 * y2)) - v1 * (2 * (v1 * y2 - v2 * y1)) + y2;
+EE = Ex0 * Ex0 + Ex1 * Ex1 + Ex2 * Ex2;
+YY = y0 * y0 + y1 * y1 + y2 * y2;
+
+# v x y and v . y, without rounding, and v.v.
+X0 = v1 * y2 - v2 * y1; X1 = v2 * y0 - v0 * y2; X2 = v0 * y1 - v1 * y0;
+VY = X0 * X0 + X1 * X1 + X2 * X2;
+VD = v0 * y0 + v1 * y1 + v2 * y2;
+VV = v0 * v0 + v1 * v1 + v2 * v2;
+
+# The two slips, the moved corner's and the moved centre's, per unit of L.
+k0 = kp0 - kc0; k1 = kp1 - kc1; k2 = kp2 - kc2;
+KK = k0 * k0 + k1 * k1 + k2 * k2;
+
+# The distance's two shares, per unit of L: the slips', and the radius's
+# times how far the turn's arithmetic takes a unit vector off length one.
+S = sqrt(KK);
+T = RL * |sqrt(EE) - 1|;
+
+{
+  # Every quaternion component is a finite f64.
+     |w| <= 1b1024 /\ |v0| <= 1b1024 /\ |v1| <= 1b1024 /\ |v2| <= 1b1024
+  # A stored turn has |q.q - 1| <= 6 epsilon (held_near_length_one), and
+  # 6 epsilon is 12b-53.
+  /\ N4 in [9007199254740980b-53, 9007199254741004b-53]
+  # y is the corner less the centre over r, a unit vector.
+  /\ YY in [1, 1]
+  /\ y0 in [-1, 1] /\ y1 in [-1, 1] /\ y2 in [-1, 1]
+  # What point.g, point1.g and point2.g prove of the moved corner and the
+  # moved centre, L at least every coordinate of either and of the shift.
+  /\ kp0 in [-36b-53, 36b-53] /\ kp1 in [-36b-53, 36b-53]
+  /\ kp2 in [-36b-53, 36b-53]
+  /\ kc0 in [-36b-53, 36b-53] /\ kc1 in [-36b-53, 36b-53]
+  /\ kc2 in [-36b-53, 36b-53]
+  # r / L: L is at least the radius.
+  /\ RL in [0, 1]
+->
+  EE - 1 in ? /\ S in ? /\ T in ?
+  /\ S + T in [0, 256b-53]
+}
+
+# |Ex(y)|^2 is |y|^2 and the turn's length share (464.20's 3), and |v x y|^2
+# is at least zero, a sum of squares, and at most v.v y.y; v.v is q.q less w^2.
+EE -> YY + 4 * (N4 - 1) * VY;
+VY -> VV * YY - VD * VD;
+VV -> N4 - w * w;
+```
+
+`plane.g`, as it ran:
+
+```gappa
+# restates: crates/rcad-geom/src/moved_corner.rs CORNER_AFTER_MOVING_ROUNDOFF at f95bb965
+# restates: crates/rcad-geom/src/moved_corner.rs the_largest_number_involved at f95bb965
+# restates: crates/rcad-geom/src/plane.rs transformed at f95bb965
+# restates: crates/rcad-geom/src/plane.rs NORMAL_LENGTH_ROUNDOFF at f95bb965
+# restates: crates/rcad-geom/src/isometry.rs apply_to_point at f95bb965
+# restates: crates/rcad-geom/src/isometry.rs apply_to_vector at f95bb965
+# CORNER_AFTER_MOVING_ROUNDOFF for a corner on a plane,
+# crates/rcad-geom/src/moved_corner.rs at f95bb965: a corner x exactly on
+# the plane n.x = off, moved, is within 128 * f64::EPSILON * L of the moved
+# plane. Plane::transformed turns the normal, n' = Ex(n) + dn, and gives the
+# offset off' = off + n'.s + dd by shiftplane.g's arithmetic; the moved
+# corner is Ex(x) + s + dp. Then n'.p' - off' is
+#   4 (q.q - 1) (v x n) . (v x x) + dn . Ex(x) + n' . dp - dd,
+# with Ex nalgebra's turn without rounding (sos.py), and the distance is that
+# over |n'|. Every length is per unit of L, which divides nothing that rounds.
+@rnd = float<ieee_64, ne>;
+
+# The quaternion (w, v), each an f64, and q.q worked out exactly.
+w = rnd(w_); v0 = rnd(v0_); v1 = rnd(v1_); v2 = rnd(v2_);
+N4 = w * w + v0 * v0 + v1 * v1 + v2 * v2;
+VV = v0 * v0 + v1 * v1 + v2 * v2;
+
+# The stored normal n, and the corner over L.
+NN = n0 * n0 + n1 * n1 + n2 * n2;
+XX = X0 * X0 + X1 * X1 + X2 * X2;
+
+# nalgebra's turn of n and of the corner without rounding, as vector.g's Ex
+# writes x.
+An0 = 2 * w * (v1 * n2 - v2 * n1)
+    + v1 * (2 * (v0 * n1 - v1 * n0)) - v2 * (2 * (v2 * n0 - v0 * n2)) + n0;
+An1 = 2 * w * (v2 * n0 - v0 * n2)
+    + v2 * (2 * (v1 * n2 - v2 * n1)) - v0 * (2 * (v0 * n1 - v1 * n0)) + n1;
+An2 = 2 * w * (v0 * n1 - v1 * n0)
+    + v0 * (2 * (v2 * n0 - v0 * n2)) - v1 * (2 * (v1 * n2 - v2 * n1)) + n2;
+E0 = 2 * w * (v1 * X2 - v2 * X1)
+   + v1 * (2 * (v0 * X1 - v1 * X0)) - v2 * (2 * (v2 * X0 - v0 * X2)) + X0;
+E1 = 2 * w * (v2 * X0 - v0 * X2)
+   + v2 * (2 * (v1 * X2 - v2 * X1)) - v0 * (2 * (v0 * X1 - v1 * X0)) + X1;
+E2 = 2 * w * (v0 * X1 - v1 * X0)
+   + v0 * (2 * (v2 * X0 - v0 * X2)) - v1 * (2 * (v1 * X2 - v2 * X1)) + X2;
+AnAn = An0 * An0 + An1 * An1 + An2 * An2;
+EE = E0 * E0 + E1 * E1 + E2 * E2;
+
+# v x n and v x x, v . n and v . x, without rounding.
+a0 = v1 * n2 - v2 * n1; a1 = v2 * n0 - v0 * n2; a2 = v0 * n1 - v1 * n0;
+b0 = v1 * X2 - v2 * X1; b1 = v2 * X0 - v0 * X2; b2 = v0 * X1 - v1 * X0;
+VN = a0 * a0 + a1 * a1 + a2 * a2;
+VX = b0 * b0 + b1 * b1 + b2 * b2;
+VDn = v0 * n0 + v1 * n1 + v2 * n2;
+VDx = v0 * X0 + v1 * X1 + v2 * X2;
+
+# The turned normal as the code stores it, and the slips.
+np0 = An0 + dn0; np1 = An1 + dn1; np2 = An2 + dn2;
+NPNP = np0 * np0 + np1 * np1 + np2 * np2;
+DNDN = dn0 * dn0 + dn1 * dn1 + dn2 * dn2;
+DPDP = DP0 * DP0 + DP1 * DP1 + DP2 * DP2;
+
+# The four shares of n'.p' - off', per unit of L, and twice the three dot
+# products they and n'.n' are written with below.
+T1 = 4 * (N4 - 1) * (a0 * b0 + a1 * b1 + a2 * b2);
+T2 = dn0 * E0 + dn1 * E1 + dn2 * E2;
+T3 = np0 * DP0 + np1 * DP1 + np2 * DP2;
+T4 = -DD;
+F1 = 2 * (a0 * b0 + a1 * b1 + a2 * b2);
+F2 = 2 * (dn0 * E0 + dn1 * E1 + dn2 * E2);
+F3 = 2 * (np0 * DP0 + np1 * DP1 + np2 * DP2);
+F4 = 2 * (An0 * dn0 + An1 * dn1 + An2 * dn2);
+T = T1 + T2 + T3 + T4;
+
+{
+  # Every quaternion component is a finite f64.
+     |w| <= 1b1024 /\ |v0| <= 1b1024 /\ |v1| <= 1b1024 /\ |v2| <= 1b1024
+  # A stored turn has |q.q - 1| <= 6 epsilon (held_near_length_one), and
+  # 6 epsilon is 12b-53.
+  /\ N4 in [9007199254740980b-53, 9007199254741004b-53]
+  # A stored normal has every component at most one and n.n within
+  # NORMAL_LENGTH_ROUNDOFF, 64 epsilon, of one.
+  /\ n0 in [-1, 1] /\ n1 in [-1, 1] /\ n2 in [-1, 1]
+  /\ NN in [9007199254740864b-53, 9007199254741120b-53]
+  # L is at least every coordinate of the corner.
+  /\ X0 in [-1, 1] /\ X1 in [-1, 1] /\ X2 in [-1, 1]
+  # What vector.g, vector1.g and vector2.g prove of the turned normal.
+  /\ dn0 in [-20b-53, 20b-53] /\ dn1 in [-20b-53, 20b-53]
+  /\ dn2 in [-20b-53, 20b-53]
+  # What point.g, point1.g and point2.g prove of the moved corner, over L.
+  /\ DP0 in [-36b-53, 36b-53] /\ DP1 in [-36b-53, 36b-53]
+  /\ DP2 in [-36b-53, 36b-53]
+  # What shiftplane.g proves of the offset's rounding over L, 16u times
+  # the larger of |n'| and one, with |n'| within 124u of one: under 17u.
+  /\ DD in [-17b-53, 17b-53]
+->
+  T1 in ? /\ T2 in ? /\ T3 in ? /\ NPNP - 1 in ?
+  /\ T / sqrt(NPNP) in [-256b-53, 256b-53]
+}
+
+# The turn's length share: Ex(n) . Ex(x) - n . x is 4 (q.q - 1)
+# (v x n) . (v x x) (sos.py), and 2ab is c a^2 + b^2 / c less (c a - b)^2 / c,
+# and (c a + b)^2 / c less c a^2 + b^2 / c, with c near sqrt(3), which makes
+# c |v x n|^2 + |v x x|^2 / c smallest for n.n near one and x.x at most 3.
+T1 -> 2 * (N4 - 1) * F1;
+F1 -> (1732/1000 * VN + VX / (1732/1000))
+      - ((1732/1000 * a0 - b0) * (1732/1000 * a0 - b0)
+       + (1732/1000 * a1 - b1) * (1732/1000 * a1 - b1)
+       + (1732/1000 * a2 - b2) * (1732/1000 * a2 - b2)) / (1732/1000);
+F1 -> ((1732/1000 * a0 + b0) * (1732/1000 * a0 + b0)
+     + (1732/1000 * a1 + b1) * (1732/1000 * a1 + b1)
+     + (1732/1000 * a2 + b2) * (1732/1000 * a2 + b2)) / (1732/1000)
+      - (1732/1000 * VN + VX / (1732/1000));
+VN -> VV * NN - VDn * VDn;
+VX -> VV * XX - VDx * VDx;
+VV -> N4 - w * w;
+
+# The normal's slip against the turned corner, c = 20u.
+T2 -> F2 / 2;
+F2 -> (20b-53 * EE + DNDN / 20b-53)
+      - ((20b-53 * E0 - dn0) * (20b-53 * E0 - dn0)
+       + (20b-53 * E1 - dn1) * (20b-53 * E1 - dn1)
+       + (20b-53 * E2 - dn2) * (20b-53 * E2 - dn2)) / 20b-53;
+F2 -> ((20b-53 * E0 + dn0) * (20b-53 * E0 + dn0)
+     + (20b-53 * E1 + dn1) * (20b-53 * E1 + dn1)
+     + (20b-53 * E2 + dn2) * (20b-53 * E2 + dn2)) / 20b-53
+      - (20b-53 * EE + DNDN / 20b-53);
+EE -> XX + 4 * (N4 - 1) * VX;
+
+# The corner's slip against the turned normal, c = sqrt(3) * 36u.
+T3 -> F3 / 2;
+F3 -> (62354b-53 / 1000 * NPNP + DPDP / (62354b-53 / 1000))
+      - ((62354b-53 / 1000 * np0 - DP0) * (62354b-53 / 1000 * np0 - DP0)
+       + (62354b-53 / 1000 * np1 - DP1) * (62354b-53 / 1000 * np1 - DP1)
+       + (62354b-53 / 1000 * np2 - DP2) * (62354b-53 / 1000 * np2 - DP2))
+        / (62354b-53 / 1000);
+F3 -> ((62354b-53 / 1000 * np0 + DP0) * (62354b-53 / 1000 * np0 + DP0)
+     + (62354b-53 / 1000 * np1 + DP1) * (62354b-53 / 1000 * np1 + DP1)
+     + (62354b-53 / 1000 * np2 + DP2) * (62354b-53 / 1000 * np2 + DP2))
+        / (62354b-53 / 1000)
+      - (62354b-53 / 1000 * NPNP + DPDP / (62354b-53 / 1000));
+
+# n'.n' as square.g writes it: n.n, the turn's length share, 2 Ex(n) . dn
+# with c = sqrt(3) * 20u, and dn . dn.
+NPNP -> AnAn + F4 + DNDN;
+AnAn -> NN + 4 * (N4 - 1) * VN;
+F4 -> (34641b-53 / 1000 * AnAn + DNDN / (34641b-53 / 1000))
+      - ((34641b-53 / 1000 * An0 - dn0) * (34641b-53 / 1000 * An0 - dn0)
+       + (34641b-53 / 1000 * An1 - dn1) * (34641b-53 / 1000 * An1 - dn1)
+       + (34641b-53 / 1000 * An2 - dn2) * (34641b-53 / 1000 * An2 - dn2))
+        / (34641b-53 / 1000);
+F4 -> ((34641b-53 / 1000 * An0 + dn0) * (34641b-53 / 1000 * An0 + dn0)
+     + (34641b-53 / 1000 * An1 + dn1) * (34641b-53 / 1000 * An1 + dn1)
+     + (34641b-53 / 1000 * An2 + dn2) * (34641b-53 / 1000 * An2 + dn2))
+        / (34641b-53 / 1000)
+      - (34641b-53 / 1000 * AnAn + DNDN / (34641b-53 / 1000));
+```
+
+`sos.py`, as it ran, printed:
+
+```text
+identities 1 to 4 hold at 1000 random points
+identity 5 holds at 1000 random points
+identity 6 holds at 1000 random points
+```
+
+`sos.py`:
+
+```python
+"""Check, in exact rationals at random points, the identities 464.21's scripts
+rest on, for nalgebra's turn worked without rounding, Ex(y) = t w + v x t + y
+with t = 2 (v x y), N4 = q.q and eta = N4 - 1:
+
+1. Ex is linear: Ex(a) - Ex(b) = Ex(a - b), so a shift added after it cancels
+   from a difference of two moved points exactly.
+2. Ex(a) . Ex(b) - a . b = 4 eta (v x a) . (v x b), 464.20's identity polarized.
+3. |Ex(y) x Ex(a)|^2 = |W|^2 + 4 eta (|v|^2 |W|^2 + (v . W)^2)
+                       + 16 eta^2 |v|^2 (v . W)^2, with W = y x a.
+4. (v x a) . (v x b) = (v . v)(a . b) - (v . a)(v . b), Lagrange's identity,
+   which with a = b is 464.20's |v x n|^2 = |v|^2 |n|^2 - (v . n)^2.
+5. Ex turns with the frame: for a rotation G, Ex with v turned to G v, of
+   G y, is G Ex(y). So pipe.g and torus.g may put the axis along z and the
+   corner in the xz plane.
+6. In that frame, a = (0, 0, al) and y = (rho, 0, t), with
+   DENQ = 1 + 4 eta (v0^2 + v1^2) and NUMQ = 1 + 4 eta (v.v + v1^2)
+   + 16 eta^2 (v.v) v1^2:
+   |Ex(a)|^2 = al^2 DENQ, |Ex(y) x Ex(a)|^2 = rho^2 al^2 NUMQ, and
+   Ex(y) . Ex(a) = al (t DENQ - 4 eta v0 v2 rho)."""
+
+from fractions import Fraction as F
+import random
+
+random.seed(1)
+
+
+def r():
+    return F(random.randint(-10**6, 10**6), 10**6)
+
+
+def cross(a, b):
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+
+
+def dot(a, b):
+    return sum(x * y for x, y in zip(a, b))
+
+
+def ex(w, v, y):
+    t = [2 * c for c in cross(v, y)]
+    k = cross(v, t)
+    return [t[i] * w + k[i] + y[i] for i in range(3)]
+
+
+for _ in range(1000):
+    w, v = r(), [r(), r(), r()]
+    a, b = [r(), r(), r()], [r(), r(), r()]
+    eta = w * w + dot(v, v) - 1
+    assert [p - q for p, q in zip(ex(w, v, a), ex(w, v, b))] == ex(w, v, [p - q for p, q in zip(a, b)])
+    assert dot(ex(w, v, a), ex(w, v, b)) - dot(a, b) == 4 * eta * dot(cross(v, a), cross(v, b))
+    W = cross(a, b)
+    big = cross(ex(w, v, a), ex(w, v, b))
+    assert dot(big, big) == (dot(W, W) + 4 * eta * (dot(v, v) * dot(W, W) + dot(v, W) ** 2)
+                             + 16 * eta * eta * dot(v, v) * dot(v, W) ** 2)
+    assert dot(cross(v, a), cross(v, b)) == dot(v, v) * dot(a, b) - dot(v, a) * dot(v, b)
+print("identities 1 to 4 hold at 1000 random points")
+
+
+def rotation(g):
+    """The rotation matrix of the rational quaternion g, which is rational."""
+    s, x, y, z = g
+    n = s * s + x * x + y * y + z * z
+    return [[(s * s + x * x - y * y - z * z) / n, 2 * (x * y - s * z) / n, 2 * (x * z + s * y) / n],
+            [2 * (x * y + s * z) / n, (s * s - x * x + y * y - z * z) / n, 2 * (y * z - s * x) / n],
+            [2 * (x * z - s * y) / n, 2 * (y * z + s * x) / n, (s * s - x * x - y * y + z * z) / n]]
+
+
+def apply(m, y):
+    return [dot(row, y) for row in m]
+
+
+for _ in range(1000):
+    w, v, y = r(), [r(), r(), r()], [r(), r(), r()]
+    G = rotation([r(), r(), r(), r()])
+    assert dot(apply(G, [1, 0, 0]), apply(G, [0, 1, 0])) == 0
+    assert dot(apply(G, [1, 0, 0]), apply(G, [1, 0, 0])) == 1
+    assert ex(w, apply(G, v), apply(G, y)) == apply(G, ex(w, v, y))
+print("identity 5 holds at 1000 random points")
+
+for _ in range(1000):
+    w, v = r(), [r(), r(), r()]
+    al, rho, t = r(), r(), r()
+    eta = w * w + dot(v, v) - 1
+    a, y = [0, 0, al], [rho, 0, t]
+    DENQ = 1 + 4 * eta * (v[0] ** 2 + v[1] ** 2)
+    NUMQ = 1 + 4 * eta * (dot(v, v) + v[1] ** 2) + 16 * eta * eta * dot(v, v) * v[1] ** 2
+    ea, ey = ex(w, v, a), ex(w, v, y)
+    assert dot(ea, ea) == al * al * DENQ
+    c = cross(ey, ea)
+    assert dot(c, c) == rho * rho * al * al * NUMQ
+    assert dot(ey, ea) == al * (t * DENQ - 4 * eta * v[0] * v[2] * rho)
+print("identity 6 holds at 1000 random points")
+```
