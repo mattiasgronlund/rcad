@@ -5514,6 +5514,22 @@ impl<'f> Arrangement<'f> {
     /// `two_cubes_corner_to_corner_turned_a_little.rs`). Two nodes neither of
     /// which is the meet of the line's two planes and a third are not asked:
     /// neither names a plane that cuts the line where it is.
+    ///
+    /// **Two meets on the line come in the order a node off it between them
+    /// puts them in.** Where two cuts cross a rounding from the line, a node a
+    /// rounding off it can lie after the one cut and before the other while
+    /// the line puts the two the other way round. Asked of the planes alone,
+    /// those three answers went round in a loop, which
+    /// [`Arrangement::nodes_along`], proving only neighbours, keeps whichever
+    /// way its hint starts it (Q1937, Q2750). So every node on the crossing
+    /// whose three planes do not hold both of the line's is read against both
+    /// cuts, as [`Arrangement::nodes_along`] reads it, boxes first, and one
+    /// that has them on its two sides names their order. Two that name the two
+    /// orders leave the planes unable to say, and where none has the cuts on
+    /// its two sides the line's order stands. Reading such a node against a
+    /// cut asks this function again with a node that names no third plane,
+    /// which is not the arm that reads the other nodes, so that reading goes
+    /// no deeper (`a_place_off_a_line_between_two_cuts_puts_them_in_the_order_its_sides_do`).
     fn as_the_planes_say(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         let partner = self.crossings[crossing].partner;
         let (Some(flat), Some(partner)) = (self.surface.as_plane(), partner.as_plane()) else {
@@ -5534,11 +5550,38 @@ impl<'f> Arrangement<'f> {
             self.the_three_planes_a_node_is_the_meet_of(second)?,
         );
         let decided = match (the_third_plane(mine), the_third_plane(theirs)) {
-            (Some(mine), Some(theirs)) => rcad_predicates::which_meet_comes_first_along_a_line(
-                line,
-                mine.coefficients(),
-                theirs.coefficients(),
-            ),
+            (Some(mine), Some(theirs)) => {
+                let mut as_a_place_between_them_says = (0..self.nodes.len())
+                    .filter(|&node| {
+                        self.nodes[node].crossings.contains(&crossing)
+                            && self
+                                .the_three_planes_a_node_is_the_meet_of(node)
+                                .is_some_and(|three| the_third_plane(three).is_none())
+                    })
+                    .filter_map(|off_the_line| {
+                        let sides = [first, second].map(|cut| {
+                            let (side, _) = self
+                                .as_proved_before_any_policy(crossing, off_the_line, cut)
+                                .expect("a line two planes cross in is ordered along an axis");
+                            side
+                        });
+                        matches!(
+                            sides,
+                            [Decision::Neg, Decision::Pos] | [Decision::Pos, Decision::Neg]
+                        )
+                        .then_some(sides[1])
+                    });
+                if let Some(said) = as_a_place_between_them_says.next() {
+                    return as_a_place_between_them_says
+                        .all(|again| again == said)
+                        .then_some(said);
+                }
+                rcad_predicates::which_meet_comes_first_along_a_line(
+                    line,
+                    mine.coefficients(),
+                    theirs.coefficients(),
+                )
+            }
             (None, Some(theirs)) => {
                 Self::where_a_corner_off_a_line_comes_along_it(line, mine, theirs)
             }
