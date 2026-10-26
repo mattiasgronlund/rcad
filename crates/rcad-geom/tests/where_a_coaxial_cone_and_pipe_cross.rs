@@ -310,6 +310,17 @@ fn a_pipe_laid_along_one_of_a_cones_rulings_is_refused_rather_than_named() {
 /// loop right round. Two cones meet along rulings only where they share an
 /// apex and their axes lean apart (`docs/decisions.md` §50.2 item 4), and the
 /// second cone off the axis here is that shape's refusal.
+///
+/// **It still is, since `how_two_cones_off_one_axis_cross` was taught to name
+/// a crossing in two loops, or one loop and two branches (`intersect.rs`).**
+/// Of its four ways, the first two want `L` above zero and the other two want
+/// `U`, which only exists where `|c|` clears `s·S`. Taking the base cone as
+/// the one crossed, `L` comes to `-4`; taking `cone_off_it` as the one
+/// crossed, `L` comes to `-8`; and `|c|` never clears `s·S` either way round
+/// — it sits under it the first way and exactly on it the second. That is the
+/// `d·w` taking both signs gap `how_two_cones_off_one_axis_cross`'s own doc
+/// names among what none of the four ways proves, not a shape nobody has
+/// tried.
 #[test]
 fn a_ball_is_named_on_a_cones_axis_and_off_it_and_a_second_cone_only_on_it() {
     let cone = a_cone_about_z(1.0);
