@@ -17902,3 +17902,194 @@ def drop_conj(src, item):
 
 main()
 ```
+
+`run_pairs.sh` writes every script and runs it, beside `block1.g`, 464.11's
+`make_one_difference_zero.py`, 464.25's `make_differences_zero.py`,
+`make_minor_zero_too.py` and 464.13's `one.sh`:
+
+```sh
+#!/bin/bash
+# Write every script for one difference at zero, alone and with each minor
+# cancelling, and run them all, sixteen at a time: each dm_ and dmi_ script
+# with its proof checked by coqc, then each control, each dmq_ check and each
+# dz_ script's own 5u control without. One line per run, as one.sh prints it.
+cd "$(dirname "$0")"
+set -e
+rm -f zd_*.g dz_*.g c_dz_*.g dzq_*.g dm_*.g c_dm_*.g dmq_*.g dmi_*.g c_dmi_*.g
+rm -f *.out *.v *.bcoq *.coqc *.vo *.vok *.vos *.glob .*.aux run_dm.txt run_c.txt
+python3 make_one_difference_zero.py adx ady adz bdx bdy bdz cdx cdy cdz
+python3 make_differences_zero.py adx ady adz bdx bdy bdz cdx cdy cdz > /dev/null
+python3 make_minor_zero_too.py \
+  adx_first adx_second adx_third ady_first ady_second ady_third \
+  adz_first adz_second adz_third bdx_first bdx_second bdx_third \
+  bdy_first bdy_second bdy_third bdz_first bdz_second bdz_third \
+  cdx_first cdx_second cdx_third cdy_first cdy_second cdy_third \
+  cdz_first cdz_second cdz_third > names.txt
+set +e
+for d in adx ady adz bdx bdy bdz cdx cdy cdz; do
+  n=$(diff <(grep -v '^ *#' "zd_$d.g") <(grep -v '^ *#' "dz_$d.g") | wc -l)
+  echo "dz_$d against zd_$d, lines differing outside comments: $n"
+done
+ls dm_*.g dmi_*.g | xargs -P 16 -I{} ./one.sh {} coq > run_dm.txt 2>&1
+ls c_dm_*.g c_dmi_*.g dmq_*.g c_dz_*_5u.g | xargs -P 16 -I{} ./one.sh {} > run_c.txt 2>&1
+echo "not trivially equal, by file:"
+grep -c 'not trivially' *.out | grep -v ':0$'
+echo finished
+```
+
+`summarize_pairs.py` prints the groups above, each with the count of
+roundings it works out from the pair:
+
+```python
+"""Read every run of the 27 pairs and group them by what they printed.
+
+For each dm_ branch: the count of roundings on its longest path, worked out
+from the pair alone; the exit codes of its script, -Bcoq and coqc; the bounds
+Gappa printed for (y - Ex) / P6 and for P against Phat; each control's exit
+and best; its dmq_ exit. For each dmi_: its exits, and its control's exit,
+best and the goal it failed at.
+"""
+import collections
+import re
+
+PRODUCT = {
+    1: ("bdx", "cdy", 1),
+    2: ("cdx", "bdy", 1),
+    3: ("cdx", "ady", 2),
+    4: ("adx", "cdy", 2),
+    5: ("adx", "bdy", 3),
+    6: ("bdx", "ady", 3),
+}
+MINOR = {"first": 1, "second": 2, "third": 3}
+Z_OF = {1: "adz", 2: "bdz", 3: "cdz"}
+
+
+def longest_path(difference, minor):
+    """Roundings on the longest path through a term of y, or through the
+    cancelled minor's term of Ex where y has a zero."""
+    c = MINOR[minor]
+    dead = {k for k, (f, g, _) in PRODUCT.items() if difference in (f, g)}
+    shape = {m for m in (1, 2, 3) if Z_OF[m] == difference or {2 * m - 1, 2 * m} <= dead}
+    zero = shape | {c}
+    longest = 0
+    for k, (f, g, m) in PRODUCT.items():
+        if k in dead or m in shape:
+            continue
+        if m == c:
+            # y holds zero for this term, Ex its exact value: the two
+            # differences and the product's rounding are all that is off.
+            n = 3
+        else:
+            other = 2 * m if k == 2 * m - 1 else 2 * m - 1
+            n = 3 + 1 + (other not in dead) + 1
+            if m in (1, 2) and (3 - m) not in zero:
+                n += 1
+        longest = max(longest, n)
+    return longest
+
+
+def exits(path):
+    out = {}
+    coq = {}
+    for line in open(path):
+        w = line.split()
+        if w[1] == "exit":
+            out[w[0]] = (int(w[2]), float(w[3].rstrip("s")))
+        elif w[1] == "coq":
+            coq[w[0]] = (int(w[4]), int(w[7]), float(w[8].rstrip("s")), int(w[10]), int(w[12]))
+    return out, coq
+
+
+def upper(line):
+    found = re.findall(r"\{(-?[\d.]+(?:e[-+]?\d+)?),", line)
+    if found:
+        return found[-1]
+    return line.rsplit(",", 1)[1].strip(" ]")
+
+
+def bound(text, start):
+    for line in text.split("\n"):
+        if line.strip().startswith(start):
+            return upper(line)
+    return "-"
+
+
+def failed(text):
+    m = re.search(r"\n  (\S.*), best: \[([^\]]*)\]", text)
+    return (m.group(1), m.group(2)) if m else ("-", "-")
+
+
+def main():
+    pairs = [l.strip() for l in open("names.txt") if l.strip()]
+    run, coq = exits("run_dm.txt")
+    c, _ = exits("run_c.txt")
+    groups = collections.defaultdict(list)
+    impossible = collections.defaultdict(list)
+    for pair in pairs:
+        difference, minor = pair.split("_")
+        if f"dmi_{pair}" in run:
+            ctl = f"c_dmi_{pair}"
+            row = (
+                run[f"dmi_{pair}"][0],
+                coq.get(f"dmi_{pair}", "none")[:2],
+                c[ctl][0],
+                failed(open(f"{ctl}.out").read()),
+            )
+            impossible[row].append(pair)
+            continue
+        name = f"dm_{pair}"
+        text = open(f"{name}.out").read()
+        y = bound(text, "(y - Ex) / P6 in")
+        p = bound(text, "P -/ Phat in")
+        if p == "-":
+            p = bound(text, "(P - Phat) / Phat in") + " as (P - Phat) / Phat"
+        c6, c5 = f"c_{name}_6u", f"c_{name}_5u"
+        row = (
+            longest_path(difference, minor),
+            run[name][0],
+            coq.get(name, "none")[:2],
+            y,
+            p,
+            c[c6][0],
+            failed(open(f"{c6}.out").read()),
+            c[c5][0],
+            failed(open(f"{c5}.out").read()),
+            c.get(f"dmq_{pair}", ("no dmq",))[0],
+        )
+        groups[row].append(pair)
+    print("roundings | exit | (-Bcoq, coqc) | (y-Ex)/P6 | P vs Phat | 6u exit, failed | 5u exit, failed | dmq exit | count")
+    for row, members in sorted(groups.items(), key=lambda kv: tuple(str(x) for x in kv[0])):
+        print(" | ".join(str(x) for x in row), "|", len(members))
+        print("    " + " ".join(members))
+    print("dm total", sum(len(m) for m in groups.values()))
+    print("dmi exit | (-Bcoq, coqc) | control exit | control failed at | count")
+    for row, members in sorted(impossible.items(), key=lambda kv: str(kv[0])):
+        print(" | ".join(str(x) for x in row), "|", len(members))
+        print("    " + " ".join(members))
+    print("dmi total", sum(len(m) for m in impossible.values()))
+    dm = [v for k, v in run.items() if k.startswith("dm_")]
+    di = [v for k, v in run.items() if k.startswith("dmi_")]
+    cq = [v for k, v in coq.items() if k.startswith("dm_")]
+    ci = [v for k, v in coq.items() if k.startswith("dmi_")]
+    print("dm gappa seconds", min(s for _, s in dm), "to", max(s for _, s in dm))
+    print("dmi gappa seconds", min(s for _, s in di), "to", max(s for _, s in di))
+    for label, rows in (("dm", cq), ("dmi", ci)):
+        print(label, "coq seconds", min(r[2] for r in rows), "to", max(r[2] for r in rows),
+              "lines", min(r[3] for r in rows), "to", max(r[3] for r in rows),
+              "hints", min(r[4] for r in rows), "to", max(r[4] for r in rows))
+    kinds = collections.Counter()
+    for k, v in c.items():
+        if k.startswith("c_dm_"):
+            kind = "c_dm " + k.rsplit("_", 1)[1]
+        elif k.startswith("c_dz_"):
+            kind = "c_dz 5u " + failed(open(f"{k}.out").read())[0]
+        else:
+            kind = k.split("_")[0]
+        kinds[(kind, "exit", v[0])] += 1
+    for key in sorted(kinds):
+        print("control", *key, "count", kinds[key])
+    print("control seconds", min(v[1] for v in c.values()), "to", max(v[1] for v in c.values()))
+
+
+main()
+```
