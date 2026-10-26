@@ -889,16 +889,6 @@ mod tests {
     /// never divided would leave the second half tested on nothing.
     #[test]
     fn a_turn_composed_of_any_number_of_turns_stays_within_six_epsilon_of_length_one() {
-        let off_one_in_epsilons = |turn: [f64; 4]| {
-            let squared_length = turn.iter().fold(Exact::of(0.0), |sum, coefficient| {
-                sum.plus(
-                    &Exact::product_of(*coefficient, *coefficient)
-                        .expect("a coefficient of a turn squares exactly"),
-                )
-            });
-            squared_length.minus(&Exact::of(1.0)).nearest_f64() / f64::EPSILON
-        };
-
         let mut numbers = Numbers::seeded();
         let mut worst = 0.0_f64;
         let mut divided_at_depth = [0_u32; 4];
@@ -921,7 +911,7 @@ mod tests {
                 if drifted {
                     divided_at_depth[(depth - 2).min(3)] += 1;
                 }
-                let off_one = off_one_in_epsilons(placed.rotation_quaternion()).abs();
+                let off_one = off_length_one_in_epsilons(placed.rotation_quaternion()).abs();
                 assert!(
                     off_one <= 6.0,
                     "a turn composed of {depth} turns sits {off_one}ε off length one"
@@ -1047,6 +1037,205 @@ mod tests {
         );
     }
 
+    /// §464.19's proof of [`Isometry::POINT_ROUNDOFF`] needs the turn's `q·q`
+    /// within `6ε` of one, and nalgebra's `Unit::new_unchecked` stores a
+    /// quaternion of any length. So a movement read from nalgebra has its turn
+    /// held to length one, as [`Isometry::compose`] holds its own.
+    ///
+    /// Here the turns of 64 movements, made longer or shorter by a part in a
+    /// billion and by factors up to `2^600`, come back within `6ε` of length
+    /// one, worked out exactly, and move every point within the bound of where
+    /// their own numbers put it.
+    #[test]
+    fn a_turn_from_nalgebra_off_length_one_is_held_within_six_epsilon_of_it() {
+        let mut numbers = Numbers::seeded();
+        for scale in [
+            1.0 + 2f64.powi(-30),
+            1.0 - 2f64.powi(-30),
+            2.0,
+            4.0,
+            1e3,
+            2f64.powi(-600),
+            2f64.powi(600),
+        ] {
+            for _ in 0..64 {
+                let unit = numbers.a_movement();
+                let read =
+                    read_from_nalgebra(unit.0.translation, unit.0.rotation.into_inner() * scale)
+                        .expect("a finite turn that is not four zeros names a rotation");
+                let off_one = off_length_one_in_epsilons(read.rotation_quaternion()).abs();
+                assert!(
+                    off_one <= 6.0,
+                    "the turn of {unit:?} made {scale} times as long was read as one \
+                     {off_one}ε off length one"
+                );
+
+                for _ in 0..16 {
+                    let point = numbers.a_point();
+                    let largest = point
+                        .largest_coordinate_magnitude()
+                        .max(largest_of(read.translation_part().components()));
+                    let computed = read.apply_to_point(point).coordinates();
+                    let exact = moved_without_rounding(&read, point);
+                    for axis in 0..3 {
+                        let slipped = magnitude_of(&sum(&exact[axis], &entry(-computed[axis])));
+                        assert!(
+                            slipped <= Isometry::POINT_ROUNDOFF * largest,
+                            "{read:?}, read from a turn {scale} times as long as {unit:?}'s, \
+                             moved {point:?} {slipped} off on axis {axis}, past {} times the \
+                             largest coordinate {largest}",
+                            Isometry::POINT_ROUNDOFF
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// §16.10 for [`Isometry::POINT_ROUNDOFF`]'s "a turn further than `6ε`
+    /// from length one goes past it", and the reason every route to a movement
+    /// holds its turn near length one: a turn four times as long as one, so
+    /// `q·q = 16`, moves points past the bound of where its own numbers put
+    /// them.
+    ///
+    /// The movement is built around every route, straight from the stored
+    /// nalgebra isometry, since no route keeps such a turn.
+    #[test]
+    fn a_turn_four_times_the_length_of_one_moves_points_past_the_published_roundoff() {
+        let mut numbers = Numbers::seeded();
+        let (mut past, mut cases, mut worst) = (0, 0, 0.0f64);
+        for _ in 0..64 {
+            let unit = numbers.a_movement();
+            let stretched = Isometry(na::Isometry3::from_parts(
+                unit.0.translation,
+                na::Unit::new_unchecked(unit.0.rotation.into_inner() * 4.0),
+            ));
+            for _ in 0..16 {
+                let point = numbers.a_point();
+                let largest = point
+                    .largest_coordinate_magnitude()
+                    .max(largest_of(stretched.translation_part().components()));
+                let computed = stretched.apply_to_point(point).coordinates();
+                let exact = moved_without_rounding(&stretched, point);
+                for axis in 0..3 {
+                    let slipped = magnitude_of(&sum(&exact[axis], &entry(-computed[axis])));
+                    let used = slipped / (Isometry::POINT_ROUNDOFF * largest);
+                    worst = worst.max(used);
+                    past += usize::from(used > 1.0);
+                    cases += 1;
+                }
+            }
+        }
+        println!(
+            "a turn four times as long as one put {past} of {cases} coordinates past the bound, \
+             the worst at {worst:.2} times it"
+        );
+        assert!(
+            past > 0,
+            "no coordinate went past the bound, so it is not shown that a turn this far from \
+             length one needs holding to it"
+        );
+    }
+
+    /// The other half of holding a turn read from nalgebra as
+    /// [`Isometry::compose`] holds its own: a turn that had not drifted past
+    /// [`TURN_LENGTH_DRIFT`] keeps its bits. So every movement this file
+    /// builds — turned, composed until some products were divided, turned by
+    /// quarters, undone and read back from its stored parts — comes back from
+    /// nalgebra as the very movement it was.
+    #[test]
+    fn a_movement_handed_to_nalgebra_and_back_keeps_its_bits() {
+        let mut numbers = Numbers::seeded();
+        let mut movements = Vec::new();
+        for _ in 0..64 {
+            let mut placed = numbers.a_movement();
+            movements.push(placed);
+            for _ in 0..64 {
+                placed = numbers.a_movement().compose(&placed);
+                movements.push(placed);
+            }
+        }
+        for axis in [Axis::x(), Axis::y(), Axis::z()] {
+            for quarters in 0..4 {
+                movements.push(
+                    Isometry::quarter_turns(&axis, quarters).expect("an axis along x, y or z"),
+                );
+            }
+        }
+        let undone: Vec<_> = movements.iter().map(Isometry::inverse).collect();
+        let reread: Vec<_> = movements
+            .iter()
+            .map(|movement| {
+                Isometry::try_from(<([f64; 3], [f64; 4])>::from(*movement))
+                    .expect("a movement's own stored parts name a movement")
+            })
+            .collect();
+        movements.extend(undone);
+        movements.extend(reread);
+
+        for movement in movements {
+            let back = read_from_nalgebra(movement.0.translation, movement.0.rotation.into_inner())
+                .expect("a movement this file built names a movement");
+            assert_eq!(
+                back.rotation_quaternion().map(f64::to_bits),
+                movement.rotation_quaternion().map(f64::to_bits),
+                "{movement:?} came back from nalgebra as {back:?}"
+            );
+            assert_eq!(
+                back.translation_part().components().map(f64::to_bits),
+                movement.translation_part().components().map(f64::to_bits),
+                "{movement:?} came back from nalgebra as {back:?}"
+            );
+        }
+    }
+
+    /// A nalgebra isometry can hold numbers that name no movement, and those
+    /// are refused as the same numbers read from stored parts are.
+    #[test]
+    fn a_movement_from_nalgebra_whose_numbers_name_no_movement_is_refused() {
+        let shift = na::Translation3::new(1.0, 2.0, 3.0);
+        let no_turn = na::Quaternion::new(1.0, 0.0, 0.0, 0.0);
+        let refusal = |error: Error| Err(error.to_string());
+
+        assert_eq!(
+            read_from_nalgebra(shift, na::Quaternion::new(0.0, 0.0, 0.0, 0.0)),
+            refusal(Error::ZeroLength { what: "rotation" })
+        );
+        assert_eq!(
+            read_from_nalgebra(shift, na::Quaternion::new(1.0, f64::NAN, 0.0, 0.0)),
+            refusal(Error::NotFinite { what: "rotation" })
+        );
+        assert_eq!(
+            read_from_nalgebra(shift, na::Quaternion::new(f64::INFINITY, 0.0, 0.0, 0.0)),
+            refusal(Error::NotFinite { what: "rotation" })
+        );
+        assert_eq!(
+            read_from_nalgebra(na::Translation3::new(f64::INFINITY, 0.0, 0.0), no_turn),
+            refusal(Error::NotFinite {
+                what: "translation"
+            })
+        );
+        assert_eq!(
+            read_from_nalgebra(na::Translation3::new(0.0, f64::NAN, 0.0), no_turn * 2.0),
+            refusal(Error::NotFinite {
+                what: "translation"
+            })
+        );
+    }
+
+    /// The movement nalgebra's `shift` and `turn`, the turn stored as it comes
+    /// by `Unit::new_unchecked`, are read as, with a refusal as its message.
+    fn read_from_nalgebra(
+        shift: na::Translation3<f64>,
+        turn: na::Quaternion<f64>,
+    ) -> core::result::Result<Isometry, String> {
+        Isometry::try_from(na::Isometry3::from_parts(
+            shift,
+            na::Unit::new_unchecked(turn),
+        ))
+        .map_err(|refusal| refusal.to_string())
+    }
+
     /// [`Isometry::apply_to_point`]'s expression with nothing rounded away, one
     /// expansion per coordinate.
     ///
@@ -1125,6 +1314,19 @@ mod tests {
 
     fn largest_of(components: [f64; 3]) -> f64 {
         components.into_iter().map(f64::abs).fold(0.0, f64::max)
+    }
+
+    /// `q·q − 1` for the turn `[w, i, j, k]`, worked out without rounding and
+    /// then given in units of `f64::EPSILON`, so a check of it does not share
+    /// the rounding it checks.
+    fn off_length_one_in_epsilons(turn: [f64; 4]) -> f64 {
+        let squared_length = turn.iter().fold(Exact::of(0.0), |sum, coefficient| {
+            sum.plus(
+                &Exact::product_of(*coefficient, *coefficient)
+                    .expect("a coefficient of a turn squares exactly"),
+            )
+        });
+        squared_length.minus(&Exact::of(1.0)).nearest_f64() / f64::EPSILON
     }
 
     /// §16.10 for [`brought_into_the_range_its_squares_fit_in`]'s claim that
