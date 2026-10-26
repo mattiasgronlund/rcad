@@ -72,12 +72,44 @@
 //! shell below the floor as flat first, the same fold the difference above
 //! uses, so the floor-fold's record now comes from the intersection alone.
 //!
+//! **Certified fuses refused for the range are §3.5's limit** (queue row
+//! Q1688). Of the 400 tilts `t = 0.0005k`, `k` from 1 to 400, the union is
+//! refused `DynamicRangeTooWide` under `Policy::certified()` at 20, either way
+//! round, and so is the tipped cube less the block. The intersection, either
+//! way round, and the block less the tipped cube are refused at those 20 and
+//! at the two of [`TILTS`]: [`TILTS_A_CERTIFIED_FUSE_IS_REFUSED_FOR_THE_RANGE_AT`].
+//! Nothing else is refused. At each of the 22 the edge the cube stands on, its
+//! bottom and its side as the model holds them, runs along `x` and is proved
+//! below the floor, by `6.6e−19` to `1.75e−16`. So the true answer of the
+//! numbers handed holds a sliver. The floor cuts the cube's bottom and its
+//! side in two lines either side of the edge, at most `6.6e−16` apart, and the
+//! cube dips below the floor between them. The intersection holds that strip
+//! of the floor as a face, the block less the cube a slot as wide, and the
+//! union and the cube less the block the fin below the floor. Against
+//! coordinates of 10 that is a range past `1e15`, and §3.5 refuses past
+//! `1e11`. A sliver in the true answer makes a limit
+//! (`Invalid::limit_or_gap`, `docs/decisions.md` §437.6 as Q2304 amended it),
+//! as a bar dipping `4.4e−16` through a block's top is (queue row Q2237).
+//! Under a tolerant policy all six fuses answer one solid at each of the 22,
+//! the volume worked by hand.
+//!
+//! The edge is proved below the floor at 194 of the 400 tilts, above it at
+//! 188 and on it at 18. At the other 172 below it every certified fuse
+//! answers, the sliver rounded away, and §417.4 takes such an answer as
+//! right. What tells those 172 from the 22 is not known. Whether the floor's
+//! two crossings round to one `y` does not: they do at 10 of the 22 and at 129
+//! of the 172, each time both to `y = 5`. At those 10 the answer written at
+//! the 129, which §417.4 takes as right, is in reach: read §417.4 as saying
+//! what the certified answer is, and the refusals there are gaps. This file
+//! keeps `Invalid::limit_or_gap`'s rule, which reads the true answer.
+//!
 //! What the two cubes share is the cube's square cross-section, clipped to
 //! the block, along the five of its ten that lie over the block:
 //! [`what_the_two_share`] works it out from the tilt.
 
 use rcad_geom::{Deflection, Isometry, Scale};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::expansion::difference_of_two_products;
+use rcad_predicates::{Decision, Policy, ProvenanceLog, side_of_a_plane_where_three_planes_meet};
 use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
 
 /// The two tilts, as the quaternion `[w, i, j, k]` that `Isometry::try_from`
@@ -131,6 +163,46 @@ const TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT: [[f64; 4]; 4] = [
     [0.0, 0.0, 0.095_354_902_203_049_7, 0.995_443_339_736_545_1],
     [0.0, 0.0, 0.101_325_810_022_482_75, 0.994_853_295_829_735_8],
     [0.0, 0.0, 0.153_392_010_734_994_53, 0.988_165_416_842_076_7],
+];
+
+/// The 22 tilts, of the 400 `t = 0.0005k`, at which a certified intersection
+/// is refused `DynamicRangeTooWide` (queue row Q1688), at `k = 1`, 48, 69, 76,
+/// 95, 150, 160, 162, 165, 177, 191, 197, 203, 206, 211, 263, 278, 284, 289,
+/// 308, 334 and 342, as `f64::sin` and `f64::cos` give them. Nine are tilts
+/// above: `k = 48`, 191, 203 and 308 are
+/// [`TILTS_THE_UNION_AND_THE_INTERSECTION_WERE_REFUSED_AT`], 76 and 162 are
+/// [`TILTS`], and 150, 177 and 263 are three of
+/// [`TILTS_A_TETRAHEDRON_WAS_LEFT_BELOW_THE_FLOOR_AT`]. Its fourth, `t = 0.142`,
+/// is not `k = 284`: `0.0005 · 284` is a rounding past `0.142`, and its sine
+/// a rounding past `sin 0.142`.
+const TILTS_A_CERTIFIED_FUSE_IS_REFUSED_FOR_THE_RANGE_AT: [[f64; 4]; 22] = [
+    [
+        0.0,
+        0.0,
+        0.000_499_999_979_166_666_9,
+        0.999_999_875_000_002_6,
+    ],
+    [0.0, 0.0, 0.023_997_696_066_354_29, 0.999_712_013_823_734_5],
+    [0.0, 0.0, 0.034_493_156_469_788_29, 0.999_404_934_026_619],
+    [0.0, 0.0, 0.037_990_855_326_937_03, 0.999_278_086_876_484_9],
+    [0.0, 0.0, 0.047_482_140_035_779_614, 0.998_872_087_095_050_7],
+    [0.0, 0.0, 0.074_929_707_272_742_34, 0.997_188_818_112_207_5],
+    [0.0, 0.0, 0.079_914_693_969_172_7, 0.996_801_706_302_619_4],
+    [0.0, 0.0, 0.080_911_455_551_998_05, 0.996_721_293_221_157_7],
+    [0.0, 0.0, 0.082_406_445_905_803_69, 0.996_598_804_772_097_7],
+    [0.0, 0.0, 0.088_384_519_545_367_51, 0.996_086_430_338_62],
+    [0.0, 0.0, 0.095_354_902_203_049_7, 0.995_443_339_736_545_1],
+    [0.0, 0.0, 0.098_340_798_646_028_22, 0.995_152_795_967_363_6],
+    [0.0, 0.0, 0.101_325_810_022_482_75, 0.994_853_295_829_735_8],
+    [0.0, 0.0, 0.102_817_975_415_107_54, 0.994_700_187_961_949_8],
+    [0.0, 0.0, 0.105_304_401_988_642_31, 0.994_440_034_854_698_8],
+    [0.0, 0.0, 0.131_121_339_064_130_45, 0.991_366_327_066_856_5],
+    [0.0, 0.0, 0.138_552_829_041_508_34, 0.990_355_044_196_067_3],
+    [0.0, 0.0, 0.141_523_266_230_237_78, 0.989_934_929_738_073_8],
+    [0.0, 0.0, 0.143_997_658_716_651_57, 0.989_578_028_396_004_2],
+    [0.0, 0.0, 0.153_392_010_734_994_53, 0.988_165_416_842_076_7],
+    [0.0, 0.0, 0.166_224_837_881_396_97, 0.986_087_878_067_316_7],
+    [0.0, 0.0, 0.170_167_849_078_474, 0.985_415_091_796_348_3],
 ];
 
 #[test]
@@ -202,8 +274,10 @@ fn the_intersection_is_what_they_share_tolerant() {
     }
 }
 
-/// Not Q1506's: refused before and after it, for corners a rounding apart
-/// beside corners ten long.
+/// Not Q1506's: refused before and after it, and §3.5's limit. The cube's edge
+/// is proved below the floor, so the intersection holds a strip of the floor
+/// far thinner than its coordinates resolve (queue row Q1688,
+/// [`where_a_certified_fuse_is_refused_for_the_range_the_cubes_edge_is_proved_below_the_floor`]).
 #[test]
 fn the_intersection_is_refused_for_the_range_certified() {
     for tilt in TILTS {
@@ -233,7 +307,8 @@ fn the_block_less_the_tipped_cube_is_the_block_less_what_they_share_tolerant() {
     }
 }
 
-/// Not Q1506's, as the certified intersection.
+/// Not Q1506's, and §3.5's limit, as the certified intersection: the block
+/// keeps a slot as wide as the intersection's strip.
 #[test]
 fn the_block_less_the_tipped_cube_is_refused_for_the_range_certified() {
     for tilt in TILTS {
@@ -250,6 +325,82 @@ fn the_block_less_the_tipped_cube_is_refused_for_the_range_certified() {
             "{asked}: {why:?}"
         );
     }
+}
+
+/// At each of [`TILTS_A_CERTIFIED_FUSE_IS_REFUSED_FOR_THE_RANGE_AT`] the
+/// cube's edge is proved below the floor, and every answer holds a sliver
+/// past §3.5's range of `1e11`, so the refusals are a limit (queue row Q1688).
+///
+/// The intersection and the block less the cube are refused at all 22. The
+/// union and the cube less the block are refused at 20 and answer at the two
+/// of [`TILTS`], where §417.4 takes their answers as right. Under a tolerant
+/// policy all six answer one solid, the volume worked by hand.
+///
+/// The strip is how far apart the floor cuts the cube's bottom and its side:
+/// the edge's depth times how far each face runs along `y` for each unit it
+/// rises. The edge's depth is the meet of the two faces' planes in `(y, z)`,
+/// worked with the numerator exact. Its denominator, the two normals'
+/// cross product along `x`, is about 1.
+#[test]
+fn where_a_certified_fuse_is_refused_for_the_range_the_cubes_edge_is_proved_below_the_floor() {
+    let mut widest_strip = 0.0_f64;
+    let mut shallowest = f64::INFINITY;
+    let mut deepest = 0.0_f64;
+    let mut narrowest_range = f64::INFINITY;
+    let mut both_crossings_round_to_five = 0;
+    for tilt in TILTS_A_CERTIFIED_FUSE_IS_REFUSED_FOR_THE_RANGE_AT {
+        let dip = how_far_the_cubes_edge_dips_below_the_floor(tilt);
+        let range = 10.0 / dip.strip.max(dip.depth);
+        assert!(range > 1e11, "{tilt:?}: {dip:?}, a range of {range:e}");
+        widest_strip = widest_strip.max(dip.strip);
+        shallowest = shallowest.min(dip.depth);
+        deepest = deepest.max(dip.depth);
+        narrowest_range = narrowest_range.min(range);
+        both_crossings_round_to_five += usize::from(dip.both_crossings_round_to_five);
+        let share = what_the_two_share(tilt);
+        let at_tilts = TILTS.contains(&tilt);
+        for (rule, order, worked, answers_certified) in [
+            (Rule::Union, Order::BlockFirst, 2000.0 - share, at_tilts),
+            (Rule::Union, Order::TippedFirst, 2000.0 - share, at_tilts),
+            (Rule::Intersection, Order::BlockFirst, share, false),
+            (Rule::Intersection, Order::TippedFirst, share, false),
+            (Rule::Difference, Order::BlockFirst, 1000.0 - share, false),
+            (
+                Rule::Difference,
+                Order::TippedFirst,
+                1000.0 - share,
+                at_tilts,
+            ),
+        ] {
+            let asked = format!("{tilt:?}, {order:?}");
+            if answers_certified {
+                let volume = volume_of_a_fuse(tilt, rule, order, &certified(), &asked);
+                assert_about(volume, worked, &asked);
+            } else {
+                let why = refusal(tilt, rule, order, &certified(), &asked);
+                assert!(
+                    matches!(why, Error::Invalid(Invalid::DynamicRangeTooWide { .. })),
+                    "{asked}, {rule:?}: {why:?}"
+                );
+            }
+            let volumes = volumes_of_a_fuse(
+                tilt,
+                rule,
+                order,
+                &tolerant(),
+                &mut ProvenanceLog::new(),
+                &asked,
+            );
+            assert_eq!(volumes.len(), 1, "{asked}, {rule:?}: {volumes:?}");
+            assert_about(volumes[0], worked, &asked);
+        }
+    }
+    println!(
+        "widest strip {widest_strip:e}, depth {shallowest:e} to {deepest:e}, \
+         narrowest range {narrowest_range:e}, \
+         both crossings round to y = 5 at {both_crossings_round_to_five} of 22"
+    );
+    assert_eq!(both_crossings_round_to_five, 10);
 }
 
 /// Refused `VolumeIsNotPositive` with a volume of `0.0` under both policies,
@@ -497,6 +648,62 @@ fn assert_about(got: f64, worked: f64, asked: &str) {
         (got - worked).abs() <= 1e-9 * worked,
         "{asked}: measured {got}, worked by hand {worked}"
     );
+}
+
+/// How far below the floor the tipped cube's edge runs, as the model holds the
+/// cube's planes, and how wide a strip of the floor the cube cuts there.
+#[derive(Debug)]
+struct Dip {
+    depth: f64,
+    strip: f64,
+    /// Whether `y` where the floor cuts the cube's bottom, and `y` where it
+    /// cuts its side, each correctly rounded, are both `5`.
+    both_crossings_round_to_five: bool,
+}
+
+/// The cube's bottom, its side `y = 5` and its end `x = 5`, and the block's
+/// floor, picked by which way each faces. Asserts the edge runs along `x` and
+/// its end at `x = 5` is proved below the floor.
+fn how_far_the_cubes_edge_dips_below_the_floor(tilt: [f64; 4]) -> Dip {
+    let mut model = a_model();
+    let [block, tipped] = the_block_and_the_tipped_cube(&mut model, tilt);
+    let plane_facing = |solid: SolidKey, facing: fn([f64; 3]) -> bool| {
+        model
+            .solid(solid)
+            .expect("this model made the key")
+            .faces()
+            .find(|face| facing(face.outward_normal().components()))
+            .expect("a face facing that way")
+            .plane()
+            .coefficients()
+    };
+    let floor = plane_facing(block, |out| out[2] < -0.5);
+    let bottom = plane_facing(tipped, |out| out[2] < -0.5);
+    let side = plane_facing(tipped, |out| out[1] > 0.5);
+    let near_end = plane_facing(tipped, |out| out[0] > 0.5);
+    assert_eq!(floor, [0.0, 0.0, -1.0, 0.0], "{tilt:?}");
+    assert_eq!(
+        [bottom[0], side[0]],
+        [0.0, 0.0],
+        "{tilt:?}: the edge does not run along x"
+    );
+    assert_eq!(
+        side_of_a_plane_where_three_planes_meet([bottom, side, near_end], floor),
+        Ok(Decision::Pos),
+        "{tilt:?}: the edge is not proved below the floor"
+    );
+    let (numerator, len) = difference_of_two_products(side[1], bottom[3], bottom[1], side[3])
+        .expect("products that do not round");
+    let depth = -numerator[..len].iter().sum::<f64>() / (bottom[1] * side[2] - side[1] * bottom[2]);
+    assert!(
+        depth > 0.0,
+        "{tilt:?}: the edge is {depth:e} below the floor"
+    );
+    Dip {
+        depth,
+        strip: depth * ((bottom[2] / bottom[1]).abs() + (side[2] / side[1]).abs()),
+        both_crossings_round_to_five: [-bottom[3] / bottom[1], -side[3] / side[1]] == [5.0, 5.0],
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
