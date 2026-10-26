@@ -15519,6 +15519,8 @@ XMM = (out - S) / M + (P0 - z0) / M + (P1 - z1) / M
   /\ (out - Ex) / M in [-9b-53, 9b-53]
 }
 
+# (out - Ex) / M is XMM, what this stage rounds per unit of M, plus the
+# incoming errors carried through. XMM is bounded as in stage.g.
 (out - Ex) / M -> XMM + rest * ((d0 - t0) / M) + share * ((d1 - t1) / M);
 (P0 - z0) / M -> ((P0 - z0) / z0) * (z0 / M);
 (P1 - z1) / M -> ((P1 - z1) / z1) * (z1 / M);
@@ -15529,8 +15531,300 @@ d0 / M -> t0 / M + (d0 - t0) / M;
 d1 / M -> t1 / M + (d1 - t1) / M;
 S / M -> (P0 - z0) / M + (P1 - z1) / M + z0 / M + z1 / M;
 
+# Where 1 - share starts to be exact.
 $ share in (0.5);
+# Where each product and the sum leaves the normal range, below which its
+# rounding is absolute.
 $ z0 in (-1b-1022, 1b-1022);
 $ z1 in (-1b-1022, 1b-1022);
 $ S in (-1b-1022, 1b-1022);
 ```
+
+`controls.py`, which writes the four edges, the controls of 6 and the runs:
+
+```python
+"""Write stage.g's and stage_e0.g's two share edges, their controls, and the
+runs that show what the scripts do not use and why they are cut as they are.
+An edge takes share at 0 or at 1, the two values the f64 divide can give
+outside the range the main scripts take. Each control changes one thing: a
+smaller bound, to see whether the script proved its goal from hypotheses that
+contradict each other; or a hypothesis dropped or weakened, to see whether the
+proof needs it."""
+
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+def write(name, src):
+    open(name, "w").write(src)
+
+
+SHARE = "  /\\ share in [1b-1074, 9007199254740991b-53]\n"
+SPLIT = "# Where 1 - share starts to be exact.\n$ share in (0.5);\n"
+
+stage = open("stage.g").read()
+small = open("stage_e0.g").read()
+
+# The edges. With share at 0 or at 1, one of the two incoming errors has no
+# weight, so XE / cE needs no average, and there is no half to split at.
+AVERAGE = stage[stage.index("# XE / cE through the average"):stage.index("# XM a share at a time")]
+DIRECT = ("# share is 0 or 1, so XE / cE needs no average.\n"
+          "XE / cE -> (rest * ((d0 - t0) / E) + share * ((d1 - t1) / E)) / (1 + 9b-53);\n\n")
+for name, at in (("stage_0.g", "[0, 0]"), ("stage_1.g", "[1, 1]")):
+    text = sub(stage, SHARE, "  /\\ share in " + at + "\n")
+    text = sub(text, AVERAGE, DIRECT)
+    text = sub(text, " /\\ XE / V in ?", "")
+    write(name, sub(text, SPLIT, ""))
+for name, at in (("stage_e0_0.g", "[0, 0]"), ("stage_e0_1.g", "[1, 1]")):
+    text = sub(small, SHARE, "  /\\ share in " + at + "\n")
+    write(name, sub(text, SPLIT, ""))
+
+# 8.5u for the M part, below the 8.5u and a hair XMM reaches.
+text = sub(stage, "cM = 9b-53 * M;", "cM = 17b-54 * M;")
+write("c_stage_85.g", sub(text, "XM / cM -> XMM / 9b-53;", "XM / cM -> XMM / 17b-54;"))
+# M allowed below the normal range.
+write("c_stage_m.g", sub(stage, "/\\ M in [1b-1022, 1b1024]", "/\\ M in [1b-1074, 1b1024]"))
+# Without the incoming error's size against M.
+write("c_stage_noe.g", sub(stage, "  /\\ E / M in [1b-60, 1b-40]\n", ""))
+# Without share's range: what the case split gives.
+write("c_stage_noshare.g", sub(stage, SHARE, ""))
+# Without M at least the true running values.
+write("c_stage_not.g", sub(stage, "  /\\ t0 / M in [-1, 1] /\\ t1 / M in [-1, 1]\n", ""))
+# Without the incoming errors at most E.
+write("c_stage_nod.g", sub(stage, "  /\\ (d0 - t0) / E in [-1, 1] /\\ (d1 - t1) / E in [-1, 1]\n", ""))
+E0_GOAL = "/\\ (out - Ex) / M in [-9b-53, 9b-53]"
+# 8.375u for the small-E case, below the 8.5u it proves.
+write("c_e0_8375.g", sub(small, E0_GOAL, "/\\ (out - Ex) / M in [-67b-57, 67b-57]"))
+# M allowed below the normal range.
+write("c_e0_m.g", sub(small, "/\\ M in [1b-1022, 1b1024]", "/\\ M in [1b-1074, 1b1024]"))
+# Without the incoming errors at most 2^-60 M.
+write("c_e0_nod.g", sub(small, "  /\\ (d0 - t0) / M in [-1b-60, 1b-60] /\\ (d1 - t1) / M in [-1b-60, 1b-60]\n",
+                        ""))
+
+# The runs. Without the parameter between the two knots, and without the
+# knots' difference positive and in range: neither is used by Gappa, and both
+# enter by hand.
+write("r_stage_noa.g", sub(stage, "  /\\ A in [0, 1]\n", ""))
+write("r_stage_noknots.g", sub(stage, "  /\\ above - below in [1b-1074, 1b1024]\n", ""))
+# The small-E case at 8.5u, which it reaches.
+write("r_e0_85.g", sub(small, E0_GOAL, "/\\ (out - Ex) / M in [-17b-54, 17b-54]"))
+# stage.g with E allowed to be zero, which is why stage_e0.g exists.
+write("r_stage_e_from_0.g", sub(stage, "/\\ E / M in [1b-60, 1b-40]", "/\\ E / M in [0, 1b-40]"))
+# stage.g averaging over the weights themselves, which is why it takes twice
+# them.
+text = sub(stage, "cR = 2 * rest * E; cS = 2 * share * E;", "cR = rest * E; cS = share * E;")
+text = sub(text, "XE / cE -> (XE / V) * (2 * (rest + share) / (1 + 9b-53));",
+           "XE / cE -> (XE / V) * ((rest + share) / (1 + 9b-53));")
+text = sub(text, "rest * (d0 - t0) / cR -> ((d0 - t0) / E) / 2;", "rest * (d0 - t0) / cR -> (d0 - t0) / E;")
+write("r_stage_plain.g",
+      sub(text, "share * (d1 - t1) / cS -> ((d1 - t1) / E) / 2;", "share * (d1 - t1) / cS -> (d1 - t1) / E;"))
+# stage_e0.g with share over all of [0, 1], which is why share is cut in three.
+write("r_e0_whole.g", sub(small, SHARE, "  /\\ share in [0, 1]\n"))
+```
+
+`all.sh`:
+
+```sh
+#!/bin/bash
+# Write the edges, the controls and the runs, then run every script at once,
+# each through 464.13's one.sh: the two stage scripts and their four edges with
+# coq, and the controls and the runs without.
+cd "$(dirname "$0")"
+python3 controls.py
+for f in stage.g stage_0.g stage_1.g stage_e0.g stage_e0_0.g stage_e0_1.g; do
+  ./one.sh "$f" coq > "${f%.g}.run" 2>&1 &
+done
+for f in c_stage_85.g c_stage_m.g c_stage_noe.g c_stage_noshare.g c_stage_not.g c_stage_nod.g \
+         c_e0_8375.g c_e0_m.g c_e0_nod.g \
+         r_stage_noa.g r_stage_noknots.g r_e0_85.g r_stage_e_from_0.g r_stage_plain.g r_e0_whole.g; do
+  ./one.sh "$f" > "${f%.g}.run" 2>&1 &
+done
+wait
+cat stage.run stage_0.run stage_1.run stage_e0.run stage_e0_0.run stage_e0_1.run \
+    c_stage_85.run c_stage_m.run c_stage_noe.run c_stage_noshare.run c_stage_not.run \
+    c_stage_nod.run c_e0_8375.run c_e0_m.run c_e0_nod.run \
+    r_stage_noa.run r_stage_noknots.run r_e0_85.run r_stage_e_from_0.run r_stage_plain.run \
+    r_e0_whole.run
+```
+
+It printed, on the last run:
+
+```text
+stage exit 0 1.96s
+stage coq -Bcoq exit 0 coqc exit 0 2.91s lines 4529 hints 21
+stage_0 exit 0 0.98s
+stage_0 coq -Bcoq exit 0 coqc exit 0 2.52s lines 2572 hints 14
+stage_1 exit 0 0.96s
+stage_1 coq -Bcoq exit 0 coqc exit 0 2.64s lines 2479 hints 14
+stage_e0 exit 0 0.33s
+stage_e0 coq -Bcoq exit 0 coqc exit 0 1.84s lines 1825 hints 9
+stage_e0_0 exit 0 0.28s
+stage_e0_0 coq -Bcoq exit 0 coqc exit 0 1.50s lines 1388 hints 9
+stage_e0_1 exit 0 0.26s
+stage_e0_1 coq -Bcoq exit 0 coqc exit 1 1.15s lines 1543 hints 9
+c_stage_85 exit 1 3.07s
+c_stage_m exit 1 3.37s
+c_stage_noe exit 1 1.40s
+c_stage_noshare exit 1 2.82s
+c_stage_not exit 1 2.23s
+c_stage_nod exit 1 1.94s
+c_e0_8375 exit 1 3.14s
+c_e0_m exit 1 37.26s
+c_e0_nod exit 1 0.42s
+r_stage_noa exit 0 1.85s
+r_stage_noknots exit 0 1.84s
+r_e0_85 exit 0 0.84s
+r_stage_e_from_0 exit 1 2.88s
+r_stage_plain exit 1 2.93s
+r_e0_whole exit 1 51.41s
+```
+
+`same.py`, a check that what this subsection appends is what ran:
+
+```python
+"""Check that each script 464.22 appends whole is byte for byte the file that
+was run, in q2692/ran/; that one.sh is 464.13's block; that all.log is the
+print 464.22 gives for all.sh; and that controls.py, run again in a fresh
+directory beside the two stage scripts from the appended text, writes the
+scripts that ran.
+Run as: python3 same.py <doc> <q2692/ran dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, ran = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+sec = section(22)
+blocks = FENCED.findall(sec)
+print("code blocks in 464.22:", len(blocks))
+assert len(re.findall(r"^```", sec, re.M)) == 2 * len(blocks)
+
+# Which appended block is which file: by its first lines.
+HEAD = ("# restates: crates/rcad-geom/src/de_boor.rs EVALUATION_ROUNDOFF at 812503ed\n"
+        "# restates: crates/rcad-geom/src/de_boor.rs de_boor at 812503ed\n"
+        "# restates: crates/rcad-geom/src/de_boor.rs blended at 812503ed\n")
+marks = {
+    "stage.g": HEAD + "# One coordinate",
+    "stage_e0.g": HEAD + "# stage.g's stage",
+    "controls.py": '"""Write stage.g\'s and stage_e0.g\'s two share edges',
+    "all.sh": "#!/bin/bash\n# Write the edges, the controls and the runs",
+    "same.py": '"""Check that each script 464.22 appends whole',
+}
+found = {}
+for lang, body in blocks:
+    for name, mark in marks.items():
+        if not body.startswith(mark):
+            continue
+        assert name not in found, name
+        found[name] = body
+for name in marks:
+    if name not in found:
+        print(name, "not appended")
+        continue
+    path = os.path.abspath(__file__) if name == "same.py" else os.path.join(ran, name)
+    print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+
+def block_of(n, first):
+    got = [body for lang, body in FENCED.findall(section(n)) if body.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+def printed(first):
+    got = [body for lang, body in blocks if lang == "text" and body.startswith(first)]
+    assert len(got) == 1, (first, len(got))
+    return got[0]
+
+
+print("one.sh is 464.13's block:", open(os.path.join(ran, "one.sh")).read()
+      == block_of(13, "#!/bin/bash\n# Run one Gappa script under 464.4's pin"))
+print("all.log is what 464.22 gives:",
+      open(os.path.join(ran, "all.log")).read() == printed("stage exit "))
+
+fresh = tempfile.mkdtemp()
+for name in ("stage.g", "stage_e0.g", "controls.py"):
+    open(os.path.join(fresh, name), "w").write(found[name])
+subprocess.run(["python3", "controls.py"], cwd=fresh, check=True)
+written = sorted(f for f in os.listdir(fresh) if f.endswith(".g") and f not in found)
+for name in written:
+    print(name, "written again is the one that ran:",
+          filecmp.cmp(os.path.join(fresh, name), os.path.join(ran, name), shallow=False))
+print(".g files that ran and are neither appended nor written again:",
+      sorted(f for f in os.listdir(ran) if f.endswith(".g") and f not in found and f not in written))
+shutil.rmtree(fresh)
+```
+
+It prints:
+
+```text
+code blocks in 464.22: 8
+stage.g same
+stage_e0.g same
+controls.py same
+all.sh same
+same.py same
+one.sh is 464.13's block: True
+all.log is what 464.22 gives: True
+c_e0_8375.g written again is the one that ran: True
+c_e0_m.g written again is the one that ran: True
+c_e0_nod.g written again is the one that ran: True
+c_stage_85.g written again is the one that ran: True
+c_stage_m.g written again is the one that ran: True
+c_stage_nod.g written again is the one that ran: True
+c_stage_noe.g written again is the one that ran: True
+c_stage_noshare.g written again is the one that ran: True
+c_stage_not.g written again is the one that ran: True
+r_e0_85.g written again is the one that ran: True
+r_e0_whole.g written again is the one that ran: True
+r_stage_e_from_0.g written again is the one that ran: True
+r_stage_noa.g written again is the one that ran: True
+r_stage_noknots.g written again is the one that ran: True
+r_stage_plain.g written again is the one that ran: True
+stage_0.g written again is the one that ran: True
+stage_1.g written again is the one that ran: True
+stage_e0_0.g written again is the one that ran: True
+stage_e0_1.g written again is the one that ran: True
+.g files that ran and are neither appended nor written again: []
+```
+
+**9. What this leaves.** Rows, filed from this write-up when it merges, each
+from Q2692:
+
+- Restate `EVALUATION_ROUNDOFF`'s per-stage count (`de_boor.rs:41-77`)
+  against 3 and 4: `share − A` at `2.5u` over the middle range and `3u` at
+  `share = 1`; the two coefficient errors as one error, `5u` on `|t1 − t0| ≤
+  2M` where the doc has `7u`; `1 − share` exact above one half; the two
+  products and the sum at `3.5u`, bounded one at a time, where the doc takes
+  `2u` for the three together; `8.5u` in all. None of the doc's terms is shown
+  wrong, and the doc's `9u` holds.
+- Check `stage_e0_1.g` in Coq. `gappa -Bcoq` writes `Definition p49 := FLT
+  _rest (0).` at `stage_e0_1.v` line 468, and `coqc` says `Error: Cannot
+  interpret this number as a value of type positive` (7). `stage_1.g` has
+  `rest` exactly 0 too, and its `.v` passes. Find why, and get the edge
+  checked by Coq or record why it cannot be.
+
+And what is not a row: the sum over fifteen stages, which is Q2696's, in Lean
+(464.9); a stage whose running values overflow, which no script here models,
+since Gappa's `float<ieee_64, ne>` has no largest number, and which nobody has
+run, so it has no class (§360.5); and Q2700, which moves these scripts into
+`proofs/gappa/` with the rest of 464's and already waits on Q2692.
