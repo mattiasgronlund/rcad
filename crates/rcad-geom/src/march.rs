@@ -482,9 +482,19 @@ pub(crate) fn march_to(
 ///
 /// # Errors
 ///
-/// The same two [`march`] has, for the same reasons.
+/// [`Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces`] when the seed,
+/// settled, is still far enough off one of the surfaces that nothing near it can
+/// be on both, which is the seed [`march`] turns away (§43.6, Q2796).
+///
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when the two
+/// surfaces are too nearly parallel at the seed to settle it or to bound how far
+/// off the crossing it is, and [`Error::CannotWorkOutHowBigACrossingIs`] when a
+/// round of the settling lands somewhere that is not a point.
 pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Result<(Point, f64)> {
     let settled = settled(surfaces, seed)?;
+    if the_settling_did_not_land_on_both(surfaces, settled) {
+        return Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces);
+    }
     let off = how_far_off_the_crossing(surfaces, settled)?;
     Ok((settled, off))
 }
@@ -532,7 +542,7 @@ pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Resu
 /// than a half, or the radius left to either surface is not more than nothing:
 /// the two surfaces are too nearly parallel for their bend to leave any bound
 /// on how far off the crossing the point is. And what [`settled_with_a_bound`]
-/// refuses.
+/// refuses, but for its seed check, which is not asked here.
 pub(crate) fn settled_with_a_bound_where_they_bend(
     surfaces: [&Surface; 2],
     seed: Point,
@@ -1294,6 +1304,15 @@ fn how_far_off_a_pipe_enclosing(pipe: &Cylinder, at: Point) -> (Interval, [Inter
 ///
 /// Reached by the loops a cone crosses a pipe or a ball in off its axis, as
 /// [`how_far_off_and_which_way`]'s cone arm says.
+///
+/// **Where how far up the axis the point is encloses to both signs**, the
+/// arithmetic cannot tell which nappe the point stands over. Then `|up|` is
+/// enclosed as running from nothing to the further end, and the normal's
+/// lean along the axis as anything from one nappe's to the other's, since
+/// either may be the true one. Taking the upper nappe there put `−slope·up`
+/// where `−slope·|up|` belongs, and left the true distance below the
+/// enclosure wherever `up` ran further below zero than above it (§43.6,
+/// Q2796).
 fn how_far_off_a_cone_enclosing(cone: &Cone, at: Point) -> (Interval, [Interval; 3]) {
     let along = exactly(cone.axis().direction().components());
     let squared_direction = squared_length_enclosing(along);
@@ -1303,12 +1322,22 @@ fn how_far_off_a_cone_enclosing(cone: &Cone, at: Point) -> (Interval, [Interval;
     let reach = root_enclosing(squared_length_enclosing(sideways));
     let slope = Interval::exactly(cone.slope());
     let steepness = root_enclosing(Interval::exactly(1.0) + slope * slope);
-    let leaning = if up.hi() < 0.0 {
+    let up_either_way = if up.lo() >= 0.0 {
+        up
+    } else if up.hi() <= 0.0 {
+        -up
+    } else {
+        Interval::new(0.0, furthest_from_zero(up).hi())
+            .expect("an enclosure either side of zero has a further end above zero")
+    };
+    let leaning = if up.lo() > 0.0 {
+        Interval::exactly(1.0)
+    } else if up.hi() < 0.0 {
         -Interval::exactly(1.0)
     } else {
-        Interval::exactly(1.0)
+        Interval::new(-1.0, 1.0).expect("minus one to one is a range")
     };
-    let off = quotient_or_everything(reach - slope * up * leaning, steepness);
+    let off = quotient_or_everything(reach - slope * up_either_way, steepness);
     let outwards: [Interval; 3] = core::array::from_fn(|axis| {
         let across = quotient_or_everything(sideways[axis], reach);
         let down = quotient_or_everything(
@@ -1356,6 +1385,7 @@ fn furthest_from_zero(value: Interval) -> Interval {
 mod tests {
     use super::*;
     use crate::Axis;
+    use rcad_predicates::expansion::{two_diff, two_product, two_sum};
     use rcad_predicates::{Decision, Point as PredicatePoint, SideOfSurface};
 
     fn a_ball(centre: [f64; 3], radius: f64) -> Surface {
@@ -2281,6 +2311,240 @@ mod tests {
                  about a point on the skin of the pipe about {stored:?} is zero and \
                  nothing either side of it",
             );
+        }
+    }
+
+    /// **A seed the settling cannot put on both surfaces is refused by
+    /// [`settled_with_a_bound`] as [`march`] refuses it** (§43.6, Q2796).
+    ///
+    /// The two pipes of `how_small_a_crossing_can_be_before_no_point_sits_on_it.rs`,
+    /// one of radius `2147482112` and one of radius `4.36e-106`, cross in two
+    /// loops far smaller than the spacing of the `f64` where they sit. Settled
+    /// from this seed, the point lands at `(-1.2e-7, 1786830731.7, -3.4e-8)`,
+    /// `1.27e-7` off the thin pipe's axis, and [`march`] turns it away.
+    /// [`settled_with_a_bound`] handed the same point back as settled onto both,
+    /// to a caller about to ask which piece of the crossing it was on.
+    ///
+    /// The seeds `(4.36e-106, ±1786830731.7039194, 0)` are no use here: they
+    /// refuse earlier, inside the settling.
+    #[test]
+    fn a_seed_that_settles_off_one_surface_is_refused_as_the_march_refuses_it() {
+        let fat = a_pipe([0.0, 0.0, 1.0], [1191182336.0, 0.0, 0.0], 2147482112.0);
+        let thin = a_pipe([0.0, 1.0, 0.0], [0.0, 0.0, 0.0], 4.3601508761683463e-106);
+        let surfaces = [&fat, &thin];
+        let seed = Point::new(0.0, 1786830731.7039194, 4.3601508761683463e-106);
+
+        assert_eq!(
+            march(surfaces, seed, 1.0, 1000).map(|walked| walked.points.len()),
+            Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces),
+            "the march turns this seed away once it has settled it",
+        );
+        assert_eq!(
+            settled_with_a_bound(surfaces, seed),
+            Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces),
+            "and a seed settled with a bound is the same seed, so it is turned away too",
+        );
+    }
+
+    /// **How far a point is off a cone is enclosed even where the arithmetic
+    /// cannot tell which side of the flat through the apex the point is on**
+    /// (§43.6, Q2796).
+    ///
+    /// The distance is `(‖x_perp‖ − slope·|up|)/√(1 + slope²)`, with `up` how
+    /// far the point is along the axis from the apex. Here `up` encloses to
+    /// either sign, further below zero than above. Taking the upper nappe for
+    /// any `up` that might be above zero put `−slope·up` where `−slope·|up|`
+    /// belongs, and at slope `100` the enclosure's low end came out at
+    /// `9.999500037496863e-3` with the true distance `9.999500037496853e-3`,
+    /// below it: the point was said to be further off the cone than it is. At
+    /// slope `1e17` the same miss gave the wrong sign.
+    #[test]
+    fn a_point_a_rounding_under_the_flat_through_a_cones_apex_has_its_distance_enclosed() {
+        let (cone, at, truth) =
+            a_cone_and_a_point_a_rounding_under_the_flat_through_its_apex(100.0);
+        let (off, _) = how_far_off_a_cone_enclosing(&cone, at);
+        assert!(
+            holds(off, truth.off),
+            "{at:?} is {:e} off the cone, and its enclosure is [{:e}, {:e}]",
+            truth.off.0,
+            off.lo(),
+            off.hi(),
+        );
+    }
+
+    /// **The normal at a point the arithmetic cannot place on either side of
+    /// the flat through a cone's apex is enclosed as either nappe's** (§43.6,
+    /// Q2796).
+    ///
+    /// Over that flat the cone's normal leans down the axis, and under it up.
+    /// Taking the upper nappe for any `up` that might be above zero enclosed
+    /// the upper nappe's normal alone, `z` in `[-0.5657, -0.5657]`, when the
+    /// point is truly under the flat and its normal's `z` is `+0.5657`. The
+    /// arithmetic cannot rule out either nappe here, so the enclosure holds
+    /// both.
+    #[test]
+    fn a_point_a_rounding_under_the_flat_through_a_cones_apex_has_its_normal_enclosed() {
+        let (cone, at, truth) = a_cone_and_a_point_a_rounding_under_the_flat_through_its_apex(1.0);
+        let (_, normal) = how_far_off_a_cone_enclosing(&cone, at);
+        for (axis, (enclosed, exact)) in normal.into_iter().zip(truth.normal).enumerate() {
+            assert!(
+                holds(enclosed, exact),
+                "the normal at {at:?} has {:e} along axis {axis}, and its enclosure there is \
+                 [{:e}, {:e}]",
+                exact.0,
+                enclosed.lo(),
+                enclosed.hi(),
+            );
+        }
+    }
+
+    /// A cone of `slope` leaning along `(0.36, 0.48, 0.8)` from the origin, and a
+    /// point one unit out from the apex square to that axis and then nine
+    /// `2^-57` down `z`, with what is true there.
+    ///
+    /// The point is truly `2.3e-17` under the flat through the apex, and the
+    /// arithmetic encloses how far up the axis it is as `[-1.05e-16, 5.6e-18]`:
+    /// either side of the flat, and further under it than over. Both are
+    /// checked here, since the pins that use this point are about nothing else.
+    fn a_cone_and_a_point_a_rounding_under_the_flat_through_its_apex(
+        slope: f64,
+    ) -> (Cone, Point, WhatIsTrueBesideACone) {
+        let cone = Cone::new(
+            Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(0.36, 0.48, 0.8))
+                .expect("a direction"),
+            slope,
+        )
+        .expect("a slope");
+        let at = Point::new(0.8, -0.6, -9.0 * 2.0_f64.powi(-57));
+
+        let along = exactly(cone.axis().direction().components());
+        let up = quotient_or_everything(
+            dot_enclosing(
+                gap_enclosing(cone.apex().coordinates(), at.coordinates()),
+                along,
+            ),
+            squared_length_enclosing(along),
+        );
+        assert!(
+            up.lo() < 0.0 && up.hi() > 0.0 && -up.lo() > up.hi(),
+            "{at:?} was picked so that how far up the axis it is encloses to either side of \
+             zero, further under than over, and it encloses to [{:e}, {:e}]",
+            up.lo(),
+            up.hi(),
+        );
+        let truth = what_is_true_beside(&cone, at);
+        assert!(
+            truth.up.0 < 0.0,
+            "and {at:?} was picked to be truly under the flat, where it is {:e} up the axis",
+            truth.up.0,
+        );
+        (cone, at, truth)
+    }
+
+    /// How far up its axis a point is from a cone's apex, how far off the cone
+    /// it is, and the cone's unit normal there.
+    struct WhatIsTrueBesideACone {
+        up: Doubled,
+        off: Doubled,
+        normal: [Doubled; 3],
+    }
+
+    /// [`WhatIsTrueBesideACone`] at `at`, worked out in [`Doubled`] from the
+    /// same stored numbers the kernel reads.
+    fn what_is_true_beside(cone: &Cone, at: Point) -> WhatIsTrueBesideACone {
+        let along = cone.axis().direction().components().map(Doubled::of);
+        let apex = cone.apex().coordinates();
+        let at = at.coordinates();
+        let out: [Doubled; 3] = core::array::from_fn(|axis| {
+            let (difference, error) = two_diff(at[axis], apex[axis]);
+            Doubled(difference, error)
+        });
+        let dot = |one: [Doubled; 3], other: [Doubled; 3]| {
+            (0..3).fold(Doubled::of(0.0), |sum, axis| sum + one[axis] * other[axis])
+        };
+        let squared_direction = dot(along, along);
+        let up = dot(out, along) / squared_direction;
+        let sideways: [Doubled; 3] = core::array::from_fn(|axis| out[axis] - along[axis] * up);
+        let reach = dot(sideways, sideways).root();
+        let slope = Doubled::of(cone.slope());
+        let steepness = (Doubled::of(1.0) + slope * slope).root();
+        let leaning = Doubled::of(up.0.signum());
+        let up_either_way = if up.0 < 0.0 { -up } else { up };
+        WhatIsTrueBesideACone {
+            up,
+            off: (reach - slope * up_either_way) / steepness,
+            normal: core::array::from_fn(|axis| {
+                (sideways[axis] / reach - slope * leaning * along[axis] / squared_direction.root())
+                    / steepness
+            }),
+        }
+    }
+
+    /// Whether `exact` is inside `enclosure`, ends included. The sign of a
+    /// [`Doubled`]'s first part is the sign of the whole.
+    fn holds(enclosure: Interval, exact: Doubled) -> bool {
+        (exact - Doubled::of(enclosure.lo())).0 >= 0.0
+            && (Doubled::of(enclosure.hi()) - exact).0 >= 0.0
+    }
+
+    /// A number carried as the sum of two `f64`, about 106 bits, to judge an
+    /// enclosure against: each step here rounds at about `2^-104` of the
+    /// numbers it is made from, where an enclosure's ends round at `2^-53`.
+    #[derive(Clone, Copy, Debug)]
+    struct Doubled(f64, f64);
+
+    impl Doubled {
+        fn of(value: f64) -> Self {
+            Self(value, 0.0)
+        }
+
+        fn root(self) -> Self {
+            let first = self.0.sqrt();
+            let left = self - Self::of(first) * Self::of(first);
+            Self::of(first) + Self::of(left.0 / (2.0 * first))
+        }
+    }
+
+    impl core::ops::Add for Doubled {
+        type Output = Self;
+        fn add(self, other: Self) -> Self {
+            let (sum, error) = two_sum(self.0, other.0);
+            let (sum, error) = two_sum(sum, error + self.1 + other.1);
+            Self(sum, error)
+        }
+    }
+
+    impl core::ops::Neg for Doubled {
+        type Output = Self;
+        fn neg(self) -> Self {
+            Self(-self.0, -self.1)
+        }
+    }
+
+    impl core::ops::Sub for Doubled {
+        type Output = Self;
+        fn sub(self, other: Self) -> Self {
+            self + -other
+        }
+    }
+
+    impl core::ops::Mul for Doubled {
+        type Output = Self;
+        fn mul(self, other: Self) -> Self {
+            let (product, error) = two_product(self.0, other.0);
+            let (product, error) = two_sum(product, error + self.0 * other.1 + self.1 * other.0);
+            Self(product, error)
+        }
+    }
+
+    impl core::ops::Div for Doubled {
+        type Output = Self;
+        fn div(self, other: Self) -> Self {
+            let first = self.0 / other.0;
+            let left = self - Self::of(first) * other;
+            let second = left.0 / other.0;
+            let left = left - Self::of(second) * other;
+            Self::of(first) + Self::of(second) + Self::of(left.0 / other.0)
         }
     }
 }
