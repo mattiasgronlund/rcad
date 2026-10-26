@@ -13962,62 +13962,265 @@ Q2700, which moves these scripts into `proofs/gappa/` with 464.19's.
 
 ### 464.21 CORNER_AFTER_MOVING_ROUNDOFF
 
-**Draft, unfinished: Q2691's second lane handed it on here (§416).** What
-follows is what ran, on 2026-10-26 at `f95bb965`, through 464.13's `one.sh`,
-unchanged. The cylinder, the torus, the cone, the controls, the Coq runs,
-`all.sh`, `same.py` and the write-up are still to do, and the lane that
-finishes this rewrites the section whole.
+Q2691 proved `CORNER_AFTER_MOVING_ROUNDOFF` in Gappa on 2026-10-26 at
+`f95bb965`, on 464.19's `point.g` and 464.20's `vector.g`, for four of the
+five kinds of surface. A corner exactly on a plane, a ball, a pipe or a torus,
+once moved, is within `222.5u · L`, `148.7u · L`, `230.6u · L` and `213.0u · L`
+of the moved surface as the code stores it, and the box the code draws round
+the moved corner meets that surface whenever it is within `256u · L` (1, 3).
+The pipe gets there only with the slips at the `25u` that `point.g` reaches,
+not at `POINT_ROUNDOFF`'s `36u`. The cone is not proved: the same argument, on
+paper, comes to about `290u`, past the bound, and nobody has searched for a
+corner that gets there (3). The doc's own count miscounts in three ways (4).
+Coq checks the four proofs, modulo their hints (7).
 
-The bound is a distance: `where_a_corner_lands_after_moving`
-(`moved_corner.rs:208-244`) boxes the moved corner by `128ε · L` per
-coordinate, so the box meets the moved surface when the moved corner is within
-`128ε · L = 256u · L` of it. `L` is `the_largest_number_involved`
-(`moved_corner.rs:424-468`).
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, unchanged, against `moved_corner.rs`, `plane.rs`,
+`sphere.rs`, `cylinder.rs`, `torus.rs`, `point.rs` and `isometry.rs` at
+`f95bb965` and nalgebra 0.35.0. `u` is `2⁻⁵³` and `ε` is `f64::EPSILON = 2u`.
+Every length the scripts work with is per unit of `L`.
 
-**Done.**
+**1. What the proof guards.** `where_a_corner_lands_after_moving`
+(`moved_corner.rs:208-244`) moves a corner by `Isometry::apply_to_point` and,
+unless the move rounded nothing, hands back a box round the moved corner of
+half-width `CORNER_AFTER_MOVING_ROUNDOFF · L` on each coordinate. `L` is
+`the_largest_number_involved` (`moved_corner.rs:423-441`): the largest
+magnitude among the corner before and after the move, the shift, and what
+`how_big_a_surface_is` (`moved_corner.rs:443-468`) gives for each surface
+before and after — a plane's offset, a ball's centre and radius, a pipe's
+axis origin and radius, a cone's apex and slope, a torus's centre and `ring +
+tube`. The box is to meet the moved surface as the code stores it,
+`Surface::transformed`. It does whenever the moved corner is within `128ε · L
+= 256u · L` of that surface, since a ball of that radius lies inside the box,
+and that distance is each script's goal. The doc (`moved_corner.rs:38-97`)
+counts five `POINT_ROUNDOFF`s for the worst kind, a plane, and publishes
+seven.
 
-- `sos.py` checks six identities in exact rationals at 1000 points each,
-  printed below. `Ex` is nalgebra's turn without rounding; it is linear, so a
-  moved corner less a moved centre or axis origin is `Ex(x − c)` and the two
-  slips `point.g` proves.
-- `ball.g` proves a corner exactly on a ball within `256u · L` of the moved
-  ball. It printed the slips' share `|kp − kc| ≤ 1.38453e-14`, `124.7u`, and
-  the radius's `r · ||Ex(y)| − 1| ≤ 2.66454e-15`, `24.0u`, so `148.7u` in all.
-  The triangle inequality that splits the distance into those two is by hand.
-- `plane.g` proves a corner exactly on a plane within `256u · L` of the moved
-  plane. Its four shares printed `±9.23022e-15` (`83.14u`, the turn's length,
-  `4(q·q − 1)(v × n)·(v × x)`, which the doc's count leaves out), `±6.66134e-15`
-  (`60u`, the normal's slip), `±6.92267e-15` (`62.35u`, the corner's slip),
-  and the offset's `17u` taken as a hypothesis from `shiftplane.g`'s goal;
-  `n'·n' − 1` printed `±2.72318e-14`, `245.3u`. That is about `222.5u` in all.
-  Gappa warned twice that a rewriting was not needed, for `T2 -> F2 / 2` and
-  `T3 -> F3 / 2`.
+**2. The scripts.** Each script takes the corner exactly on the surface,
+bounds a few shares of the moved corner's distance from the moved surface,
+and proves their sum within `256u`. What joins the shares to the distance is
+done by hand, below, and `sos.py` (8) checks the six identities the scripts
+rest on, in exact rationals at 1000 random points each. `Ex` is nalgebra's
+turn worked without rounding. It is linear (identity 1), so a moved corner
+less a moved centre or axis origin is `Ex(y) + k`, with `y` the corner less
+the centre or origin and `k = kp − ko` the two slips `point.g` proves.
 
-**Next, worked on paper and not run.** Cylinder, cone and torus all go
-through `Axis::transformed`. With `y` the corner less the axis origin, `e`
-the unit `Ex(a)`, `â'` the unit stored moved direction and `k` the two point
-slips, the distance is at most `|k| + |Ex(y)| · θ + |f(Ex(y); e)|`, where:
+- `ball.g`: `Sphere::transformed` (`sphere.rs:78`) moves the centre and
+  carries the radius `r` over. By the triangle inequality the distance is at
+  most `|k| + r · ||Ex(y / r)| − 1|`, and the second share is the turn's
+  length share of 464.20's 3, for a unit vector.
+- `plane.g`: `Plane::transformed` (`plane.rs:544`) turns the normal to `n' =
+  Ex(n) + dn`, `dn` what `vector.g` proves, and gives the offset `off' = off +
+  n'·s + dd` by `shiftplane.g`'s arithmetic (464.9). With the moved corner
+  `Ex(x) + s + dp`, identity 2 makes `n'·p' − off'` exactly `4(q·q − 1)(v ×
+  n)·(v × x) + dn·Ex(x) + n'·dp − dd`, and the distance is that over `|n'|`.
+  Gappa bounds the whole quotient, and no inequality is taken by hand.
+- `pipe.g` and `torus.g`: `Cylinder::transformed` (`cylinder.rs:74`) and
+  `Torus::transformed` (`torus.rs:152`) carry the radii over and move the axis
+  by `Axis::transformed` (`point.rs:784`): the origin by `apply_to_point`, and
+  the direction by `apply_to_vector`, to `Ex(a) + da`. With `e` the unit
+  `Ex(a)` and `θ` the angle `da` tilts it by, the distance is at most `|k| +
+  θ · |Ex(y)| + |(ρ' − ρ, t' − t)|`, by three steps by hand:
+  - moving a point by `k` moves its distance from a surface by at most `|k|`;
+  - turning the axis by `θ` about the moved origin moves a point `|Ex(y)|`
+    from it by at most `θ · |Ex(y)|`, and `θ ≤ tan θ ≤ |da| / (|Ex(a)| −
+    |da|)`, which makes the scripts' `TI`;
+  - with `(ρ, t)` how far the corner is from the axis and along it, and `(ρ',
+    t')` the same of `Ex(y)` about `e`, the distance from the surface in the
+    plane of across and along is 1-Lipschitz. For a pipe it is `|ρ − r|`,
+    which leaves `|ρ' − ρ|`, `pipe.g`'s `DR`. For a torus it is `||(ρ − R, t)|
+    − r|`, and `|(ρ' − R, t')| − |(ρ − R, t)| ≤ |(ρ' − ρ, t' − t)|`,
+    `torus.g`'s `DR`.
 
-- `θ ≤ |da| / (|Ex(a)| − |da|)` is the tilt;
-- `f` is the surface's distance in the plane of along and across, which is
-  1-Lipschitz there.
+  Identities 5 and 6 let the two scripts put the axis along `z` and the corner
+  in the `xz` plane. `Ex` turns with the frame (identity 5), so there `w` and
+  `v` are the turn's quaternion in the turned frame, reals with `q·q`
+  unchanged, and `ρ' = ρ · sqrt(NUMQ / DENQ)` and `t' = t · sqrt(DENQ) −
+  4(q·q − 1)v₀v₂ρ / sqrt(DENQ)` (identity 6). Turning the frame turns `k` and
+  `da` too, and that is sound because the two enter the scripts only by their
+  lengths, `S = sqrt(KK)` and `DA = sqrt(DADA)`. `point.g`'s and `vector.g`'s
+  boxes, on each coordinate in the world's frame, bound `|k|` by `√3` times
+  twice a slip's bound and `|da|` by `√3 · 20u`, and the scripts' boxes, read
+  in the turned frame, hold a `k` and a `da` of every such length.
 
-Identities 5 and 6 let the scripts put the axis on `z` and the corner in the
-`xz` plane. Then `ρ' = ρ · sqrt(NUMQ / DENQ)` and `t' = t · sqrt(DENQ) − 4η
-v₀v₂ρ / sqrt(DENQ)`. The shares come to:
+**3. The shares.** Gappa's bounds, as each script printed them:
 
-- a cylinder, `|y| ≤ 2√3 L` and `r ≤ L`: `124.7u + 120u + 24u = 268.7u` at
-  `POINT_ROUNDOFF`'s `36u`, which is over `256u`; `86.6u + 120u + 24u =
-  230.6u` at `25u`, which `point.g` reaches (`D / L ≤ 24.8`, 464.19's 3), and
-  which needs a run of `point.g` with its goal at `100b-55`;
-- a torus, `|y| ≤ ring + tube ≤ L`: `124.7u + 34.6u` and a drift of at most
-  `sqrt((24u + 24u)² + (24u)²) = 53.7u`, so about `213u`;
-- a cone, `|y| ≤ 2√3 L`: the drift is `2η ρ (v₂² − v₀² + 2s v₀v₂) / h` to first
-  order, at most `24u · ρ`, and `ρ` can reach `2√3 L`. So `86.6u + 120u +
-  83u = 290u` even at `25u`. This argument does not reach `128ε` for a cone.
-  Whether an input does, nobody has searched.
+- ball, at `36u` slips: the slips' `S` `1.38453e-14` (`124.7u`, `√3 · 72u`)
+  and the radius's `T` `2.66454e-15` (`24.0u`), so `148.7u`;
+- plane, at `36u`: the turn's length share `T1` within `±9.23022e-15`
+  (`83.14u`), the normal's slip against the turned corner `T2` within
+  `±6.66134e-15` (`60u`), the corner's slip against the turned normal `T3`
+  within `±6.92267e-15` (`62.35u`), and the offset's `17u` taken from
+  `shiftplane.g`'s goal, all over `|n'|`, with `n'·n' − 1` within
+  `±2.72318e-14` (`245.3u`): about `222.5u`, where `c_plane_222.g` finds the
+  best `±2.47016e-14`;
+- pipe, at `25u`: `S` `9.61481e-15` (`86.6u`), the tilt `TI` `1.33227e-14`
+  (`120.0u`, `2√3 · √3 · 20u`) and the drift `DR` `2.66454e-15` (`24.0u`), so
+  `230.6u`; at `36u`, `r_pipe_36.g` fails with best `2.98325e-14`, `268.7u`;
+- torus, at `36u`: `S` `1.38453e-14` (`124.7u`), `TI` `3.84593e-15`
+  (`34.6u`) and `DR` `5.95808e-15` (`53.7u`), from `DRr` within
+  `±2.66454e-15` and `DRt` within `±5.32907e-15`, so `213.0u`.
 
-`ball.g`, as it ran:
+A torus's tilt and drift are small because its corner is within about `L` of
+its centre, where a pipe's can be `2√3 L` from its origin. Each axis script
+also proves `DENQ − 1` within `±5.32907e-15`, `48u`, which keeps its one
+divisor off zero.
+
+The cone is on paper and was not run. `Cone::transformed` (`cone.rs:156-161`)
+is `Axis::transformed` too, and its distance in the plane of across and along
+is `|ρ − st| / h`, `h = sqrt(1 + s²)`, also 1-Lipschitz. To first order in `η
+= q·q − 1`, identity 6's `ρ'` and `t'` take a corner on the cone off it by
+`2ηρ(v₂² − v₀² + 2s v₀v₂) / h`. The form's eigenvalues are `±h`, since `h(v₀² +
+v₂²)` less it is `((h + 1)v₀ − s v₂)² / (h + 1)` and `h(v₀² + v₂²)` plus it is
+`((h + 1)v₂ + s v₀)² / (h + 1)`, so the drift is at most `2|η|ρ · q·q`, about
+`24u · ρ`. A cone's `L` counts its apex and slope and not how far it reaches
+(`moved_corner.rs:456-460`), so `ρ ≤ |y| ≤ 2√3 L` and the drift reaches
+`83.1u`. With the pipe's `86.6u` and `120u` that is about `290u`, past `256u`,
+even at `25u` slips. That is an argument and not a demonstration that the
+bound fails (§16.10): the three shares need not reach their worst at once.
+The test that searches,
+`a_corner_read_out_of_a_model_and_moved_is_a_box_around_where_it_lands.rs`,
+finds about `5ε` (its lines 44-46), and nobody has searched for a corner on a
+cone past `256u`. One of the rows 9 files is that search.
+
+**4. What the doc counts wrong.** The doc (`moved_corner.rs:38-97`) counts
+one `POINT_ROUNDOFF · L` for the point, one more for a ball, three for a pipe
+and four for a plane, and takes the plane's four and the point's one, `90ε ·
+L`, as the worst. The 128 holds for the four kinds Gappa proved, but not by
+that count, which is wrong in three ways:
+
+- It treats `POINT_ROUNDOFF`, a bound on each coordinate, as a bound on a
+  length. `point.g` bounds each coordinate of a slip by `36u · L`, so a slip
+  is up to `√3 · 36u · L = 62.35u · L` long, and the two slips a ball's
+  distance adds up to `124.7u · L`, where the doc gives them `72u · L`.
+- It leaves the turn's length share out. Even worked without rounding,
+  nalgebra's turn keeps a length only when `q·q` is exactly one (464.20's 3),
+  and `|q·q − 1|` can be `6ε`. That share is `83.14u` for a plane, `24u` for a
+  ball, the drift `DR`, `24u` for a pipe and `53.7u` for a torus, and on paper
+  about `24u · ρ` for a cone.
+- Its worst is not the plane. On the counts Gappa proved, the pipe's `230.6u`
+  is over the plane's `222.5u`, and the pipe gets there only with `point.g`'s
+  `25u` slips: with `POINT_ROUNDOFF`'s `36u` its argument comes to `268.7u`.
+  The doc's "a point at most `2L` away" misses that `|y|` can reach `2√3 L`,
+  which, with `vector.g`'s `20u` on each component, makes the tilt `120u`
+  where the doc has `72u`. The cone's `290u` on paper is past them both.
+
+**5. The hypotheses.** Each script takes `point.g`'s goal as the bound on its
+slips, and each but `ball.g` takes `vector.g`'s as the bound on its turned
+normal or direction, so they stand on `point.g`'s hypotheses (464.19's 5) and
+`vector.g`'s (464.20's 5). Their own, in each script's order:
+
+- in every script, a stored turn's `|q·q − 1| ≤ 6ε`, worked out exactly, as
+  464.19's 5 has it; in `pipe.g` and `torus.g`, each of `|w|` and `|vᵢ|` at
+  most two, since each square is at most `q·q` in any frame;
+- `ball.g`: `y` a unit vector, each slip coordinate within `36u`, and `L` at
+  least the radius;
+- `plane.g`: the stored normal's components at most one and `n·n` within
+  `NORMAL_LENGTH_ROUNDOFF`, `64ε`, of one; the corner's coordinates at most
+  `L`; `dn` within `vector.g`'s `20u`; the corner's slip within `36u`; and the
+  offset's rounding within `shiftplane.g`'s `16u` times the larger of `|n'|`
+  and one, under `17u`;
+- `pipe.g`: the stored direction's `a·a` within `64ε` of one; `L` at least the
+  radius, and `|y| ≤ 2√3 L`, since `L` is at least every coordinate of the
+  corner and of the origin; the six slip coordinates within `25u`; and `da`
+  within `vector.g`'s `20u`. The `25u` rests on `r_point_25.g`,
+  `r_point1_25.g` and `r_point2_25.g`, 464.19's `point.g` and its `y` and `z`
+  with the goal at `25u`, which prove under `point.g`'s own hypotheses with
+  `D / L` at most `24.8`;
+- `torus.g`: the axis as `pipe.g`'s; `|y| / L ≤ 1 + u`, since the corner is at
+  most `ring + tube` from the centre and `L` is at least `ring + tube` as
+  `f64` adds them (`moved_corner.rs:463-466`), taken with room as `ρ / L` and
+  `|t| / L` at most `1 + 2u` and `|y|² / L²` at most `1 + 8u`; and the slips
+  within `36u`. The draft before this run took `|y| / L ≤ 1`, which the
+  rounded sum does not promise; every bound it printed is unchanged to the six
+  digits Gappa prints.
+
+Two hypotheses are left unproved:
+
+- `vector.g` takes each component of the vector it turns at most one. A
+  normal a constructor stores has that, but a stored axis direction is only
+  within `64ε` of length one, so a component can be about `1 + 64u`, and
+  `pipe.g` and `torus.g` take `da` from `vector.g` all the same. Q2826 asks the
+  like of a normal, and one of the rows 9 files asks it of an axis.
+- `point.g` and `vector.g` are proved away from their zero branches and with
+  their products normal, as 464.19's 5 says; Q2801, Q2825 and Q2802 run them
+  there.
+
+**6. The controls.** Each changes one thing and exits 1. A goal just under
+what the script reaches shows its hypotheses do not contradict each other,
+and a hypothesis dropped shows the proof needs it.
+
+- `c_ball_148.g`, the goal at `148u`: best `1.65099e-14`, `148.7u`;
+- `c_ball_non4.g`, without the turn near length one: best `2.23899e+617`;
+- `c_ball_nok.g`, without `point.g`'s slips: best `[-inf, inf]`, with `S`
+  unproved;
+- `c_plane_222.g`, the goal at `±222u`: best `±2.47016e-14`, `222.49u`;
+- `c_plane_non4.g`, without the turn near length one: best `[-inf, inf]`;
+- `c_plane_nodn.g`, without `vector.g`'s `dn`: best `[-inf, inf]`, with `T2`,
+  `T3` and `n'·n' − 1` unproved;
+- `c_plane_nodp.g`, without `point.g`'s slip: best `[-inf, inf]`, with `T3`
+  unproved;
+- `c_plane_nodd.g`, without `shiftplane.g`'s offset: best `[-inf, inf]`;
+- `c_pipe_230.g`, the goal at `230u`: best `2.5602e-14`, `230.6u`;
+- `c_pipe_non4.g`, `q·q` only within `[0, 16]`, what the bounds on `w` and `v`
+  allow: best `[-inf, inf]`, with `TI`, `DR` and `NUMQ / DENQ − 1` unproved
+  and `DENQ − 1` within `[-1, 480]`;
+- `c_pipe_nobound.g`, without `|w|` and each `|vᵢ|` at most two, the first run
+  of `pipe.g`: best `[-inf, inf]`, with every share but `S` unproved;
+- `c_pipe_noda.g`, without `vector.g`'s `da`: best `[-inf, inf]`, with `TI`
+  unproved;
+- `c_torus_212.g`, the goal at `212u`: best `2.36493e-14`, `213.0u`;
+- `c_torus_non4.g`, `q·q` only within `[0, 16]`: best `[-inf, inf]`, with
+  `TI`, `DRr`, `DRt`, `DR` and `NUMQ / DENQ − 1` unproved.
+
+`r_pipe_36.g` is a run and not a control: the pipe with the slips at `36u`,
+best `2.98325e-14`, `268.7u` (3).
+
+**7. Coq checks the proofs, modulo their hints.** `gappa -Bcoq` and `coqc`,
+through `one.sh`, exit 0 on `ball.g`, `plane.g`, `pipe.g`, `torus.g`,
+`r_point_25.g`, `r_point1_25.g` and `r_point2_25.g`. `coqc` printed nothing,
+and `gappa -Bcoq` only its results and warnings. On the last run of `all.sh`
+(8) the `.v` files came to 1347 lines with 3 hints, 8504 with 17, 3422 with 8,
+3556 with 11, and 8222, 8162 and 8195 with 34 each. The lines are that run's
+and no other's (464.20's 7): the run before it, of the same `ball.g`,
+`plane.g`, `pipe.g` and `r_point` scripts, wrote 1347, 8503, 3280, 8215, 8244
+and 8199, with the same hints.
+
+`pipe.g` and `torus.g` needed `a` and `y` written in place. With the names
+`a0 = 0; a1 = 0; a2 = al;` and `y0 = RL; y1 = 0; y2 = TL;`, `gappa -Bcoq`
+stopped after it had written every hint, with `src/parser/ast.cpp:255:
+std::string dump_real(const ast_real*, unsigned int): Assertion 'false'
+failed`. `one.sh` printed `pipe coq -Bcoq exit 134 coqc exit 1 1.74s lines 166
+hints 8`, and the torus the same with 188 lines and 11 hints, and `coqc` said
+`Error: The section Generated_by_Gappa needs to be closed.` Two variants of
+`pipe.g` were run. `p_inline.g`, with the six names dropped and each written
+in place, printed `p_inline exit 0 0.36s` and `p_inline coq -Bcoq exit 0 coqc
+exit 0 2.31s lines 3280 hints 8`, with the same six bounds. `p_named.g`, meant
+to put the hint on `NUMQ / DENQ` on a name of its own, tested nothing: it
+defined that name from `NUMQ` above `NUMQ`'s own line, and Gappa stopped with
+`Error: redefinition of identifier 'NUMQ' at line 62 column 4`. `pipe.g` and
+`torus.g` in 8 are the in-place form. Which of the six names `-Bcoq` trips on
+was not looked for.
+
+As in 464.19's 8, each hint enters the Coq file as a hypothesis with no
+condition, so a proof stands on its hints and on the divisors Gappa took to be
+nonzero. `grep -c 'assumed to be nonzero'` counts 0 in `ball.out` and
+`plane.out`; 2 each in `pipe.out` and `torus.out`, for `DENQ`, which the two
+scripts prove within `48u` of one; and 163 in each `r_point` run's. None says a
+hint's two sides are "not trivially equal". `plane.out` says there is "no need
+for the rewriting at line 114 column 13" and "at line 126 column 13", the
+hints `T2 -> F2 / 2` and `T3 -> F3 / 2`. The controls and `r_pipe_36.g` ran
+without `-Bcoq`.
+
+**8. The scripts, whole, as they ran.** To run them again, save `ball.g`,
+`plane.g`, `pipe.g`, `torus.g`, `controls.py` and `all.sh` in one directory
+with 464.13's `one.sh` and 464.19's `point.g`, and run `bash all.sh` there.
+`controls.py` writes the controls, `r_pipe_36.g` and the three runs at `25u`
+from them. The longest of the runs, `r_point2_25.g`, took 45.56 s and then
+102.15 s with `coqc`, as `all.sh`'s print shows. `sos.py` and `same.py` are
+checks, and `all.sh` needs neither.
+
+`ball.g`:
 
 ```gappa
 # restates: crates/rcad-geom/src/moved_corner.rs CORNER_AFTER_MOVING_ROUNDOFF at f95bb965
@@ -14094,7 +14297,7 @@ VY -> VV * YY - VD * VD;
 VV -> N4 - w * w;
 ```
 
-`plane.g`, as it ran:
+`plane.g`:
 
 ```gappa
 # restates: crates/rcad-geom/src/moved_corner.rs CORNER_AFTER_MOVING_ROUNDOFF at f95bb965
