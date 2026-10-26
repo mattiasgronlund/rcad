@@ -2170,6 +2170,23 @@ check refuses an edge between two corners at one point.
   away. An answer it refuses is refused as it was without the change, ratio
   and all (below).
 
+**A third step, from Q2783.** A corner the fuse solves is stored at the
+middle of the Cramer box it was solved as, which can lie several roundings
+off the exact meet of its planes. Where neither the one-corner nor the
+two-corner search above turns a speck, `Assembly::a_rounding_that_winds` now
+walks one movable corner further: `Assembly::a_walk_that_winds_it_more` moves
+it a rounding at a time in each coordinate, each one the way its part of
+`(q₊ − q₋) × n` points, since moving the corner by that much changes the sign
+the winding check reads by that much. The walk stops once the corner is more
+than half its wobble from where it was solved — still inside the box it was
+solved as — or 64 roundings from where it started
+(`A_SPECK_IS_AT_MOST_THIS_MANY_ROUNDINGS_ACROSS`). The wedge over the `−y`
+edge through the placed pyramid's apex, shifted after the turn 0.7 about
+`(0.3, −1, 2)` and about `(−2, 1, 0.5)`, needed a walk of four roundings
+(`8.7e−15`) and of two (`5.0e−15`); its difference and union under
+`tolerant(100)` were refused `TheFuseWroteABrokenAnswer` with
+`OuterWireWindsAgainstTheNormal` until then (queue row Q2783).
+
 **Why it is not a tolerance.** No two points are taken as one: a move that
 lands on a corner already there is passed over. A moved corner is a rounding
 from where it was solved and its wobble says so, so the range check and the
