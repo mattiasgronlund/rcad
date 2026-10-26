@@ -22,8 +22,9 @@ differences is zero. 464.12 is Q2677, on the sphere in `surface.rs`' tests.
 Q2679, on the side of rcad-geom's sphere. 464.15 is Q2680, on the side of
 rcad-geom's cylinder. 464.16 is Q2681, on the side of rcad-geom's cone, and
 464.17 is Q2682, on the side of rcad-geom's torus. 464.18 is Q2684, on the
-side of a plane with every product anywhere, and 464.19 is Q2689, on
-`Isometry::POINT_ROUNDOFF`.*
+side of a plane with every product anywhere, 464.19 is Q2689, on
+`Isometry::POINT_ROUNDOFF`, and 464.20 is Q2690, on
+`Plane::NORMAL_LENGTH_ROUNDOFF`.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -44,6 +45,7 @@ side of a plane with every product anywhere, and 464.19 is Q2689, on
   464.17  The side of rcad-geom's torus
   464.18  The side of a plane with every product anywhere
   464.19  Isometry::POINT_ROUNDOFF
+  464.20  Plane::NORMAL_LENGTH_ROUNDOFF
 
 ### 464.1 The bugs a bound prover is for
 
@@ -13147,3 +13149,645 @@ And what is not a row:
 - Overflow, which does not reach Gappa (464.4). The doc's own condition, that
   nothing overflows, stands as it is.
 - `field` on these scripts' hints (464.10).
+
+### 464.20 Plane::NORMAL_LENGTH_ROUNDOFF
+
+Q2690 proved `Plane::NORMAL_LENGTH_ROUNDOFF` in Gappa on 2026-10-26 at
+`4b642567`, on 464.19's `point.g`. A normal a constructor stores, turned once,
+has `n·n` within `59.64ε` of one where the code allows `64ε`, while the
+turn's `q·q` is within `6ε` of one and the hypotheses of 464.19's 5 hold. The
+share the doc measures and does not derive, Gappa derives, from the turn's
+length (3). Coq checks the proof, modulo its hints (7).
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, unchanged, against `plane.rs`, `point.rs` and
+`isometry.rs` at `4b642567` and nalgebra 0.35.0. `isometry.rs` differs from
+464.19's `ba0a654e` in `POINT_ROUNDOFF`'s doc alone. `u` is `2⁻⁵³` and `ε` is
+`f64::EPSILON = 2u`.
+
+**1. What the proof guards.** `NORMAL_LENGTH_ROUNDOFF` (`plane.rs:114-165`)
+is how far `n·n` may sit from one and still be a turned unit normal:
+`has_length_one_to_within_a_turn` (`plane.rs:777-813`) keeps a normal inside
+it, for `Plane::from_point_and_normal_as_written` and `Axis::as_written`, and
+scales one outside it. A moved plane's normal is `Plane::transformed`
+(`plane.rs:544-550`), which is `Isometry::apply_to_vector`
+(`isometry.rs:335-337`) and so `turned_by` (`isometry.rs:527-532`): 464.19's
+arithmetic with no shift. The doc counts two roundings, the constructor's,
+`ε + ε²/4`, and the turn's, `2√3 · 18ε ≈ 62.35ε` from `POINT_ROUNDOFF`,
+`63.4ε` in all. It says one share is left out and measured instead: the
+turn's arithmetic, done exactly, keeps a length only when `q·q` is exactly
+one.
+
+**2. The scripts.** `vector.g` is `point.g` with no shift and every
+component of the vector at most one, which a constructor's normal is. It
+proves each turned component within `20u` of the same arithmetic without
+rounding. Its terms pass one rounding fewer than `point.g`'s, five through
+`w`, six through `k` and one for `n₀`, so its `D` is `10|w|s + 12|v₀|s +
+12(|v₁|² + |v₂|²) + 1`. The quadratic's largest eigenvalue is `6 + √158 =
+18.5698`, a root of `λ² − 12λ − 122`, and `93/5 = 18.6` is just above it, so
+`D ≤ 93/5 · q·q + 1 = 19.6`. `sos.py` (8) checks the identity, and finds the
+largest `D` on a 200-step grid of unit quaternions to be `19.5695`. `turn.py`
+writes `vector1.g` and `vector2.g`, the `y` and `z`.
+
+`square.g` takes the constructor's `nᵢ = rnd(mᵢ)` of an exact unit vector
+`m`, the turn's arithmetic `Ex` without rounding, and the turned vector as
+`Ex + d` with each `|dᵢ| ≤ 20u`, which is `vector.g`'s goal: the two join by
+hand, at `d`, as 464.19's `doubling.g` joins `point.g`. It proves `|n·n − 1| ≤
+128u`, the code's `64ε`, by
+
+`out·out − 1 = (n·n − 1) + 4(q·q − 1)|v × n|² + 2 Ex·d + d·d`,
+
+and prints each part:
+
+- `n·n − 1` within `±2.22045e-16`, `2u`, the constructor's `ε`: the doc's
+  first share, by 464.19's averaging over the `mᵢ²`, which add to one;
+- `4(q·q − 1)|v × n|²` within `±5.32907e-15`, `48u`, which is `24ε`;
+- `2 Ex·d` within `±7.69185e-15`, `69.28u`, which is `2√3 · 20u`;
+- `d·d` at most `75b-102`, `1200u²`.
+
+**3. The share that was measured.** nalgebra's `t·w + v × t + n` with `t =
+2(v × n)` is `n(1 − 2|v|²) + 2w(v × n) + 2v(v·n)`, and its square length less
+`n·n` is exactly `4(q·q − 1)|v × n|²`: `sos.py` checks that in rationals at
+1000 points, and Gappa takes it as a hint without reporting it as not an
+identity. `|v × n|²` is a sum of squares and at most `|v|²|n|²`, since what
+lies between is `(v·n)²`. So with `|q·q − 1| ≤ 6ε` the share is within `24ε`,
+and Gappa derives it. What it does not derive is the `6ε` itself, the same
+hypothesis as 464.19's 5: `compose` holds its turns there by
+`held_near_length_one`'s count, `Isometry::rotation`'s is measured
+(`TURN_LENGTH_DRIFT`), and `From<na::Isometry3<f64>>` holds any length.
+
+The 64 holds for a turn within `7ε` of length one and not by this argument at
+`7.5ε`: `r_square_14.g`, `|q·q − 1| ≤ 14u`, proves, and `r_square_15.g`,
+`15u`, fails with best `±1.45752e-14`, `131.28u`. With `q·q` exactly one,
+`r_square_one.g` proves and the share prints `[0, 0]`.
+
+**4. What the doc's `63.4ε` counts.** It counts the constructor's `ε` and
+`2√3 · 18ε` for the turn's rounding, and leaves the `0.6ε` up to `64ε`. The
+share of 3 does not fit in that: added at Gappa's `24ε`, the doc's count is
+`87.4ε`, past the bound. What makes room is the turn's rounding for a vector,
+`19.6u` per component where the doc charges `POINT_ROUNDOFF`'s `36u`, a
+point's bound with a shift and `L` for every coordinate. Gappa's sum is `2u +
+48u + 69.28u = 119.28u`, `59.64ε`, which leaves `4.36ε`. The test
+`every_normal_a_turn_leaves_sits_well_inside_the_bound` finds `22.16ε` at
+worst (`plane.rs:141-143`), which is under both.
+
+**5. The hypotheses.** `vector.g`'s are `point.g`'s (464.19's 5) less the
+shift, and each `|nᵢ| ≤ 1`. `square.g`'s, in its order:
+
+- `m` of length exactly one, so each `|mᵢ| ≤ 1`;
+- each `|mᵢ| ≥ 2⁻¹⁰¹²`, where `scaled_to_length_one_from_anywhere`
+  (`point.rs:335-398`) promises the nearest `f64`, and so no component zero;
+- the quaternion's components finite, and `|q·q − 1| ≤ 6ε` worked out exactly;
+- each `|dᵢ| ≤ 20u`, what `vector.g`, `vector1.g` and `vector2.g` prove.
+
+**6. The controls.** Each changes one thing and exits 1:
+
+- `c_vector_195.g`, the goal at `19.5u`: best `±2.17604e-15`, `19.6u`, so
+  `vector.g`'s hypotheses do not contradict each other;
+- `c_vector_non4.g`, without the turn near length one: best `±2.43978e+602`;
+- `c_vector_nonormal.g`, without the nine products normal: best `±29.1613`,
+  with `W1` and `W3` unproved;
+- `c_square_119.g`, the goal at `119u`: best `±1.3243e-14`, `119.28u`, so
+  `square.g`'s do not either;
+- `c_square_non4.g`, without the turn near length one: best `[-1,
+  5.01307e+1234]`. The proof needs the turn's length, which is the share;
+- `c_square_nod.g`, without `vector.g`'s bound on `d`: best `[-inf, inf]`.
+
+**7. Coq checks the proof, modulo its hints.** `gappa -Bcoq` and `coqc`,
+through `one.sh`, exit 0 on `vector.g` and `square.g`: `vector.v` came to
+6399 lines with 33 hints and `square.v` to 4595 with 18. As in 464.19's 8,
+each hint enters the Coq file as a hypothesis with no condition, so the
+proof stands on its hints and on the divisors Gappa took to be nonzero: 134
+warnings in `vector.out` and 15 in `square.out`. `vector.out` also says
+there is "no need for the rewriting at line 136", the hint `out - Ex ->
+((out - Ex) / D) * D`, if `D != 0`. `vector1.g` and `vector2.g` ran without
+`-Bcoq`.
+
+**8. The scripts, whole, as they ran.** To run them again, save these six
+and `one.sh` in one directory and run `bash all.sh` there, which took about
+two and a half minutes.
+
+`vector.g`:
+
+```gappa
+# restates: crates/rcad-geom/src/isometry.rs apply_to_vector at 4b642567
+# restates: crates/rcad-geom/src/isometry.rs turned_by at 4b642567
+# restates: crates/rcad-geom/src/isometry.rs held_near_length_one at 4b642567
+# restates: crates/rcad-geom/src/plane.rs transformed at 4b642567
+# restates: Cargo.lock nalgebra at 4b642567
+# Isometry::apply_to_vector, crates/rcad-geom/src/isometry.rs at 4b642567,
+# through nalgebra 0.35's UnitQuaternion * Vector3: point.g with no shift and
+# a vector of components at most one. The turned vector's x is within
+# 20u of what the same arithmetic gives without rounding. y and z are this
+# with the indices turned 0 -> 1 -> 2 -> 0, as turn.py writes them.
+@rnd = float<ieee_64, ne>;
+
+# The quaternion (w, v) and the vector n, each an f64.
+w = rnd(w_); v0 = rnd(v0_); v1 = rnd(v1_); v2 = rnd(v2_);
+n0 = rnd(n0_); n1 = rnd(n1_); n2 = rnd(n2_);
+
+# c = v x n, as nalgebra's cross writes each component: a*b - c*d.
+P01 = v1 * n2; q01 = rnd(P01); P02 = v2 * n1; q02 = rnd(P02);
+C0 = q01 - q02; c0 = rnd(C0);
+P11 = v2 * n0; q11 = rnd(P11); P12 = v0 * n2; q12 = rnd(P12);
+C1 = q11 - q12; c1 = rnd(C1);
+P21 = v0 * n1; q21 = rnd(P21); P22 = v1 * n0; q22 = rnd(P22);
+C2 = q21 - q22; c2 = rnd(C2);
+
+# t = c * 2, written without its rounding, on the strength of 464.19's
+# doubling.g.
+t0 = c0 * 2; t1 = c1 * 2; t2 = c2 * 2;
+
+# k = v x t, its x.
+K1 = v1 * t2; k01 = rnd(K1); K2 = v2 * t1; k02 = rnd(K2);
+KK = k01 - k02; k0 = rnd(KK);
+
+# t * w + k + n, folded left to right. A vector takes no shift.
+M = t0 * w; m0 = rnd(M);
+A = m0 + k0; a0 = rnd(A);
+R = a0 + n0; out = rnd(R);
+
+# The same arithmetic without rounding.
+Ex = 2 * w * (v1 * n2 - v2 * n1)
+   + v1 * (2 * (v0 * n1 - v1 * n0)) - v2 * (2 * (v2 * n0 - v0 * n2))
+   + n0;
+
+# What each rounding multiplied its argument by.
+rq01 = q01 / P01; rq02 = q02 / P02; rq11 = q11 / P11; rq12 = q12 / P12;
+rq21 = q21 / P21; rq22 = q22 / P22;
+rc0 = c0 / C0; rc1 = c1 / C1; rc2 = c2 / C2;
+rk01 = k01 / K1; rk02 = k02 / K2; rk0 = k0 / KK;
+rm = m0 / M; ra = a0 / A; rr = out / R;
+
+# The seven terms of Ex, each as out carries it, less the term itself: five
+# roundings for the two through w, six for the four through k, one for n0.
+W1 = rr * ra * rm * rc0 * rq01 - 1;
+W2 = rr * ra * rm * rc0 * rq02 - 1;
+W3 = rr * ra * rk0 * rk01 * rc2 * rq21 - 1;
+W4 = rr * ra * rk0 * rk01 * rc2 * rq22 - 1;
+W5 = rr * ra * rk0 * rk02 * rc1 * rq11 - 1;
+W6 = rr * ra * rk0 * rk02 * rc1 * rq12 - 1;
+W7 = rr - 1;
+e1 = 2 * w * v1 * n2 * W1; e2 = -(2 * w * v2 * n1 * W2);
+e3 = 2 * v1 * v0 * n1 * W3; e4 = -(2 * v1 * v1 * n0 * W4);
+e5 = -(2 * v2 * v2 * n0 * W5); e6 = 2 * v2 * v0 * n2 * W6;
+e7 = n0 * W7;
+
+# Each term's share of the bound: its size with 1 for the vector's
+# component, times the roundings it meets.
+d1 = 10 * |w| * |v1|; d2 = 10 * |w| * |v2|;
+d3 = 12 * |v1| * |v0|; d4 = 12 * |v1| * |v1|;
+d5 = 12 * |v2| * |v2|; d6 = 12 * |v2| * |v0|;
+d7 = 1;
+D = d1 + d2 + d3 + d4 + d5 + d6 + d7;
+
+# q.q, each square written as |x| * |x|, and the four squares D is written
+# with below.
+N4 = |w| * |w| + |v0| * |v0| + |v1| * |v1| + |v2| * |v2|;
+X = |w| - 25/93 * (|v1| + |v2|);
+Y = |v0| - 10/31 * (|v1| + |v2|);
+Z = |v1| - |v2|;
+
+{
+  # Every input is a finite f64.
+     |w| <= 1b1024 /\ |v0| <= 1b1024 /\ |v1| <= 1b1024 /\ |v2| <= 1b1024
+  # No factor of a product is zero.
+  /\ |w| >= 1b-1074 /\ |v0| >= 1b-1074 /\ |v1| >= 1b-1074 /\ |v2| >= 1b-1074
+  /\ |n0| >= 1b-1074 /\ |n1| >= 1b-1074 /\ |n2| >= 1b-1074
+  # No sum cancels to zero.
+  /\ |C0| >= 1b-1074 /\ |C1| >= 1b-1074 /\ |C2| >= 1b-1074 /\ |KK| >= 1b-1074
+  /\ |A| >= 1b-1074 /\ |R| >= 1b-1074
+  # The nine products are normal, which apply_to_vector does not check.
+  /\ |q01| >= 1b-1022 /\ |q02| >= 1b-1022 /\ |q11| >= 1b-1022
+  /\ |q12| >= 1b-1022 /\ |q21| >= 1b-1022 /\ |q22| >= 1b-1022
+  /\ |k01| >= 1b-1022 /\ |k02| >= 1b-1022 /\ |m0| >= 1b-1022
+  # What lemma.g proves each of those nine gives.
+  /\ q01 -/ P01 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q02 -/ P02 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q11 -/ P11 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q12 -/ P12 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q21 -/ P21 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q22 -/ P22 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ k01 -/ K1 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ k02 -/ K2 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ m0 -/ M in [-4503599627370497b-105, 4503599627370497b-105]
+  # Every component of the vector is at most one: a constructor's normal is
+  # the nearest f64 to a unit vector's components.
+  /\ n0 in [-1, 1] /\ n1 in [-1, 1] /\ n2 in [-1, 1]
+  # A stored turn has |q.q - 1| <= 6 epsilon (held_near_length_one), and
+  # 6 epsilon is 12b-53.
+  /\ N4 in [9007199254740980b-53, 9007199254741004b-53]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ w / |w| in [-1, 1] /\ v0 / |v0| in [-1, 1]
+  /\ v1 / |v1| in [-1, 1] /\ v2 / |v2| in [-1, 1]
+->
+  W1 in ? /\ W3 in ? /\ W7 in ? /\ D in ?
+  /\ (out - Ex) / D in ?
+  /\ out - Ex in [-20b-53, 20b-53]
+}
+
+# How far each rounding is from the identity.
+q01 / P01 -> 1 + (q01 - P01) / P01;
+q02 / P02 -> 1 + (q02 - P02) / P02;
+q11 / P11 -> 1 + (q11 - P11) / P11;
+q12 / P12 -> 1 + (q12 - P12) / P12;
+q21 / P21 -> 1 + (q21 - P21) / P21;
+q22 / P22 -> 1 + (q22 - P22) / P22;
+c0 / C0 -> 1 + (c0 - C0) / C0;
+c1 / C1 -> 1 + (c1 - C1) / C1;
+c2 / C2 -> 1 + (c2 - C2) / C2;
+k01 / K1 -> 1 + (k01 - K1) / K1;
+k02 / K2 -> 1 + (k02 - K2) / K2;
+k0 / KK -> 1 + (k0 - KK) / KK;
+m0 / M -> 1 + (m0 - M) / M;
+a0 / A -> 1 + (a0 - A) / A;
+out / R -> 1 + (out - R) / R;
+
+# The error is the sum of the seven shares' errors, each a fraction of its
+# own share of D; add_rr then averages them.
+out - Ex -> ((out - Ex) / D) * D;
+(out - Ex) / D -> ((D + (out - Ex)) - D) / D;
+D + (out - Ex) -> (d1 + e1) + (d2 + e2) + (d3 + e3) + (d4 + e4)
+                + (d5 + e5) + (d6 + e6) + (d7 + e7);
+(d1 + e1) - d1 -> e1;
+(d2 + e2) - d2 -> e2;
+(d3 + e3) - d3 -> e3;
+(d4 + e4) - d4 -> e4;
+(d5 + e5) - d5 -> e5;
+(d6 + e6) - d6 -> e6;
+(d7 + e7) - d7 -> e7;
+e1 / d1 -> (w / |w|) * (v1 / |v1|) * n2 * (W1 / 5);
+e2 / d2 -> -((w / |w|) * (v2 / |v2|) * n1 * (W2 / 5));
+e3 / d3 -> (v1 / |v1|) * (v0 / |v0|) * n1 * (W3 / 6);
+e4 / d4 -> -((v1 / |v1|) * (v1 / |v1|) * n0 * (W4 / 6));
+e5 / d5 -> -((v2 / |v2|) * (v2 / |v2|) * n0 * (W5 / 6));
+e6 / d6 -> (v2 / |v2|) * (v0 / |v0|) * n2 * (W6 / 6);
+e7 / d7 -> n0 * W7;
+
+# D is 1 and a quadratic in |w|, |v0|, |v1|, |v2|, and that quadratic is
+# 93/5 q.q less four squares: Gappa bounds each square below by zero.
+D -> 93/5 * N4 - (93/5 * (X * X) + 93/5 * (Y * Y) + 305/93 * (Z * Z)
+                  + 19/465 * (|v1| * |v1| + |v2| * |v2|)) + 1;
+```
+
+`square.g`:
+
+```gappa
+# restates: crates/rcad-geom/src/plane.rs NORMAL_LENGTH_ROUNDOFF at 4b642567
+# restates: crates/rcad-geom/src/plane.rs transformed at 4b642567
+# restates: crates/rcad-geom/src/point.rs scaled_to_length_one_from_anywhere at 4b642567
+# restates: crates/rcad-geom/src/isometry.rs apply_to_vector at 4b642567
+# restates: crates/rcad-geom/src/isometry.rs held_near_length_one at 4b642567
+# Plane::NORMAL_LENGTH_ROUNDOFF, crates/rcad-geom/src/plane.rs at 4b642567:
+# a constructor's normal, turned once, has n.n within 64 * f64::EPSILON of
+# one. The constructor rounds each component of an exact unit vector m to
+# the nearest f64; the turn is nalgebra's arithmetic, and vector.g,
+# vector1.g and vector2.g prove each turned component within 20u of what
+# that arithmetic gives without rounding, which is the hypothesis on d0, d1
+# and d2 here.
+@rnd = float<ieee_64, ne>;
+
+# The constructor: n is the nearest f64 to the exact unit vector m.
+n0 = rnd(m0); n1 = rnd(m1); n2 = rnd(m2);
+M2 = m0 * m0 + m1 * m1 + m2 * m2;
+NN = n0 * n0 + n1 * n1 + n2 * n2;
+
+# The quaternion (w, v), each an f64, and q.q worked out exactly.
+w = rnd(w_); v0 = rnd(v0_); v1 = rnd(v1_); v2 = rnd(v2_);
+N4 = w * w + v0 * v0 + v1 * v1 + v2 * v2;
+
+# nalgebra's turn of n without rounding, as vector.g's Ex writes x.
+Ex0 = 2 * w * (v1 * n2 - v2 * n1)
+    + v1 * (2 * (v0 * n1 - v1 * n0)) - v2 * (2 * (v2 * n0 - v0 * n2)) + n0;
+Ex1 = 2 * w * (v2 * n0 - v0 * n2)
+    + v2 * (2 * (v1 * n2 - v2 * n1)) - v0 * (2 * (v0 * n1 - v1 * n0)) + n1;
+Ex2 = 2 * w * (v0 * n1 - v1 * n0)
+    + v0 * (2 * (v2 * n0 - v0 * n2)) - v1 * (2 * (v1 * n2 - v2 * n1)) + n2;
+ExEx = Ex0 * Ex0 + Ex1 * Ex1 + Ex2 * Ex2;
+
+# The turned vector the f64 arithmetic gives: Ex and each rounding's slip.
+o0 = Ex0 + d0; o1 = Ex1 + d1; o2 = Ex2 + d2;
+OO = o0 * o0 + o1 * o1 + o2 * o2;
+DD = d0 * d0 + d1 * d1 + d2 * d2;
+F2 = 2 * (Ex0 * d0 + Ex1 * d1 + Ex2 * d2);
+
+# v x n and v . n, without rounding, and v.v.
+X0 = v1 * n2 - v2 * n1; X1 = v2 * n0 - v0 * n2; X2 = v0 * n1 - v1 * n0;
+VN = X0 * X0 + X1 * X1 + X2 * X2;
+VD = v0 * n0 + v1 * n1 + v2 * n2;
+VV = v0 * v0 + v1 * v1 + v2 * v2;
+
+# The constructor's shares: m_i^2, and what rounding m_i adds to its square.
+g0 = m0 * m0; g1 = m1 * m1; g2 = m2 * m2;
+h0 = n0 * n0 - m0 * m0; h1 = n1 * n1 - m1 * m1; h2 = n2 * n2 - m2 * m2;
+
+{
+  # m is a unit vector, so each component is at most one.
+     M2 in [1, 1]
+  /\ m0 in [-1, 1] /\ m1 in [-1, 1] /\ m2 in [-1, 1]
+  # Above 2^-1012 each component is the nearest f64 to the exact ratio
+  # (scaled_to_length_one_from_anywhere's doc), and none is zero.
+  /\ |m0| >= 1b-1012 /\ |m1| >= 1b-1012 /\ |m2| >= 1b-1012
+  # Every quaternion component is a finite f64.
+  /\ |w| <= 1b1024 /\ |v0| <= 1b1024 /\ |v1| <= 1b1024 /\ |v2| <= 1b1024
+  # A stored turn has |q.q - 1| <= 6 epsilon (held_near_length_one), and
+  # 6 epsilon is 12b-53.
+  /\ N4 in [9007199254740980b-53, 9007199254741004b-53]
+  # What vector.g, vector1.g and vector2.g prove of each turned component.
+  /\ d0 in [-20b-53, 20b-53] /\ d1 in [-20b-53, 20b-53]
+  /\ d2 in [-20b-53, 20b-53]
+->
+  NN - 1 in ? /\ VN in ? /\ 4 * (N4 - 1) * VN in ? /\ F2 in ? /\ DD in ?
+  /\ OO - 1 in [-128b-53, 128b-53]
+}
+
+# n.n off one is the constructor's, then the turn's own arithmetic, then the
+# turn's rounding.
+OO - 1 -> (NN - 1) + 4 * (N4 - 1) * VN + F2 + DD;
+ExEx -> NN + 4 * (N4 - 1) * VN;
+
+# The constructor: each n_i^2 is m_i^2 times a factor within 2u + u^2 of
+# one, and the m_i^2 add to one; add_rr averages them.
+NN - 1 -> ((NN - M2) / M2) * M2 + (M2 - 1);
+(NN - M2) / M2 -> ((M2 + (NN - M2)) - M2) / M2;
+M2 + (NN - M2) -> (g0 + h0) + (g1 + h1) + (g2 + h2);
+(g0 + h0) - g0 -> h0;
+(g1 + h1) - g1 -> h1;
+(g2 + h2) - g2 -> h2;
+h0 / g0 -> (n0 / m0) * (n0 / m0) - 1;
+h1 / g1 -> (n1 / m1) * (n1 / m1) - 1;
+h2 / g2 -> (n2 / m2) * (n2 / m2) - 1;
+n0 / m0 -> 1 + (n0 - m0) / m0;
+n1 / m1 -> 1 + (n1 - m1) / m1;
+n2 / m2 -> 1 + (n2 - m2) / m2;
+
+# |v x n|^2 is at least zero, a sum of squares, and at most v.v n.n, since
+# what is between is (v . n)^2; v.v is q.q less w^2.
+VN -> VV * NN - VD * VD;
+VV -> N4 - w * w;
+
+# 2 Ex . d, both ways round: 2ab is c a^2 + b^2 / c less (c a - b)^2 / c,
+# and (c a + b)^2 / c less c a^2 + b^2 / c. c is near sqrt(3) * 20u, which
+# makes c Ex.Ex + DD / c smallest for Ex.Ex near one and DD at most 3 (20u)^2.
+F2 -> (34641b-53 / 1000 * ExEx + DD / (34641b-53 / 1000))
+      - ((34641b-53 / 1000 * Ex0 - d0) * (34641b-53 / 1000 * Ex0 - d0)
+       + (34641b-53 / 1000 * Ex1 - d1) * (34641b-53 / 1000 * Ex1 - d1)
+       + (34641b-53 / 1000 * Ex2 - d2) * (34641b-53 / 1000 * Ex2 - d2))
+        / (34641b-53 / 1000);
+F2 -> ((34641b-53 / 1000 * Ex0 + d0) * (34641b-53 / 1000 * Ex0 + d0)
+     + (34641b-53 / 1000 * Ex1 + d1) * (34641b-53 / 1000 * Ex1 + d1)
+     + (34641b-53 / 1000 * Ex2 + d2) * (34641b-53 / 1000 * Ex2 + d2))
+        / (34641b-53 / 1000)
+      - (34641b-53 / 1000 * ExEx + DD / (34641b-53 / 1000));
+```
+
+`turn.py`, which writes `vector1.g` and `vector2.g`:
+
+```python
+"""Write vector1.g and vector2.g, the turned vector's y and z: vector.g with
+every coordinate index turned 0 -> 1 -> 2 -> 0, once and twice, as 464.19's
+turn.py writes point1.g and point2.g from point.g, with n for its p and no
+shift.
+
+A name whose first digit is a coordinate index is turned there and keeps any
+second digit, which counts products. W, e, d, K and N number terms, shares,
+products and q.q, and are left alone."""
+
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+TURNED = {"v", "n", "P", "q", "C", "c", "rq", "rc", "t", "k", "rk"}
+NAME = re.compile(r"\b([A-Za-z]+)(\d)(\d?)(_?)\b")
+
+
+def turn(src):
+    def one(m):
+        prefix, index, rest, under = m.groups()
+        if prefix not in TURNED:
+            return m.group(0)
+        return prefix + str((int(index) + 1) % 3) + rest + under
+
+    return NAME.sub(one, src)
+
+
+vector = open("vector.g").read()
+once = turn(vector)
+twice = turn(once)
+assert turn(twice) == vector
+X = "# a vector of components at most one. The turned vector's x is within"
+assert vector.count(X) == 1
+for name, src, axis in (("vector1.g", once, "y"), ("vector2.g", twice, "z")):
+    open(name, "w").write(src.replace(X, X[:-len("x is within")] + axis + " is within"))
+    print(name, "written,", len(NAME.findall(src)), "names")
+```
+
+`controls.py`, which writes the controls of 6 and the runs of 3:
+
+```python
+"""Write vector.g's and square.g's controls, and square.g's runs on how far
+the turn may sit from length one. Each changes one thing: a smaller bound, to
+see whether the script proved its goal from hypotheses that contradict each
+other; a hypothesis dropped, to see whether the proof needs it; or the turn's
+q.q held to another width, to see where the 64 stops holding."""
+
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+def write(name, src):
+    open(name, "w").write(src)
+
+
+N4 = "  /\\ N4 in [9007199254740980b-53, 9007199254741004b-53]\n"
+
+vector = open("vector.g").read()
+VGOAL = "/\\ out - Ex in [-20b-53, 20b-53]"
+# 19.5u, below the 18.6 q.q + 1 = 19.6u D reaches.
+write("c_vector_195.g", sub(vector, VGOAL, "/\\ out - Ex in [-39b-54, 39b-54]"))
+# Without |q.q - 1| <= 6 epsilon.
+write("c_vector_non4.g", sub(vector, N4, ""))
+# Without the nine products normal, and what lemma.g gives from them.
+start = vector.index("  # The nine products are normal")
+end = vector.index("  /\\ m0 -/ M in [-4503599627370497b-105, 4503599627370497b-105]\n")
+end += len("  /\\ m0 -/ M in [-4503599627370497b-105, 4503599627370497b-105]\n")
+block = vector[start:end]
+assert block.count(">= 1b-1022") == 9 and block.count(" -/ ") == 9, block
+write("c_vector_nonormal.g", vector[:start] + vector[end:])
+
+square = open("square.g").read()
+SGOAL = "/\\ OO - 1 in [-128b-53, 128b-53]"
+# 119u, below the 2u + 48u + 2 sqrt(3) 20u = 119.28u the sum reaches.
+write("c_square_119.g", sub(square, SGOAL, "/\\ OO - 1 in [-119b-53, 119b-53]"))
+# Without |q.q - 1| <= 6 epsilon: the share the doc measures.
+write("c_square_non4.g", sub(square, N4, ""))
+# Without what vector.g proves of the turn's rounding.
+D = ("  # What vector.g, vector1.g and vector2.g prove of each turned component.\n"
+     "  /\\ d0 in [-20b-53, 20b-53] /\\ d1 in [-20b-53, 20b-53]\n"
+     "  /\\ d2 in [-20b-53, 20b-53]\n")
+write("c_square_nod.g", sub(square, D, ""))
+# q.q held to 14u and to 15u of one, 7 and 7.5 epsilon, and to exactly one,
+# which is what the doc's count of two roundings assumes.
+write("r_square_14.g", sub(square, N4, "  /\\ N4 in [9007199254740978b-53, 9007199254741006b-53]\n"))
+write("r_square_15.g", sub(square, N4, "  /\\ N4 in [9007199254740977b-53, 9007199254741007b-53]\n"))
+write("r_square_one.g", sub(square, N4, "  /\\ N4 in [1, 1]\n"))
+```
+
+`sos.py`, which checks the identities of 2 and 3 in exact rationals and looks
+for the largest `D` on a grid:
+
+```python
+"""Check, in exact rationals at random points, the two identities square.g and
+vector.g rest on, and look for how far the first-order bound goes.
+
+1. nalgebra's turn of n, worked without rounding, is
+   Ex = n(1 - 2|v|^2) + 2w(v x n) + 2v(v . n), and
+   Ex . Ex - n . n = 4(q.q - 1)|v x n|^2, with |v x n|^2 = |v|^2 |n|^2 - (v . n)^2.
+2. vector.g's D is 10|w|s + 12|v0|s + 12(|v1|^2 + |v2|^2) + 1, s = |v1| + |v2|,
+   and its quadratic part is K q.q less four squares, K = 93/5."""
+
+from fractions import Fraction as F
+import math
+import random
+
+random.seed(1)
+
+
+def r():
+    return F(random.randint(-10**6, 10**6), 10**6)
+
+
+def cross(a, b):
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
+
+
+def dot(a, b):
+    return sum(x * y for x, y in zip(a, b))
+
+
+for _ in range(1000):
+    w, v, n = r(), [r(), r(), r()], [r(), r(), r()]
+    # nalgebra: t = 2 (v x n), out = t w + v x t + n
+    t = [2 * c for c in cross(v, n)]
+    k = cross(v, t)
+    ex = [t[i] * w + k[i] + n[i] for i in range(3)]
+    N4 = w * w + dot(v, v)
+    vxn = cross(v, n)
+    assert dot(ex, ex) - dot(n, n) == 4 * (N4 - 1) * dot(vxn, vxn)
+    assert dot(vxn, vxn) == dot(v, v) * dot(n, n) - dot(v, n) ** 2
+print("drift identity holds at 1000 random points")
+
+K = F(93, 5)
+for _ in range(1000):
+    aw, a0, a1, a2 = (abs(r()) for _ in range(4))
+    s = a1 + a2
+    lhs = 10 * aw * s + 12 * a0 * s + 12 * (a1 * a1 + a2 * a2)
+    X = aw - F(25, 93) * s
+    Y = a0 - F(10, 31) * s
+    Z = a1 - a2
+    rhs = K * (aw * aw + a0 * a0 + a1 * a1 + a2 * a2) - (
+        K * X * X + K * Y * Y + F(305, 93) * Z * Z + F(19, 465) * (a1 * a1 + a2 * a2)
+    )
+    assert lhs == rhs
+print("vector identity holds at 1000 random points")
+print("K =", float(K), "root of K^2 - 12K - 122:", 6 + math.sqrt(158))
+
+best = 0.0
+n = 200
+for i in range(n + 1):
+    for j in range(n + 1):
+        for k in range(n + 1):
+            aw, a1, a2 = i / n, j / n, k / n
+            rr = 1 - aw * aw - a1 * a1 - a2 * a2
+            if rr < 0:
+                continue
+            a0 = math.sqrt(rr)
+            s = a1 + a2
+            f = 10 * aw * s + 12 * a0 * s + 12 * (a1 * a1 + a2 * a2) + 1
+            best = max(best, f)
+print("largest D on a 200-step grid of unit quaternions:", best)
+```
+
+It printed:
+
+```text
+drift identity holds at 1000 random points
+vector identity holds at 1000 random points
+K = 18.6 root of K^2 - 12K - 122: 18.569805089976533
+largest D on a 200-step grid of unit quaternions: 19.569532313805855
+```
+
+`all.sh`, which writes the controls and the `y` and `z` scripts and runs
+every script at once, each through 464.13's `one.sh`, unchanged:
+
+```sh
+#!/bin/bash
+# Write the controls and the y and z scripts, then run every script at once,
+# each through 464.13's one.sh: vector.g and square.g with coq, and the
+# controls, the runs on q.q's width, vector1.g and vector2.g without.
+cd "$(dirname "$0")"
+python3 controls.py
+python3 turn.py
+for f in vector.g square.g; do
+  ./one.sh "$f" coq > "${f%.g}.run" 2>&1 &
+done
+for f in vector1.g vector2.g c_vector_195.g c_vector_non4.g c_vector_nonormal.g \
+         c_square_119.g c_square_non4.g c_square_nod.g \
+         r_square_14.g r_square_15.g r_square_one.g; do
+  ./one.sh "$f" > "${f%.g}.run" 2>&1 &
+done
+wait
+cat vector.run square.run vector1.run vector2.run c_vector_195.run c_vector_non4.run \
+    c_vector_nonormal.run c_square_119.run c_square_non4.run c_square_nod.run \
+    r_square_14.run r_square_15.run r_square_one.run
+```
+
+It printed:
+
+```text
+vector1.g written, 446 names
+vector2.g written, 446 names
+vector exit 0 32.68s
+vector coq -Bcoq exit 0 coqc exit 0 37.93s lines 6399 hints 33
+square exit 0 13.69s
+square coq -Bcoq exit 0 coqc exit 0 18.21s lines 4595 hints 18
+vector1 exit 0 31.58s
+vector2 exit 0 28.77s
+c_vector_195 exit 1 135.97s
+c_vector_non4 exit 1 128.94s
+c_vector_nonormal exit 1 32.26s
+c_square_119 exit 1 132.76s
+c_square_non4 exit 1 13.67s
+c_square_nod exit 1 12.82s
+r_square_14 exit 0 11.94s
+r_square_15 exit 1 42.56s
+r_square_one exit 0 14.06s
+```
+
+**9. What this leaves.** Rows, filed from this write-up when it merges, each
+from Q2690:
+
+- Small: cite this subsection in `NORMAL_LENGTH_ROUNDOFF`'s doc
+  (`plane.rs:114-165`), whose "One share is not derived, and is measured
+  instead" is no longer so given the turn's length: Gappa derives the share,
+  `4(q·q − 1)|v × n|²`, within `24ε` for `|q·q − 1| ≤ 6ε`, and the doc's own
+  `63.4ε` does not hold it, where Gappa's `59.64ε` does (4).
+- Run `vector.g` and `square.g` in the zero branches: a normal along an axis
+  has two components zero, a turn about an axis two of `v`, and a sum may
+  cancel to zero. These are common inputs. Not run, so no class (§360.5).
+- Whether a normal that reaches a turn other than from a constructor stays
+  within the bound: one `from_point_and_normal_as_written` kept at up to
+  `64ε`, or a plane stored after one turn and turned again. `square.g`
+  assumes the constructor's `ε` before the turn. Not run, so no class.
+
+And what is not a row: the hypotheses 464.19 already leaves, the nine
+products below the normals and the route through `From<na::Isometry3<f64>>`,
+which `vector.g` shares with `point.g`; Q2700, which moves these scripts into
+`proofs/gappa/` with 464.19's.
