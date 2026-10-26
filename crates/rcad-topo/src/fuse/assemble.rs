@@ -5222,9 +5222,9 @@ impl Assembly {
     }
 
     /// Move a corner or two of each speck of a flat face whose outline winds
-    /// against its normal by a rounding, where that winds the outline with its
-    /// normal and leaves every other ring through the corners it moves wound
-    /// as it was.
+    /// against its normal by a rounding, or one corner further inside the box
+    /// it was solved as, where that winds the outline with its normal and
+    /// leaves every other ring through the corners it moves wound as it was.
     ///
     /// **A face the fuse builds can be a triangle a rounding across**, and the
     /// meets of three planes it is cut at can then round to points that wind
@@ -5247,7 +5247,18 @@ impl Assembly {
     ///
     /// **One corner first, then two**, each coordinate to the `f64` below, the
     /// same or the one above, fewest coordinates moved first, and the first
-    /// move that winds the face is taken. The faces go in the order of their
+    /// move that winds the face is taken. **Then one corner walked further**,
+    /// a rounding at a time in each coordinate the way that winds the face the
+    /// more, while it stays within half its wobble
+    /// ([`Assembly::a_walk_that_winds_it_more`]). A corner is stored at the
+    /// middle of the box it was solved as, and that middle can be several
+    /// roundings off the true meet of its planes. Where the wedge over the
+    /// `−y` edge cuts the placed pyramid through its apex, shifted after the
+    /// turn 0.7 about `(0.3, −1, 2)` or about `(−2, 1, 0.5)`, the middles wind
+    /// a speck against its normal that the planes it was cut from, worked out
+    /// exactly, do not, and no move of a rounding turned it. A walk of four
+    /// roundings, `9e−15`, turns the first, and one of two, `5e−15`, the
+    /// second (queue row Q2783). The faces go in the order of their
     /// corners and the corners in [`the_order_of_two_roundings`], so the same
     /// answer fused from its arguments the other way round moves the same
     /// corners. A move onto a triple a corner already holds is passed over,
@@ -5261,8 +5272,9 @@ impl Assembly {
     /// `Model::fused_under` tries the answer again with the folds of
     /// `docs/decisions.md` §417.9, and a strip one of them closes has to reach
     /// it refused. So a face more than a speck across ([`is_a_speck`]) is left
-    /// for that sweep to refuse, so is a face no move of two corners winds,
-    /// and so is one wound so far the wrong way that no rounding of every
+    /// for that sweep to refuse, so is a face no move of two corners and no
+    /// walk of one winds, and so is one wound so far the wrong way that no
+    /// rounding of every
     /// corner could turn it ([`a_rounding_could_turn_it`]): a big face wound
     /// wrong for some other reason costs no search.
     ///
@@ -5403,7 +5415,8 @@ impl Assembly {
     }
 
     /// The corners of the outline of `face` to move, and the points to move
-    /// them to, that wind it with its normal: one corner first, then two
+    /// them to, that wind it with its normal: one corner a rounding first,
+    /// then two, then one corner walked further
     /// (see [`Assembly::wind_each_flat_face_with_its_normal`]).
     ///
     /// `flat` says which faces are flat with straight edges, and
@@ -5423,10 +5436,11 @@ impl Assembly {
             .iter()
             .map(|&corner| self.corners[corner].point.coordinates())
             .collect();
-        if !is_a_speck(&points) || !a_rounding_could_turn_it(&points, plane.normal().components()) {
+        let normal = plane.normal().components();
+        if !is_a_speck(&points) || !a_rounding_could_turn_it(&points, normal) {
             return None;
         }
-        let mut movable = outline;
+        let mut movable = outline.clone();
         movable.sort_unstable();
         movable.dedup();
         movable.retain(|&corner| {
@@ -5469,7 +5483,69 @@ impl Assembly {
                 }
             }
         }
+        for &corner in &movable {
+            for point in self.a_walk_that_winds_it_more(&outline, corner, normal) {
+                if winds(&[(corner, point)]) {
+                    return Some(vec![(corner, point)]);
+                }
+            }
+        }
         None
+    }
+
+    /// The points `corner` of the outline `ring` of a face whose normal is
+    /// `normal` goes through, walked a rounding at a time in each coordinate
+    /// the way that winds the outline the more with its normal, for as long as
+    /// it stays within half its wobble of where it is and within
+    /// [`A_SPECK_IS_AT_MOST_THIS_MANY_ROUNDINGS_ACROSS`] roundings of it.
+    ///
+    /// **Moving the corner by `δ` changes the sum [`winding_round`] decides
+    /// the sign of by `δ · ((q₊ − q₋) × n)`**, with `q₋` and `q₊` the corners
+    /// either side of it ([`a_rounding_could_turn_it`]), so each coordinate
+    /// walks the way its part of `(q₊ − q₋) × n` points, and a coordinate where
+    /// that part is zero stays. **Half the wobble keeps the corner inside the
+    /// box it was solved as**: the meet it was solved for is in that box,
+    /// within half its widest side of the box's middle in each coordinate, so
+    /// the corner walked ends no further from that meet than its wobble, and
+    /// [`Assembly::wind_each_flat_face_with_its_normal`] adds the walk to it.
+    fn a_walk_that_winds_it_more(
+        &self,
+        ring: &[usize],
+        corner: usize,
+        normal: [f64; 3],
+    ) -> Vec<Point> {
+        let at = |index: usize| self.corners[ring[index % ring.len()]].point.coordinates();
+        let mut toward = [0.0f64; 3];
+        for index in (0..ring.len()).filter(|&index| ring[index] == corner) {
+            let before = at(index + ring.len() - 1);
+            let after = at(index + 1);
+            let across: [f64; 3] = core::array::from_fn(|axis| after[axis] - before[axis]);
+            for (axis, (one, other)) in [(1, 2), (2, 0), (0, 1)].into_iter().enumerate() {
+                toward[axis] += across[one] * normal[other] - across[other] * normal[one];
+            }
+        }
+        let Corner { point, wobble, .. } = self.corners[corner];
+        let start = point.coordinates();
+        let reach = wobble / 2.0;
+        let mut walked = start;
+        let mut walk = Vec::new();
+        for _ in 0..A_SPECK_IS_AT_MOST_THIS_MANY_ROUNDINGS_ACROSS as usize {
+            walked = core::array::from_fn(|axis| match toward[axis].partial_cmp(&0.0) {
+                Some(Ordering::Greater) => walked[axis].next_up(),
+                Some(Ordering::Less) => walked[axis].next_down(),
+                Some(Ordering::Equal) | None => walked[axis],
+            });
+            if walked == start
+                || walked
+                    .iter()
+                    .zip(start)
+                    .any(|(there, from)| (there - from).abs() > reach)
+            {
+                break;
+            }
+            walk.push(Point::from(walked));
+        }
+        walk
     }
 
     /// Whether `moves` wind the outline of `face` with its normal, leave each
@@ -6385,7 +6461,9 @@ fn a_rounding_could_turn_it(ring: &[[f64; 3]], normal: [f64; 3]) -> bool {
 }
 
 /// How many roundings across, at most, a face
-/// [`Assembly::wind_each_flat_face_with_its_normal`] moves a corner of.
+/// [`Assembly::wind_each_flat_face_with_its_normal`] moves a corner of, and
+/// how many roundings, at most, [`Assembly::a_walk_that_winds_it_more`] walks
+/// a corner of it.
 const A_SPECK_IS_AT_MOST_THIS_MANY_ROUNDINGS_ACROSS: f64 = 64.0;
 
 /// Whether every corner of `ring` lies within
