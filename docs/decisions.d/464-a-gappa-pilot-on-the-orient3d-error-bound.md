@@ -18122,13 +18122,13 @@ main()
 ### 464.27 The side of a flat surface through a point with every product anywhere
 
 Q2760 took up `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` again, in
-three lanes on 2026-10-26, for what 464.13's 5 left unrun: products of
+four lanes on 2026-10-26, for what 464.13's 5 left unrun: products of
 `SideOfAFlatSurfaceThroughAPoint` below the normals, which `on_floats`'s six
 `product_is_normal` checks refuse, as 464.18 ran them for
 `SideOfAFlatSurface`'s three. The first lane wrote `flatall.py` and ran nine
 of its scripts. The second wrote `prodzero.g` again so that it proves, and ran
-every case and control. The third read the controls, restated `plane.rs` and
-wrote this up.
+every case and control. The third restated `plane.rs` and wrote this up, and
+the fourth read the controls.
 
 The bound is proved at the code's constant in every case of where the six
 products land, normal, below the normals or rounding to zero, with any of the
@@ -18239,11 +18239,15 @@ cancels. `fa_nnnnnn.g` is 464.13's `flat.g` in this form.
   its way to `y` with every term normal, `L − 1 − c` for `c` sums cancelling
   and at least 1, and `P −/ Phat` within `(L − 1) u + 10u²`, each with a
   little more: `summary.py` prints that little more as `u³` and `10u³` at
-  most, to ten digits. The largest are `5u + 7u²` (`fa_nnnnnn`, `fa_nnssss`)
-  and `5u + 10u²` (`fa_snssss_c4` among others). 131 cases print less than
-  `k u`, such as `fa_ssssnn` at `2.8u` for its `5u`. To six digits, `(Σ e) /
-  Phat` is `u` in 38 cases, `1.8u` in 2, `2u` in 112, `2.8u` in 2, `3u` in
-  288, `4u` in 232 and `5u` in 48.
+  most, to ten digits. The largest are `5u + 7u²`, in 46 cases with
+  `fa_nnnnnn` and `fa_nnssss` among them, and `5u + 10u²`, in 384 with
+  `fa_snssss_c4` among them (`grep -c -F 'e: 5.000000u = 5u+7.0000u^2'
+  summary.txt` and `grep -c -F 'P: 5.000000u = 5u+10.0000u^2' summary.txt`,
+  with `summary.txt` what `summary.py` printed). 131 cases print less than
+  `k u` (`grep -c 'e: [0-9.]*u = [0-9]u-' summary.txt`), such as `fa_ssssnn`
+  at `2.8u` for its `5u`. To six digits, `(Σ e) / Phat` is `u` in 38 cases,
+  `1.8u` in 2, `2u` in 112, `2.8u` in 2, `3u` in 288, `4u` in 232 and `5u` in
+  48 (`grep -o 'e: [0-9.]*u' summary.txt | sort | uniq -c`).
 
 So the bound holds with any of the products below the normals because a
 normal `eb` is `2⁻¹⁰²²` or more, which puts `P` at `2^(-971.585)` or more
@@ -18256,7 +18260,15 @@ beside a normal one.
 **5. The controls.** A script whose hypotheses contradict each other proves
 every goal (464.7's 3), so each case is run again where it must fail:
 
-- CONTROLS_HALF
+- Each of the 722 cases at `B = u / 2` (`c_<name>_half.g`, `B = 1b-54;`)
+  exits 1, and none prints "pointless". Its best is `[−2x, 2x]` for the `x u`
+  that `summary.py` prints for its case's `(Σ e) / Phat`, which `controls.py`
+  (8) checks for each, to within a thousandth: it prints `_half controls
+  whose best is twice their case's u count: 722`, with none under, none over
+  and none without a best. `c_fa_nnnnnn_half.g`'s best is `[-10, 10]`. Gappa's
+  best for a goal it does not prove can change from one run to the next
+  (464.26), so these are this run's figures, each a bound Gappa found on the
+  size of `(y − Ex) / eb`, and not an exact value.
 - `c_fa_none_noeb.g`, `fa_none.g` without `eb` normal, exits 1, best `[-inf,
   inf]`, printing `eb` in `[0, 9b-1073]` and `P` in `[0, 3b-1021]`. So what
   proves `fa_none.g` is the contradiction with `eb` normal and nothing else,
@@ -18266,7 +18278,9 @@ every goal (464.7's 3), so each case is run again where it must fail:
   · 2⁻¹` is a product of two doubles, and rounds to zero, the tie going to
   even.
 
-CONTROLS_COUNT
+`runall.sh` (8) ran the 724 controls, the 722 and these two, without Coq,
+from 21:07:17Z to 21:27:52Z: `grep -c ' exit 1 ' list_c.log` prints 724, and
+`grep -l pointless c_*.out | wc -l` prints 0.
 
 **6. What `plane.rs` said, and says now.** At `eb125ed0` the doc on the
 constant ended, `plane.rs:1088-1089`: "Whether a product below the normals,
@@ -18605,7 +18619,27 @@ P -> (eb / B) / (1 + (eb - B * P) / (B * P));
 `runall.sh`:
 
 ```sh
-RUNALL_SH
+#!/bin/bash
+# Run every case and prodzero.g with Coq, then every control without, through
+# runmany.sh, and print when each list is done.
+cd "$(dirname "$0")"
+{ ls fa_*.g; echo prodzero.g; } > list_fa
+ls c_*.g > list_c
+date -u +%FT%TZ
+bash runmany.sh list_fa coq
+date -u +%FT%TZ
+bash runmany.sh list_c nocoq
+date -u +%FT%TZ
+```
+
+What it printed, `runall.log`:
+
+```text
+2026-10-26T20:42:34Z
+done 724 files from list_fa
+2026-10-26T21:07:17Z
+done 724 files from list_c
+2026-10-26T21:27:52Z
 ```
 
 `runmany.sh`, 464.18's at sixteen at a time rather than eight:
@@ -18622,13 +18656,185 @@ echo "done $(wc -l < "$1") files from $1"
 `summary.py`:
 
 ```python
-SUMMARY_PY
+"""Read every fa_*.out beside this file and print, one line per case, what
+Gappa printed for each goal: (sum e) / Phat and P -/ Phat in u, each with how
+far past k u it is in u^2, and A as a multiple of 2^-1075. Then check each
+case: (sum e) / Phat within k u + 64 u^2, k the most roundings a term goes
+through on its way to y; P -/ Phat within (left - 1) u + 64 u^2, left - 1 the
+additions that fold the permanent; and A within exactly 2^-1075 for each
+product that is not normal. Gappa prints a bound with a little more than its
+u^2 part (464.13's 5), so the counts within 7 u^2 and 10 u^2 are of cases
+whose u^2 part is at most 7.0001 and 10.0001."""
+import os
+import re
+import sys
+from fractions import Fraction
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+U = Fraction(1, 2**53)
+TINY = Fraction(1, 2**1075)
+ROOM = Fraction(1, 10000)
+NUM = re.compile(r"(-?\d+)(?:b(-?\d+))?")
+NAME = re.compile(r"fa_([ns]+)(?:_c(\d+))?")
+
+
+def value(text):
+    m = NUM.fullmatch(text)
+    mant, exp = int(m.group(1)), int(m.group(2) or 0)
+    return Fraction(mant) * (Fraction(2) ** exp)
+
+
+def interval(line):
+    m = re.search(r" in \[(-?\d+(?:b-?\d+)?)(?: \{[^}]*\})?, (-?\d+(?:b-?\d+)?)(?: \{[^}]*\})?\]", line)
+    return value(m.group(1)), value(m.group(2))
+
+
+def chain(left, cancel):
+    """The most roundings a term goes through on its way to y with every term
+    normal: its own, and each rounded sum, as 464.13's 6 counts them."""
+    return max(1, left - 1 - cancel)
+
+
+def read(name):
+    text = open(f"{name}.out").read()
+    out = {}
+    if "Results:" not in text or "pointless" in text:
+        return out
+    for line in text.split("Results:", 1)[1].splitlines():
+        line = line.strip()
+        if " in " not in line:
+            continue
+        goal = line.split(" in ")[0]
+        lo, hi = interval(line)
+        top = max(-lo, hi)
+        # Gappa prints a goal by what it names, so with one term left P -/ Phat
+        # is |...| -/ |...|, and with one amount A is t5 - X5 or the like.
+        if " -/ " in goal:
+            out["P"] = top
+        elif " / " in goal:
+            out["e"] = top
+        else:
+            out["A"] = top
+    return out
+
+
+def past(x, k):
+    """How far x is past k u, in u^2."""
+    return (x - k * U) / (U * U)
+
+
+names = sys.argv[1:] or sorted(f[:-4] for f in os.listdir(".")
+                               if f.endswith(".out") and NAME.fullmatch(f[:-4]))
+odd, rows = [], []
+for name in names:
+    r = read(name)
+    m = NAME.fullmatch(name)
+    states, cancel = m.group(1), m.group(2) or ""
+    left = len(states)
+    if "e" not in r or "P" not in r:
+        odd.append(name)
+        continue
+    k = chain(left, len(cancel))
+    rows.append((name, states, left, k, r))
+    print(name, f"e: {float(r['e'] / U):.6f}u = {k}u{float(past(r['e'], k)):+.4f}u^2",
+          f"P: {float(r['P'] / U):.6f}u = {left - 1}u{float(past(r['P'], left - 1)):+.4f}u^2",
+          f"A: {r['A'] / TINY}*2^-1075" if "A" in r else "")
+
+print()
+print(f"cases read: {len(rows)}; no figures or pointless: {odd}")
+for label, key, ku, cap in (("(sum e) / Phat", "e", "k u", 7), ("P -/ Phat", "P", "(left - 1) u", 10)):
+    excess = [(past(r[key], k if key == "e" else left - 1), name) for name, _, left, k, r in rows]
+    within = sum(1 for x, _ in excess if x <= 64)
+    small = {c: sum(1 for x, _ in excess if x <= c + ROOM) for c in (7, 10)}
+    most = max(excess)
+    whole = max((r[key] / U, name) for name, _, _, _, r in rows)
+    print(f"{label} within {ku} + 64 u^2: {within} of {len(rows)}; "
+          f"within {ku} + 7 u^2 and a little more: {small[7]}; within {ku} + 10 u^2 and a little more: {small[10]}")
+    print(f"  most past {ku}: {most[1]}, {float(most[0]):.4f}u^2, "
+          f"and past {ku} + {cap} u^2 by {float((most[0] - cap) / U):.10g}u^3 at most; "
+          f"largest: {whole[1]}, {float(whole[0]):.6f}u, {float(past(whole[0] * U, 5)):.6f}u^2 over 5u")
+not_a = [name for name, states, _, _, r in rows if r.get("A", 0) / TINY != 6 - states.count("n")]
+print(f"A within exactly 2^-1075 for each product not normal: {len(rows) - len(not_a)}; not: {not_a}")
+```
+
+`python3 summary.py` printed one line for each case, such as
+
+```text
+fa_nnssss e: 5.000000u = 5u+7.0000u^2 P: 5.000000u = 5u+10.0000u^2 A: 4*2^-1075
+fa_snssss_c4 e: 4.000000u = 4u+2.0000u^2 P: 5.000000u = 5u+10.0000u^2 A: 5*2^-1075
+fa_ssssnn e: 2.800000u = 5u-19815838360430180.0000u^2 P: 2.000000u = 5u-27021597764222952.0000u^2 A: 4*2^-1075
+```
+
+and then:
+
+```text
+cases read: 722; no figures or pointless: []
+(sum e) / Phat within k u + 64 u^2: 722 of 722; within k u + 7 u^2 and a little more: 722; within k u + 10 u^2 and a little more: 722
+  most past k u: fa_nnssss, 7.0000u^2, and past k u + 7 u^2 by 1u^3 at most; largest: fa_nnssss, 5.000000u, 7.000000u^2 over 5u
+P -/ Phat within (left - 1) u + 64 u^2: 722 of 722; within (left - 1) u + 7 u^2 and a little more: 338; within (left - 1) u + 10 u^2 and a little more: 722
+  most past (left - 1) u: fa_snssss_c4, 10.0000u^2, and past (left - 1) u + 10 u^2 by 10u^3 at most; largest: fa_snssss_c4, 5.000000u, 10.000000u^2 over 5u
+A within exactly 2^-1075 for each product not normal: 722; not: []
 ```
 
 `controls.py`:
 
 ```python
-CONTROLS_PY
+"""For each c_fa_*_half control beside this file, read its best and say
+whether it is twice the u count its case printed for (sum e) / Phat: a case
+that proves at B = 6u + 2^-99 with that sum within x u fails at B = u / 2 with
+a best near 2x. Gappa's best for a goal it does not prove can change from run
+to run (464.26), so this counts the bests within a thousandth of 2x, under it
+and over it, and says nothing finer."""
+import os
+import re
+import subprocess
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+summary = subprocess.run([sys.executable, "summary.py"], capture_output=True, text=True).stdout
+ucount = {}
+for line in summary.splitlines():
+    m = re.match(r"(fa_\S+) e: ([0-9.]+)u", line)
+    if m:
+        ucount[m.group(1)] = float(m.group(2))
+
+at, under, over, pointless, nobest = 0, [], [], [], []
+for f in sorted(os.listdir(".")):
+    if not (f.startswith("c_fa_") and f.endswith("_half.out")):
+        continue
+    text = open(f).read()
+    case = f[2 : -len("_half.out")]
+    if "pointless" in text:
+        pointless.append(case)
+    # With one term left Gappa names y by what it is, float<...>(X0).
+    m = re.search(r"BND\(\(\S+ - Ex\) / eb\), best: \[([^,]+), ([^\]]+)\]", text)
+    if not m:
+        nobest.append(case)
+        continue
+    best, want = float(m.group(2)), 2 * ucount[case]
+    if abs(best - want) <= 1e-3:
+        at += 1
+    elif best < want:
+        under.append((case, best, want))
+    else:
+        over.append((case, best, want))
+print(f"_half controls read: {at + len(under) + len(over) + len(nobest)}")
+print(f"_half controls whose best is twice their case's u count: {at}")
+print("under it:", under)
+print("over it:", over)
+print("pointless:", pointless)
+print("no best for (y - Ex) / eb:", nobest)
+```
+
+`python3 controls.py` printed:
+
+```text
+_half controls read: 722
+_half controls whose best is twice their case's u count: 722
+under it: []
+over it: []
+pointless: []
+no best for (y - Ex) / eb: []
 ```
 
 **9. What this leaves.** No row. What is not a row:
