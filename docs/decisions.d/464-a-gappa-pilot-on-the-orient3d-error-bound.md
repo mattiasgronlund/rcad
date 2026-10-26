@@ -17584,47 +17584,125 @@ main()
 
 ### 464.26 One difference at zero with one minor at zero
 
-**DRAFT, Q2748's first lane, handed over at its budget (§416). Not finished:
-the controls at `6u` and `5u`, the `dmq_` checks, `coqc`, the prose below, and
-the pointers in 464.6, 464.11 and 464.25 and the list at the top are still to
-do. The relay finishes them and takes this paragraph out.**
+Q2748 ran block 1 with one of the nine differences `adx` to `cdz` at zero and
+one of `first`, `second` and `third` cancelling to zero at once, in two lanes
+on 2026-10-26. Of the 27 pairs, 12 cannot happen, and Gappa proves that for
+each; 3 are 464.11's branches; 12 are branches that neither 464.7 nor 464.11
+runs. Each of the 15 branches proves at the code's `B` and fails below the
+bound it proves, and Coq checks each proof, modulo its hints. Nothing in
+`orient3d.rs` needs to change for it.
 
-Of the 27 pairs of one difference `adx` to `cdz` at zero and one of `first`,
-`second` and `third` cancelling to zero:
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, with `block1.g` 464.5's first `gappa` block, the one headed
+`# Orient3d::on_floats and ORIENT3D_ERROR_BOUND,`, against `on_floats` as
+464.4 read it at `d9f931e8`: no commit touches `orient3d.rs` between 464.11's
+`ca9b6493` and `f60bb262`.
 
-- 12 cannot happen where `decide` compares. An x or y difference is a factor
-  of one product in each of two minors. Such a minor is then a double less a
-  zero, or a zero less a double, and rounds to the other product, which
-  `product_is_normal` has checked is at least `2⁻¹⁰²²`. So it is not zero.
-  `dmi_<pair>.g`, `dz_<difference>.g` asking only `|minor| >= 1b-1022` with
-  its `|minor| >= 1b-1074` hypothesis out, proves for each of the 12. Its
-  control `c_dmi_<pair>.g`, with that product's `>= 1b-1022` hypothesis out
-  too, fails for each, `c_dmi_adx_second` with best `[4.94066e-324,
-  2.22507e-308]`.
-- 3 are 464.11's branch already: `adz` with `first`, `bdz` with `second` and
-  `cdz` with `third`. The term is zero by its shape, in `y` and in `Ex`, and
-  464.11's script puts no condition on its minor. Run anyway with the two
-  products one double, each proves.
-- 12 are branches of their own: `adx`, `ady` with `first`; `bdx`, `bdy` with
-  `second`; `cdx`, `cdy` with `third`; and each z difference with each minor
-  whose term it does not zero.
+**Which pairs are branches.** A minor cancels to zero when its two products
+round to the same double, as in 464.7.
 
-At the code's `B`, every one of the 15 `dm_` scripts proves (Gappa exit 0, 2.45
-to 4.92 s at sixteen at once). `dm_adx_first` prints `(y − Ex) / P6` within
-`5.55112e-16` and `P −/ Phat` within `6.66134e-16`; `dm_cdx_third`
-`6.66134e-16` and `6.66134e-16`. `dm_adz_second` and `dm_bdz_first`, where
-`t1` and `t2` are both zero, one by its shape and one by cancelling, failed at
-`REL(P, Phat)` with block 1's hints, best `[-5.91571e+289, 5.0398e+404]` and
-`[-1.77847e+476, 1.93842e+419]`; with `both_first_terms_zero`'s hints they
-prove, `(y − Ex) / P6` and `(P − Phat) / Phat` each within `6.66134e-16`.
-`third` with `cdx`, `cdy`, `adz` or `bdz` proves with block 1's hints alone,
-where 464.7's `third` alone needed six more.
+- **12 cannot happen.** An x or y difference is a factor of one product in
+  each of two minors: `adx` of `adxcdy` in `second` and of `adxbdy` in
+  `third`. With it zero, such a minor is a double less a zero, or a zero less
+  a double, and rounds to its other product, which `product_is_normal` has
+  checked is at least `2⁻¹⁰²²`. So the minor is not zero. The 12 are `adx`
+  and `ady` with `second` or `third`, `bdx` and `bdy` with `first` or
+  `third`, and `cdx` and `cdy` with `first` or `second`. For each,
+  `dmi_<pair>.g` is `dz_<difference>.g` with the minor's `>= 1b-1074`
+  hypothesis out and `|minor| >= 1b-1022` its only goal, and it proves. Its
+  control `c_dmi_<pair>.g` takes the other product's `>= 1b-1022` hypothesis
+  out too, and fails, for each of the 12, with best `[4.94066e-324,
+  2.22507e-308]`: without `product_is_normal`, Gappa keeps the minor only
+  off zero.
+- **3 are 464.11's branches**: `adz` with `first`, `bdz` with `second` and
+  `cdz` with `third`. The term is zero by its shape, in `y` and in `Ex` alike,
+  and 464.11's script asks nothing of its minor. Run anyway with the minor's
+  two products one double, each proves with 464.11's bounds.
+- **12 are new**: `adx` and `ady` with `first`, `bdx` and `bdy` with
+  `second`, `cdx` and `cdy` with `third`, and each z difference with each of
+  the two minors whose term it does not zero.
 
-Run as `python3 make_differences_zero.py adx ady adz bdx bdy bdz cdx cdy cdz`
-beside `block1.g` (lines 360 to 536 of this file), which writes
-`dz_<difference>.g` for each single difference, the same as 464.11's
-`zd_<difference>.g` but for comments, and then `python3 make_minor_zero_too.py`
-with the 27 pairs, `adx_first` to `cdz_third`:
+**The scripts.** `make_differences_zero.py` (464.25), given the nine
+differences one at a time, writes `dz_<difference>.g` for each. Each is
+464.11's `zd_<difference>.g` but for its comments: with the comment lines
+dropped, `diff` prints nothing for any of the nine. `make_minor_zero_too.py`,
+below, writes each pair from its `dz_<difference>.g` the way 464.7 writes a
+minor at zero from block 1. The minor's second product is the same double as
+its first; the minor and its term are left unrounded, with their two ratios
+set to 1; and the hypotheses that the term is normal, and that the
+permanent's product `r` for it is, go, since `product_is_normal` passes on the
+zero term and checks nothing of `r`. Where the zero term is `t1` or `t2` and
+the other of the two is not zero, `t1 + t2` is that other term, a double, and
+the script carries 464.11's hint `t1 + t2 -> t2;` or `-> t1;`. Where the
+difference already zeroes the minor's term, only the products and the minor
+change.
+
+`adz` with `second` and `bdz` with `first` zero both `t1` and `t2`, one by its
+shape and one by cancelling. Each script without what `both_first_terms_zero`
+adds, so with `P`, `Phat` and the goal as block 1 writes them and the hints
+`dz_<difference>.g` has, fails at `REL(P, Phat)`: `adz` with `second` with
+best `[-2.10534e+465, 6.2623e+421]`, and `bdz` with `first` with
+`[-1.77847e+476, 1.93842e+419]`. `both_first_terms_zero` does what 464.7 does
+for `third` at zero. It asks for `(P − Phat) / Phat`, splits `Phat` into
+`Phat1`, `Phat2` and `Phat3`, and adds six hints, which carry the cancelled
+term's `r` as an amount against `Phat`, since it may be below the normals, and
+keep `Phat` away from zero through `Phat3`. It keeps `P` rounded as the code
+rounds it, `P12 = rnd(r1 + r2)` and then `rnd(P12 + r3)`, and no hint divides
+by the zeroed term's own part of `Phat`, which is zero.
+
+**What runs, at the code's `B`.** Each of the 15 proves, with `(y − Ex) / P6`
+within:
+
+- `5.55112e-16`, `5u` and some `u²`, for 4: `adx` and `ady` with `first`,
+  and `bdx` and `bdy` with `second`. At `6u` each proves, and at `5u` each
+  fails with best `±1`.
+- `6.66134e-16`, `6u` and some `u²`, for 10: the other 8 new ones, and
+  464.11's `adz` with `first` and `bdz` with `second`. At `6u` each fails with
+  best `±1`, and at `5u` with `±1.2`.
+- `7.77156e-16`, `7u` and some `u²`, for 464.11's `cdz` with `third`. At `6u`
+  it fails with best `±1.16667`, and at `5u` with `±1.4`.
+
+In each of the 15 the count of `u` is the count of roundings on the longest
+path, counted as 464.25 counts it, with one path more: the cancelled term,
+which `y` holds as zero and `Ex` does not. What is left of it is its two
+products' rounding errors, so its path is its two differences and its
+product, three, and its z difference's rounding only scales that error. A
+cancelled `t1` or `t2` adds no rounding to the sum of the two.
+`summarize_pairs.py`, below, works the count out from the pair alone, and its
+groups split the 15 the same way the printed bounds do.
+
+`P −/ Phat` is within `4.44089e-16` in 464.11's three, as 464.11 found, and
+within `6.66134e-16` in the 10 new ones that ask for it; `(P − Phat) / Phat`
+is within `6.66134e-16` in the two with `t1` and `t2` both zero. Why the new
+ones' is wider was not traced.
+
+`third` with `cdx`, `cdy`, `adz` or `bdz` proves with the hints its
+`dz_<difference>.g` has and none added, where 464.7's `third` alone needed six
+more. Why was not traced either.
+
+Block 1's `|t1 + t2| ≥ 2⁻¹⁰⁷⁴` costs nothing here. Where `first` or `second`
+cancels, `t1 + t2` is the other of the two: normal by hypothesis, or zero by
+its shape, and then the script drops the hypothesis. Where `third` cancels,
+`t1 + t2` at zero makes `y` zero, and `decide` certifies no sign (464.7).
+
+Every one of the 15 fails at `5u`, and the 11 whose bound is above `6u` fail
+there too, so each fails below the bound it proves, and none proves its goal
+from hypotheses that contradict each other (464.7). A `dmi_` script's
+hypotheses are its `dz_<difference>.g`'s less one, and each of the nine
+`dz_<difference>.g` fails at `5u`, at `BND((y − Ex) / eb)`, so those do not
+contradict each other either. The 6 `dmq_` scripts, each a `dm_` script with
+its `q` hypotheses taken out and only its `|q|` goals left, each prove: no goal
+leans on the hypothesis it backs.
+
+`gappa -Bcoq` writes each of the 15 proofs, 8429 to 9653 lines with 31 to 35
+hints, and each of the 12 `dmi_` proofs, 1434 to 1588 lines with 34, and
+`coqc` under 464.5's commands accepts each, exit 0. At sixteen at once, Gappa
+takes 4.56 to 8.35 s on a `dm_` script and 3.36 to 6.49 s on a `dmi_` one, and
+`-Bcoq` and `coqc` together 10.96 to 15.02 s and 4.54 to 7.43 s. `field` has
+not been run on these hints (464.10).
+
+`make_minor_zero_too.py`, run beside the `dz_<difference>.g` scripts as
+`run_pairs.sh` below runs it:
 
 ```python
 """Write block 1 with one difference zero and one minor cancelling to zero.
@@ -17650,9 +17728,7 @@ PRODUCT = {
 }
 MINOR = {"first": 1, "second": 2, "third": 3}
 Z_OF = {1: "adz", 2: "bdz", 3: "cdz"}
-TERM = {"adz": 1, "bdz": 2, "cdz": 3}
 BOUND = "in [-4503599627370497b-105, 4503599627370497b-105]\n"
-GOAL = "  (y - Ex) / P6 in ? /\\ P -/ Phat in ?\n"
 
 
 def main():
@@ -17730,12 +17806,13 @@ def cancel(src, difference, minor, m):
     src = drop_conj(src, f"|r{m}| >= 1b-1022")
     start = src.index("  # Each of r")
     end = src.index("\n", src.index("\n", start) + 1) + 1
-    zero = f" r{TERM.get(difference)} is zero, and" if difference in TERM else ""
+    zeroed = [k for k, z in Z_OF.items() if z == difference]
+    said = f"r{zeroed[0]} is zero, and nothing" if zeroed else "Nothing"
     src = sub(
         src,
         src[start:end],
         "  # Each r asked to be normal here is, because its t is and its minor is\n"
-        f"  # at most its q.{zero} nothing checks r{m}, since {minor} is zero.\n",
+        f"  # at most its q. {said} checks r{m}, since {minor} is zero.\n",
     )
     src = sub(src, f"  /\\ t{m} -/ U{m} {BOUND}", "")
     src = sub(src, f"  /\\ r{m} -/ R{m} {BOUND}", "")
