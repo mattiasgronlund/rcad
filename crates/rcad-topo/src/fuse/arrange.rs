@@ -19561,6 +19561,138 @@ mod tests {
         );
     }
 
+    /// The top of a cube of side two, `z = 2`, cut along `y = 1` and by
+    /// `x = y` and `x + y = 2.25`, which cross that line at `x = 1` and
+    /// `x = 1.25` and cross each other at `(1.125, 1.125)`. Past that point the
+    /// two cuts are the other way round, so the place `(1.125, 1.5)`, half a
+    /// unit off the line, is on the side of each cut that puts it before the
+    /// one and after the other in the order the line puts them the other way
+    /// round. Asked of the planes alone, the place against each cut and the
+    /// two cuts against each other went round in a loop, which
+    /// `nodes_along`, proving only neighbours, keeps whichever way its hint
+    /// starts it (Q1937, Q2750).
+    ///
+    /// So the two cuts come in the order such a place puts them in. A place
+    /// off the line on one side of both, `(0.5, 1.5)`, says nothing of their
+    /// order, and `(1.125, 0.5)`, between them on the near side of the line,
+    /// puts them the way the line does, so with `(1.125, 1.5)` there too the
+    /// planes cannot say.
+    #[test]
+    fn a_place_off_a_line_between_two_cuts_puts_them_in_the_order_its_sides_do() {
+        let (model, cube) = a_cube_of_side_two();
+        let top = the_top_of_a_cube(&model, cube);
+        let line = [0.0, 1.0, 0.0, -1.0];
+        let cuts = [[1.0, -1.0, 0.0, 0.0], [1.0, 1.0, 0.0, -2.25]];
+        let face = cut_by(&top, &[line, cuts[0], cuts[1]]);
+        let mut arrangement = drawn_up_to_its_corners(&face);
+        let along = the_crossing_of_the_cut(&arrangement, line);
+        let flat = arrangement.surface;
+        let partner = arrangement.crossings[along].partner;
+        let [first_cut, second_cut] = cuts
+            .map(|cut| arrangement.crossings[the_crossing_of_the_cut(&arrangement, cut)].partner);
+        let plane =
+            |coefficients| Surface::Plane(Plane::from_coefficients(coefficients).expect("a plane"));
+        let mut place = |three: [Surface; 3], at: [f64; 3]| {
+            arrangement.nodes.push(Node {
+                point: PredicatePoint::from(at),
+                vertex: None,
+                made_of: Some((three, 0)),
+                also: Vec::new(),
+                half_way_round: false,
+                crossings: vec![along],
+            });
+            arrangement.nodes.len() - 1
+        };
+        let on_the_first = place([flat, partner, first_cut], [1.0, 1.0, 2.0]);
+        let on_the_second = place([flat, partner, second_cut], [1.25, 1.0, 2.0]);
+        let off_both = place(
+            [
+                flat,
+                plane([1.0, 0.0, 0.0, -0.5]),
+                plane([0.0, 1.0, 0.0, -1.5]),
+            ],
+            [0.5, 1.5, 2.0],
+        );
+        let past_where_they_cross = place(
+            [
+                flat,
+                plane([1.0, 0.0, 0.0, -1.125]),
+                plane([0.0, 1.0, 0.0, -1.5]),
+            ],
+            [1.125, 1.5, 2.0],
+        );
+        let near_side = [
+            flat,
+            plane([1.0, 0.0, 0.0, -1.125]),
+            plane([0.0, 1.0, 0.0, -0.5]),
+        ];
+
+        let by_the_line = rcad_predicates::which_meet_comes_first_along_a_line(
+            [flat, partner].map(|surface| surface.as_plane().expect("a plane").coefficients()),
+            first_cut.as_plane().expect("a plane").coefficients(),
+            second_cut.as_plane().expect("a plane").coefficients(),
+        )
+        .expect("three planes meeting at one point");
+        assert!(matches!(by_the_line, Decision::Pos | Decision::Neg));
+        let ask = |arrangement: &Arrangement<'_>, first: usize, second: usize| {
+            arrangement.as_the_planes_say(along, first, second)
+        };
+        assert_eq!(
+            ask(&arrangement, off_both, on_the_first),
+            ask(&arrangement, off_both, on_the_second),
+            "a place on one side of both cuts"
+        );
+        let before_the_first = ask(&arrangement, past_where_they_cross, on_the_first);
+        assert_eq!(
+            before_the_first,
+            Some(the_other_way(by_the_line)),
+            "the place past where the cuts cross puts the first cut after it as the line puts the \
+             second cut after the first"
+        );
+        assert_eq!(
+            ask(&arrangement, on_the_second, past_where_they_cross),
+            before_the_first,
+            "and the second cut before it"
+        );
+
+        assert_eq!(
+            ask(&arrangement, on_the_second, on_the_first),
+            before_the_first,
+            "the two cuts in the order the place between them puts them in"
+        );
+        assert_eq!(
+            ask(&arrangement, on_the_first, on_the_second),
+            before_the_first.map(the_other_way),
+            "asked the other way round"
+        );
+
+        let mut arrangement = arrangement;
+        arrangement.nodes.push(Node {
+            point: PredicatePoint::from([1.125, 0.5, 2.0]),
+            vertex: None,
+            made_of: Some((near_side, 0)),
+            also: Vec::new(),
+            half_way_round: false,
+            crossings: vec![along],
+        });
+        let on_the_near_side = arrangement.nodes.len() - 1;
+        assert_eq!(
+            ask(&arrangement, on_the_first, on_the_near_side),
+            ask(&arrangement, on_the_near_side, on_the_second),
+            "the place on the near side is between the two cuts"
+        );
+        assert_eq!(
+            ask(&arrangement, on_the_first, on_the_near_side),
+            Some(by_the_line),
+            "in the order the line puts them in"
+        );
+        assert_eq!(
+            ask(&arrangement, on_the_first, on_the_second),
+            None,
+            "two places off the line that put the cuts each way round leave the planes unable to say"
+        );
+    }
+
     /// The pipe of radius one about the `z` axis, its cap `z = 0` and the
     /// plane `y = 0` through its axis: the line the two planes share is the `x`
     /// axis, which crosses the cap's circle at `(1, 0, 0)` and `(−1, 0, 0)`,
