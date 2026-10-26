@@ -11679,8 +11679,12 @@ fn which_of_the_pairs_closed_crossings_it_is(
     Ok(which_curve_of_the_pair(&[this_circle]))
 }
 
-/// The slot ahead of a ring's circle's plane in its [`WhichCurveOfThePair`],
-/// past the four kinds of picker [`which_curve_of_the_pair`] writes.
+/// The slot ahead of a ring's circle's plane in its [`WhichCurveOfThePair`].
+/// [`which_curve_of_the_pair`] writes the same number ahead of a flat picker
+/// through a point, and the two never meet: a ring against a ball, a pipe or a
+/// cone is named by its circle's plane before any picker is asked
+/// ([`which_of_the_pairs_closed_crossings_it_is`]), every other pair by its
+/// pickers, and the [`CurveName`] each sits in names its two surfaces too.
 const A_CIRCLE_NAMED_BY_ITS_OWN_PLANE: u64 = 4;
 
 /// The planes `intersect` names each circle a ring and a ball, a pipe or a
@@ -11763,6 +11767,14 @@ type WhichCurveOfThePair = Option<SmallVec<[[u64; 10]; 1]>>;
 /// cross in, for the corner it starts at: `None` where the pair crosses in one
 /// closed curve and nothing picks it.
 ///
+/// **A bar down a pointed cone's axis is why.** The bar's wall crosses the
+/// cone's surface in a circle either side of the apex, at `z = −1` and `z = 1`
+/// for the cone of slope one, and named by the two surfaces alone both circles
+/// started at one corner. The union and the bar less the cone keep the bar's
+/// band between them, so the two circles were one closed edge with four faces
+/// along it — the band's two wires, the band below and the cone — and both
+/// were refused as not a manifold (`tests/a_pointed_cone_drilled_along_its_axis.rs`).
+///
 /// **A crossing picked by more than one picker is named by all of them.** Two
 /// pointed cones whose own directions overlap, of slopes a half and a quarter
 /// and height eight, the second turned 0.3 about the `x` axis through
@@ -11775,14 +11787,6 @@ type WhichCurveOfThePair = Option<SmallVec<[[u64; 10]; 1]>>;
 /// here (`tests/a_funnel_with_a_leaning_spout.rs`). A curve is the part of the
 /// crossing on or inside every one of its pickers, so the name is the set of
 /// them, sorted so it does not hang on the order `intersect` lists them in.
-///
-/// **A bar down a pointed cone's axis is why.** The bar's wall crosses the
-/// cone's surface in a circle either side of the apex, at `z = −1` and `z = 1`
-/// for the cone of slope one, and named by the two surfaces alone both circles
-/// started at one corner. The union and the bar less the cone keep the bar's
-/// band between them, so the two circles were one closed edge with four faces
-/// along it — the band's two wires, the band below and the cone — and both
-/// were refused as not a manifold (`tests/a_pointed_cone_drilled_along_its_axis.rs`).
 ///
 /// **The same from both faces along the curve and in both argument orders.**
 /// Both faces carry the one pair of surfaces, and `intersect` builds what picks
