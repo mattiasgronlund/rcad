@@ -5563,6 +5563,17 @@ impl<'f> Arrangement<'f> {
     /// cut asks this function again with a node that names no third plane,
     /// which is not the arm that reads the other nodes, so that reading goes
     /// no deeper (`a_place_off_a_line_between_two_cuts_puts_them_in_the_order_its_sides_do`).
+    ///
+    /// **A node off the line on one cut names their order too.** It is one
+    /// point with that cut's meet, so the side of the other cut it is on is
+    /// the side that meet is on. Skipped, a node a step off the line on the
+    /// second cut and after the first, where the line puts the first after
+    /// the second, made the same loop with an equality in it, and
+    /// [`Arrangement::nodes_along`] kept the first cut between two nodes it
+    /// proved one point (Q2840). A node on both cuts, where they cross a
+    /// rounding off the line, is one point with each meet, which no order of
+    /// two places on the line keeps, so it leaves the planes unable to say
+    /// (`a_place_off_a_line_on_one_cut_puts_the_cuts_in_the_order_its_sides_do`).
     fn as_the_planes_say(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         let partner = self.crossings[crossing].partner;
         let (Some(flat), Some(partner)) = (self.surface.as_plane(), partner.as_plane()) else {
@@ -5584,7 +5595,7 @@ impl<'f> Arrangement<'f> {
         );
         let decided = match (the_third_plane(mine), the_third_plane(theirs)) {
             (Some(mine), Some(theirs)) => {
-                let mut as_a_place_between_them_says = (0..self.nodes.len())
+                let mut as_each_place_off_the_line_says = (0..self.nodes.len())
                     .filter(|&node| {
                         self.nodes[node].crossings.contains(&crossing)
                             && self
@@ -5592,22 +5603,32 @@ impl<'f> Arrangement<'f> {
                                 .is_some_and(|three| the_third_plane(three).is_none())
                     })
                     .filter_map(|off_the_line| {
-                        let sides = [first, second].map(|cut| {
+                        let [to_the_first, to_the_second] = [first, second].map(|cut| {
                             let (side, _) = self
                                 .as_proved_before_any_policy(crossing, off_the_line, cut)
                                 .expect("a line two planes cross in is ordered along an axis");
                             side
                         });
-                        matches!(
-                            sides,
-                            [Decision::Neg, Decision::Pos] | [Decision::Pos, Decision::Neg]
-                        )
-                        .then_some(sides[1])
+                        match (to_the_first, to_the_second) {
+                            (Decision::Neg | Decision::Zero, Decision::Pos)
+                            | (Decision::Neg, Decision::Zero) => Some(Some(Decision::Pos)),
+                            (Decision::Pos | Decision::Zero, Decision::Neg)
+                            | (Decision::Pos, Decision::Zero) => Some(Some(Decision::Neg)),
+                            (Decision::Zero, Decision::Zero) => Some(None),
+                            (Decision::Pos, Decision::Pos)
+                            | (Decision::Neg, Decision::Neg)
+                            | (Decision::Undecidable { .. }, _)
+                            | (_, Decision::Undecidable { .. }) => None,
+                            (other, decided) => panic!(
+                                "a sign came back with a decision nothing here knows: \
+                                 {other:?}, {decided:?}"
+                            ),
+                        }
                     });
-                if let Some(said) = as_a_place_between_them_says.next() {
-                    return as_a_place_between_them_says
-                        .all(|again| again == said)
-                        .then_some(said);
+                if let Some(said) = as_each_place_off_the_line_says.next() {
+                    return said.filter(|&said| {
+                        as_each_place_off_the_line_says.all(|again| again == Some(said))
+                    });
                 }
                 rcad_predicates::which_meet_comes_first_along_a_line(
                     line,
