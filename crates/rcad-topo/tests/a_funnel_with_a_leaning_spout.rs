@@ -26,6 +26,11 @@
 //! Since Q2818 a closed crossing is named by every picker it has, and all six
 //! fuses answer.
 //!
+//! A fourth came with row Q2813: the two pointed cones of one slope again, the
+//! second a quarter turn off the first, so that every number is exact and the
+//! two are exactly mirror images and touch. Every fuse of that pair is refused
+//! as a crossing that touches itself.
+//!
 //! Each answer that comes back is to be certified, sound, and measure as the
 //! others that came back say it must: the union and the intersection together
 //! hold each solid once, and each solid less the other is that solid less the
@@ -43,6 +48,10 @@ use cones::{a_frustum, a_pointed_cone};
 /// curved surface.
 const A_CONE_ACROSS_A_CURVED_SURFACE: &str =
     "geometry: a cone crossing another curved surface is a degree-four space curve";
+
+/// What `fuse` says where two surfaces touch where they cross.
+const A_CROSSING_THAT_TOUCHES_ITSELF: &str = "geometry: these two surfaces are tangent along \
+     where they cross, so what they cross in is one curve that runs through itself";
 
 /// **A funnel with a leaning spout.** The funnel is a frustum of slope a half
 /// with its apex at the origin, cut two and eight up, so of radius one and
@@ -72,7 +81,9 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 /// `sin` and `cos` rounded once each, as `rcad-geom`'s tests write it.
 /// `two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points`
 /// in `rcad-geom`
-/// shows the touch on a pair whose numbers are exact.
+/// shows the touch on a pair whose numbers are exact, and
+/// [`two_pointed_cones_a_quarter_turn_apart_touch_and_are_refused_by_every_rule`]
+/// on the same two cones a quarter turn apart, where every number is exact.
 ///
 /// Every fuse is refused where `intersect` names the crossing.
 #[test]
@@ -80,6 +91,24 @@ fn two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule() {
     assert_eq!(
         every_fuse_of(two_pointed_cones).refusals(),
         [[Some(A_CONE_ACROSS_A_CURVED_SURFACE); 2]; 3]
+    );
+}
+
+/// **Two pointed cones, one a quarter turn off the other.** Both have slope a
+/// half and height eight, and the second turns a quarter about the `x` axis
+/// through the point four up the first's axis, which puts its apex at
+/// `(0, 4, 4)` and its axis along `-y`, every number exact.
+///
+/// The second is then exactly the first's mirror image across the flat
+/// surface `y + z = 4` halfway between their apexes, and the two **touch** at
+/// `(±√1.92, 0.8, 3.2)`, inside both faces, where their crossing runs through
+/// itself. `intersect` refuses that as a crossing that touches itself, and so
+/// does every fuse.
+#[test]
+fn two_pointed_cones_a_quarter_turn_apart_touch_and_are_refused_by_every_rule() {
+    assert_eq!(
+        every_fuse_of(two_pointed_cones_a_quarter_turn_apart).refusals(),
+        [[Some(A_CROSSING_THAT_TOUCHES_ITSELF); 2]; 3]
     );
 }
 
@@ -124,6 +153,20 @@ fn two_pointed_cones(model: &mut Model) -> (SolidKey, SolidKey) {
         .place_solid(leaning, &Isometry::rotation(&through, 0.3).expect("a turn"))
         .expect("this model made the key");
     (upright, leaning)
+}
+
+fn two_pointed_cones_a_quarter_turn_apart(model: &mut Model) -> (SolidKey, SolidKey) {
+    let upright = a_pointed_cone(model, 0.5, 8.0);
+    let turned = a_pointed_cone(model, 0.5, 8.0);
+    let through =
+        Axis::new(Point::new(0.0, 0.0, 4.0), Vector::new(1.0, 0.0, 0.0)).expect("an axis");
+    model
+        .place_solid(
+            turned,
+            &Isometry::quarter_turns(&through, 1).expect("an axis along x"),
+        )
+        .expect("this model made the key");
+    (upright, turned)
 }
 
 fn pointed_cones_of_two_slopes(model: &mut Model) -> (SolidKey, SolidKey) {
