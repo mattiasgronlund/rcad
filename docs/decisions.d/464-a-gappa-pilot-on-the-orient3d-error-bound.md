@@ -16024,7 +16024,334 @@ in `[7/16, 0.4453]`, `76.2u` at `[4.97, 5]`, `110u` at `[7.94, 8]`, `201u` at
 `[15.9, 16]` and `381u` at `[31.75, 32]`. It grows like `7.5u·t`, so past `t`
 of about 6 this chain does not reach `64 ε`.
 
-**Still to do**, in order: controls for `s1`–`s5` (a goal under `80u`, `Bw`'s
-hypothesis dropped, `t` widened to 8); a script that evaluates the hint
-differences Gappa prints at rational points with `1 + t²` a square; `same.py`
-and `all.sh`; rewriting this subsection on the model of 464.22; and the rows.
+**The fourth lane's runs, draft too.** `parabola.py`, below, writes the five
+scripts again with a third goal, `|(K − KS)/KS| ≤ 2⁻⁴⁴`. That is what puts the
+walk's `|s|`, at most `1/‖bend‖` and so within about `10u` of `|K|` by hand,
+inside `r`'s `1 + 2⁻⁴⁰` on every range. `G`'s goal alone gives it only where
+`r²`'s factor is not small, and on `s1` that factor is down to `2⁻⁹⁹⁸`. `r` is
+now written exactly, `1099511627777b-40`. A first `all.sh`, which ran the five
+with `coq` and an earlier list of controls, printed, at a load of about 13 on
+24 cores:
+
+```text
+s1 exit 0 2.60s
+s1 coq -Bcoq exit 0 coqc exit 0 8.83s lines 5255 hints 14
+s2 exit 0 2.87s
+s2 coq -Bcoq exit 0 coqc exit 0 13.25s lines 6803 hints 14
+s3 exit 0 33.97s
+s3 coq -Bcoq exit 0 coqc exit 0 129.27s lines 9571 hints 15
+s4 exit 0 2.86s
+s4 coq -Bcoq exit 0 coqc exit 0 12.30s lines 6698 hints 15
+s5 exit 0 18.20s
+s5 coq -Bcoq exit 0 coqc exit 0 56.39s lines 10895 hints 15
+c_s2_72 exit 124 600.03s
+c_s3_76 exit 124 600.03s
+c_s5_nobw exit 1 464.38s
+c_s3_nor exit 1 403.78s
+c_s5_to8 exit 1 236.87s
+p_7_16_below exit 0 4.02s
+  G in {-8.44565e-15, -2^(-46.7507)}, {8.44565e-15, 2^(-46.7507)}]
+p_7_16_above exit 0 4.30s
+  G in {-8.93913e-15, -2^(-46.6688)}, {8.93913e-15, 2^(-46.6688)}]
+p_5 exit 0 4.36s
+  G in {-8.46127e-15, -2^(-46.748)}, {8.46127e-15, 2^(-46.748)}]
+p_8 exit 0 4.14s
+  G in {-1.22487e-14, -2^(-46.2144)}, {1.22487e-14, 2^(-46.2144)}]
+p_16 exit 0 3.74s
+  G in {-2.23102e-14, -2^(-45.3493)}, {2.23102e-14, 2^(-45.3493)}]
+p_32 exit 0 3.79s
+  G in {-4.23131e-14, -2^(-44.4259)}, {4.23131e-14, 2^(-44.4259)}]
+```
+
+A failing goal is slow here. `c_s2_72` and `c_s3_76`, a goal under the reach
+on scripts that split on `t`, ran to `one.sh`'s 600 s limit. So `parabola.py`
+as appended writes other controls, and a second run of them printed:
+`c_s1_40 exit 124 600.02s`, `c_s4_40 exit 1 295.17s` with best `BND(|G|)
+[4.44089e-15, 5.35968e-15]`, `c_s1_nobw exit 1 252.74s` and `c_s1_nor exit 1
+167.52s`. With no goal, `s1` and `s4` bound `G` by `5.73909e-15` (`51.7u`) and
+`5.35968e-15` (`48.3u`), without a split. Gappa's bound on `G` grows about
+linearly in `t`, and past `t` of about 6.7 it is over the `95.9u` the other
+terms leave.
+
+`ids.py`, below, finds each hint Gappa could not prove by itself in the five
+`.out` files and works out the difference Gappa prints, in exact rationals, at
+twenty points with `1 + t²` a square. It printed:
+
+```text
+s1.out 7 hints not trivially equal, 7 of them zero at all twenty points 
+s2.out 7 hints not trivially equal, 7 of them zero at all twenty points 
+s3.out 9 hints not trivially equal, 9 of them zero at all twenty points 
+s4.out 9 hints not trivially equal, 9 of them zero at all twenty points 
+s5.out 9 hints not trivially equal, 9 of them zero at all twenty points 
+```
+
+On a copy of `s3.out` with `nN` written `wW` in `hS`'s difference, it printed
+`bad_s3.out 9 hints not trivially equal, 8 of them zero at all twenty points
+['hS']`. `grep -c 'assumed to be nonzero'` counts 75 in `s1.out` and `s2.out`,
+and 90 in each of the other three; they are not yet sorted by divisor.
+
+`parabola.py`, as appended:
+
+```python
+"""Write 464.23's five scripts, s1.g to s5.g, their controls and the probes
+that show how far the chain reaches. Each script is the same chain, the scalars
+of the parabola a plane along a ruling cuts a cone in, over one range of the
+slope t; the ranges are cut where the share G is taken over a different length
+and where Gappa needs a finer split. Each control changes one thing in one
+script and must fail. Each probe asks for G's range, with no goal, on a short
+stretch of t."""
+
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+HEAD = """# restates: crates/rcad-geom/src/walk.rs POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF at 7485253e
+# restates: crates/rcad-geom/src/walk.rs where_a_plane_cuts_a_cone at 7485253e
+# restates: crates/rcad-geom/src/walk.rs the_parabola_a_plane_along_a_ruling_cuts at 7485253e
+# restates: Cargo.lock nalgebra at 7485253e
+# The scalars of the parabola a plane along a ruling cuts a cone in, as
+# where_a_plane_cuts_a_cone and the_parabola_a_plane_along_a_ruling_cuts work
+# them out in f64, against the same scalars without rounding, whose names end
+# in S. hs is the apex's true height over the plane, nN and wW the true lengths
+# of the plane's normal n and of the cone's axis w, t the cone's slope. R, Nn,
+# Ww and U are the exact sums walk.rs rounds once each. Bw is the f64 dot of
+# the computed `and` with w, and Bws the true one, -|w| / sqrt(1 + t^2) on a
+# parabola. G is what the scalars put into the point at s = r * KS along `and`,
+# over |KS| or over |offS|; q is the foot's quotient.
+"""
+
+CHAIN = """@rnd = float<ieee_64, ne>;
+
+t = rnd(t_);
+Bw = rnd(Bw_);
+
+Ts = 1 + t * t;
+As = t / sqrt(Ts);
+Bs = -1 / sqrt(Ts);
+
+R = hs * nN;
+Nn = nN * nN;
+Ww = wW * wW;
+U = As * (nN * wW);
+Bws = Bs * wW;
+
+reach = rnd(R); sqn = rnd(Nn); sqw = rnd(Ww); up = rnd(U);
+q = rnd(reach / sqn);
+nl = rnd(sqrt(sqn)); wl = rnd(sqrt(sqw));
+h = rnd(reach / nl);
+nw = rnd(nl * wl);
+au = rnd(up / nw);
+bu = rnd(Bw / wl);
+tt = rnd(t * t);
+t2 = rnd(1 + tt);
+k1 = rnd(2 * t2);
+k2 = rnd(k1 * h);
+k3 = rnd(k2 * au);
+K = rnd(k3 * bu);
+hh = rnd(h * h);
+c1 = rnd(t2 * au);
+c2 = rnd(c1 * au);
+br = rnd(1 - c2);
+C = rnd(hh * br);
+off = rnd(C / K);
+mrk = rnd(1 / K);
+
+qS = R / Nn;
+nlS = sqrt(Nn); wlS = sqrt(Ww);
+hS = R / nlS;
+nwS = nlS * wlS;
+auS = U / nwS;
+buS = Bws / wlS;
+t2S = 1 + t * t;
+k1S = 2 * t2S;
+k2S = k1S * hS;
+k3S = k2S * auS;
+KS = k3S * buS;
+hhS = hS * hS;
+c1S = t2S * auS;
+c2S = c1S * auS;
+brS = 1 - c2S;
+CS = hhS * brS;
+offS = CS / KS;
+m = mrk * KS;
+"""
+
+# t at least 7/16: G is the scalars' share along `and` over |KS|.
+BIG = """G = (off - offS) / KS + r * r * (m - 1);
+"""
+
+# t at most 7/16: the same share over |offS|, which is the larger there.
+SMALL = """G = (off - offS) / offS + r * r * ((4 * t * t) / (1 - t * t)) * (m - 1);
+"""
+
+T = "  /\\ t in [TLO, THI]\n"
+BW = "  /\\ (Bw - Bws) / wW in [-15b-54, 15b-54]\n"
+RS = "  /\\ r in [-1099511627777b-40, 1099511627777b-40]\n"
+GOAL = "  |G| <= 84b-53 /\\ |(q - qS) / qS| <= 25b-56 /\\ |(K - KS) / KS| <= 1b-44\n"
+
+HYP = """
+{
+     hs in [1, 2]
+  /\\ nN in [1, 2] /\\ wW in [1, 2]
+""" + T + BW + RS + """->
+""" + GOAL + """}
+
+reach ~ R; sqn ~ Nn; sqw ~ Ww; up ~ U; Bw ~ Bws; q ~ qS;
+nl ~ nlS; wl ~ wlS; h ~ hS; nw ~ nwS; au ~ auS; bu ~ buS;
+tt ~ t * t; t2 ~ t2S; k1 ~ k1S; k2 ~ k2S; k3 ~ k3S; K ~ KS;
+hh ~ hhS; c1 ~ c1S; c2 ~ c2S;
+
+hS -> hs;
+auS -> As;
+buS -> Bs;
+c2S -> t * t;
+KS -> -2 * hs * t;
+
+(C - CS) / hhS -> ((C - hh * br) / (hh * br)) * ((hh * br) / hhS) + ((hh - hhS) / hhS) * br + (br - brS);
+br - brS -> (br - (1 - c2)) - (c2 - c2S);
+c2 - c2S -> ((c2 - c2S) / c2S) * (t * t);
+m - 1 -> ((mrk - 1 / K) / (1 / K)) * (KS / K) - (K - KS) / K;
+KS / K -> 1 / (1 + (K - KS) / KS);
+(K - KS) / K -> ((K - KS) / KS) / (1 + (K - KS) / KS);
+"""
+
+BIG_HINTS = """G -> (off - C / K) / KS + (C - CS) / (K * KS) + r * r * (((mrk - 1 / K) / (1 / K)) * (KS / K))
+     - ((1 - t * t) / (4 * t * t) + r * r) * ((K - KS) / K);
+(off - C / K) / KS -> ((off - C / K) / (C / K)) * ((C / K) / KS);
+(C / K) / KS -> (C - CS) / (K * KS) + ((1 - t * t) / (4 * t * t)) * (KS / K);
+(C - CS) / (K * KS) -> ((C - CS) / hhS) * ((KS / K) / (4 * t * t));
+"""
+
+SMALL_HINTS = """G -> ((off - C / K) / (C / K)) * (1 + (C - CS) / CS) * (KS / K) + ((C - CS) / CS) * (KS / K)
+     + r * r * ((4 * t * t) / (1 - t * t)) * (((mrk - 1 / K) / (1 / K)) * (KS / K))
+     - (1 + r * r * ((4 * t * t) / (1 - t * t))) * ((K - KS) / K);
+(C - CS) / CS -> ((C - hh * br) / (hh * br)) * (1 + (hh - hhS) / hhS) * (1 + (br - brS) / brS)
+     + ((hh - hhS) / hhS) * (1 + (br - brS) / brS) + (br - brS) / brS;
+(br - brS) / brS -> ((br - (1 - c2)) / (1 - c2)) * (1 - ((c2 - c2S) / c2S) * ((t * t) / (1 - t * t)))
+     - ((c2 - c2S) / c2S) * ((t * t) / (1 - t * t));
+"""
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+def script(lo, hi, small, split):
+    body, hints = (SMALL, SMALL_HINTS) if small else (BIG, BIG_HINTS)
+    text = HEAD + CHAIN + body + HYP + hints
+    text = sub(text, "TLO", lo)
+    text = sub(text, "THI", hi)
+    return text + ("\n$ t in " + split + ";\n" if split else "")
+
+
+def write(name, text):
+    open(name, "w").write(text)
+
+
+SCRIPTS = {
+    "s1.g": script("1b-500", "0.25", True, None),
+    "s2.g": script("0.25", "0.4375", True, "16"),
+    "s3.g": script("0.4375", "1", False, "32"),
+    "s4.g": script("1", "2", False, "8"),
+    "s5.g": script("2", "5", False, "8"),
+}
+for name, text in SCRIPTS.items():
+    write(name, text)
+
+# The controls. A goal under what each shape reaches, to see that the
+# hypotheses do not contradict each other; then a hypothesis dropped or
+# widened, to see that the proof needs it.
+G84 = "|G| <= 84b-53"
+write("c_s1_40.g", sub(SCRIPTS["s1.g"], G84, "|G| <= 40b-53"))
+write("c_s4_40.g", sub(SCRIPTS["s4.g"], G84, "|G| <= 40b-53"))
+write("c_s1_nobw.g", sub(SCRIPTS["s1.g"], BW, ""))
+write("c_s1_nor.g", sub(SCRIPTS["s1.g"], RS, ""))
+write("c_s5_to8.g", sub(SCRIPTS["s5.g"], "t in [2, 5]", "t in [2, 8]"))
+
+# The probes: G with no goal, no split, on a short stretch of t.
+PROBE_GOAL = "  G in ?\n"
+write("p_s1.g", sub(SCRIPTS["s1.g"], GOAL, PROBE_GOAL))
+write("p_s4.g", sub(SCRIPTS["s4.g"], GOAL, PROBE_GOAL))
+for name, lo, hi, small in (
+    ("p_7_16_below.g", "0.4296875", "0.4375", True),
+    ("p_7_16_above.g", "0.4375", "0.4453125", False),
+    ("p_5.g", "4.96875", "5", False),
+    ("p_8.g", "7.9375", "8", False),
+    ("p_16.g", "15.875", "16", False),
+    ("p_32.g", "31.75", "32", False),
+):
+    write(name, sub(script(lo, hi, small, None), GOAL, PROBE_GOAL))
+```
+
+`ids.py`, as it ran:
+
+```python
+"""Check that each hint Gappa could not prove by itself is an identity once the
+square roots are taken: sqrt(nN * nN) = nN and sqrt(wW * wW) = wW, since both
+lengths are positive, and sqrt(1 + t * t) is S. For each "not trivially
+equal" warning in each script's .out, the Difference Gappa prints is worked
+out in exact rationals at twenty points with t = (a^2 - b^2) / (2ab), so that
+S = (a^2 + b^2) / (2ab) is rational too, and every other name a random
+rational. A difference that is not zero as a rational function is zero at
+such a point only by an accident of its numerator, which the twenty points
+make vanishingly unlikely; this is a check, not a proof.
+Run as: python3 ids.py s1.out s2.out s3.out s4.out s5.out"""
+import random
+import re
+import sys
+from fractions import Fraction
+
+random.seed(2693)
+WARNING = re.compile(r"Warning: (.*?) and (.*?) are not trivially equal\.\n\s*Difference: (.*)")
+
+
+class Point(dict):
+    def __missing__(self, name):
+        value = Fraction(random.randint(1, 10**12), random.randint(1, 10**12))
+        self[name] = value
+        return value
+
+
+def at_a_point(expr):
+    a, b = random.randint(2, 10**9), random.randint(1, 10**9)
+    if a <= b:
+        a, b = b + 1, a
+    point = Point()
+    point["t"] = Fraction(a * a - b * b, 2 * a * b)
+    point["S"] = Fraction(a * a + b * b, 2 * a * b)
+    assert point["S"] ** 2 == 1 + point["t"] ** 2 and point["S"] > 0
+    point["nN"] = point["nlS"] = Fraction(random.randint(1, 10**12), random.randint(1, 10**12))
+    point["wW"] = point["wlS"] = Fraction(random.randint(1, 10**12), random.randint(1, 10**12))
+    return eval(expr, {"__builtins__": {}}, point)
+
+
+for out in sys.argv[1:]:
+    found = WARNING.findall(open(out).read())
+    nonzero = []
+    for left, right, difference in found:
+        expr = difference.replace("sqrt(1 + t * t)", "S").replace("^", "**")
+        assert "sqrt" not in expr, expr
+        if any(at_a_point(expr) != 0 for _ in range(20)):
+            nonzero.append(left)
+    print(out, len(found), "hints not trivially equal,", len(found) - len(nonzero),
+          "of them zero at all twenty points", nonzero if nonzero else "")
+```
+
+**Still to do**, in order:
+
+1. `all.sh` brought in line with `parabola.py`'s controls, and run once more.
+   Each failing control takes minutes, and `c_s1_40` ran to the 600 s limit,
+   so a goal control on the small shape still needs a quicker form or a longer
+   limit.
+2. `same.py`, on 464.22's model.
+3. This subsection written again on 464.22's model, as one proof: what it
+   guards; the scripts and their cut; the hand decomposition, each term with
+   its norm (the third lane's paragraph); the hypotheses; the controls; Coq;
+   the scripts; what this leaves.
+4. The rows: restate `walk.rs:144-146` and the per-term count; a kernel probe
+   of the parabola at slopes past 6; a probe of a run whose ends lie past
+   `|K|`; a probe of `|h|` below `2⁻⁵¹¹`, and of an exact `leaning` that is
+   not zero but rounds to it; a proof or a probe of `two_directions_in`'s
+   error against the true directions, whose cross product has length
+   `1/√(1 + t²)` on a parabola.
