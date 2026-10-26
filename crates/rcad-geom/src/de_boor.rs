@@ -42,39 +42,57 @@ use crate::{Error, Result};
 ///
 /// Write `u = f64::EPSILON / 2` for the unit roundoff — half an ulp of 1, and
 /// so the most a single rounding costs in relative terms. One stage replaces
-/// `d[j]` by `(1 − a)·d[j−1] + a·d[j]`, where
-/// `a = (x − knots[left]) / (knots[right] − knots[left])` and `a` is in `[0, 1]`.
+/// `d[j]` by `b·d[j−1] + a·d[j]`, where
+/// `a = (x − knots[left]) / (knots[right] − knots[left])` is in `[0, 1]` and
+/// `b = 1 − a`. Computed, that is seven roundings: the two subtractions, the
+/// divide, `1 − a`, the two products and the sum.
 ///
-/// - `a` costs three roundings: the two subtractions and the divide. Its
-///   operands are stored numbers, so each subtraction is exactly `(1 + δ)`
-///   times the truth, and `|a_computed − a| ≤ 3u·a ≤ 3u`.
-/// - `1 − a` inherits that error and adds one rounding of its own, so
-///   `|b_computed − b| ≤ 4u`.
-/// - The two products and the sum are three more roundings, worth `2u` on the
-///   two products' magnitudes plus `u` on the sum — `(1 + u)² − 1 ≤ 2u + u²`
-///   applied to a total that is at most `(a + b)` times the largest running
-///   value.
+/// Write `t[j]` for what `d[j]` would hold had nothing rounded, and `E` for how
+/// far the `d` are from the `t`. Each `t` is an average of control
+/// coordinates, so `M` bounds it. A stage's result is off by the errors handed
+/// in, carried through, plus what the stage rounds itself. The errors handed
+/// in arrive weighted by the computed `b` and `a`, which sum to one or to
+/// within `u/2` of it, so they cost at most `(1 + 9u)·E`. What the stage
+/// rounds comes to `8.5u·M`, and a hair that grows with `E`:
 ///
-/// The naive reading of that list is seven roundings per stage. **It is nine.**
-/// The coefficient errors do not travel down one chain; both of them are
-/// charged at full size against the running values, because `|δa|·|d[j]|` does
-/// not shrink when `a` is small. Adding them up: `4u` for `b`, `3u` for `a`,
-/// `2u` for the three arithmetic roundings, so
-/// `E_r ≤ E_{r−1}·(1 + 9u) + 9u·M`, and after `p` stages
-/// `E_p ≤ M·((1 + 9u)^p − 1)`.
+/// - The computed `a` is within `2.5u` of `a`, and within `3u` where it comes
+///   out as exactly one. The two subtractions cost about `2u·a`, and the divide
+///   rounds a quotient below one by at most `u/2`.
+/// - The two coefficient errors are one error. The computed `b` is one less
+///   the computed `a`, plus a rounding of its own, so together the two enter as
+///   `δa·(t[j] − t[j−1]) + δb·t[j−1]`, with `δb` that one rounding. Two `t`
+///   differ by at most `2M`, so the first term is `5u·M`. The second is zero
+///   when the computed `a` is at least one half, where taking it from one is
+///   exact by Sterbenz's lemma, and at most `u/2·M` below that.
+/// - The two products and the sum are `u`, `u` and `1.5u`, each rounding
+///   bounded on its own: `3.5u`.
 ///
-/// With `p` capped at [`MAX_DEGREE`] that is 15 stages and 135 roundings.
-/// Using `(1 + x)^p − 1 ≤ p·x + p²·x²` with `x = 9u`, the constant is
-/// `135u + (9·15)²·u² = 135u + 18225u²`.
+/// With the computed `a` at one half or more that is `5u + 0 + 3.5u = 8.5u`.
+/// Below one half those three bounds, each taken at its worst over the whole
+/// range, add to `9u`, but the bound on their sum is still `8.5u`. Where the
+/// computed `a` is zero or one the two products are exact, and what the stage
+/// rounds is at most `u` and `7u`. So `E_r ≤ E_{r−1}·(1 + 9u) + 9u·M`, with
+/// `0.5u` to spare, and after `p` stages `E_p ≤ M·((1 + 9u)^p − 1)`.
+///
+/// Gappa proves that one-stage recurrence as the code computes it, second-order
+/// terms and all, for every `E` up to `2⁻⁴⁰ M` (`docs/decisions.md` §464.22).
+/// That is every stage there is: while the stages before it hold the
+/// recurrence, `E` is at most this constant times `M`, which is under
+/// `2⁻⁴⁵ M`. The sum over the stages is the induction above, by hand; §464.22
+/// does not reach it.
+///
+/// With `p` capped at [`MAX_DEGREE`] that is 15 stages at `9u` each: `135u`,
+/// the constant's `roundings`, which counts units of `u` rather than
+/// operations. Using `(1 + x)^p − 1 ≤ p·x + p²·x²` with `x = 9u`, the constant
+/// is `135u + (9·15)²·u² = 135u + 18225u²`.
 ///
 /// The binomial's own second-order term is only `C(15,2)·9² = 8505`, so 18225
-/// leaves better than a factor of two spare. It is spent on two real things:
-/// the second-order terms dropped from the per-stage argument above, worth
-/// another 165 or so; and the fact that `f64` cannot write `135u + 8670u²`
-/// down that precisely — the second term is worth about 78 ulps of the first,
-/// so the sum's own rounding costs more than a percent of it. A bound that its
-/// own arithmetic rounded below the truth is not a bound. This is the slack
-/// `SIDE_OF_SPHERE_ERROR_BOUND`'s 48-over-15 leaves, for the same reason.
+/// leaves better than a factor of two over it, and the count above drops no
+/// term for the difference to pay for. The constant's own arithmetic takes
+/// little of it. `f64` cannot write `135u + 18225u²` down exactly, and the
+/// sum's one rounding can move it by half an ulp of `135u`, which is `128u²`. A
+/// bound that its own arithmetic rounded below the truth is not a bound, and
+/// 18225 less 128 is still more than twice 8505.
 ///
 /// A surface is two passes, `v` then `u`, so it needs
 /// [`after_two_passes`] instead.
@@ -93,7 +111,7 @@ use crate::{Error, Result};
 ///    level-1 filters.
 /// 2. The weight the divide is by. Same function, same `None`.
 /// 3. **The knots.** `a` is `(x − knots[left]) / (knots[right] − knots[left])`,
-///    and the claim that it lands in `[0, 1]` with a relative error of `3u`
+///    and the claim that it lands in `[0, 1]` within `3u` of the truth
 ///    fails outright if either subtraction overflows: the coefficient comes out
 ///    as zero, every stage collapses to the control point below it, and the
 ///    bound goes on certifying the answer. Nothing at evaluation time can see
