@@ -526,9 +526,17 @@ impl SolidView<'_> {
             let crossed = a_flat_face_whose_bent_sides_crossed(self, &why);
             if let Some(face) = crossed {
                 let rungs = walked_again.entry(face.key()).or_default();
-                if *rungs < RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER {
+                if *rungs < 2 * RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER {
                     *rungs += 1;
-                    building = building.again_with_its_bent_sides_walked_finer(face);
+                    building = match *rungs {
+                        rung if rung <= RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER => {
+                            building.again_with_its_bent_sides_walked_finer(face)
+                        }
+                        rung if rung == RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER + 1 => building
+                            .with_its_sides_walked_as_asked(face)
+                            .again_with_its_outline_walked_finer(face),
+                        _ => building.again_with_its_outline_walked_finer(face),
+                    };
                     finest_crossing = Some((why, said));
                     continue;
                 }
@@ -913,12 +921,37 @@ impl BuildingAMesh {
     /// rung or two already step under a quarter turn.
     ///
     /// An edge one face uses twice, as a seam, is halved once.
-    fn again_with_its_bent_sides_walked_finer(mut self, face: FaceView<'_>) -> Self {
+    fn again_with_its_bent_sides_walked_finer(self, face: FaceView<'_>) -> Self {
+        self.again_with_the_bent_sides_of_walked_finer(face, face.wires())
+    }
+
+    /// [`Self::again_with_its_bent_sides_walked_finer`] for the sides of
+    /// `face`'s outline alone, its first wire, with its holes left at the room
+    /// they were walked at.
+    fn again_with_its_outline_walked_finer(self, face: FaceView<'_>) -> Self {
+        self.again_with_the_bent_sides_of_walked_finer(face, face.wires().take(1))
+    }
+
+    /// This building with every side of `face` back at the room the mesh was
+    /// asked for, as on the first pass.
+    fn with_its_sides_walked_as_asked(mut self, face: FaceView<'_>) -> Self {
+        for coedge in face.wires().flat_map(WireView::coedges) {
+            self.walked_finer.remove(&coedge.edge().key());
+        }
+        self
+    }
+
+    /// A building started over, with each side of `wires`, the wires of `face`,
+    /// that bends walked as [`Self::again_with_its_bent_sides_walked_finer`]
+    /// says.
+    fn again_with_the_bent_sides_of_walked_finer<'f>(
+        mut self,
+        face: FaceView<'f>,
+        wires: impl Iterator<Item = WireView<'f>>,
+    ) -> Self {
         let top = self.half_the_widest_its_walked_boundary_reaches(face);
         let mut walked_finer = core::mem::take(&mut self.walked_finer);
-        let halved: HashMap<EdgeKey, f64> = face
-            .wires()
-            .take(1)
+        let halved: HashMap<EdgeKey, f64> = wires
             .flat_map(WireView::coedges)
             .map(|coedge| coedge.edge())
             .filter(|edge| *edge.stored_run() != EdgeRun::Straight)
