@@ -966,6 +966,39 @@ fn two_cones_of_one_slope_a_quarter_turn_apart_touch_unless_each_apex_is_inside_
     );
 }
 
+/// Two cones of slope one side by side, the second on `(1, 0, 0)` with its
+/// axis along `z` or along `-z`, which is the same cone. They are mirror
+/// images across `x = 1/2`, halfway between their apexes, and each apex is
+/// outside the other cone, but they do not touch: their forms differ by
+/// `2x − 1` alone, so they cross in one hyperbola in `x = 1/2`, where the two
+/// normals `(1/2, y, −z)` and `(−1/2, y, −z)` are never one direction. The
+/// flat surface `x = 0` through the first apex, where a mirror pair touches,
+/// never meets `x = 1/2`.
+///
+/// The pair is refused as any other overlap is, by the namer and by the
+/// walker, and not as a crossing that touches itself.
+#[test]
+fn two_cones_of_one_slope_side_by_side_cross_in_one_hyperbola_and_do_not_touch() {
+    let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("a whole loop needs nothing picking it");
+    let one = a_cone([0.0; 3], [0.0, 0.0, 1.0], 1.0);
+    for other in [
+        a_cone([1.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0),
+        a_cone([1.0, 0.0, 0.0], [0.0, 0.0, -1.0], 1.0),
+    ] {
+        for along in [[&one, &other], [&other, &one]] {
+            assert_eq!(
+                named(along[0], along[1]),
+                Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+            );
+            assert_eq!(
+                where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new()).err(),
+                Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+            );
+        }
+    }
+}
+
 /// Two pairs of cones of one slope, the second of each the first turned about
 /// a line through a point of the first's axis, whose second axis is rounded
 /// when it is written or stored.
