@@ -18854,20 +18854,136 @@ no best for (y - Ex) / eb: []
 
 ### 464.28 The side of rcad-geom's cylinder with a zero factor
 
-DRAFT, not run (Q2771, relay 1 of 3, handed over at its budget). This
-subsection is unfinished: no script below has been through Gappa yet, so
-nothing here is a result. What is here is the generator for the 82 cases of
-`cyl.g` (464.15) where a difference or a direction component is zero, so that
-the lane after this one starts from it. `python3 cylzero.py` printed `cases
-written: 82` in the scratchpad and wrote 82 scripts and 82 controls;
-`cylz_dxdy.g`, the axis-aligned cylinder `d = (0, 0, dz)`, was read by eye and
-its hint identities checked on paper. A zero radius does not reach
-`on_floats`: `Cylinder::new` refuses it (`a_pipe_with_no_radius_is_not_a_pipe`,
-`cylinder.rs:633`), `Deserialize` goes through `TryFrom`, which calls `new`
-(`cylinder.rs:607-613`), `transformed` copies the radius (`cylinder.rs:74-79`),
-and the field is private.
+Q2771 ran 464.15's `cyl.g` where a difference or a direction component is
+zero, in two lanes on 2026-10-27, at `cc9adf3f`. The first wrote
+`cylzero.py`; its relay ran it and wrote this. The bound is proved on `y`, the
+sum before `value`'s last rounding, at the code's constant in each of the 82
+cases, and Coq checks each proof, modulo its hints. Each control at `u / 2`
+fails. A zero radius, and a direction with all three components zero, do not
+reach `on_floats`. So with 464.15 every pattern of zero and nonzero factors
+that reaches `on_floats` is run, and the bound holds on `y` in each. The doc
+comment on the constant still says these branches have not been run, which is
+a row (6).
 
-`cylzero.py`, whole, as drafted:
+**1. Which zeros get through.** `product_is_normal(a, b)` is `a == 0.0 || b
+== 0.0 || (a * b).abs() >= f64::MIN_POSITIVE` (`cascade.rs:67` at
+`cc9adf3f`). So `on_floats` lets a zero factor through every check it makes:
+the six halves in `cross_product_halves_if_normal`, and the components, the
+direction components and the radius in `stays_accurate`. A half whose two
+factors are not zero is normal, which the check enforces, so a half is zero
+exactly when one of its factors is. Of the seven factors:
+
+- A difference `f = rnd(p − o)` is zero exactly when `p` and `o` are the same
+  double, as 464.11's `diffzero.g` writes it, so its true value is zero too.
+  A half with it as a factor is exactly zero, and so is its true product.
+- A direction component is zero when the axis is written so, as the
+  axis-aligned cylinder `d = (0, 0, dz)` is.
+- All three direction components at once do not reach `on_floats`. The doc on
+  `Cylinder::basis` (`cylinder.rs:95-117`) names each route a `Cylinder` gets
+  its axis by, and the tests that show none of them gives a zero direction.
+- The radius does not reach it at zero either. `Cylinder::new` refuses a
+  radius that is not above zero (`cylinder.rs:53-55`), which
+  `a_pipe_with_no_radius_is_not_a_pipe` (`cylinder.rs:633`) checks.
+  `Deserialize` goes through `TryFrom`, which calls `new`
+  (`cylinder.rs:607-613`), `transformed` copies the radius
+  (`cylinder.rs:74-79`), and the field is private.
+
+**2. The cases.** Each zero factor zeroes one half in each of two components:
+`fx` the right half of `y` and the left half of `z`, `dx` the left half of `y`
+and the right half of `z`, and so on round. Each component is then one of:
+
+- `h`: its right half is zero. `q = h` exactly, its square `s = rnd(h²)` is
+  normal, which `stays_accurate` checks, and its reach is `|h|`, so its reach
+  square is `s` again.
+- `k`: its left half is zero, and the same with `q = −k`.
+- `0`: both halves are zero. `q`, `s` and its reach square are zero, its true
+  square is zero, and it drops out of `y`, `P` and the error.
+- `n`, `c`, `s` or `u`: both halves are live, in 464.15's four states (464.15's
+  6).
+
+`x` keeps both halves only when the zeros are among `fx` and `dx`, and the
+same for `y` and `z`, so with any factor zero at most one component keeps
+both. Of the 63 sets of zero factors, the 8 that hold all three direction
+components are left out (1), which leaves 55. In 9 of them, `{fa}`, `{da}`
+and `{fa, da}` for each axis `a`, one component keeps both halves and takes
+the four states, which makes 36 cases. The other 46 are one case each. That is
+82, written `cylz_<zeros>[_<state>].g`, each with a control
+`c_cylz_<zeros>[_<state>]_half.g` at `B = 1b-54;`. In 10 of them every half is
+zero, so `y` is `−skin` and `P` is `skin`. The axis-aligned cylinder
+`d = (0, 0, dz)` is `cylz_dxdy.g`: `x` is `h`, `y` is `k` and `z` is `0`.
+
+How `cylzero.py` (7) writes a zero: a zero difference as `ox = px;` with
+`fx = Fx;` unrounded, and a zero direction component as `dx = 0;`. A half with
+a zero factor is its unrounded product, and a sum with a zero term is written
+without it, since each of those rounds to itself (464.11's `refl.g`). A
+one-half reach is `nx = |hx|;`, and its block is one piece, with
+`eHx / P3x -> (hx / |hx|) * (hx / |hx|) * WHx`. The hints' equalities lean on
+Gappa expanding each name, as 464.14's `skincases.py` does, so `pz − pz` and
+`dx = 0` give zero there. No run printed "not trivially equal".
+
+**3. What they print.** `runz.sh` (7) ran the 82 cases with `gappa -Bcoq`
+and `coqc`, and their 82 controls, all at once. `start.sh` (7) started it,
+and `uptime` read a load average of 131 over 24 cores during it. `tallyz.py`
+(7) counts them:
+
+- Each of the 82 exits 0 at the code's `B`, in 7.69 s (`cylz_fxfyfzdxdz`) to
+  94.36 s (`cylz_fz_n`).
+- `(y − Ex) / P12` is within `9.99201e-16`, `9u`, in 4 cases: `cylz_fx_n`,
+  `cylz_fy_n`, `cylz_dx_n` and `cylz_dy_n`. It is within `8u` in 2
+  (`cylz_fz_n` and `cylz_dz_n`), `7u` in 9, `6u` in 30, `5u` in 19, `4u` in
+  12 and `3u` in 6. None is above `cyl.g`'s `9u`.
+- `P −/ Phat`, or `P −/ Phatx` where a reach square is `s` or `u`, is within
+  `6u` in 4 cases, `5u` in 2, `4u` in 21, `3u` in 18, `2u` in 21 and `u` in 3.
+  In the other 13, the 10 of 2 and the three `u` cases with only one component
+  live, `P` is `skin`, and Gappa prints `skin` against itself in `[0, 0]`.
+- `coqc` accepts all 82: 2063 lines with 10 hints (`cylz_fxfyfzdxdy`) to 10699
+  lines with 39 hints (`cylz_fz_n`), in 27.88 to 74.2 s each.
+- No `.out`, `.bcoq` or `.coqc` of the 82 has a line other than its results
+  and "assumed to be nonzero" warnings.
+
+Gappa does not write the same proof each run (464.4), so the sizes are this
+run's. Each proof stands on its hints and on what Gappa took to be nonzero, as
+464.15's 8 says of its own.
+
+**4. The controls.** At `B = 1b-54;`, `u / 2`, each of the 82 must fail, and
+each exits 1. Gappa's best for a goal it does not prove can change from one
+run to the next (464.26), so these are this run's figures, each a bound Gappa
+found on the size of `(y − Ex) / eb` and not an exact value: `[-18, 18]` in 4
+controls, `[-16, 16]` in 2, `[-14, 14]` in 9, `[-12, 12]` in 30, `[-10, 10]`
+in 19, `[-8, 8]` in 12 and `[-6, 6]` in 6. Each is its case's own bound on
+`y` over `u / 2`. So none of the 82 proofs came from a contradiction in its
+hypotheses.
+
+**5. The shapes.** None of these cases was run as Rust input. By hand
+arithmetic, not run: with the axis origin at 0, the direction `(0, 0, 1)` and
+the point `(3, 4, 5)`, the differences are `(3, 4, 5)` and the halves `(4,
+0)`, `(0, 3)` and `(0, 0)`, so that is `cylz_dxdy`. The point `(0, 4, 5)`
+adds `fx`, and is `cylz_fxdxdy`. Both are shapes a designer makes. Every case
+proves, so there is no wrong sign to look for.
+
+**6. What this leaves.**
+
+- A row: the doc on `SIDE_OF_CYLINDER_ERROR_BOUND` (`cylinder.rs:574-575`)
+  says "Neither proof covers a zero difference, direction component or radius,
+  which have not been run." By 1 to 3 the first two are run and prove, and
+  the third does not reach `on_floats`. It is a comment that claims less than
+  is proved, not a wrong answer.
+- Not a row: Q2700 moves into `proofs/gappa/` each script a row of 464
+  appended, and this section's are among them. Q2773 runs `cylsplit.py` with
+  the checked products below the normals, which this section does not.
+
+**7. The scripts.** One change was made to the generator the first lane
+committed. It wrote an empty hypothesis line where every half is zero, and
+Gappa refused `cylz_fxfyfz.g` with "syntax error, unexpected AND"; below,
+`make()` writes no line there. A trial before the run, with each case under
+`one1.sh` at `T=60`, 16 at once, found nothing else: each of the 82 exited 0
+and printed no warning. To run them again, save `cylzero.py`, `runz.sh` and
+`start.sh` beside 464.13's `one.sh` and 464.15's `one1.sh`, and run
+`./start.sh`; it writes `runz.txt`, which ends `done`, and `python3
+tallyz.py` counts it. `samez.py` checks that each block here is the file that
+ran.
+
+`cylzero.py`, whole:
 
 ```python
 """Write cyl.g's cases where a difference or a direction component is zero,
@@ -19204,8 +19320,9 @@ def make(zero, state, b=B_CODE):
         "  # (cross_product_halves_if_normal), and on the components, the direction",
         "  # components and the radius that are not zero, and the radius term",
         "  # (stays_accurate).",
-        "  /\\ " + lines([" /\\ ".join(halves[i:i + 3]) for i in range(0, len(halves), 3)]),
     ]
+    if halves:
+        src.append("  /\\ " + lines([" /\\ ".join(halves[i:i + 3]) for i in range(0, len(halves), 3)]))
     if sq:
         src.append("  /\\ " + " /\\ ".join(f"|s{a}| >= 1b-1022" for a in sq))
     src += [
@@ -19367,3 +19484,199 @@ for mask in itertools.product((False, True), repeat=6):
         count += 1
 print("cases written:", count)
 ```
+
+`runz.sh`, whole:
+
+```sh
+#!/bin/bash
+# cylzero.py's 82 cases, each with gappa -Bcoq and coqc when it proves, and
+# their 82 controls at u/2, all at once.
+cd "$(dirname "$0")"
+python3 cylzero.py
+{
+  for f in cylz_*.g; do
+    ./one.sh "$f" coq &
+  done
+  for f in c_cylz_*_half.g; do
+    ./one1.sh "$f" &
+  done
+  wait
+} > runz.txt 2>&1
+echo done >> runz.txt
+```
+
+`start.sh`, whole, which a lane runs in the foreground and then waits on the
+pid it prints:
+
+```sh
+#!/bin/bash
+# Start runz.sh detached in its own process group and print its pid.
+cd "$(dirname "$0")"
+setsid nohup ./runz.sh > runz.nohup 2>&1 &
+echo $!
+```
+
+`tallyz.py`, whole:
+
+```python
+"""Tally runz.txt and the .out files of cylzero.py's 82 cases: for each case
+its exit, the relative bound on y and on P that it prints, and its coqc line;
+for each control its exit and best. Prints one line per case, then counts.
+Run as: python3 tallyz.py"""
+import collections
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+run = open("runz.txt").read()
+cases = sorted(f[:-2] for f in os.listdir(".") if f.startswith("cylz_") and f.endswith(".g"))
+
+
+def short(out, goal):
+    m = re.search(r"^  " + goal + r" in \[[^{]*\{([^,]*),[^}]*\}, [^{]*\{([^,]*),", out, re.M)
+    return f"[{m.group(1)}, {m.group(2)}]" if m else "-"
+
+
+ybounds = collections.Counter()
+pbounds = collections.Counter()
+bests = collections.Counter()
+coq = []
+times = []
+for c in cases:
+    out = open(f"{c}.out").read()
+    ex = re.search(rf"^{c} exit (\d+) ([\d.]+)s$", run, re.M)
+    cq = re.search(rf"^{c} coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$", run, re.M)
+    ctl = re.search(rf"^c_{c}_half exit (\d+) ([\d.]+)s$", run, re.M)
+    cout = open(f"c_{c}_half.out").read() if os.path.exists(f"c_{c}_half.out") else ""
+    best = re.search(r"best: (\[[^\]]*\])", cout)
+    y = short(out, r"\(y - Ex\) / .*?")
+    p = short(out, r"P -/ Phatx?")
+    ybounds[y] += 1
+    pbounds[p] += 1
+    bests[best.group(1) if best else "-"] += 1
+    if ex:
+        times.append((float(ex.group(2)), c))
+    if cq:
+        coq.append((int(cq.group(4)), int(cq.group(5)), c, cq.group(1), cq.group(2), float(cq.group(3))))
+    print(c, "exit", ex.group(1) if ex else "?", ex.group(2) if ex else "", "y", y, "P", p,
+          "coq", cq.groups() if cq else "-", "ctl", ctl.group(1) if ctl else "?", best.group(1) if best else "-")
+print("y bounds", dict(ybounds))
+print("P bounds", dict(pbounds))
+print("control bests", dict(bests))
+print("cases exit 0:", len(re.findall(r"^cylz_\w+ exit 0 ", run, re.M)), "of", len(cases))
+print("controls exit 1:", len(re.findall(r"^c_cylz_\w+_half exit 1 ", run, re.M)), "of", len(cases))
+times.sort()
+print("case times", times[0], times[-1])
+print("coq ok:", sum(1 for x in coq if x[3] == "0" and x[4] == "0"), "of", len(coq))
+if coq:
+    coq.sort()
+    print("coq smallest", coq[0][:3], "largest", coq[-1][:3], "times", min(x[5] for x in coq), max(x[5] for x in coq))
+
+
+def other_lines(f):
+    return [line for line in open(f).read().split("\n")
+            if line and "assumed to be nonzero" not in line and not line.startswith(("Results:", "  "))]
+
+
+warn = [f for f in os.listdir(".") if f.startswith("cylz_") and f.endswith((".out", ".bcoq", ".coqc"))
+        and other_lines(f)]
+print("files with a line other than results and 'assumed to be nonzero':", sorted(warn))
+```
+
+After its line for each case, `python3 tallyz.py` prints:
+
+```text
+y bounds {'[-6.66134e-16, 6.66134e-16]': 30, '[-9.99201e-16, 9.99201e-16]': 4, '[-8.88178e-16, 8.88178e-16]': 2, '[-4.44089e-16, 4.44089e-16]': 12, '[-7.77156e-16, 7.77156e-16]': 9, '[-5.55112e-16, 5.55112e-16]': 19, '[-3.33067e-16, 3.33067e-16]': 6}
+P bounds {'[-4.44089e-16, 4.44089e-16]': 21, '[-6.66134e-16, 6.66134e-16]': 4, '[-3.33067e-16, 3.33067e-16]': 18, '[-5.55112e-16, 5.55112e-16]': 2, '[-2.22045e-16, 2.22045e-16]': 21, '[-1.11022e-16, 1.11022e-16]': 3, '-': 13}
+control bests {'[-12, 12]': 30, '[-18, 18]': 4, '[-16, 16]': 2, '[-8, 8]': 12, '[-14, 14]': 9, '[-10, 10]': 19, '[-6, 6]': 6}
+cases exit 0: 82 of 82
+controls exit 1: 82 of 82
+case times (7.69, 'cylz_fxfyfzdxdz') (94.36, 'cylz_fz_n')
+coq ok: 82 of 82
+coq smallest (2063, 10, 'cylz_fxfyfzdxdy') largest (10699, 39, 'cylz_fz_n') times 27.88 74.2
+files with a line other than results and 'assumed to be nonzero': []
+```
+
+The 13 `-` among the `P` bounds are the cases whose `P` is `skin` (3).
+
+`samez.py`, whole:
+
+```python
+"""Check that each script 464.28 appends whole is byte for byte the file that
+was run, in the directory given; that one.sh and one1.sh there are 464.13's
+and 464.15's blocks; and that cylzero.py, run again in a fresh directory from
+the appended text, writes what was run.
+Run as: python3 samez.py <doc> <dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, ran = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+sec = text[text.index("### 464.28"):]
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+blocks = FENCED.findall(sec)
+print("code blocks in 464.28:", len(blocks))
+marks = {
+    "cylzero.py": '"""Write cyl.g\'s cases where a difference or a direction component is zero',
+    "runz.sh": "#!/bin/bash\n# cylzero.py's 82 cases",
+    "start.sh": "#!/bin/bash\n# Start runz.sh detached",
+    "tallyz.py": '"""Tally runz.txt',
+    "samez.py": '"""Check that each script 464.28 appends whole',
+}
+found = {}
+for lang, body in blocks:
+    for name, mark in marks.items():
+        if body.startswith(mark):
+            assert name not in found, name
+            found[name] = body
+for name in marks:
+    if name not in found:
+        print(name, "not appended")
+        continue
+    path = os.path.abspath(__file__) if name == "samez.py" else os.path.join(ran, name)
+    print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+for sub, end, name, mark in (("### 464.13", "### 464.14", "one.sh", "#!/bin/bash\n# Run one Gappa script under 464.4's pin"),
+                             ("### 464.15", "### 464.16", "one1.sh", "#!/bin/bash\n# one.sh with the timeout taken from T")):
+    s = text[text.index(sub):text.index(end)]
+    want = [body for lang, body in FENCED.findall(s) if body.startswith(mark)]
+    assert len(want) == 1, (name, len(want))
+    print(name, "is", sub[4:], "block:", open(os.path.join(ran, name)).read() == want[0])
+
+fresh = tempfile.mkdtemp()
+open(os.path.join(fresh, "cylzero.py"), "w").write(found["cylzero.py"])
+subprocess.run(["python3", "cylzero.py"], cwd=fresh, check=True)
+written = sorted(f for f in os.listdir(fresh) if f.endswith(".g"))
+same = [f for f in written if os.path.exists(os.path.join(ran, f))
+        and filecmp.cmp(os.path.join(fresh, f), os.path.join(ran, f), shallow=False)]
+differ = [f for f in written if os.path.exists(os.path.join(ran, f)) and f not in same]
+absent = [f for f in written if not os.path.exists(os.path.join(ran, f))]
+extra = sorted(f for f in os.listdir(ran) if f.endswith(".g") and f not in written)
+print("written again:", len(written), "same as run:", len(same), "differ:", differ, "not run:", absent,
+      "run, not written:", extra)
+shutil.rmtree(fresh)
+```
+
+It prints:
+
+```text
+cases written: 82
+code blocks in 464.28: 7
+cylzero.py same
+runz.sh same
+start.sh same
+tallyz.py same
+samez.py same
+one.sh is 464.13 block: True
+one1.sh is 464.15 block: True
+written again: 164 same as run: 164 differ: [] not run: [] run, not written: []
+```
+
+Its first line is `cylzero.py`'s own, run again in the fresh directory; the
+parent's lines come after it because its output is buffered when it is not a
+terminal.
