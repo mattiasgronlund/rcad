@@ -821,8 +821,8 @@ reading moves it and that solid as read does not
 (`TheCornersOfAPiece::sides_of`, and the Q2575 paragraph of `by_a_plane`'s
 doc). Read round a corner of the solid it is placed against, that solid is
 read as moved too, so its planes round the corner do place it. Each of the
-following already has an open row or a settled place, so this section files
-nothing:
+following but the last already has an open row or a settled place, so this
+section files a row for the last alone:
 
 - The cut through the apex, Q1936's shape. Its speck lies on the block's face,
   which belongs to the other solid. Since Q2744 the side faces that cut that
@@ -854,4 +854,6 @@ nothing:
   under `certified`, as at `f7bde708`, and are not traced
   (`a_placed_pyramid_cut_by_a_wedge_through_its_apex_answers_under_tolerant_where_q2583_found_it_refused`).
 - A corner of the joined faces of a wholly flat solid makes no choice. Whether
-  one needs it is not measured, and no shape found so far does.
+  one needs it is not measured, and no shape found so far does. The row from
+  Q2815 builds the pin's pyramid with a side face in two coplanar pieces, so
+  that the fuse joins them, and asks whether it keeps the speck on `+y`.
