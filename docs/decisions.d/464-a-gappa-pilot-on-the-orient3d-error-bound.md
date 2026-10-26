@@ -586,8 +586,10 @@ trust is 35 facts that a number is not zero, each one step on paper from block
 1's hypotheses. The branches where one of the nine differences is zero were on
 paper, as 464.4 argues them; since 464.11 each is run, and proves at the code's
 bound. Since 464.25 each set of two or more differences at zero at once that
-leaves `y` not zero is run too, and proves at the code's bound. The step from
-`y` to the sign is still on paper.
+leaves `y` not zero is run too, and proves at the code's bound. Since 464.26
+each branch with one difference at zero and one minor cancelling to zero is
+run too, and proves at the code's bound. The step from `y` to the sign is
+still on paper.
 
 ### 464.7 value past the bound, and every minor at zero run
 
@@ -2842,8 +2844,8 @@ Q2675 ran block 1 with one of the nine differences `adx` to `cdz` at zero, in
 three lanes on 2026-10-24. 464.4's paper argument holds there. Each of the
 nine branches proves at the code's `B` and fails at `6u`, and Coq checks each
 proof, modulo its hints. Nothing in `orient3d.rs` needs to change for it. Two
-or more differences at zero at once are run in 464.25. A difference at zero
-with a minor at zero is still not run (Q2748).
+or more differences at zero at once are run in 464.25. One difference at zero
+with one minor at zero is run in 464.26.
 
 Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200` and the code's
 `B = 7u + 56u²`, against `on_floats` as 464.4 read it at `d9f931e8`: no line of
@@ -3100,7 +3102,8 @@ for name in sys.argv[1:]:
   minor too: `adx` and `bdx` zero both of `third`'s products. A row. Done, in
   464.25: each of the 237 branches proves at the code's bound.
 - One difference at zero with one minor at zero, 464.7's case, such as `adx`
-  with `first`. A row.
+  with `first`. A row. Done, in 464.26: each of the 15 branches proves at the
+  code's bound, and the other 12 pairs cannot happen.
 - The row that moves the scripts into `proofs/gappa/` after the fourteen of
   464.10 3 f now waits on those two as well, since they append here too.
 
@@ -17571,8 +17574,8 @@ main()
 
 - One or two of `first`, `second` and `third` cancelling to zero, their two
   products the same double as in 464.7, together with one or more of the
-  differences at zero, past Q2748's one minor with one difference. A row after
-  Q2748.
+  differences at zero, past the one minor with one difference that 464.26
+  runs. A row after Q2748.
 - `t1 + t2` cancelling to zero while neither is zero, with one or more of the
   differences at zero. Block 1 assumes it away with `|t1 + t2| ≥ 2⁻¹⁰⁷⁴`.
   464.4 runs it with no difference at zero, and it proves at `6u + 13u²`;
