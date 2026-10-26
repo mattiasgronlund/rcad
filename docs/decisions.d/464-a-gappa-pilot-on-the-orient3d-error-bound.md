@@ -271,8 +271,10 @@ with the pattern known, each of the eight should take less.
 zero, and `on_floats` does not. A difference of two doubles rounds to zero only
 when it is zero, and a product with a zero factor is exactly zero, so a zero
 difference zeroes its terms in both `y` and `Ex`. Q2675 runs each of the nine,
-one at a time, and each proves (464.11). The branch where `t1 + t2` is
-zero was run: the goal proves, with `|y − Ex| / P6 ≤ 6u + 13u²`. The branch
+one at a time, and each proves (464.11). Q2747 runs each set of two or more
+that leaves `y` not zero by its shape, and each proves (464.25). The branch
+where `t1 + t2` is zero was run: the goal proves, with `|y − Ex| / P6 ≤ 6u +
+13u²`. The branch
 where `first` is zero was not. There `bdxcdy == cdxbdy`, so the first term of
 `y` is zero while the matching term of `Ex` need not be, and the identity block
 1 rests on still holds with `rm1 = rt1 = 1`. But `product_is_normal(adz,
@@ -583,8 +585,9 @@ zero is run. Since 464.10 the 39 equalities are proved, and what Coq takes on
 trust is 35 facts that a number is not zero, each one step on paper from block
 1's hypotheses. The branches where one of the nine differences is zero were on
 paper, as 464.4 argues them; since 464.11 each is run, and proves at the code's
-bound. Two differences at zero at once are still on paper, and so is the step
-from `y` to the sign.
+bound. Since 464.25 each set of two or more differences at zero at once that
+leaves `y` not zero is run too, and proves at the code's bound. The step from
+`y` to the sign is still on paper.
 
 ### 464.7 value past the bound, and every minor at zero run
 
@@ -2839,8 +2842,8 @@ Q2675 ran block 1 with one of the nine differences `adx` to `cdz` at zero, in
 three lanes on 2026-10-24. 464.4's paper argument holds there. Each of the
 nine branches proves at the code's `B` and fails at `6u`, and Coq checks each
 proof, modulo its hints. Nothing in `orient3d.rs` needs to change for it. Two
-differences at zero at once, and a difference at zero with a minor at zero, are
-still not run.
+or more differences at zero at once are run in 464.25. A difference at zero
+with a minor at zero is still not run (Q2748).
 
 Every run is Gappa 1.8.0 under 464.4's pin, at `-Eprecision=200` and the code's
 `B = 7u + 56u²`, against `on_floats` as 464.4 read it at `d9f931e8`: no line of
@@ -3094,7 +3097,8 @@ for name in sys.argv[1:]:
 **What this leaves.**
 
 - Two or more of the nine differences at zero at once. Some pairs zero a
-  minor too: `adx` and `bdx` zero both of `third`'s products. A row.
+  minor too: `adx` and `bdx` zero both of `third`'s products. A row. Done, in
+  464.25: each of the 237 branches proves at the code's bound.
 - One difference at zero with one minor at zero, 464.7's case, such as `adx`
   with `first`. A row.
 - The row that moves the scripts into `proofs/gappa/` after the fourteen of
@@ -17102,7 +17106,7 @@ unrounded. A minor with one product zero rounds a double less a zero, and its
    but without the amounts, it proved only by leaning on the goal's own
    interval: asked as `(y − Ex) / eb in ?` it got `±1.39141e+1218`, and the
    goals `(P − Phat) / Phat in [-1b-50, 1b-50]` and `Phat / P in [0, 2]` each
-   ran out the 600 s timeout. With the amounts it proves in 3.44 s.
+   ran out the 600 s timeout. With the amounts it proves in 4.46 s.
 
 **What runs, at the code's `B`.** Each of the 237 proves, with `(y − Ex) / P6`
 within:
@@ -17404,3 +17408,176 @@ def line_starting(src, start, containing=""):
 
 main()
 ```
+
+`run_all.sh` runs every script the generator wrote, beside `block1.g` and
+464.13's `one.sh`. It runs after `python3 make_differences_zero.py >
+names.txt`, which writes the scripts and keeps the names `summarize.py` reads:
+
+```sh
+#!/bin/bash
+# Run every script make_differences_zero.py wrote, sixteen at a time: each
+# dz_ script with its proof checked by coqc, then each control and each
+# dzq_ check without. One line per run, as one.sh prints it.
+cd "$(dirname "$0")"
+rm -f run_done.txt
+ls dz_*.g | xargs -P 16 -I{} ./one.sh {} coq > run_dz.txt 2>&1
+ls c_dz_*.g dzq_*.g | xargs -P 16 -I{} ./one.sh {} > run_c.txt 2>&1
+echo finished > run_done.txt
+```
+
+`stats.py` prints the counts of exit codes above, and the ranges of times,
+proof lines and hints:
+
+```python
+"""Count and range what run_dz.txt and run_c.txt printed."""
+import collections
+
+gappa = []
+coq = []
+for line in open("run_dz.txt"):
+    w = line.split()
+    if w[1] == "exit":
+        gappa.append((w[0], int(w[2]), float(w[3].rstrip("s"))))
+    elif w[1] == "coq":
+        coq.append((w[0], int(w[4]), int(w[7]), float(w[8].rstrip("s")), int(w[10]), int(w[12])))
+print("dz runs", len(gappa), "exit codes", collections.Counter(e for _, e, _ in gappa))
+print("dz seconds", min(s for *_, s in gappa), "to", max(s for *_, s in gappa))
+print("coq runs", len(coq), "-Bcoq exits", collections.Counter(c[1] for c in coq),
+      "coqc exits", collections.Counter(c[2] for c in coq))
+print("coq seconds", min(c[3] for c in coq), "to", max(c[3] for c in coq))
+print("proof lines", min(c[4] for c in coq), "to", max(c[4] for c in coq))
+print("hints", min(c[5] for c in coq), "to", max(c[5] for c in coq))
+ctl = collections.Counter()
+for line in open("run_c.txt"):
+    w = line.split()
+    kind = "dzq" if w[0].startswith("dzq_") else w[0].rsplit("_", 1)[1]
+    ctl[(kind, w[2])] += 1
+for key in sorted(ctl):
+    print("control", key, ctl[key])
+```
+
+`summarize.py` prints the groups above, each with the count of roundings it
+works out from the set:
+
+```python
+"""Read every run of the 237 branches and group them by what they printed.
+
+For each branch: the exit codes of its script, its -Bcoq and its coqc, the
+bounds Gappa printed for (y - Ex) / P6 and for P against Phat, the exit code
+and best of each control, the exit code of its dzq_ check if it has one, and
+the number of roundings on its longest path, counted from the set alone.
+"""
+import collections
+import re
+
+DIFFERENCES = ["adx", "ady", "adz", "bdx", "bdy", "bdz", "cdx", "cdy", "cdz"]
+PRODUCT = {
+    1: ("bdx", "cdy", 1),
+    2: ("cdx", "bdy", 1),
+    3: ("cdx", "ady", 2),
+    4: ("adx", "cdy", 2),
+    5: ("adx", "bdy", 3),
+    6: ("bdx", "ady", 3),
+}
+Z_OF = {1: "adz", 2: "bdz", 3: "cdz"}
+
+
+def longest_path(zero):
+    dead = {k for k, (f, g, _) in PRODUCT.items() if f in zero or g in zero}
+    terms = {m for m in (1, 2, 3) if Z_OF[m] in zero or {2 * m - 1, 2 * m} <= dead}
+    longest = 0
+    for k, (f, g, m) in PRODUCT.items():
+        if k in dead or m in terms:
+            continue
+        other = 2 * m if k == 2 * m - 1 else 2 * m - 1
+        n = 3 + 1 + (other not in dead) + 1
+        if m in (1, 2) and (3 - m) not in terms:
+            n += 1
+        longest = max(longest, n)
+    return longest
+
+
+def exits(path):
+    out = {}
+    coq = {}
+    for line in open(path):
+        w = line.split()
+        if w[1] == "exit":
+            out[w[0]] = int(w[2])
+        elif w[1] == "coq":
+            coq[w[0]] = (int(w[4]), int(w[7]))
+    return out, coq
+
+
+def upper(line):
+    found = re.findall(r"\{(-?[\d.]+(?:e[-+]?\d+)?),", line)
+    if found:
+        return found[-1]
+    return line.rsplit(",", 1)[1].strip(" ]")
+
+
+def bound(text, start):
+    for line in text.split("\n"):
+        if line.strip().startswith(start):
+            return upper(line)
+    return "-"
+
+
+def best(text):
+    m = re.search(r"best: \[([^\]]*)\]", text)
+    return m.group(1).split(",")[1].strip() if m else "-"
+
+
+def main():
+    names = [l.strip() for l in open("names.txt") if l.strip()]
+    dz, coq = exits("run_dz.txt")
+    c, _ = exits("run_c.txt")
+    groups = collections.defaultdict(list)
+    for name in names:
+        zero = set(name[3:].split("_"))
+        text = open(f"{name}.out").read()
+        y = bound(text, "(y - Ex) / P6 in")
+        p = bound(text, "P -/ Phat in")
+        if p == "-":
+            p = bound(text, "(P - Phat) / Phat in") + " as (P - Phat) / Phat"
+        c6 = f"c_{name}_6u"
+        c5 = f"c_{name}_5u"
+        q = "dzq_" + name[3:]
+        row = (
+            longest_path(zero),
+            dz.get(name, "missing"),
+            coq.get(name, "none"),
+            y,
+            p,
+            c.get(c6, "missing"),
+            best(open(f"{c6}.out").read()),
+            c.get(c5, "missing"),
+            best(open(f"{c5}.out").read()),
+            c.get(q, "no dzq"),
+        )
+        groups[row].append(name)
+    print("roundings | exit | (-Bcoq, coqc) | (y-Ex)/P6 | P vs Phat | 6u exit, best | 5u exit, best | dzq exit | count")
+    for row, members in sorted(groups.items(), key=lambda kv: tuple(str(x) for x in kv[0])):
+        k, e, cq, y, p, e6, b6, e5, b5, eq = row
+        print(f"{k} | {e} | {cq} | {y} | {p} | {e6}, {b6} | {e5}, {b5} | {eq} | {len(members)}")
+        print("    " + " ".join(m[3:] for m in members))
+    print("total", sum(len(m) for m in groups.values()))
+
+
+main()
+```
+
+**What this leaves.**
+
+- One or two of `first`, `second` and `third` cancelling to zero, their two
+  products the same double as in 464.7, together with one or more of the
+  differences at zero, past Q2748's one minor with one difference. A row after
+  Q2748.
+- `t1 + t2` cancelling to zero while neither is zero, with one or more of the
+  differences at zero. Block 1 assumes it away with `|t1 + t2| ≥ 2⁻¹⁰⁷⁴`.
+  464.4 runs it with no difference at zero, and it proves at `6u + 13u²`;
+  464.11 and this section keep the hypothesis wherever `t1` and `t2` are both
+  alive. Where `t3` is zero too, `y` is zero (464.7), so nothing is left to
+  run there. A row.
+- The row that moves the scripts into `proofs/gappa/`, Q2700, now waits on
+  those two as well, since they append here too.
