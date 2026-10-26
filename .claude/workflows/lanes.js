@@ -509,6 +509,7 @@ function reachesTests(report) {
 function unproven(lane, kind, check) {
   const why = []
   if (check.files_outside_write_set && check.files_outside_write_set.length) why.push(`the branch touches ${check.files_outside_write_set.join(', ')}, outside the write set`)
+  if (check.write_set_mismatch && check.write_set_mismatch.length) why.push(`the write set does not match just queue show at the base: ${check.write_set_mismatch.join(', ')}`)
   const runs = linesThatRun(check.lines_that_run)
   if (runs === null) why.push('the lines-that-run print the verifier reported does not end in its count, lines that run: N')
   if (squeezed(check.lines_that_run_command) !== squeezed(linesThatRunCommand(lane))) why.push('the verifier ran another command than the lines-that-run command it was given')
@@ -1401,6 +1402,7 @@ function verdictSchema(kind) {
     worktree_path: { type: 'string', description: 'the output of git rev-parse --show-toplevel run in your OWN tree, not the lane\'s worktree path given in the prompt' },
     branch_ok: { type: 'boolean', description: 'exists, sits on the pinned base' },
     files_outside_write_set: { type: 'array', items: { type: 'string' } },
+    write_set_mismatch: { type: 'array', items: { type: 'string' }, description: 'each file where the write set above and the write-set columns just queue show prints at the base disagree; empty when they match exactly (§396)' },
     gate_summary: { type: 'string', description: 'the summary block, verbatim, or why you could not run it' },
     number_mismatches: { type: 'array', items: { type: 'string' } },
     unbacked_claims: { type: 'array', items: { type: 'string' } },
@@ -1417,7 +1419,7 @@ function verdictSchema(kind) {
       items: { type: 'object', required: ['row', 'why'], properties: { row: { type: 'string' }, why: { type: 'string' } } },
     },
   }
-  const required = ['worktree_path', 'branch_ok', 'files_outside_write_set', 'gate_summary', 'number_mismatches', 'unbacked_claims', 'fixes', 'lines_that_run_command', 'lines_that_run', 'verdict']
+  const required = ['worktree_path', 'branch_ok', 'files_outside_write_set', 'write_set_mismatch', 'gate_summary', 'number_mismatches', 'unbacked_claims', 'fixes', 'lines_that_run_command', 'lines_that_run', 'verdict']
   if (kind === 'tests') {
     properties.tests_pass_on_branch = { type: 'boolean', description: "from step 3's gate summary (served or fresh), not a separate run -- §370" }
     properties.tests_fail_without_fix = { type: 'boolean', description: 'false if you could not make them fail with the source reverted' }
