@@ -1266,6 +1266,70 @@ fn a_pyramid_turned_and_cut_on_one_side_of_the_x_axis_answers_as_the_true_planes
     }
 }
 
+/// **Drawing the pyramid's `+y` face as two coplanar pieces instead of one
+/// changes the fuse's answer, though the two pyramids are the same solid.**
+/// Built as one triangle,
+/// [`a_pyramid_turned_and_cut_on_one_side_of_the_x_axis_answers_as_the_true_planes_do`]
+/// answers both rules under both policies with nothing in the log, the true
+/// planes' faces and sides. Built with the `+y` face in two pieces that the
+/// fuse joins back into one before it bakes the solid, the apex is solved by
+/// `corner_of_every_vertex_left`, which still passes `None` for
+/// `derive_a_corner`'s `choosing_among`, as before Q2815, and keeps the speck
+/// Q2815 cut off the ordinary apex: `certified` refuses both rules at the
+/// range check, over a ratio of `6.1e15`, where the one-triangle pyramid
+/// answers; `tolerant(100)` answers with the range check in the log and a
+/// face more than the true planes keep, the intersection 5 faces and 18
+/// sides and the difference 8 and 34, as `bake` gave the ordinary apex
+/// before Q2815. A gap, not a limit: the choice Q2815 added to one call to
+/// `derive_a_corner` is not made from `corner_of_every_vertex_left`'s (§448).
+#[test]
+fn a_pyramid_with_a_split_plus_y_face_cut_on_one_side_of_the_x_axis_keeps_the_speck_q2815_cut_off()
+{
+    let wedge = A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS;
+    let placement = the_turn_that_keeps_a_speck_on_the_plus_y_face();
+    for (rule, tolerant_left) in [
+        (
+            Rule::Intersection,
+            FacesAndSides {
+                faces: 5,
+                sides: 18,
+            },
+        ),
+        (
+            Rule::Difference,
+            FacesAndSides {
+                faces: 8,
+                sides: 34,
+            },
+        ),
+    ] {
+        let case = format!("{wedge:?} {rule:?}, the pyramid's +y face in two pieces");
+        match the_wedge_through_the_split_pyramids_apex_and_its_faces(
+            wedge,
+            placement,
+            rule,
+            &Policy::certified(),
+        ) {
+            Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => {
+                assert!(ratio > 1e15, "{case}: certified, a range of {ratio}");
+            }
+            other => panic!("{case}: certified came back {other:?}"),
+        }
+        match the_wedge_through_the_split_pyramids_apex_and_its_faces(
+            wedge,
+            placement,
+            rule,
+            &Policy::tolerant(100.0),
+        ) {
+            Ok((named, faces)) => {
+                assert_eq!(named, [DYNAMIC_RANGE_CHECK], "{case}: tolerant(100)");
+                assert_eq!(faces, tolerant_left, "{case}: tolerant(100)");
+            }
+            Err(refused) => panic!("{case}: tolerant(100) came back {refused:?}"),
+        }
+    }
+}
+
 /// **Every partner, every rule, every placement and both policies give the
 /// box's refusal** for every move of the apex, the cut through the apex among
 /// them. Each three of the four side planes cross at the apex alone, so no
@@ -1591,6 +1655,54 @@ fn the_wedge_through_the_apex_and_its_faces(
     let case = format!("{policy:?}, {placement:?}, {wedge:?} {rule:?}");
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
     let pyramid = a_pyramid(&mut model);
+    model
+        .place_solid(pyramid, &placement)
+        .expect("this model made the key");
+    let cut = a_wedge(&mut model, wedge, &placement);
+    let before = postcard::to_allocvec(&model).expect("a model writes out");
+    let mut log = ProvenanceLog::new();
+    match model.fuse(&[pyramid], &[cut], rule, policy, &mut log) {
+        Ok(answer) => {
+            the_answer_holds(
+                &model,
+                &answer,
+                what_the_pyramid_and_a_wedge_hold(wedge, rule),
+                policy,
+                &case,
+            );
+            let named = log
+                .records()
+                .iter()
+                .map(|record| record.predicate())
+                .collect();
+            Ok((named, the_faces_and_sides_of(&model, &answer)))
+        }
+        Err(refused) => {
+            assert_eq!(
+                postcard::to_allocvec(&model).expect("a model writes out"),
+                before,
+                "{case}: a refused fuse leaves the model as it was"
+            );
+            Err(refused)
+        }
+    }
+}
+
+/// [`the_wedge_through_the_apex_and_its_faces`], with the pyramid's `+y` face
+/// in two coplanar pieces so the fuse joins them back into one plane before
+/// it bakes the solid (§448), rather than solving the apex from four faces
+/// that already meet there without joining.
+fn the_wedge_through_the_split_pyramids_apex_and_its_faces(
+    wedge: Wedge,
+    placement: Isometry,
+    rule: Rule,
+    policy: &Policy,
+) -> Result<(Vec<&'static str>, FacesAndSides), Error> {
+    let case = format!(
+        "{policy:?}, {placement:?}, {wedge:?} {rule:?}, the pyramid's +y face in two pieces"
+    );
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let pyramid = a_pyramid_with_its_plus_y_face_in_two_pieces(&mut model);
     model
         .place_solid(pyramid, &placement)
         .expect("this model made the key");
@@ -2152,6 +2264,83 @@ fn a_pyramid(model: &mut Model) -> SolidKey {
     builder
         .add_shell(&drafted.map(|face| (face, Orientation::Forward)))
         .expect("five faces close a pyramid");
+    builder
+        .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a pyramid is a sound solid")
+}
+
+/// [`a_pyramid`] with its `+y` side face, `[0, 3, 4]` there, split into two
+/// coplanar pieces that meet at the midpoint of its base edge: `[0, 3, 5]`
+/// and `[0, 5, 4]`, with the base face's wire carrying the same split,
+/// `[1, 4, 5, 3, 2]`. The two pieces are coplanar and adjacent, so the fuse
+/// joins them back into one plane before it bakes the solid
+/// (`bake_the_joined_faces`), and the apex's corner, which both pieces still
+/// meet, is solved from that joined group rather than from four faces that
+/// already meet there without joining (§448).
+fn a_pyramid_with_its_plus_y_face_in_two_pieces(model: &mut Model) -> SolidKey {
+    let points = [
+        WHERE_THE_PYRAMID_PUTS_ITS_APEX,
+        [-SIDE, -SIDE, 0.0],
+        [SIDE, -SIDE, 0.0],
+        [SIDE, SIDE, 0.0],
+        [-SIDE, SIDE, 0.0],
+        [0.0, SIDE, 0.0],
+    ]
+    .map(|[x, y, z]| Point::new(x, y, z));
+    // Counter-clockwise seen from outside, the apex first on every side face.
+    let faces: [&[usize]; 6] = [
+        &[0, 1, 2],
+        &[0, 2, 3],
+        &[0, 3, 5],
+        &[0, 5, 4],
+        &[0, 4, 1],
+        &[1, 4, 5, 3, 2],
+    ];
+
+    let mut builder = SolidBuilder::new();
+    let vertices = points.map(|point| builder.add_vertex(point).expect("a finite corner"));
+    let mut edges: Vec<([usize; 2], DraftEdge)> = Vec::new();
+    let drafted: Vec<_> = faces
+        .iter()
+        .map(|face| {
+            let steps: Vec<DraftStep> = (0..face.len())
+                .map(|position| {
+                    let (from, to) = (face[position], face[(position + 1) % face.len()]);
+                    let (edge, orientation) =
+                        match edges.iter().find(|(ends, _)| *ends == [to, from]) {
+                            Some(&(_, edge)) => (edge, Orientation::Reversed),
+                            None => {
+                                let edge = builder
+                                    .add_edge(vertices[from], vertices[to], EdgeRun::Straight)
+                                    .expect("a side between two corners");
+                                edges.push(([from, to], edge));
+                                (edge, Orientation::Forward)
+                            }
+                        };
+                    DraftStep::Along(
+                        builder
+                            .add_coedge(edge, orientation)
+                            .expect("one use of a side"),
+                    )
+                })
+                .collect();
+            let wire = builder.add_wire(&steps).expect("a closed boundary");
+            let plane =
+                Plane::through_three_points(points[face[0]], points[face[1]], points[face[2]])
+                    .expect("three corners of a face not in a line");
+            builder
+                .add_face(Surface::Plane(plane), &[wire])
+                .expect("a face of a pyramid")
+        })
+        .collect();
+    builder
+        .add_shell(
+            &drafted
+                .iter()
+                .map(|&face| (face, Orientation::Forward))
+                .collect::<Vec<_>>(),
+        )
+        .expect("six faces close a pyramid");
     builder
         .build(model, &Policy::certified(), &mut ProvenanceLog::new())
         .expect("a pyramid is a sound solid")
