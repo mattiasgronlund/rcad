@@ -411,9 +411,10 @@ pub enum Error {
     /// one outside the other, are done where their crossing is proved one loop
     /// and two branches that run off for ever (Q2812): a cone of slope a half
     /// about `z` and one of slope a quarter leaned `0.3` about `x` through
-    /// `(0, 0, 4)` are named so, and `walk` marches the loop and refuses a run
-    /// on either branch with this, since a march follows only a closed loop.
-    /// What stays refused is every other overlap, and every pair the
+    /// `(0, 0, 4)` are named so. `walk` marches the loop, and a run between two
+    /// corners on either branch from one corner to the other (Q2817), and
+    /// refuses with this only a whole branch, which has no end to march to, and
+    /// a run whose two corners are not both on one branch. What stays refused is every other overlap, and every pair the
     /// enclosures are too loose for. Two cones of **one slope**, one turned
     /// about a line through a point of the other's axis, are mirror images
     /// across the flat surface halfway between their apexes, and can **touch**
@@ -695,6 +696,22 @@ pub enum Error {
         /// The most one crossing is walked into.
         most: usize,
     },
+
+    /// A crossing walked from one end of a run towards the other went no
+    /// further towards it.
+    ///
+    /// A run between two ends is walked by a measure of how far along it a
+    /// point is, which grows from the first end to the second. This is the
+    /// walk finding that neither way the crossing runs from the first end
+    /// grows it, or that a step it kept went back on what an earlier one had
+    /// covered. A step that goes back has jumped onto another piece of the
+    /// crossing, or the measure does not grow along this piece at all, and
+    /// either way the points walked so far are not the run asked for.
+    ///
+    /// Whether this is a gap or a limit is **not known**: no walk the tests
+    /// make meets it on a run that really goes from one end to the other.
+    #[error("no step along this crossing goes on towards the other end of its run")]
+    CannotFollowACrossingTowardsTheOtherEndOfItsRun,
 
     /// Two surfaces that cross in a curve that runs on for ever rather than in a
     /// closed one.
@@ -1039,6 +1056,7 @@ impl Error {
             | Self::CannotFollowACrossingWhereItsSurfacesAreTangent { .. }
             | Self::CannotFollowACrossingBecauseNoStepStaysOnIt { .. }
             | Self::TooManyPointsAlongOneCrossing { .. }
+            | Self::CannotFollowACrossingTowardsTheOtherEndOfItsRun
             | Self::TheseTwoSurfacesDoNotCrossInAConic
             | Self::WhereALineMeetsARingNeedsTheLineExactly
             | Self::Predicate(..)
