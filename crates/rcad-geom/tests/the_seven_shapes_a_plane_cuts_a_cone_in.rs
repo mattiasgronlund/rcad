@@ -1173,10 +1173,10 @@ fn a_leaning_plane(point: Point, slope: f64) -> Plane {
             continue;
         }
         let normal = Vector::new(0.0, n_y, n_z);
-        if let Ok(flat) = Plane::from_point_and_normal_as_written(point, normal) {
-            if flat.normal().components() == normal.components() {
-                return flat;
-            }
+        if let Ok(flat) = Plane::from_point_and_normal_as_written(point, normal)
+            && flat.normal().components() == normal.components()
+        {
+            return flat;
         }
     }
     panic!("slope {slope} has no exact normal close to length one");
