@@ -29,7 +29,10 @@
 //! A fourth came with row Q2813: the two pointed cones of one slope again, the
 //! second a quarter turn off the first, so that every number is exact and the
 //! two are exactly mirror images and touch. Every fuse of that pair is refused
-//! as a crossing that touches itself.
+//! as a crossing that touches itself. A fifth came with it: the same two side
+//! by side, which are mirror images too but cross in one hyperbola and do not
+//! touch, and every fuse of which is refused as a cone crossing another curved
+//! surface.
 //!
 //! Each answer that comes back is to be certified, sound, and measure as the
 //! others that came back say it must: the union and the intersection together
@@ -112,6 +115,22 @@ fn two_pointed_cones_a_quarter_turn_apart_touch_and_are_refused_by_every_rule() 
     );
 }
 
+/// **Two pointed cones side by side.** Both have slope a half and height
+/// eight, and the second stands three along `x` from the first.
+///
+/// They are mirror images across `x = 1.5` too, but do not touch: their skins
+/// cross in one hyperbola in that flat surface, from `(1.5, 0, 3)` up to the
+/// two tops. `intersect` does not name it, and refuses the pair as it refuses
+/// any other two cones whose crossing it cannot prove two loops or a loop and
+/// two branches, and so does every fuse.
+#[test]
+fn two_pointed_cones_side_by_side_do_not_touch_and_are_refused_by_every_rule() {
+    assert_eq!(
+        every_fuse_of(two_pointed_cones_side_by_side).refusals(),
+        [[Some(A_CONE_ACROSS_A_CURVED_SURFACE); 2]; 3]
+    );
+}
+
 /// **Two pointed cones of different slopes, the narrower leaning off the
 /// wider.** Both are eight high. The upright one has slope a half, the leaning
 /// one a quarter, and the leaning one turns 0.3 radians about the `x` axis
@@ -167,6 +186,18 @@ fn two_pointed_cones_a_quarter_turn_apart(model: &mut Model) -> (SolidKey, Solid
         )
         .expect("this model made the key");
     (upright, turned)
+}
+
+fn two_pointed_cones_side_by_side(model: &mut Model) -> (SolidKey, SolidKey) {
+    let one = a_pointed_cone(model, 0.5, 8.0);
+    let beside = a_pointed_cone(model, 0.5, 8.0);
+    model
+        .place_solid(
+            beside,
+            &Isometry::translation(Vector::new(3.0, 0.0, 0.0)).expect("a move"),
+        )
+        .expect("this model made the key");
+    (one, beside)
 }
 
 fn pointed_cones_of_two_slopes(model: &mut Model) -> (SolidKey, SolidKey) {
