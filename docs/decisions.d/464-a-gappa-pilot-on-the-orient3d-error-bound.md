@@ -18121,46 +18121,196 @@ main()
 
 ### 464.27 The side of a flat surface through a point with every product anywhere
 
-DRAFT, unfinished: Q2760's first lane relayed here. What follows is the
-generator it wrote and ran on nine scripts, for the lane after it to run on
-all and write up. Nothing below is a finding yet.
+Q2760 took up `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` again, in
+three lanes on 2026-10-26, for what 464.13's 5 left unrun: products of
+`SideOfAFlatSurfaceThroughAPoint` below the normals, which `on_floats`'s six
+`product_is_normal` checks refuse, as 464.18 ran them for
+`SideOfAFlatSurface`'s three. The first lane wrote `flatall.py` and ran nine
+of its scripts. The second wrote `prodzero.g` again so that it proves, and ran
+every case and control. The third read the controls, restated `plane.rs` and
+wrote this up.
 
-Q2760 takes up `SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND` again, for
-what 464.13's 5 left unrun: products of `SideOfAFlatSurfaceThroughAPoint`
-below the normals, which `on_floats`'s six `product_is_normal` checks refuse.
+The bound is proved at the code's constant in every case of where the six
+products land, normal, below the normals or rounding to zero, with any of the
+sums cancelling to zero. So `on_floats` does not need its six
+`product_is_normal` checks to give a right sign. They are kept, as 464.18's 7
+kept plane's and Q2766 the sphere's (464.14), and the comment on them and the
+doc on the constant now say why (6). Coq checks each proof, modulo its hints
+(7).
 
-**How the cases are cut.** 464.18's `planeall.py`, carried over to six
-products as it stands, splits each product four ways and makes about 25 000
-scripts. `flatall.py` cuts them differently, and makes 722 and one more:
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, against
+`plane.rs` and `cascade.rs` at `eb125ed0`, through 464.13's `one.sh`, sixteen
+at a time. `u` is `2⁻⁵³`, and the code's `B = 6u + 128u²` is written `B =
+6b-53 + 1b-99;`. Each script follows 464.13's `flat.g`: one ratio hint per
+rounding of a normal number, the error split into one term per product so
+that Gappa averages them, and 464.5's lemma for each product that rounds to a
+normal number and for `eb`. What rounding a product below the normals cost,
+and each product that rounds to zero, is carried as an amount, as 464.18's
+cases carry it.
 
-- Each of the six terms the fold adds is a rounded product of two doubles: a
-  through product enters negated, and `−rnd(f · q)` is `rnd(f · (−q))`. So the
-  scripts write all six alike, `t = rnd(a · b)`, and drop the facing being
-  shared between two products, which covers more inputs than the code makes.
-- A term that rounds to zero is left out of both folds (464.13's `addzero.g`),
-  so it costs only its exact product in `Ex`, at most `2⁻¹⁰⁷⁵` (`prodzero.g`).
-  Where it sits in the fold does not matter, only how many there are.
-- Each term left is `n`, rounding to at least `2⁻¹⁰²²`, or `s`, at most
-  `2⁻¹⁰²²` and rounding to a double that is not zero. Neither is zero, so two
-  cancelling sums are never next to each other, as in 464.13.
-- Every term left goes into the averaged part as a fraction of `|t|`, `e = t ·
-  W`, `W` the sums' ratios less one, and less `1 / rp` for an `n` term. An `s`
-  term's own rounding, `d = t − X`, goes into an amount `A` with the products
-  that rounded to zero, against `eb` normal. No sign split is needed.
-- With no `n` term, `fa_none.g` covers every case at once: each product at
-  most `2⁻¹⁰²²` puts `eb` below the normals.
+**1. What the proof guards.** As in 464.13's 1, at `eb125ed0`:
+`which_side_of_a_flat_surface_through` (`plane.rs:972-988`) runs the cascade
+on `SideOfAFlatSurfaceThroughAPoint`. Its one caller is
+`HalfSpaceThroughAPoint::side_of_point` (`half_space.rs:668-675`), and
+`lib.rs:101` exports `HalfSpaceThroughAPoint`, so a user reaches it.
 
-**What the nine printed** (`runmany.sh` at 16 at a time, `one.sh` as 464.13
-has it): `fa_nnnnnn.g`, `fa_snsnns_c2.g`, `fa_sssssn.g`, `fa_nsssss.g`,
-`fa_ssnsss_c13.g`, `fa_n.g` and `fa_sn.g` each exit 0, and their `gappa
--Bcoq` and `coqc` exit 0. `fa_nnnnnn.g` prints `(Σ e) / Phat` and `P −/ Phat`
-within `5.55112e-16`, 464.13's `5u` for `flat.g`; `fa_sssssn.g` and
-`fa_nsssss.g` print `A` within `5b-1075`. `fa_none.g` prints "remaining
-results are pointless", and `c_fa_none_noeb.g` exits 1 with `eb in [0,
-9b-1073]` and `P in [0, 3b-1021]`. `c_fa_nnnnnn_half.g` exits 1 with best
-`[-10, 10]`, `c_fa_sssssn_half.g` with `[-2, 2]`. `prodzero.g` exits 1, `BND(X)`
-best `[-2.22507e-308, 2.22507e-308]`: it wants a split at zero, as 464.14's
-`tinysq.g` and `tinyzero.g` have for a square, which is never negative.
+**2. `on_floats`, line for line.** `SideOfAFlatSurfaceThroughAPoint::on_floats`
+(`plane.rs:1003-1026` at `eb125ed0`) returns `None` for a point that is not
+exact `f64`s, and unless `product_is_normal` holds for each of the six
+products (`plane.rs:1007-1012`). Then it takes the facing times the point on
+each axis and the facing times the through point on each axis, negated
+(`plane.rs:1014-1017`), folds them from `(0.0, 0.0)` into `value` and
+`permanent` (`plane.rs:1018-1020`), and returns `error_bound =
+SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND * permanent`
+(`plane.rs:1024`). Each script writes that as 464.13's `flat.g` does, with the
+check left out. `product_is_normal(a, b)` is `a == 0.0 || b == 0.0 || (a *
+b).abs() >= f64::MIN_POSITIVE` (`cascade.rs:67-69`): it lets through a product
+with a zero factor and one that rounds to `2⁻¹⁰²²` or more, and refuses every
+other. `decide` compares only against a bound that is a normal number
+(`cascade.rs:125`), and the doc on `Filtered::error_bound` asks for the bound
+on `y`, the sum before `value`'s last rounding. So every claim here is on `y`.
+464.13's 4 proved `value` within `eb` too with every product normal or zero;
+that was not run with a product below the normals.
+
+**3. Every place the six products can land.** 464.18's `planeall.py` split
+each product four ways, normal, zero, and below the normals of either sign.
+Carried over to six products that is `4⁶ = 4096` placements before the sums
+are split. `flatall.py` (8) cuts the same inputs into 722 cases and one more,
+by four facts:
+
+- Each product of two doubles, `X = a · b` rounded to `t = rnd(X)`, is one of
+  three. `z`: it rounds to zero, and then `|X| ≤ 2⁻¹⁰⁷⁵` (`prodzero.g`, 8).
+  `n`: it rounds to `2⁻¹⁰²²` or more, which `product_is_normal` lets through.
+  `s`: it rounds to a double that is neither zero nor normal, and then `|X| ≤
+  2⁻¹⁰²²`, since rounding is monotone and `2⁻¹⁰²²` is a double. Those three
+  cover every product. A product with a zero factor is a `z`, which the check
+  lets through; so is a product below the normals that rounds to zero, which
+  the check refuses; every `s` the check refuses.
+- A through product enters the fold negated, and `−rnd(f · q)` is `rnd(f ·
+  (−q))`, rounding to nearest being symmetric. So each script writes the six
+  alike, `t = rnd(a · b)`, each with two factors of its own. That drops the
+  facing being shared between two products, which covers more inputs than the
+  code can make, not fewer.
+- A `z` term is left out of both folds, adding zero to a double giving the
+  double back (464.13's `addzero.g`), and stays only in `Ex`, as its exact
+  product `Z`. So where the `z` terms sit does not matter, only how many there
+  are. The terms left are folded in the order the code adds them.
+- Each rounded sum of the terms left is either at least `2⁻¹⁰⁷⁴`, a sum of
+  two doubles being a multiple of `2⁻¹⁰⁷⁴`, or it cancels to zero, rounds to
+  itself and is written unrounded, as 464.13's 6 writes it. An `n` or `s` term
+  is not zero, so the sum after a cancelled one is not zero, and two
+  cancelling sums are never next to each other. In 464.18 they could be, since
+  a product below the normals could round to zero there; here that is a `z`,
+  and left out.
+
+With `L` terms left there are `2^L − 1` strings of `n` and `s` with an `n`
+among them, and as many sets of cancelling sums as there are sets of the sums
+`1` to `L − 2` with no two next to each other: 1, 1, 2, 3, 5 and 8 for `L`
+from 1 to 6. That makes `1·1 + 3·1 + 7·2 + 15·3 + 31·5 + 63·8 = 722` cases,
+each `fa_<states>[_c<set>].g`: `<states>` one letter for each term left, in
+the fold's order, and `<set>` the place among them of each term whose sum
+cancels. `fa_nnnnnn.g` is 464.13's `flat.g` in this form.
+
+- With an `n` term, the step is 464.18's, `(y − Ex) / eb -> ((Σ e) / Phat) ·
+  (Phat / P) · (P / eb) + A / eb`. Each term left carries `e = t · W`, `W`
+  what the rounded sums after it multiplied it by, less one, and for an `n`
+  term less `1 / rp` rather than one, `rp` what its own rounding multiplied it
+  by. `Phat` is the permanent with no rounding of its own. What each `s`
+  term's own rounding cost, `d = t − X`, less each `Z`, is the amount `A`, so
+  `y − Ex` is `Σ e + A`, and `eb` being normal keeps `A` small against `eb`.
+  No sign split is needed.
+- With none, `fa_none.g` takes every case at once: each of the six products
+  is at most `2⁻¹⁰²²`, so `P` is at most about `6 · 2⁻¹⁰²²`, `eb` is far below
+  the normals, and `decide` does not compare. Unlike 464.18's plane, no offset
+  can make `eb` normal here.
+
+**4. What they print.** `runall.sh` (8) ran the 722 cases, `fa_none.g` and
+`prodzero.g` with Coq, from 20:42:34Z to 21:07:17Z on a load of 15 to 33 over
+24 cores.
+
+- Each of the 722 and `fa_none.g` proves at the code's `B`, and so does
+  `prodzero.g`: `grep -c ' exit 0 [0-9.]*s$' list_fa.log` prints 724. Only
+  `fa_none.g` prints "pointless". The slowest is `fa_nnnnnn.g`, 92.72 s.
+- `fa_nnnnnn.g` prints 464.13's figures for `flat.g`: `(Σ e) / Phat` within
+  `5u + 7u²` and `P −/ Phat` within `5u + 10u²`, each with a little more.
+- `summary.py` (8) reads each case. In all 722, `A` is within exactly
+  `2⁻¹⁰⁷⁵` for each term that is not `n`, so at most `5 · 2⁻¹⁰⁷⁵`. `(Σ e) /
+  Phat` is within `k u + 7u²`, `k` the most roundings a term goes through on
+  its way to `y` with every term normal, `L − 1 − c` for `c` sums cancelling
+  and at least 1, and `P −/ Phat` within `(L − 1) u + 10u²`, each with a
+  little more: `summary.py` prints that little more as `u³` and `10u³` at
+  most, to ten digits. The largest are `5u + 7u²` (`fa_nnnnnn`, `fa_nnssss`)
+  and `5u + 10u²` (`fa_snssss_c4` among others). 131 cases print less than
+  `k u`, such as `fa_ssssnn` at `2.8u` for its `5u`. To six digits, `(Σ e) /
+  Phat` is `u` in 38 cases, `1.8u` in 2, `2u` in 112, `2.8u` in 2, `3u` in
+  288, `4u` in 232 and `5u` in 48.
+
+So the bound holds with any of the products below the normals because a
+normal `eb` is `2⁻¹⁰²²` or more, which puts `P` at `2^(-971.585)` or more
+(`pmin.g`, 8, with `P` any real at least zero, so every permanent). The
+relative part is then at most `5u + 7u²` of `Phat`, and a little more, against
+`B = 6u + 128u²`, and `A` at most `5 · 2⁻¹⁰⁷⁵`, which is `5u` of `eb`. That is
+464.18's 4 again, with five products not normal where it had at most two
+beside a normal one.
+
+**5. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3), so each case is run again where it must fail:
+
+- CONTROLS_HALF
+- `c_fa_none_noeb.g`, `fa_none.g` without `eb` normal, exits 1, best `[-inf,
+  inf]`, printing `eb` in `[0, 9b-1073]` and `P` in `[0, 3b-1021]`. So what
+  proves `fa_none.g` is the contradiction with `eb` normal and nothing else,
+  as 464.13's `flat_z012345.g`.
+- `c_prodzero.g` is `prodzero.g` asking for `2⁻¹⁰⁷⁶`, and exits 1, best
+  `[-2.47033e-324, 2.47033e-324]`, `2⁻¹⁰⁷⁵`. That is the bound, met: `2⁻¹⁰⁷⁴
+  · 2⁻¹` is a product of two doubles, and rounds to zero, the tie going to
+  even.
+
+CONTROLS_COUNT
+
+**6. What `plane.rs` said, and says now.** At `eb125ed0` the doc on the
+constant ended, `plane.rs:1088-1089`: "Whether a product below the normals,
+which `on_floats` refuses, would break it has not been run." The check itself
+had no comment. By 4 it would not break it: without the check, `on_floats`
+would hand `decide` a number with one to five of the six products below the
+normals, and `decide` would certify no wrong sign from it, and with all six
+there `decide` does not compare.
+
+So the six checks are not needed for a right sign. They are kept, as 464.18's
+7 kept plane's three, for the same reason: with them, level 1 answers only
+where the relative argument in the constant's doc holds, and the 722 cases
+stay a second proof rather than the only one. Dropping them would move the
+inputs with a product below the normals from level 2 to level 1, and whether
+that turns any refusal into an answer was not run. The check now carries a
+comment saying it is not needed for a right sign and what it does, in the
+words of plane's (`plane.rs:863-867`), and the doc on the constant ends with
+how far down the bound holds and why, citing this subsection, in place of the
+sentence above. Comment only: lines that run 0.
+
+**7. Rocq checks every proof here, modulo its hints.** `gappa -Bcoq` and
+`coqc`, under 464.4's pins with gappalib 1.8.0, exit 0 on each of the 722,
+`fa_none.g` and `prodzero.g`: `grep -c 'coq -Bcoq exit 0 coqc exit 0'
+list_fa.log` prints 724. Gappa does not write the same proof each run (464.4),
+so the sizes are the second lane's:
+
+- the 722 cases: 1513 to 6969 lines, 8 to 27 hints; `fa_nnnnnn.g` 5369 lines
+  and 27 hints, beside `flat.g`'s 4926 and 27 in 464.13's 8;
+- `fa_none.g`: 832 lines, no hints;
+- `prodzero.g`: 101 lines, no hints.
+
+The slowest, `fa_nnnnnn.g`, took 104.44 s for the two together. Each hint
+enters the Coq file as a hypothesis with no condition attached, as in 464.4,
+so each proof stands on its hints, and on the divisors Gappa took to be
+nonzero, which its warnings name. `field` has not been run on these hints
+(464.10).
+
+**8. The scripts.** `flatall.py` writes the 722 cases, `fa_none.g`, a control
+at `u / 2` for each case and `c_fa_none_noeb.g`. `prodzero.g`, `c_prodzero.g`
+and `pmin.g` are whole below. `runall.sh` runs every script through
+`runmany.sh` and 464.13's `one.sh`, unchanged; `summary.py` and `controls.py`
+read what they print. To run them again, save these eight files and `one.sh`
+in one directory and run `python3 flatall.py`, `bash runall.sh`, `python3
+summary.py` and `python3 controls.py` there.
 
 `flatall.py`, whole, as run:
 
@@ -18407,28 +18557,11 @@ if __name__ == "__main__":
 `python3 flatall.py` prints `722 cases with a normal term, each with a
 control at u / 2, and fa_none.g`.
 
-**The second lane's run, still a draft.** The first lane's `prodzero.g`
-asked both directions as implications inside the goal and exited 1, `BND(X)`
-best within `2.22507e-308`. The cover needs one direction only, a product that
-rounds to zero is at most `2⁻¹⁰⁷⁵`, and with `t` zero as a hypothesis it
-proves with no hint, `gappa -Bcoq` and `coqc` exit 0, 101 lines, no hints.
-`c_prodzero.g`, the same asking `2⁻¹⁰⁷⁶`, exits 1. `pmin.g` prints `P` at
-least `2^(-971.585)` with `eb` normal at the code's `B`.
-
-`runall.sh` ran the 722 cases, `fa_none.g` and `prodzero.g` with Coq, 16 at a
-time on a load of 15 to 33 over 24 cores, from 20:42:34Z to 21:07:17Z: `grep
--c ' exit 0 [0-9.]*s$' list_fa.log` printed 724, and `grep -c 'coq -Bcoq exit
-0 coqc exit 0' list_fa.log` 724. Only `fa_none.out` prints "pointless". The
-proofs of the 722 are 1513 to 6969 lines with 8 to 27 hints; the slowest is
-`fa_nnnnnn`, 92.72 s in Gappa and 104.44 s for `-Bcoq` and `coqc`.
-`summary.py` read every case: `A` within exactly `2⁻¹⁰⁷⁵` for each product
-not normal in all 722, and the largest `(Σ e) / Phat` and `P −/ Phat` `5u +
-7u²` and `5u + 10u²` and a little more, 464.13's for `flat.g`. Its checks
-against `k u + 7u²` per case compare with no room for that little more, so
-they count `5u + 7u²`-and-a-little as over: give them room before quoting
-them. The controls were still running when this lane relayed.
-
-`prodzero.g`, as it proves:
+`prodzero.g` proves the cover's `z`. The first lane wrote it with both
+directions as implications inside the goal, and it failed, `BND(X)` best
+within `2.22507e-308`: Gappa reads an implication in the goal by negating it,
+and the edge at `2⁻¹⁰⁷⁵` is not closed. The cover needs one direction only,
+and with `t` zero among the hypotheses it proves with no hint:
 
 ```gappa
 # prodzero.g: a product of two doubles, of either sign, that rounds to zero
@@ -18441,7 +18574,41 @@ t = rnd(X);
   -> X in [-1b-1075, 1b-1075] }
 ```
 
-`runmany.sh` is 464.18's at 16 at a time rather than 8:
+`c_prodzero.g`, its control (5):
+
+```gappa
+# c_prodzero.g: prodzero.g asking for half its bound, which must fail: 2^-1075
+# is a product of two doubles and rounds to zero, ties going to even.
+@rnd = float<ieee_64, ne>;
+a = rnd(a_); b = rnd(b_);
+X = a * b;
+t = rnd(X);
+{ |a| <= 1b1024 /\ |b| <= 1b1024 /\ t in [0, 0]
+  -> X in [-1b-1076, 1b-1076] }
+```
+
+`pmin.g`, which `bash one.sh pmin.g nocoq` runs, printing `P in
+[1071292029505990860761435525475052308156628044440098539197007b-1171
+{3.34028e-293, 2^(-971.585)}, 1b1000 {1.07151e+301, 2^(1000)}]`:
+
+```gappa
+# pmin.g: how small the permanent can be with eb = rnd(B * P) normal, at the
+# code's B. P is any non-negative real here, which covers every permanent.
+@rnd = float<ieee_64, ne>;
+B = 6b-53 + 1b-99;
+eb = rnd(B * P);
+{ P >= 0 /\ P <= 1b1000 /\ eb >= 1b-1022 /\ eb -/ B * P in [-4503599627370497b-105, 4503599627370497b-105]
+  -> P in ? }
+P -> (eb / B) / (1 + (eb - B * P) / (B * P));
+```
+
+`runall.sh`:
+
+```sh
+RUNALL_SH
+```
+
+`runmany.sh`, 464.18's at sixteen at a time rather than eight:
 
 ```sh
 #!/bin/bash
@@ -18451,3 +18618,30 @@ rm -f "$1.log"
 xargs -P 16 -I{} bash one.sh {} "$2" < "$1" >> "$1.log" 2>&1
 echo "done $(wc -l < "$1") files from $1"
 ```
+
+`summary.py`:
+
+```python
+SUMMARY_PY
+```
+
+`controls.py`:
+
+```python
+CONTROLS_PY
+```
+
+**9. What this leaves.** No row. What is not a row:
+
+- Q2767, on the doc of `product_is_normal` in `cascade.rs`, already waits on
+  Q2760. 6 here is a third predicate, after 464.14's sphere and 464.18's
+  plane, where that doc's claim does not hold: without its checks, a product
+  below the normals would not make this filter certify a sign it has not
+  earned.
+- Q2700 moves the Gappa scripts that rows of 464 appended into
+  `proofs/gappa/`, and that takes in the eight of 8.
+- Whether dropping the six checks would turn a refusal at level 1 into an
+  answer was not run (6). The checks stay, so nothing asks for it (§13).
+- The claim on `value`, rather than `y`, with a product below the normals was
+  not run. `decide` needs only `y` (2).
+- `field` on these scripts' hints (464.10).
