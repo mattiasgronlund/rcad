@@ -117,31 +117,43 @@ impl Plane {
     ///
     /// # Where the 64 comes from
     ///
-    /// Write `ε = f64::EPSILON`. Two roundings reach a moved plane's normal.
+    /// Write `ε = f64::EPSILON`, `u = ε/2`. Gappa proves three shares reach a
+    /// moved normal's `n·n`, against a turn whose quaternion's `q·q` is
+    /// within `6ε` of one — which [`Isometry::compose`] keeps, and
+    /// `Isometry::rotation`'s is measured against `TURN_LENGTH_DRIFT`
+    /// (`docs/decisions.md` §464.20).
     ///
     /// - **The constructor's.** Each component is the nearest `f64` to the
-    ///   exact ratio, a relative slip of at most `ε/2`, so `n·n` is within
-    ///   `ε + ε²/4` of one.
-    /// - **The turn's.** [`Isometry::POINT_ROUNDOFF`] puts each turned
-    ///   component within `18ε` times the largest component of where the turn's
-    ///   own arithmetic, done exactly, puts it; a vector has no shift, and its
-    ///   largest component is at most its length, one. So the turned vector is
-    ///   `m + δ` with `|δ| ≤ √3·18ε`, and `|m + δ|² − |m|² = 2m·δ + |δ|²`, which
-    ///   is at most `2√3·18ε ≈ 62.35ε` and a term of order `ε²`.
+    ///   exact ratio, a relative slip of at most `ε/2`, so `n·n` moves by at
+    ///   most `2u` (`ε`).
+    /// - **The turn's length drifting from one.** The turn's own arithmetic,
+    ///   done exactly, moves `n·n` by `4(q·q − 1)|v × n|²`. An earlier count
+    ///   of this bound left this share to a test rather than deriving it;
+    ///   Gappa now derives it, within `48u` (`24ε`), from `|q·q − 1| ≤ 6ε`
+    ///   and `|v × n|² ≤ |v|²|n|²`.
+    /// - **The turn's rounding.** A vector has no shift, and its largest
+    ///   component is at most its length, one. Gappa puts each turned
+    ///   component within `20u` of the turn's own arithmetic on this
+    ///   account — not [`Isometry::POINT_ROUNDOFF`]'s `36u`, a point's bound
+    ///   with a shift and every coordinate at `L` — so `n·n` moves by at
+    ///   most `2√3·20u ≈ 69.28u`.
     ///
-    /// Together `63.4ε`, under `64ε`.
+    /// Together `2u + 48u + 69.28u = 119.28u`, `59.64ε`, under `64ε` with
+    /// `4.36ε` to spare.
     ///
-    /// **One share is not derived, and is measured instead.** The turn's own
-    /// arithmetic done exactly keeps a length only when its quaternion has
-    /// length exactly one, and a stored quaternion comes from `sin` and `cos`,
-    /// which Rust does not bound. So the sum above is not a proof that every
-    /// turned normal is inside, and
-    /// `every_normal_a_turn_leaves_sits_well_inside_the_bound` is the evidence
-    /// that the share that was left out fits in the room the worst case
-    /// leaves. Over 20 000 normals the worst `|n·n − 1|` it finds is `8.96ε`
-    /// turned once, `16.95ε` through four composed turns, `22.16ε` through
-    /// sixteen and `20.77ε` through 256, and it asserts every one is under
-    /// half the bound.
+    /// **An earlier count here, `63.4ε`, could not hold the second share.**
+    /// It counted the constructor's `ε` and `2√3·18ε ≈ 62.35ε` for the turn's
+    /// rounding — `POINT_ROUNDOFF`'s `18ε` per component, a point's figure,
+    /// where a vector's turn rounds at only `19.6u` per component — and left
+    /// the second share, `4(q·q − 1)|v × n|²`, to a test. Added at Gappa's
+    /// `24ε`, that count comes to `87.4ε`, past the bound; what makes room is
+    /// charging the vector's own, smaller, rounding instead.
+    ///
+    /// `every_normal_a_turn_leaves_sits_well_inside_the_bound` is
+    /// corroborating evidence, not the proof: over 20 000 normals the worst
+    /// `|n·n − 1|` it finds is `8.96ε` turned once, `16.95ε` through four
+    /// composed turns, `22.16ε` through sixteen and `20.77ε` through 256,
+    /// each under half the bound.
     ///
     /// **That holds through any number of composed turns because
     /// [`Isometry::compose`] keeps the turn near length one.** Composing two
