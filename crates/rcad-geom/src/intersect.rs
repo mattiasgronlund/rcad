@@ -5329,10 +5329,11 @@ pub(crate) struct TwoConesOffOneAxis {
 /// enclosures above are too loose for. A **gap** where the crossing is two
 /// loops, or a loop and two branches, and the curve is there whatever its
 /// shape. Among the pairs refused are mirror images that do not touch, whose
-/// two flat cuts stay apart, and a cone turned off another of its slope whose
-/// turned axis was rounded when written or stored, so that the two are not
-/// exactly mirror images, do not touch, and pass close by each other where the
-/// exact pair would touch.
+/// two flat cuts stay apart; two of one slope side by side, which cross in one
+/// curve in the flat surface halfway between them; and a cone turned off
+/// another of its slope whose turned axis was rounded when written or stored,
+/// so that the two are not exactly mirror images, do not touch, and pass close
+/// by each other where the exact pair would touch.
 ///
 /// [`Error::Undecidable`] where a sign asked exactly could not be settled.
 pub(crate) fn how_two_cones_off_one_axis_cross(
@@ -5661,6 +5662,13 @@ fn where_every_line_crosses_a_flat_inside(
 /// is that one and both cones are tangent to the flat surface along it; and
 /// nowhere where `b` is inside `one`.
 ///
+/// **Unless `w·n = 0`**, asked exactly. `u × n` is `−k(w·n)(w × n)`, so with
+/// the axes not on one line the flat surface `y·u = 0` is parallel to `P` just
+/// where `w·n = 0`: two cones side by side, their axes one direction, whose
+/// forms differ by `P`'s alone, so that they cross in one curve in `P` and
+/// touch nowhere. Otherwise at most one of the two lines is parallel to `P`,
+/// since two would both run along `n × u`, so at least one crosses it.
+///
 /// # Errors
 ///
 /// [`Error::Undecidable`] where a sign asked exactly could not be settled.
@@ -5686,6 +5694,17 @@ fn two_mirror_images_that_touch(
         Decision::Neg | Decision::Undecidable { .. } | _ => {
             unreachable!("a sum of squares asked through `ask` is never below zero nor undecided")
         }
+    }
+    match ask(
+        &how_far_along_ones_axis_the_other_apex_is(one, other),
+        Measures::Length,
+        at,
+        policy,
+        log,
+    )? {
+        Decision::Zero => return Ok(false),
+        Decision::Pos | Decision::Neg => (),
+        Decision::Undecidable { .. } | _ => unreachable!("`ask` hands back a sign or an error"),
     }
     match ask(
         &where_a_point_stands_against_a_cone(other.apex(), one),
@@ -5734,6 +5753,20 @@ fn whether_one_cone_is_the_others_mirror_image(one: &Cone, other: &Cone) -> impl
                 return None;
             };
             Exact::squared_length_of(&Exact::cross_of(&[x, y, z], along)?)
+        },
+    }
+}
+
+/// `w·n` of [`two_mirror_images_that_touch`]: nothing exactly where the line
+/// between the apexes is square to `one`'s axis, as a question.
+fn how_far_along_ones_axis_the_other_apex_is(one: &Cone, other: &Cone) -> impl Predicate {
+    let [here, there] = [one.apex(), other.apex()].map(|apex| apex.coordinates());
+    let up = one.axis().direction().components();
+    Question {
+        named: WHERE_TWO_CONES_CROSS,
+        enclosing: move || dot_enclosing(exactly(up), gap_enclosing(here, there)),
+        exactly: move || {
+            Exact::dot_of_two_exact(&Exact::of_each(up), &Exact::gap_between(here, there))
         },
     }
 }
