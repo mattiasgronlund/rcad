@@ -547,10 +547,12 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_both_turned_a_radian_about_its_axis_a
 /// in it, at the hole's rim. `validate` read which side of the thin pipe the
 /// floor lies on off its one corner not on that pipe, the outline's
 /// `(2c, 2s, −2)`. That corner is `(c, s)` from the thin axis, and `c² + s²` is
-/// under 1, so it read inside the thin pipe, where the floor is not. A flat
-/// face whose hole is a pipe's closed crossing alone lies outside that pipe
-/// next to it, and `validate` now takes that side from the hole and reads no
-/// corner.
+/// under 1, so it read inside the thin pipe, where the floor is not. That
+/// corner is within a rounding of the thin pipe, where `validate` lets a
+/// corner sit as on the pipe, so it says no side of it either. `validate` now
+/// reads no side off such a corner, and with no other corner off the thin pipe
+/// it asks the floor nothing at the hole's rim, as it asks a bar's cap nothing
+/// at its wall.
 ///
 /// Before that these were refused `CannotMeshAFace` with
 /// `BoundaryCrossesItself` as the shells were sorted, before the answer was
