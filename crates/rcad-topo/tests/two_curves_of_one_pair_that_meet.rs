@@ -625,14 +625,15 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_opposite_its_seam_both_turned_so_it_r
 /// [`a_thin_bar_up_the_inside_of_a_thick_one_opposite_its_seam_both_turned_so_it_rounds_inside_answers_every_fuse`]
 /// turned 1.56, 1.58, 4.69, 4.71 and 4.73, within `0.023` of a quarter or
 /// three quarters of a turn, where `c² + s² − 1` is below zero at each.
+/// Every fuse answers as the unturned bars' do.
 ///
 /// The union both ways round at 1.56, 1.58 and 4.71, and the thick bar less
-/// the thin one at all five, are refused `CannotMeshAFace` with
+/// the thin one at all five, were refused `CannotMeshAFace` with
 /// `BoundaryCrossesItself` on the answer's thick floor (Q2845), after
-/// `the_coarsest_mesh_whose_sides_do_not_cross` in `validate.rs` has run every
+/// `the_coarsest_mesh_whose_sides_do_not_cross` in `validate.rs` had run every
 /// one of its rooms and `SolidView::mesh_or_how_it_folded` every one of its
 /// sixteen rungs at each. At every rung of every room the corner of the hole
-/// outside the outline is the same one, a corner every walk of the hole's
+/// outside the outline was the same one, a corner every walk of the hole's
 /// circle keeps: the circle's own vertex, at the floor's chart's first axis
 /// from the thin axis, near a quarter turn, and the point opposite it near
 /// three quarters. That corner is `α` round the hole's centre from where the
@@ -641,8 +642,15 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_opposite_its_seam_both_turned_so_it_r
 /// 1.56, `1.4e−6` at 4.71. The outline's chord across that place sags `β²`
 /// at its middle, `β` its half-angle round the thick axis, so the corner
 /// lies outside it while `β` is above about `α/2`. The finest outline the
-/// ladder walks has 269 corners for the union and 165 for the difference,
+/// ladder walked had 269 corners for the union and 165 for the difference,
 /// `β` of `0.0117` and `0.019`, and 1.56 needs `β` under `0.0054`.
+///
+/// From the outline's second rung on, the mesh now walks each bent side of
+/// the outline so that its chords sag at most half the way the point of the
+/// hole nearest the thick pipe stands in from it
+/// (`BuildingAMesh::again_with_its_outline_walked_clear_of_its_holes` in
+/// `mesh.rs`). Here that point is this corner, `α²/4` in, and every mesh of
+/// these fuses clears on that rung.
 #[test]
 fn a_thin_bar_up_the_inside_of_a_thick_one_opposite_its_seam_turned_near_a_quarter_answers_every_fuse()
  {

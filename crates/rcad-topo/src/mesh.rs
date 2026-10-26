@@ -395,12 +395,13 @@ impl SolidView<'_> {
     ///   its points there: its own chords sag into the hole, away from the face,
     ///   so its points are what comes close to the outline. So once those rungs
     ///   have run out, every side of the face goes back to the room the first
-    ///   pass walked it at, and only the outline is halved, rung after rung,
-    ///   and from its second rung on walked fine enough to clear the point of
-    ///   a hole nearest it as well (Q2845). Not from the first rung, because the bowls a rounding off a half ball
+    ///   pass walked it at, and only the outline is halved, rung after rung.
+    ///   Not from the first rung, because the bowls a rounding off a half ball
     ///   in `a_piece_grazed_by_a_trimming_nothing_follows.rs`, whose ring clears
     ///   with both rims halved, were refused when only the outline was, and a
-    ///   mesh that cleared halving both is cut as it was.
+    ///   mesh that cleared halving both is cut as it was. From the outline's
+    ///   second rung on, each of its sides is also walked fine enough that its
+    ///   chords stay clear of the point of a hole nearest it (Q2845).
     /// - **A refusal on a finer rung hands back the last crossing.** The
     ///   finer rooms are this function's own numbers, and a refusal at one of
     ///   them is no answer about the deflection the caller asked for — the same
