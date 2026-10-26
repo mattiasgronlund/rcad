@@ -15973,6 +15973,23 @@ and `C`'s `92u·h²` is not yet checked against a count by hand. The relaying
 lane had written, and not run, `gen.py`'s hints for them (its handoff), with
 `Bw` within `7u·|w|` and `t` in `[0.5, 2]`, `[2, 8]` and `[8, 32]`.
 
+**The second lane's runs, draft too.** `gen.py`'s hints (the first lane's
+handoff), run unchanged as `k1.g`, `k2.g` and `k3.g` with `Bw` within
+`7u·|w|`, all exit 0 and print, for `t` in `[0.5, 2]`, `[2, 8]` and `[8, 32]`:
+`bend_up` `2.05044e-15`, `6.66977e-15`, `2.56613e-14`; `K` `3.63806e-15`,
+`8.27788e-15`, `2.72711e-14`; `(mrk − 1/KS)·KS` `3.74908e-15`, `8.3889e-15`,
+`2.73821e-14`; `(C − CS)/hhS` `1.02363e-14`, `1.8008e-13`, `2.8979e-12`; and
+`(off − offS)/KS` `1.3751e-14`, `1.1819e-14`, `3.02893e-14`. `off`'s `124u` at
+`[0.5, 2]` is interval width over `t`, not a bound worth keeping: its two terms
+both peak at `t = 0.5`, where `C` is about `11u·h²`, not the `92u·h²` it
+reaches at `t = 2`. The ranges need cutting finer, with explicit goals, since
+Gappa does not split for an `in ?` goal.
+
+A first point script, one coordinate in units of `L`, proves each rounding but
+the bend's: `bd = rnd(nd·(−mrk))` with `mrk` up to `2¹⁰⁰⁰` leaves `(bd −
+z5)·s²/L` at `±2.4e285`, and `$ z5 in (-1b-1022, 1b-1022)` prints "case split
+on z5 has not produced any interesting new result".
+
 **Still to do**, in order: the scalar chain over slope ranges, a script for one
 coordinate of the point against the true parabola at the same `s`, the
 controls, `coqc` through 464.13's `one.sh`, and the rows for what this
