@@ -19783,6 +19783,75 @@ mod tests {
         );
     }
 
+    /// Two cones on one apex at a right angle whose slopes multiply to one
+    /// touch along two rulings, and each of the four halves `rcad-geom` names
+    /// leaves the apex one way, read in its own corner (Q2870).
+    ///
+    /// Slope one about `z` and about `x` touch along `(±1, 0, ±1)`, slope two
+    /// about `z` and one half about `x` along `(±2, 0, ±1)`. Each flat surface
+    /// through the apex that `rcad-geom` names them by touches the cones along
+    /// one of those rulings, so its two roots are one and both of its ways out
+    /// used to be read in the one corner.
+    #[test]
+    fn each_half_of_a_ruling_two_cones_touch_along_leaves_the_apex_one_way() {
+        use rcad_geom::{EdgeRun, Picker, SurfaceMeet, intersect};
+
+        use super::the_way_a_half_ruling_two_cones_share_leaves_the_apex;
+
+        for (upright, lying, across) in [(1.0, 1.0, 1.0), (2.0, 0.5, 2.0)] {
+            let upright = Cone::new(Axis::z(), upright).expect("a slope above zero");
+            let lying = Cone::new(Axis::x(), lying).expect("a slope above zero");
+            let met = intersect(
+                &Surface::Cone(upright),
+                &Surface::Cone(lying),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            let Ok(SurfaceMeet::Curves(runs)) = &met else {
+                panic!("the two touching rulings are named: {met:?}");
+            };
+            assert_eq!(runs.len(), 4, "the four halves of two rulings: {runs:?}");
+            let mut found = Vec::new();
+            for named in runs {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = named.run() else {
+                    panic!("a half ruling is part of where the cones cross: {named:?}");
+                };
+                let corner: Vec<&HalfSpace> = picked_by
+                    .iter()
+                    .map(|picker| {
+                        let Picker::InFrontOf(flat) = picker else {
+                            panic!("a half ruling is picked by flat surfaces: {picker:?}");
+                        };
+                        flat
+                    })
+                    .collect();
+                let way = the_way_a_half_ruling_two_cones_share_leaves_the_apex(
+                    &upright, &lying, &corner,
+                )
+                .unwrap_or_else(|| panic!("{named:?} leaves the apex one way"));
+                let half = [[across, 0.0, 1.0], [across, 0.0, -1.0]]
+                    .into_iter()
+                    .flat_map(|half| [half, half.map(|part| -part)])
+                    .find(|&half| runs_along(way, half))
+                    .unwrap_or_else(|| panic!("{way:?} runs along a touching ruling"));
+                found.push(half);
+            }
+            found.sort_by(|one, other| one.partial_cmp(other).expect("no NaN"));
+            found.dedup();
+            assert_eq!(found.len(), 4, "each half is found once: {found:?}");
+        }
+    }
+
+    /// Whether `way` can be a positive multiple of `half`: every part of
+    /// `way × half` holds nothing and `way · half` is above it.
+    fn runs_along(way: [Interval; 3], half: [f64; 3]) -> bool {
+        let half = half.map(Interval::exactly);
+        cross_of_intervals(way, half)
+            .iter()
+            .all(|part| part.lo() <= 0.0 && 0.0 <= part.hi())
+            && (way[0] * half[0] + way[1] * half[1] + way[2] * half[2]).sign() == Decision::Pos
+    }
+
     /// A hint that puts a pair the wrong way round comes back the right way
     /// round, and one that is already right is not asked twice about anything.
     ///
