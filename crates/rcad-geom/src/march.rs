@@ -2284,3 +2284,242 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod probe_q2796 {
+    use super::*;
+    use crate::Axis;
+    use rcad_predicates::expansion::{two_diff, two_product, two_sum};
+
+    #[derive(Clone, Copy, Debug)]
+    struct Dd(f64, f64);
+    fn dd(x: f64) -> Dd {
+        Dd(x, 0.0)
+    }
+    fn add(a: Dd, b: Dd) -> Dd {
+        let (s, e) = two_sum(a.0, b.0);
+        let (s, e) = two_sum(s, e + a.1 + b.1);
+        Dd(s, e)
+    }
+    fn neg(a: Dd) -> Dd {
+        Dd(-a.0, -a.1)
+    }
+    fn mul(a: Dd, b: Dd) -> Dd {
+        let (p, e) = two_product(a.0, b.0);
+        let (p, e) = two_sum(p, e + a.0 * b.1 + a.1 * b.0);
+        Dd(p, e)
+    }
+    fn div(a: Dd, b: Dd) -> Dd {
+        let q1 = a.0 / b.0;
+        let r = add(a, neg(mul(dd(q1), b)));
+        let q2 = r.0 / b.0;
+        let r = add(r, neg(mul(dd(q2), b)));
+        let q3 = r.0 / b.0;
+        add(add(dd(q1), dd(q2)), dd(q3))
+    }
+    fn root(a: Dd) -> Dd {
+        let s = a.0.sqrt();
+        let r = add(a, neg(mul(dd(s), dd(s))));
+        add(dd(s), dd(r.0 / (2.0 * s)))
+    }
+    fn below(a: Dd, x: f64) -> bool {
+        let d = add(a, dd(-x));
+        d.0 < 0.0 || (d.0 == 0.0 && d.1 < 0.0)
+    }
+    fn above(a: Dd, x: f64) -> bool {
+        let d = add(a, dd(-x));
+        d.0 > 0.0 || (d.0 == 0.0 && d.1 > 0.0)
+    }
+
+    fn the_truth(cone: &Cone, at: Point) -> (Dd, Dd, [f64; 3]) {
+        let along = cone.axis().direction().components();
+        let apex = cone.apex().coordinates();
+        let at = at.coordinates();
+        let out: [Dd; 3] = core::array::from_fn(|i| {
+            let (d, e) = two_diff(at[i], apex[i]);
+            Dd(d, e)
+        });
+        let mut l2 = dd(0.0);
+        let mut dot = dd(0.0);
+        let mut o2 = dd(0.0);
+        for i in 0..3 {
+            l2 = add(l2, mul(dd(along[i]), dd(along[i])));
+            dot = add(dot, mul(out[i], dd(along[i])));
+            o2 = add(o2, mul(out[i], out[i]));
+        }
+        let up = div(dot, l2);
+        let reach = root(add(o2, neg(mul(mul(up, up), l2))));
+        let slope = dd(cone.slope());
+        let steep = root(add(dd(1.0), mul(slope, slope)));
+        let up_abs = if up.0 < 0.0 { neg(up) } else { up };
+        let off = div(add(reach, neg(mul(slope, up_abs))), steep);
+        let sign = up.0.signum();
+        let normal = core::array::from_fn(|i| {
+            ((out[i].0 + out[i].1 - along[i] * (up.0 + up.1)) / (reach.0 + reach.1)
+                - cone.slope() * sign * along[i] / (l2.0 + l2.1).sqrt())
+                / (steep.0 + steep.1)
+        });
+        (up, off, normal)
+    }
+
+    #[test]
+    fn probe_q2796_a_lopsided_up() {
+        let along = Vector::new(0.36, 0.48, 0.8);
+        let u = Vector::new(0.8, -0.6, 0.0);
+        let v = Vector::new(0.48, 0.64, -0.6);
+        for apex in [Point::new(0.0, 0.0, 0.0), Point::new(0.75, -1.25, 2.5)] {
+            for slope in [0.5, 1.0, 4.0, 100.0, 1e15, 1e17] {
+                let cone =
+                    Cone::new(Axis::new(apex, along).expect("an axis"), slope).expect("a cone");
+                let stored = cone.axis().direction();
+                let (mut straddles, mut lopsided, mut misses, mut wrong_signs, mut normal_misses) =
+                    (0, 0, 0, 0, 0);
+                let mut worst_miss_in_widths = 0.0_f64;
+                let mut example = None;
+                for radius in [1.0, 3.0, 1e-3] {
+                    let h = radius * f64::EPSILON;
+                    for turn in 0..64 {
+                        let angle = f64::from(turn) * core::f64::consts::TAU / 64.0;
+                        for k in -8..=8 {
+                            let at = apex
+                                + u * (radius * angle.cos())
+                                + v * (radius * angle.sin())
+                                + stored * (f64::from(k) * h);
+                            let along_i = exactly(stored.components());
+                            let up_i = quotient_or_everything(
+                                dot_enclosing(
+                                    gap_enclosing(apex.coordinates(), at.coordinates()),
+                                    along_i,
+                                ),
+                                squared_length_enclosing(along_i),
+                            );
+                            if !(up_i.lo() < 0.0 && up_i.hi() > 0.0) {
+                                continue;
+                            }
+                            straddles += 1;
+                            if -up_i.lo() > up_i.hi() {
+                                lopsided += 1;
+                            }
+                            let (off, normal) = how_far_off_a_cone_enclosing(&cone, at);
+                            let (up_t, off_t, normal_t) = the_truth(&cone, at);
+                            if below(off_t, off.lo()) || above(off_t, off.hi()) {
+                                misses += 1;
+                                let miss = (off.lo() - (off_t.0 + off_t.1)).max(0.0);
+                                worst_miss_in_widths = worst_miss_in_widths.max(miss / off.width());
+                                if example.is_none() {
+                                    example = Some((at, up_i, up_t, off, off_t));
+                                }
+                            }
+                            if (off.lo() > 0.0 && below(off_t, 0.0))
+                                || (off.hi() < 0.0 && above(off_t, 0.0))
+                            {
+                                wrong_signs += 1;
+                            }
+                            if (0..3).any(|i| {
+                                normal_t[i] < normal[i].lo() - 1e-9
+                                    || normal_t[i] > normal[i].hi() + 1e-9
+                            }) {
+                                normal_misses += 1;
+                            }
+                        }
+                    }
+                }
+                eprintln!(
+                    "apex {apex:?} slope {slope:e}: straddles {straddles}, lopsided {lopsided}, \
+                     truth outside the enclosure {misses} (worst {worst_miss_in_widths:e} widths \
+                     below), wrong signs {wrong_signs}, normal outside {normal_misses}"
+                );
+                if let Some((at, up_i, up_t, off, off_t)) = example {
+                    eprintln!(
+                        "  e.g. at {:?}: up [{:e}, {:e}] true {:e}; off [{:e}, {:e}] true {:e}",
+                        at.coordinates(),
+                        up_i.lo(),
+                        up_i.hi(),
+                        up_t.0 + up_t.1,
+                        off.lo(),
+                        off.hi(),
+                        off_t.0 + off_t.1
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn probe_q2796_pick_points() {
+        let along = Vector::new(0.36, 0.48, 0.8);
+        let u = Vector::new(0.8, -0.6, 0.0);
+        let apex = Point::new(0.0, 0.0, 0.0);
+        for slope in [1.0, 4.0, 57.28996163075943, 100.0, 1e4] {
+            let cone = Cone::new(Axis::new(apex, along).expect("an axis"), slope).expect("a cone");
+            let stored = cone.axis().direction();
+            eprintln!("slope {slope} stored {:?}", stored.components());
+            for k in 0..=12 {
+                let at = apex + u + Vector::new(0.0, 0.0, -f64::from(k) * 2.0_f64.powi(-57));
+                let along_i = exactly(stored.components());
+                let up_i = quotient_or_everything(
+                    dot_enclosing(gap_enclosing(apex.coordinates(), at.coordinates()), along_i),
+                    squared_length_enclosing(along_i),
+                );
+                let (off, normal) = how_far_off_a_cone_enclosing(&cone, at);
+                let (up_t, off_t, normal_t) = the_truth(&cone, at);
+                eprintln!(
+                    "k {k} at {:?} up [{:e}, {:e}] true {:e}; off [{:e}, {:e}] true {:e} below {}; \
+                     normal z [{:e}, {:e}] true {:e}",
+                    at.coordinates(),
+                    up_i.lo(),
+                    up_i.hi(),
+                    up_t.0 + up_t.1,
+                    off.lo(),
+                    off.hi(),
+                    off_t.0 + off_t.1,
+                    below(off_t, off.lo()),
+                    normal[2].lo(),
+                    normal[2].hi(),
+                    normal_t[2]
+                );
+            }
+        }
+    }
+
+    fn a_pipe(along: [f64; 3], through: [f64; 3], radius: f64) -> Surface {
+        Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::from(through), Vector::from(along)).expect("a direction"),
+                radius,
+            )
+            .expect("a radius"),
+        )
+    }
+
+    #[test]
+    fn probe_q2796_a_seed_that_settles_off_one_surface() {
+        let fat = a_pipe([0.0, 0.0, 1.0], [1191182336.0, 0.0, 0.0], 2147482112.0);
+        let thin = a_pipe([0.0, 1.0, 0.0], [0.0, 0.0, 0.0], 4.3601508761683463e-106);
+        for seed in [
+            Point::new(4.3601508761683463e-106, 1786830731.7039194, 0.0),
+            Point::new(0.0, 1786830731.7039194, 4.3601508761683463e-106),
+            Point::new(4.3601508761683463e-106, -1786830731.7039194, 0.0),
+        ] {
+            let surfaces = [&fat, &thin];
+            let marched = march(surfaces, seed, 1.0, 1000).map(|walked| walked.points.len());
+            let bounded = settled_with_a_bound(surfaces, seed);
+            eprintln!("seed {:?}: march {marched:?}", seed.coordinates());
+            match bounded {
+                Ok((settled, off)) => {
+                    let off_each = surfaces.map(|surface| {
+                        let (enclosed, _) = how_far_off_enclosing(surface, settled);
+                        (enclosed.lo(), enclosed.hi())
+                    });
+                    eprintln!(
+                        "  settled_with_a_bound Ok at {:?} bound {off:e}; off each {off_each:?}; \
+                         the march's seed check turns it away: {}",
+                        settled.coordinates(),
+                        the_settling_did_not_land_on_both(surfaces, settled)
+                    );
+                }
+                Err(why) => eprintln!("  settled_with_a_bound Err {why:?}"),
+            }
+        }
+    }
+}
