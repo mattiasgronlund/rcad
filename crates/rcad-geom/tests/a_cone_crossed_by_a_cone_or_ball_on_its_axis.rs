@@ -942,19 +942,24 @@ fn two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_t
 /// its axis along `-y`, every number exact: mirror images across the flat
 /// surface `y + z = 4` halfway between their apexes.
 ///
-/// **They touch where each apex is outside the other cone, and only there.**
-/// Of slope a half, half-angle `0.46`, the turn is less than `π` less twice
-/// that, the apex `(0, 4, 4)` is outside the upright cone, and the two touch at
-/// `(±√1.92, 0.8, 3.2)`, inside both pointed cones eight high. Of slope two,
-/// half-angle `1.11`, the apex is inside it, and the line along `x` through
-/// `(0, 3.2, 0.8)`, the only place they could touch, stays outside the upright
-/// cone, where `x² + y² − 5z²` is `x² + 7.04`: they cross without touching,
-/// and are refused as any other overlap is.
+/// **They touch unless each apex is inside the other cone.** Of slope a half,
+/// half-angle `0.46`, the turn is less than `π` less twice that, the apex
+/// `(0, 4, 4)` is outside the upright cone, and the two touch at
+/// `(±√1.92, 0.8, 3.2)`, inside both pointed cones eight high. Of slope one,
+/// half-angle `π/4`, the turn is exactly `π` less twice that, the apex is on
+/// the upright cone, and the two share the straight line through both apexes,
+/// `x = 0, y = z`, and touch all along it, where both normals are along
+/// `(0, 1, −1)`. Of slope two, half-angle `1.11`, the apex is inside it, and
+/// the line along `x` through `(0, 3.2, 0.8)`, the only place they could
+/// touch, stays outside the upright cone, where `x² + y² − 4z²` is
+/// `x² + 7.68`: they cross without touching, and are refused as any other
+/// overlap is.
 #[test]
-fn two_cones_of_one_slope_a_quarter_turn_apart_touch_only_where_each_apex_is_outside_the_other() {
+fn two_cones_of_one_slope_a_quarter_turn_apart_touch_unless_each_apex_is_inside_the_other() {
     let upright = |slope| a_cone([0.0; 3], [0.0, 0.0, 1.0], slope);
     let turned = |slope| a_cone([0.0, 4.0, 4.0], [0.0, -1.0, 0.0], slope);
     assert_refused_as_touching_itself(&upright(0.5), &turned(0.5));
+    assert_refused_as_touching_itself(&upright(1.0), &turned(1.0));
     assert_eq!(
         named(&upright(2.0), &turned(2.0)),
         Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
