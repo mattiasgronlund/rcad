@@ -51,7 +51,7 @@ use crate::intersect::{
     whether_two_cones_share_an_axis,
 };
 use crate::march::{
-    Marched, how_tightly_a_cone_bends_at, march, settled_with_a_bound,
+    Marched, how_tightly_a_cone_bends_at, march, march_to, settled_with_a_bound,
     settled_with_a_bound_where_they_bend,
 };
 use crate::meet::nowhere_in_particular;
@@ -418,6 +418,11 @@ impl PointsAlongACrossing {
 /// [`Error::TooManyPointsAlongOneCrossing`] when the deflection asks for more
 /// than [`MOST_POINTS_ALONG_ONE_CROSSING`].
 ///
+/// [`Error::CannotFollowACrossingTowardsTheOtherEndOfItsRun`] when a run
+/// between two corners on a branch that runs off for ever, which is marched
+/// from one corner to the other, cannot be walked on towards the second
+/// corner: neither way from the first gets any nearer it, or a step went back.
+///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces on the
 /// run pick both of the two arcs between its ends, or neither, and on a
 /// degree-four crossing when its two ends are on two of its loops, or cannot
@@ -456,6 +461,10 @@ impl PointsAlongACrossing {
 /// torus's refusal also covers a whole circle such a partner shares with it
 /// that the run names by the two faces alone, which
 /// `where_a_ring_and_a_surface_on_its_axis_cut` keeps refused on purpose.
+/// Where two cones off one axis cross in a loop and two branches that run off
+/// for ever, the cone's refusal is for a whole branch, which has no end to
+/// march to, and for a run with its corners on two pieces: the loop is drawn,
+/// and so is a run between two corners on one branch.
 ///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run a caller
 /// states as going right round a crossing that runs on for ever — a plane and a
@@ -509,6 +518,15 @@ pub fn walk(
         WhatARunLiesOn::StraightLine => return Ok(nothing_between_the_ends()),
         WhatARunLiesOn::QuarticPickedUpAt(seeds, held_apart_by) => {
             return follow_the_quartic(run, pair, seeds, held_apart_by, deflection, policy, log);
+        }
+        WhatARunLiesOn::ABranchBetweenTwoCorners {
+            crossing,
+            middle,
+            beyond,
+        } => {
+            return follow_a_branch_between_two_corners(
+                run, pair, crossing, middle, beyond, deflection, policy, log,
+            );
         }
         WhatARunLiesOn::Parabola(bend) => {
             return walk_an_endless_bend(&bend, run, deflection, policy, log);
@@ -626,6 +644,11 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 /// [`Error::ACrossingBetweenATorusAndAnotherCurvedSurface`] for a cone or a
 /// torus against another curved surface, exactly as [`walk`] does.
 ///
+/// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run between two
+/// corners on one of the branches that run off for ever, where two cones off
+/// one axis cross in a loop and two branches. [`walk`] marches that run from
+/// one corner to the other, and the branch it is on does not close.
+///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a plane against a
 /// cone that cross in a parabola or a hyperbola, which is the same refusal as
 /// for the straight lines above and for the same reason: a curve that runs on
@@ -694,7 +717,9 @@ pub fn where_a_closed_crossing_starts(
         WhatARunLiesOn::QuarticPickedUpAt(seeds, held_apart_by) => {
             the_seed_this_run_is_picked_up_at(run, &pair, seeds, held_apart_by, &certified, log)
         }
-        WhatARunLiesOn::Parabola(_) | WhatARunLiesOn::OneBranchOfAHyperbola(_) => {
+        WhatARunLiesOn::Parabola(_)
+        | WhatARunLiesOn::OneBranchOfAHyperbola(_)
+        | WhatARunLiesOn::ABranchBetweenTwoCorners { .. } => {
             Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed)
         }
         // **Asked of the point and not of the conic's size**, which is the
@@ -765,10 +790,10 @@ fn middle_of(side: Interval) -> f64 {
     (side.lo() + side.hi()) / 2.0
 }
 
-/// What a run between two surfaces lies on: one of three things, and which one
-/// is worked out in a single place.
+/// What a run between two surfaces lies on, and which one is worked out in a
+/// single place.
 ///
-/// **Exhaustive on purpose.** A sixth shape of crossing would mean a sixth
+/// **Exhaustive on purpose.** Another shape of crossing would mean another
 /// way of walking one, and the point of this enum is that both callers handle
 /// every shape there is.
 enum WhatARunLiesOn {
@@ -781,6 +806,16 @@ enum WhatARunLiesOn {
     /// the marcher to start from, and what holds those two pieces apart when
     /// there are two.
     QuarticPickedUpAt([Point; 2], TwoLoopsHeldApartBy),
+    /// A run between two corners on one of the two branches that run off for
+    /// ever, where two cones off one axis cross in a loop and two branches.
+    /// `middle` is the way out from `crossing.ruled`'s axis that the straight
+    /// line of it through the middle of the branch leans, and `beyond` is the
+    /// flat surface the whole branch is in front of.
+    ABranchBetweenTwoCorners {
+        crossing: TwoConesOffOneAxis,
+        middle: Vector,
+        beyond: Picker,
+    },
     /// A parabola: one curve that runs on for ever both ways and bends.
     Parabola(Parabola),
     /// One of a hyperbola's two branches, which runs on for ever both ways and
@@ -820,7 +855,9 @@ enum TwoLoopsHeldApartBy {
     /// straight line of one cone crosses between its two crossings of the
     /// other, for two cones off one axis, as it stores it. Where those cross in
     /// one loop and two branches, it holds the loop apart from the branch
-    /// beyond it, and only the loop is marched.
+    /// beyond it. The loop is marched round from its seed, and a run between
+    /// two corners on a branch from one corner to the other
+    /// ([`WhatARunLiesOn::ABranchBetweenTwoCorners`]).
     TwoConesAcross(TwoConesOffOneAxis),
 }
 
@@ -1133,7 +1170,8 @@ fn what_a_run_between_these_two_lies_on(
         // Two cones off one axis cross in a degree-four curve that is marched
         // where it is proved two loops, or one loop and two branches, by the
         // one function `intersect` names them with, so the walk refuses
-        // exactly what the namer refuses, and a run on a branch besides.
+        // exactly what the namer refuses, and a whole branch besides, which
+        // has no end to march to.
         [Surface::Cone(one), Surface::Cone(other)]
             if whether_two_cones_share_an_axis(&one, &other) == Decision::Pos =>
         {
@@ -1145,6 +1183,9 @@ fn what_a_run_between_these_two_lies_on(
                     crossing.ruled.basis().0,
                 ),
                 Some(apex) => {
+                    if let Some(branch) = the_branch_both_corners_are_on(run, &crossing, apex) {
+                        return Ok(branch);
+                    }
                     let [near, far, back] =
                         where_a_loop_and_two_branches_are_seeded(&crossing, apex);
                     refused_unless_the_run_is_on_the_loop(
@@ -1369,6 +1410,141 @@ fn follow_the_quartic(
         points,
         deviation: tag,
     })
+}
+
+/// A run between two corners on one of the two branches two cones off one
+/// axis cross in beside their loop, marched from one corner to the other.
+///
+/// # How far along the branch a point is
+///
+/// How far round `crossing.ruled`'s axis, from `middle`, the straight line of
+/// it through the point leans ([`how_far_round_the_ruled_cone`]). Every
+/// straight line of `ruled` leaning further from `crossed`'s axis than
+/// `crossed`'s own lines do crosses the branch beyond `across` once, and every
+/// one leaning less crosses the branch behind the apex once
+/// (`how_two_cones_off_one_axis_cross`). So each branch is one arc of those
+/// lines, centred on the one leaning furthest or least, which is `middle`, and
+/// short of a whole turn, since the lines leaning the other way are not on it:
+/// the angle grows, or falls, the whole way along the branch, and never jumps
+/// a turn. Which of the two it does from the run's first corner to its second
+/// is read off the corners.
+///
+/// # What is checked
+///
+/// Both corners and the march's own bound against half the deflection, as
+/// [`follow_the_quartic`] checks them. Every point against the run's
+/// half-spaces and `beyond`, so that a step onto the loop, whose points lean
+/// as the branch's do, is refused and not drawn. A point whose box shares a
+/// point with a corner's is left out, since nothing tells the two apart.
+///
+/// # Errors
+///
+/// [`Error::CannotPlaceAPointThatCloseToACrossing`] and
+/// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a corner, as
+/// [`follow_the_quartic`] has them, and the first also for the march's bound.
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the two corners lean
+/// as one straight line does, or a point is decided behind one of the
+/// half-spaces.
+///
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when a point has no box round it.
+///
+/// What [`march_to`] refuses.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the run, its two surfaces, the three things that say which branch it is on, the deflection, the policy and the log are each their own input"
+)]
+fn follow_a_branch_between_two_corners(
+    run: &NamedRun,
+    pair: [Surface; 2],
+    crossing: TwoConesOffOneAxis,
+    middle: Vector,
+    beyond: Picker,
+    deflection: Deflection,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<PointsAlongACrossing> {
+    let half_the_budget = deflection.length() / 2.0;
+    let surfaces = [&pair[0], &pair[1]];
+    let ends = the_two_corners_of_an_open_run(run)
+        .expect("a run is a branch between two corners only where it has two corners");
+    let reach = how_far_off_the_crossing_a_corner_can_be(
+        ends,
+        surfaces,
+        TwoLoopsHeldApartBy::TwoConesAcross(crossing),
+    )?;
+    if reach > half_the_budget && !policy.wobble_is_acceptable(reach) {
+        return Err(Error::CannotPlaceAPointThatCloseToACrossing {
+            asked: deflection.length(),
+            closest: reach,
+        });
+    }
+    let corners = [
+        where_on_the_crossing_this_corner_can_be(ends[0], surfaces)?,
+        where_on_the_crossing_this_corner_can_be(ends[1], surfaces)?,
+    ];
+    let [from, to] = corners.map(|corner| Point::from(corner.enclosure().map(middle_of)));
+    let round = |at: Point| how_far_round_the_ruled_cone(&crossing.ruled, middle, at);
+    let (set_out, _) = settled_with_a_bound(surfaces, from)?;
+    let (arrive, _) = settled_with_a_bound(surfaces, to)?;
+    let way = match round(arrive).partial_cmp(&round(set_out)) {
+        Some(Ordering::Greater) => 1.0,
+        Some(Ordering::Less) => -1.0,
+        Some(Ordering::Equal) | None => return Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+    };
+    let walked = march_to(
+        surfaces,
+        from,
+        |at| way * round(at),
+        way * round(arrive),
+        half_the_budget,
+        MOST_POINTS_ALONG_ONE_CROSSING,
+    )?;
+    let deviation = walked.deviation;
+    if deviation > half_the_budget && !policy.wobble_is_acceptable(deviation) {
+        return Err(Error::CannotPlaceAPointThatCloseToACrossing {
+            asked: deflection.length(),
+            closest: deviation,
+        });
+    }
+    let mut points = Vec::with_capacity(walked.points.len());
+    for point in walked.points {
+        let round_it =
+            somewhere_within(point, deviation).ok_or(Error::CannotWorkOutHowBigACrossingIs)?;
+        if !corners
+            .iter()
+            .any(|corner| the_boxes_share_a_point(*corner, round_it))
+        {
+            points.push(point);
+        }
+    }
+    let mut picked_by: SmallVec<[Picker; 2]> =
+        the_half_spaces_that_pick(run).iter().copied().collect();
+    if !picked_by.contains(&beyond) {
+        picked_by.push(beyond);
+    }
+    if !points.is_empty() && !every_point_is_held(&points, &picked_by, deviation, policy, log)? {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    }
+    Ok(PointsAlongACrossing {
+        points,
+        deviation: Approximation::new(deviation, Cause::PointAlongACrossing),
+    })
+}
+
+/// How far round `cone`'s axis, from `middle`, the straight line of `cone`
+/// through `at` leans: an angle between `−π` and `π`, growing the way `middle`
+/// turns about the axis's direction. A point below the apex is read on the
+/// line it is on, which comes out of the apex leaning the other way.
+fn how_far_round_the_ruled_cone(cone: &Cone, middle: Vector, at: Point) -> f64 {
+    let along = cone.axis().direction();
+    let out = at - cone.apex();
+    let up = out.dot(along) / along.length_squared();
+    let ruling = (out - along * up) * up.signum();
+    middle
+        .cross(ruling)
+        .dot(along)
+        .atan2(middle.dot(ruling) * along.length())
 }
 
 /// How far off the crossing the further of an open run's two corners can be:
@@ -2723,6 +2899,37 @@ fn where_a_pipe_reaches_across_a_cone(cone: &Cone, pipe: &Cylinder) -> [Point; 2
     ]
 }
 
+/// The run between two corners on one of the two branches of a loop and two
+/// branches, when both its corners are decided on the far side of the flat
+/// surface that holds that branch apart from the loop: behind `apex` for the
+/// branch behind `ruled`'s apex, and in front of `across` for the one beyond.
+///
+/// **Asked of each corner as it is, and nothing logged.** Two corners on two
+/// pieces, or one that cannot be decided, are left to
+/// [`refused_unless_the_run_is_on_the_loop`], which refuses them as before and
+/// logs once what it could not decide.
+fn the_branch_both_corners_are_on(
+    run: &NamedRun,
+    crossing: &TwoConesOffOneAxis,
+    apex: HalfSpaceThroughAPoint,
+) -> Option<WhatARunLiesOn> {
+    let corners = the_two_corners_of_an_open_run(run)?;
+    let away = the_way_the_ruled_cone_leans_away(crossing);
+    [(apex, -away), (crossing.across.reversed(), away)]
+        .into_iter()
+        .find(|(flat, _)| {
+            let behind = Picker::from(*flat);
+            corners
+                .iter()
+                .all(|corner| behind.side_of_point(*corner) == Decision::Neg)
+        })
+        .map(|(flat, middle)| WhatARunLiesOn::ABranchBetweenTwoCorners {
+            crossing: *crossing,
+            middle,
+            beyond: Picker::from(flat.reversed()),
+        })
+}
+
 /// The seeds of a loop and two branches: where the straight line of `ruled`
 /// leaning furthest from `crossed`'s axis meets the loop and the branch beyond
 /// `across`, and where the one leaning least meets the branch behind `apex`.
@@ -2735,11 +2942,7 @@ fn where_a_loop_and_two_branches_are_seeded(
     crossing: &TwoConesOffOneAxis,
     apex: HalfSpaceThroughAPoint,
 ) -> [Point; 3] {
-    let up = crossing.crossed.axis().direction();
-    let along = crossing.ruled.axis().direction();
-    let leaning = (up - along * (up.dot(along) / along.length_squared())).normalized();
-    let leaning = leaning.expect("the two axes are not along one line, so the cones lean apart");
-    let away = -leaning * up.dot(along).signum();
+    let away = the_way_the_ruled_cone_leans_away(crossing);
     let [far, near] =
         where_one_cone_reaches_across_another(&crossing.ruled, &crossing.crossed, away);
     let behind = where_one_cone_reaches_across_another(&crossing.ruled, &crossing.crossed, -away);
@@ -2751,8 +2954,22 @@ fn where_a_loop_and_two_branches_are_seeded(
     [near, far, back]
 }
 
+/// The way out from `ruled`'s axis, square to it, that its straight line
+/// leaning furthest from `crossed`'s axis leans: the middle of the branch
+/// beyond `across`. Its opposite is the line leaning least, the middle of the
+/// branch behind the apex.
+fn the_way_the_ruled_cone_leans_away(crossing: &TwoConesOffOneAxis) -> Vector {
+    let up = crossing.crossed.axis().direction();
+    let along = crossing.ruled.axis().direction();
+    let leaning = (up - along * (up.dot(along) / along.length_squared())).normalized();
+    let leaning = leaning.expect("the two axes are not along one line, so the cones lean apart");
+    -leaning * up.dot(along).signum()
+}
+
 /// `Err` unless `run` is on the loop of a loop and two branches, which is the
-/// one piece a march follows.
+/// one piece a march follows round from a seed. A run between two corners on
+/// one branch does not come here: it is marched from one corner to the other
+/// ([`the_branch_both_corners_are_on`]).
 ///
 /// A run with corners has each of them in front of both `loop_flats`, the
 /// flat surface through `ruled`'s apex and the one `across` reversed. A run
@@ -2761,8 +2978,10 @@ fn where_a_loop_and_two_branches_are_seeded(
 ///
 /// # Errors
 ///
-/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a run on a
-/// branch, which runs off for ever where a march follows only a closed loop.
+/// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a whole branch,
+/// which runs off for ever and has no end to march to, for a run with a
+/// corner on a branch whose other corner is not on that branch, and for a
+/// closed run cornered on a branch.
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] for a corner on either
 /// flat surface or too close to tell. Whatever settling a seed refuses.
 fn refused_unless_the_run_is_on_the_loop(

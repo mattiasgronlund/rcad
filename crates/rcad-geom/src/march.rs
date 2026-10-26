@@ -32,6 +32,8 @@
 //! decides. Roadmap §6.3 calls near-tangential contact the place kernels produce
 //! silent garbage; this is what stops the silence.
 
+use core::cmp::Ordering;
+
 use rcad_predicates::Interval;
 
 use crate::enclosure::{
@@ -361,6 +363,112 @@ fn march_with_a_first_ask(
         travelled += taken;
         step = (taken * 2.0).min(room.max(f64::MIN_POSITIVE) * MOST_A_STEP_MAY_GROW_TO);
         here = next;
+    }
+}
+
+/// Follow the crossing of two surfaces from `from` until `how_far_along` reaches
+/// `end`, for a run between two ends of a crossing that need not close.
+///
+/// `how_far_along` is the caller's measure of how far along the run a point
+/// is, and it has to grow from `from` to wherever `end` is reached. The walk
+/// goes whichever way round the crossing grows it: the way the two surfaces'
+/// normals cross to, or, when a first step that way does not grow it, the
+/// other way, by marching the two surfaces in the other order. **The pair is
+/// swapped and not the tangent**, because [`one_step`] keeps only a trial whose
+/// own direction still goes the way it was asked, and the direction it reads
+/// at every trial is the pair's.
+///
+/// The step rule and the first ask are [`march`]'s. `from` is settled onto
+/// both surfaces and is not among the points, and neither is the first point
+/// the walk reaches at or past `end`: the caller already has the place the run
+/// ends at, and the last straight piece is the one to it. That piece is a part
+/// of the last trial's own, the one that went past `end`, and that trial was
+/// kept by the same rule as every other.
+///
+/// # Why it terminates
+///
+/// Every point kept grows `how_far_along` past the one before, `end` is above
+/// all of them, and `most` caps how many there are; reaching that cap is a
+/// refusal, as in [`march`]. A step that does not grow it is not kept and
+/// refuses, since it went back over what the walk had covered, and a crossing
+/// does not do that along one piece. The hole in [`march`]'s argument, steps
+/// that shrink, is turned away here as there, at `from`, by
+/// [`the_settling_did_not_land_on_both`].
+///
+/// # Errors
+///
+/// [`Error::CannotFollowACrossingTowardsTheOtherEndOfItsRun`] when a first step
+/// either way round does not grow `how_far_along`, or a later one does not.
+///
+/// What [`march`] refuses, for the same reasons. Where a refusal names the two
+/// surfaces, they are in the order they were marched in, which is the other
+/// order from `surfaces` when the walk had to go the other way round.
+pub(crate) fn march_to(
+    surfaces: [&Surface; 2],
+    from: Point,
+    how_far_along: impl Fn(Point) -> f64,
+    end: f64,
+    room: f64,
+    most: usize,
+) -> Result<Marched> {
+    let start = settled(surfaces, from)?;
+    if the_settling_did_not_land_on_both(surfaces, start) {
+        return Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces);
+    }
+    let first = room
+        .min(the_smaller_radius(surfaces, start).max(one_step_of_the_grid_at(start)))
+        .max(f64::MIN_POSITIVE);
+    let goes_on =
+        |at: Point, behind: f64| how_far_along(at).partial_cmp(&behind) == Some(Ordering::Greater);
+    let set_out = how_far_along(start);
+    let mut surfaces = surfaces;
+    let mut stepped = one_step(
+        surfaces,
+        start,
+        which_way_the_crossing_runs(surfaces, start)?,
+        first,
+        room,
+    )?;
+    if !goes_on(stepped.0, set_out) {
+        surfaces = [surfaces[1], surfaces[0]];
+        stepped = one_step(
+            surfaces,
+            start,
+            which_way_the_crossing_runs(surfaces, start)?,
+            first,
+            room,
+        )?;
+        if !goes_on(stepped.0, set_out) {
+            return Err(Error::CannotFollowACrossingTowardsTheOtherEndOfItsRun);
+        }
+    }
+
+    let mut deviation = how_far_off_the_crossing(surfaces, start)?;
+    let mut points = Vec::new();
+    let mut behind = set_out;
+    loop {
+        let (next, taken) = stepped;
+        let along = how_far_along(next);
+        if along >= end {
+            return Ok(Marched { points, deviation });
+        }
+        if !goes_on(next, behind) {
+            return Err(Error::CannotFollowACrossingTowardsTheOtherEndOfItsRun);
+        }
+        deviation = deviation.max(how_far_off_the_crossing(surfaces, next)?);
+        points.push(next);
+        if points.len() > most {
+            return Err(Error::TooManyPointsAlongOneCrossing { most });
+        }
+        behind = along;
+        let step = (taken * 2.0).min(room.max(f64::MIN_POSITIVE) * MOST_A_STEP_MAY_GROW_TO);
+        stepped = one_step(
+            surfaces,
+            next,
+            which_way_the_crossing_runs(surfaces, next)?,
+            step,
+            room,
+        )?;
     }
 }
 
@@ -1248,7 +1356,6 @@ fn furthest_from_zero(value: Interval) -> Interval {
 mod tests {
     use super::*;
     use crate::Axis;
-    use core::cmp::Ordering;
     use rcad_predicates::{Decision, Point as PredicatePoint, SideOfSurface};
 
     fn a_ball(centre: [f64; 3], radius: f64) -> Surface {
@@ -1289,6 +1396,50 @@ mod tests {
                 "and it is √(R² − r²) up the axis: {point:?}"
             );
         }
+    }
+
+    /// Marched towards an angle round the pipe's axis, the same circle is
+    /// walked from where it starts to that angle and no further, whichever way
+    /// round the angle grows.
+    #[test]
+    fn marching_towards_an_angle_round_a_circle_stops_at_that_angle_either_way_round() {
+        let ball = a_ball([0.0, 0.0, 0.0], 5.0);
+        let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 3.0);
+        let up = f64::sqrt(25.0 - 9.0);
+        for way in [1.0, -1.0] {
+            let round = |at: Point| way * at.y().atan2(at.x());
+            for along in [[&ball, &pipe], [&pipe, &ball]] {
+                let walked = march_to(along, Point::new(3.0, 0.0, up), round, 1.0, 0.01, 1 << 20)
+                    .expect("a circle runs on from any point on it");
+                assert!(walked.points.len() > 4, "got {}", walked.points.len());
+                let mut behind = 0.0;
+                for point in &walked.points {
+                    let angle = round(*point);
+                    assert!(angle > behind && angle < 1.0, "{point:?} at {angle}");
+                    behind = angle;
+                }
+                assert!(behind > 0.8, "the last point is near the end: {behind}");
+            }
+        }
+    }
+
+    /// A measure that grows neither way round has no end to march towards.
+    #[test]
+    fn marching_towards_a_measure_that_does_not_grow_either_way_is_refused_by_name() {
+        let ball = a_ball([0.0, 0.0, 0.0], 5.0);
+        let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 3.0);
+        let up = f64::sqrt(25.0 - 9.0);
+        assert_eq!(
+            march_to(
+                [&ball, &pipe],
+                Point::new(3.0, 0.0, up),
+                |_| 0.0,
+                1.0,
+                0.01,
+                1 << 20
+            ),
+            Err(Error::CannotFollowACrossingTowardsTheOtherEndOfItsRun)
+        );
     }
 
     /// A quartic, and the shape §24.5 says two pipes leave: the marcher follows
