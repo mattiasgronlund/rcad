@@ -72,6 +72,7 @@ use crate::validate::{
 use crate::view::CoedgeView;
 use crate::{EdgeKey, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey};
 
+use super::arrange::ACornerReadAsOnePoint;
 use super::assemble::{InputFace, joined_faces_of_an_input, one_surface};
 use super::{Sameness, as_exact_as_it_is, gave_up, middle_of, name_of_surface_bits};
 
@@ -103,10 +104,57 @@ pub(crate) fn bake(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Vec<BakedSolid>> {
+    let joined = solids
+        .iter()
+        .map(|&solid| joined_on_the_way_in(model, solid, policy, log))
+        .collect::<Result<Vec<_>>>()?;
+    let planes_in_the_fuse = the_plane_of_every_face(model, solids, &joined);
     solids
         .iter()
-        .map(|&solid| bake_one_solid(model, solid, policy, log))
+        .zip(joined)
+        .map(|(&solid, joined)| {
+            bake_one_solid(model, solid, joined, &planes_in_the_fuse, policy, log)
+        })
         .collect()
+}
+
+/// The faces of a wholly flat solid with any that are really one flat region
+/// joined into one ([`joined_faces_of_an_input`]), or `None` for any other
+/// solid and for one with nothing to join.
+fn joined_on_the_way_in(
+    model: &Model,
+    key: SolidKey,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<Vec<InputFace>>> {
+    let solid = model.solid_at(key.slot_in(model.id()));
+    if !solid.is_wholly_flat() {
+        return Ok(None);
+    }
+    joined_faces_of_an_input(model, solid, policy, log)
+}
+
+/// The plane of every flat face the solids are baked with, joined where
+/// [`joined_on_the_way_in`] joined them, so that a corner is solved knowing
+/// every plane the arrangement will read round it ([`derive_a_corner`]).
+fn the_plane_of_every_face(
+    model: &Model,
+    solids: &[SolidKey],
+    joined: &[Option<Vec<InputFace>>],
+) -> Vec<Plane> {
+    let mut planes = Vec::new();
+    for (&key, joined) in solids.iter().zip(joined) {
+        match joined {
+            Some(faces) => planes.extend(faces.iter().map(|face| face.plane)),
+            None => planes.extend(
+                model
+                    .solid_at(key.slot_in(model.id()))
+                    .faces()
+                    .filter_map(|face| face.surface().as_plane().copied()),
+            ),
+        }
+    }
+    planes
 }
 
 /// One input solid, in world coordinates.
@@ -571,16 +619,25 @@ impl Bounds {
 fn bake_one_solid(
     model: &Model,
     key: SolidKey,
+    joined: Option<Vec<InputFace>>,
+    planes_in_the_fuse: &[Plane],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedSolid> {
     let slot = key.slot_in(model.id());
     let solid = model.solid_at(slot);
     let validate_allows = model.room_a_corner_of_this_solid_gets(slot);
-    if solid.is_wholly_flat()
-        && let Some(joined) = joined_faces_of_an_input(model, solid, policy, log)?
-    {
-        return bake_the_joined_faces(model, key, solid, &joined, validate_allows, policy, log);
+    if let Some(joined) = joined {
+        return bake_the_joined_faces(
+            model,
+            key,
+            solid,
+            &joined,
+            validate_allows,
+            planes_in_the_fuse,
+            policy,
+            log,
+        );
     }
 
     let mut surfaces = surface_of_every_face(model, solid);
@@ -593,6 +650,7 @@ fn bake_one_solid(
         &surfaces,
         &left_out,
         validate_allows,
+        planes_in_the_fuse,
         policy,
         log,
     )?;
@@ -781,16 +839,29 @@ fn what_each_edge_left_out_ran_along(
 /// all that is left is to solve each corner that survived the joining from the
 /// planes now round it. Every one of them has three, which is the whole point of
 /// having joined.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the solid, its joined faces, and what placing a corner of it reads"
+)]
 fn bake_the_joined_faces(
     model: &Model,
     key: SolidKey,
     solid: SolidView<'_>,
     joined: &[InputFace],
     validate_allows: CornerRoom,
+    planes_in_the_fuse: &[Plane],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedSolid> {
-    let corners = corner_of_every_vertex_left(model, solid, joined, validate_allows, policy, log)?;
+    let corners = corner_of_every_vertex_left(
+        model,
+        solid,
+        joined,
+        validate_allows,
+        planes_in_the_fuse,
+        policy,
+        log,
+    )?;
 
     let mut faces = Vec::new();
     let mut bounds = Bounds::nothing();
@@ -847,6 +918,7 @@ fn corner_of_every_vertex_left(
     solid: SolidView<'_>,
     joined: &[InputFace],
     validate_allows: CornerRoom,
+    planes_in_the_fuse: &[Plane],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BTreeMap<VertexSlot, BakedCorner>> {
@@ -881,7 +953,15 @@ fn corner_of_every_vertex_left(
             )?;
             Ok((
                 slot,
-                derive_a_corner(vertex, stored, planes, validate_allows, policy, log)?,
+                derive_a_corner(
+                    vertex,
+                    stored,
+                    planes,
+                    validate_allows,
+                    planes_in_the_fuse,
+                    policy,
+                    log,
+                )?,
             ))
         })
         .collect()
@@ -941,12 +1021,17 @@ struct PlacedSurface {
 
 /// Every corner of the solid, placed from the surfaces of its faces and of the
 /// edges left out at it ([`what_each_edge_left_out_ran_along`]).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the solid, its surfaces, and what placing a corner of it reads"
+)]
 fn corner_of_every_vertex(
     model: &Model,
     solid: SolidView<'_>,
     surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
     left_out: &BTreeMap<VertexSlot, Vec<Surface>>,
     validate_allows: CornerRoom,
+    planes_in_the_fuse: &[Plane],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BTreeMap<VertexSlot, BakedCorner>> {
@@ -970,6 +1055,7 @@ fn corner_of_every_vertex(
                             &around,
                             also_on,
                             validate_allows,
+                            planes_in_the_fuse,
                             policy,
                             log,
                         )?,
@@ -1036,6 +1122,7 @@ fn place_a_corner(
     around: &[PlacedSurface],
     also_on: &[Surface],
     validate_allows: CornerRoom,
+    planes_in_the_fuse: &[Plane],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedCorner> {
@@ -1058,6 +1145,7 @@ fn place_a_corner(
             where_the_model_puts_it,
             distinct,
             validate_allows,
+            planes_in_the_fuse,
             policy,
             log,
         );
@@ -1236,10 +1324,11 @@ fn derive_a_corner(
     where_the_model_puts_it: PredicatePoint,
     around: Vec<Surface>,
     validate_allows: CornerRoom,
+    planes_in_the_fuse: &[Plane],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedCorner> {
-    let mut best: Option<(PredicatePoint, [Surface; 3])> = None;
+    let mut solved: Vec<(PredicatePoint, [Surface; 3])> = Vec::new();
     'every_triple: for first in 0..around.len() {
         for second in (first + 1)..around.len() {
             for third in (second + 1)..around.len() {
@@ -1261,16 +1350,15 @@ fn derive_a_corner(
                     continue;
                 };
                 let point = as_exact_as_it_is(place);
-                if best.is_none_or(|(best, _)| point.uncertainty() < best.uncertainty()) {
-                    best = Some((point, triple));
-                }
+                solved.push((point, triple));
                 if point.uncertainty() == 0.0 {
                     break 'every_triple;
                 }
             }
         }
     }
-    let Some((point, solved_from)) = best else {
+    solved.sort_by(|one, other| one.0.uncertainty().total_cmp(&other.0.uncertainty()));
+    let Some(&(point, solved_from)) = solved.first() else {
         return Err(gave_up(
             WHERE_THREE_SURFACES_MEET,
             &[middle_of_the_places(&around)],
@@ -1278,9 +1366,38 @@ fn derive_a_corner(
             log,
         ));
     };
+    let best = solved_at(vertex, point, solved_from, &around, validate_allows)?;
+    if !reading_it_moves_a_meet_across_a_plane(&best, planes_in_the_fuse) {
+        return Ok(best);
+    }
+    Ok(solved[1..]
+        .iter()
+        .find_map(|&(point, solved_from)| {
+            solved_at(vertex, point, solved_from, &around, validate_allows)
+                .ok()
+                .filter(|corner| {
+                    !reading_it_moves_a_meet_across_a_plane(corner, planes_in_the_fuse)
+                })
+        })
+        .unwrap_or(best))
+}
 
+/// The corner solved at `point` from the three surfaces `solved_from`, once
+/// every surface round it has been asked about it.
+///
+/// # Errors
+///
+/// [`Invalid::VertexOffItsFacePlane`] or [`Invalid::VertexOffItsFaceSurface`]
+/// when a surface round it proves it is somewhere else.
+fn solved_at(
+    vertex: VertexKey,
+    point: PredicatePoint,
+    solved_from: [Surface; 3],
+    around: &[Surface],
+    validate_allows: CornerRoom,
+) -> Result<BakedCorner> {
     let writing_it_down = what_writing_the_corner_down_cost(point.enclosure());
-    for surface in &around {
+    for surface in around {
         let asked_with_room = grown_by(point, writing_it_down + validate_allows.off(surface));
         match side_of_surface(surface, asked_with_room) {
             Decision::Zero | Decision::Undecidable { .. } => (),
@@ -1304,11 +1421,44 @@ fn derive_a_corner(
     Ok(BakedCorner {
         vertex,
         point,
-        around,
+        around: around.to_vec(),
         solved_from: Some(solved_from),
         seam_plane: None,
         room_its_planes_were_asked_with: Some(writing_it_down + validate_allows.off_a_plane),
     })
+}
+
+/// Whether reading `corner` as the one point its planes run through moves a
+/// plane round it across where three planes meet, of those round it and the
+/// planes of the fuse running through its room
+/// ([`ACornerReadAsOnePoint::moves_a_meet_across_a_plane`]). `false` for a
+/// corner with no such reading.
+fn reading_it_moves_a_meet_across_a_plane(
+    corner: &BakedCorner,
+    planes_in_the_fuse: &[Plane],
+) -> bool {
+    let (Some(reading), Some(room)) = (
+        ACornerReadAsOnePoint::of(corner),
+        ACornerReadAsOnePoint::room_of(corner),
+    ) else {
+        return false;
+    };
+    let near: Vec<Plane> = planes_in_the_fuse
+        .iter()
+        .filter(
+            |plane| match side_of_surface(&Surface::Plane(**plane), room) {
+                Decision::Zero | Decision::Undecidable { .. } => true,
+                Decision::Neg | Decision::Pos => false,
+                other => {
+                    panic!(
+                        "side of a surface came back with a decision nothing here knows: {other:?}"
+                    )
+                }
+            },
+        )
+        .copied()
+        .collect();
+    reading.moves_a_meet_across_a_plane(&near)
 }
 
 /// Which of the places three surfaces meet at this corner is, or `None` when
@@ -2314,6 +2464,7 @@ mod tests {
                 PredicatePoint::from([0.0, 0.0, up]),
                 around.clone(),
                 validate_allows,
+                &[],
                 &Policy::certified(),
                 &mut log,
             )
@@ -2354,6 +2505,7 @@ mod tests {
             both_poles_at_once,
             around,
             validate_allows,
+            &[],
             &Policy::certified(),
             &mut log,
         );
@@ -2431,6 +2583,7 @@ mod tests {
                 Surface::Plane(chamfer),
             ],
             what_validate_allows(&model, cube),
+            &[],
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         )
@@ -2503,6 +2656,7 @@ mod tests {
                 Surface::Plane(chamfer),
             ],
             validate_allows,
+            &[],
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         )
@@ -2574,6 +2728,7 @@ mod tests {
             PredicatePoint::from(far_from_the_meet.coordinates()),
             grazing.map(Surface::Plane).to_vec(),
             validate_allows,
+            &[],
             &Policy::certified(),
             &mut log,
         );
@@ -2588,6 +2743,7 @@ mod tests {
             PredicatePoint::from([0.0, 0.0, 0.0]),
             grazing.map(Surface::Plane).to_vec(),
             validate_allows,
+            &[],
             &Policy::certified(),
             &mut log,
         )
