@@ -1210,10 +1210,13 @@ fn the_steep_cone_less_a_slab_turned_one_and_a_half_keeps_a_lens_past_the_end_it
 /// `CannotMeshAFace` on the intersection and the block-less-cone at crossing
 /// `0`, turn `1`; which of that fix's two steps, the bound or the one
 /// addition, moved the four is not traced. Leaned `1`, the same
-/// crossing and turn refuses `AWireWillNotLieFlatOnItsFace` on the union and
-/// the cone-less-block, and the sliver the intersection answers measures right
-/// since Q2178; until then it did not (`TwoPatchesOfTheMeshDrewTheSameSide`),
-/// and this lean was `37` right. Leaned `1` and turned `1`,
+/// crossing and turn used to refuse `AWireWillNotLieFlatOnItsFace` on the
+/// union and the cone-less-block, and the sliver the intersection answers
+/// measures right since Q2178; until then it did not
+/// (`TwoPatchesOfTheMeshDrewTheSameSide`), and this lean was `37` right.
+/// Since Q2811 let a pointed cone's cap take islands round its apex, the
+/// union and the cone-less-block answer right there too, and this lean was
+/// `38` right until then. Leaned `1` and turned `1`,
 /// crossings `0.5` and `1.5` refuse `order along a crossing` on every rule,
 /// and crossing `−0.5`, the miss, answers right on every rule. Until Q1461's
 /// cone bands in `fuse/cuts.rs` it refused `order along a crossing` on every
@@ -1248,12 +1251,8 @@ fn a_block_leaned_one_across_a_unit_pointed_cone_answers_right_or_refuses() {
     assert_eq!(
         tally_on_every_second_point(&leaning_blocks(THE_UNIT_CONE, 1.0, &[0.0, 1.0, 3.0])),
         Tally {
-            right: 38,
-            refused: [
-                ("AWireWillNotLieFlatOnItsFace", 2),
-                ("order along a crossing", 8),
-            ]
-            .into()
+            right: 40,
+            refused: [("order along a crossing", 8)].into()
         }
     );
 }

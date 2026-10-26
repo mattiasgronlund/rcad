@@ -1395,16 +1395,17 @@ impl BuildingAMesh {
             })
             .collect();
         // **A wire that winds is only allowed beside wires that wind too**, or
-        // as the rim of a cap on a ball beside islands, or as one of the two
-        // rims of a ring on a pipe or a cone beside islands. The loops of a
-        // face cut the chart into stretches, and the one the face is has every
-        // one of its wires in its boundary. Two that go right round bound the
-        // band between them and [`BuildingAMesh::cut_a_ring_across`] cuts it.
-        // One that goes right round beside others that do not is a cap with
-        // islands in it when the surface is a ball and every other wire is a
-        // hole: the cap's side of its rim is the side holding the pole the
-        // walk keeps on its left, and each hole lies on the face, so on that
-        // side ([`BuildingAMesh::cut_a_cap_up_to_its_pole`]). Two that go
+        // as the rim of a cap on a ball or a cone beside islands, or as one of
+        // the two rims of a ring on a pipe or a cone beside islands. The loops
+        // of a face cut the chart into stretches, and the one the face is has
+        // every one of its wires in its boundary. Two that go right round bound
+        // the band between them and [`BuildingAMesh::cut_a_ring_across`] cuts
+        // it. One that goes right round beside others that do not is a cap
+        // with islands in it when the surface pinches, a ball at its poles or
+        // a cone at its apex, and every other wire is a hole: the cap's side
+        // of its rim is the side holding the pole the walk keeps on its left,
+        // and each hole lies on the face, so on that side
+        // ([`BuildingAMesh::cut_a_cap_up_to_its_pole`]). Two that go
         // right round a pipe, or a cone clear of its apex, beside holes are a
         // ring with islands in it, the band between the two with each hole on
         // it, and the ring is cut across as a ring is, round the islands its
@@ -1416,7 +1417,7 @@ impl BuildingAMesh {
             |way: fn(&WalkedLoop) -> bool| walked.iter().filter(|&around| way(around)).count();
         let round_the_first_way = winding_round(|around| around.goes_right_round);
         let round_the_second_way = winding_round(|around| around.goes_right_round_the_second_way);
-        if !a_cap_on_a_ball_with_islands_in_it(&surface, &walked)
+        if !a_cap_on_a_ball_or_a_cone_with_islands_in_it(&surface, &walked)
             && !a_ring_on_a_pipe_or_a_cone_with_islands_in_it(&surface, &walked)
             && [round_the_first_way, round_the_second_way]
                 .iter()
@@ -1702,7 +1703,9 @@ impl BuildingAMesh {
         // that patch. A ball cut by a block whose one face crosses it apart
         // from the rest leaves one: the rest cut the rim right round the pole,
         // and the lone face's circle is an island (`docs/decisions.md` §212.6).
-        if a_cap_on_a_ball_with_islands_in_it(stored, &walked) {
+        // So does a pointed cone with a ball poking out of its side, round
+        // the cone's apex, the ball's loop the island (Q2811).
+        if a_cap_on_a_ball_or_a_cone_with_islands_in_it(stored, &walked) {
             let (rims, islands): (Vec<WalkedLoop>, Vec<WalkedLoop>) = walked
                 .into_iter()
                 .partition(|around| around.goes_right_round);
@@ -1803,10 +1806,11 @@ impl BuildingAMesh {
         // whose outer loop reaches both poles and whose hole reaches neither,
         // which a half ball cut again leaves, is cut from the hole up to each
         // pole instead. A ball's skin with only holes was opened into strips
-        // above, a cap on a ball with islands in it was cut up to its pole,
-        // and a ring on a pipe or a cone with islands in it was cut across
-        // round them. Any other face with one loop right round and another
-        // that is not has already been refused in [`BuildingAMesh::cut_up`].
+        // above, a cap on a ball or a cone with islands in it was cut up to
+        // its pole, and a ring on a pipe or a cone with islands in it was cut
+        // across round them. Any other face with one loop right round and
+        // another that is not has already been refused in
+        // [`BuildingAMesh::cut_up`].
         // `Model` is `Deserialize` and `validate` is the untrusted-import
         // boundary (§16.11), so that is a refusal rather than an assert.
         //
@@ -2501,7 +2505,7 @@ impl BuildingAMesh {
         room: f64,
     ) -> Result<Option<ACutUpToThePole>> {
         let island = &cut.the_island_in_its_turn();
-        let top = the_corner_furthest(island, cut.towards.signum());
+        let top = the_corner_furthest(island, cut.which_way_the_pole_lies());
         if !cut.leaves_up_from(island, top) {
             return Ok(None);
         }
@@ -5318,6 +5322,25 @@ impl ACutThroughAnIsland<'_> {
         in_the_turn_nearest(&self.islands[self.which], self.leaving[0], self.whole)
     }
 
+    /// `1.0` where the pole lies up the latitude from the rim, and `-1.0` where
+    /// it lies down.
+    ///
+    /// **Read off the rim, not off the pole's own latitude.** A ball's poles
+    /// are at plus and minus a quarter turn, so the pole's sign says which way
+    /// it lies, but a cone pinches at its apex, at height nought, and a cap of
+    /// a pointed cone reaches it down from a rim above. Read off the pole's
+    /// sign, the cut through the ball's island in a pointed cone fused with a
+    /// ball poking out of its side left the island from its corner furthest
+    /// from the apex, the meridian from there to the apex ran back through the
+    /// island, and the fuse was refused as a face that goes too far round
+    /// (`a_tapered_shaft_with_a_cross_hole.rs`, row Q2811). Every corner of
+    /// the rim lies strictly on one side of the pole the cap reaches
+    /// ([`BuildingAMesh::which_pole_this_cap_reaches`]), so the one the cut
+    /// leaves from says which.
+    fn which_way_the_pole_lies(&self) -> f64 {
+        (self.towards - self.leaving[1]).signum()
+    }
+
     /// Whether the meridian up from the island's corner `top` to the pole
     /// meets no other island, no side of its own island but the two at `top`,
     /// and not the rim.
@@ -5520,20 +5543,22 @@ fn gradient_of(surface: &Surface, at: Point) -> Vector {
     }
 }
 
-/// Whether a face's loops are the rim of a cap on a ball with islands in it:
-/// one loop right round, and at least one more, each passing each of its
-/// points once with the material outside it.
+/// Whether a face's loops are the rim of a cap on a ball or a cone with
+/// islands in it: one loop right round, and at least one more, each passing
+/// each of its points once with the material outside it.
 ///
-/// **Only on a ball**, where this was reached and measured. A cone's ring
-/// round its apex beside an island is the same shape and is still refused,
-/// for want of a solid that reaches it.
-fn a_cap_on_a_ball_with_islands_in_it(stored: &Surface, walked: &[WalkedLoop]) -> bool {
+/// **On a ball, and on a cone round its apex**, the two surfaces that pinch,
+/// where this was reached and measured. A pointed cone fused with a ball
+/// poking out of its side leaves one in the union and in the cone less the
+/// ball, the cone's rim right round and the ball's loop an island in it, and
+/// those were refused as a wire that will not lie flat until row Q2811
+/// (`a_tapered_shaft_with_a_cross_hole.rs`).
+fn a_cap_on_a_ball_or_a_cone_with_islands_in_it(stored: &Surface, walked: &[WalkedLoop]) -> bool {
     let (rims, islands): (Vec<&WalkedLoop>, Vec<&WalkedLoop>) =
         walked.iter().partition(|around| around.goes_right_round);
     rims.len() == 1
         && !islands.is_empty()
-        && stored.where_it_pinches() == Some(core::f64::consts::FRAC_PI_2)
-        && how_far_the_second_coordinate_wraps(stored).is_none()
+        && matches!(stored, Surface::Sphere(_) | Surface::Cone(_))
         && islands.iter().all(|island| {
             it_passes_each_of_its_points_once(island)
                 && how_much_of_the_chart_this_loop_encloses(island) < 0.0
