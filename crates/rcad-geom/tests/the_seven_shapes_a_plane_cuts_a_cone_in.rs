@@ -1145,6 +1145,43 @@ fn the_two_branches_a_steeper_plane_cuts_are_walked_one_per_nappe() {
     );
 }
 
+/// The plane through `point`, leaning against a cone of `slope` at exactly
+/// zero.
+///
+/// `(0, 1, t)`'s own normalizing division only lands `c` on `t · b` to the
+/// bit when `t` is a power of two — the file's own doc comment at the top
+/// says why — so for every other slope this walks a stretch of ulps either
+/// side of `1/√(1+t²)` for an `n_y` whose product with `t` rounds to no
+/// error at all, which `two_product`'s second half says exactly, pairs it
+/// with that product as `n_z`, and asks
+/// [`Plane::from_point_and_normal_as_written`] to keep `(0, n_y, n_z)`'s own
+/// bits.
+///
+/// Whether it did is checked against the plane handed back, not against a
+/// length worked out here in plain `f64`: that arithmetic rounds too, and
+/// rounded differently from what decides the keeping it put one candidate
+/// `(0, n_y, n_z)` just the near side of the bound and the real decision
+/// just the far side, so asking the plane itself is the only check that
+/// cannot disagree with it. Slopes 6 to 32 each need at most 64 ulps either
+/// way; 128 leaves room either side of that.
+fn a_leaning_plane(point: Point, slope: f64) -> Plane {
+    let near_one = 1.0 / (1.0 + slope * slope).sqrt();
+    for nudge in -128i64..=128 {
+        let n_y = f64::from_bits((near_one.to_bits() as i64 + nudge) as u64);
+        let (n_z, roundoff) = two_product(slope, n_y);
+        if roundoff != 0.0 {
+            continue;
+        }
+        let normal = Vector::new(0.0, n_y, n_z);
+        if let Ok(flat) = Plane::from_point_and_normal_as_written(point, normal)
+            && flat.normal().components() == normal.components()
+        {
+            return flat;
+        }
+    }
+    panic!("slope {slope} has no exact normal close to length one");
+}
+
 /// Every point of an endless bend is on both surfaces inside
 /// [`POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF`], over a search wide enough to catch
 /// the expression drifting out from under its own derivation.
@@ -1162,13 +1199,14 @@ fn the_two_branches_a_steeper_plane_cuts_are_walked_one_per_nappe() {
 ///   The scaling assertion below is the sharper half: it fails if the error
 ///   stops being proportional to `L`.
 /// - **It cannot fail on the constant being twice too big, and the number that
-///   says so is measured rather than argued.** Six families were tried, each
+///   says so is measured rather than argued.** Seven families were tried, each
 ///   adding to the one above it, with the worst share of the published bound
 ///   each reached:
 ///
 ///   | sweep | worst |
 ///   |---|---|
 ///   | the slope-and-height sweep and the parabola row alone | 0.0392 |
+///   | + the parabola row past slope four, slopes 6 to 32 and four off-grid | 0.0392 |
 ///   | + the deflection over 21 octaves, which those two pin at `1/64` | 0.0424 |
 ///   | + slopes off the eighths grid, so `slope²` is not a stored square | 0.0424 |
 ///   | + planes nudged either side of a ruling, so it is barely a hyperbola | 0.0458 |
@@ -1176,7 +1214,7 @@ fn the_two_branches_a_steeper_plane_cuts_are_walked_one_per_nappe() {
 ///   | + 120,000 random plane-and-cone pairs | **0.0750** |
 ///
 ///   Each line is printed as the test runs, so the table is checkable and not a
-///   remembered number. Five untried families moved the worst by **1.9x**
+///   remembered number. Six untried families moved the worst by **1.9x**
 ///   between them, and the one that moved it most is the one that holds nothing
 ///   still. The constant would have to come down by a factor of **13** before
 ///   this test could fail, so **halving it would not fail this test** — what
@@ -1190,8 +1228,10 @@ fn the_two_branches_a_steeper_plane_cuts_are_walked_one_per_nappe() {
 /// one; how far off the plane the **apex** stands, because every term is a
 /// multiple of it; the **deflection**, because the step count and so the
 /// parameter arithmetic hangs off it; the **scale**, because a power of two
-/// rounds nothing; and **both bending rows**, the parabola reached with the
-/// power-of-two slopes whose `E` is exactly zero.
+/// rounds nothing; and **both bending rows**, the parabola reached with a
+/// normal built so `E` is exactly zero — a power-of-two slope lands there on
+/// its own normalizing division, and [`a_leaning_plane`] walks a few ulps to
+/// put every other slope there by hand.
 #[test]
 fn every_point_along_an_endless_bend_is_on_both_surfaces_inside_the_published_bound() {
     let mut worst = 0.0f64;
@@ -1281,6 +1321,30 @@ fn every_point_along_an_endless_bend_is_on_both_surfaces_inside_the_published_bo
     }
 
     println!("and the parabola row: {worst:.4}");
+
+    // The parabola row past where a power of two reaches: slopes 6 to 32,
+    // where 464.23's chain does not prove 64 eps, plus four off the eighths
+    // grid that still take the parabola branch. `(0, 1, t)`'s own
+    // normalizing division does not land `c` on `t·b` to the bit for any of
+    // these, so `a_leaning_plane` builds the normal by hand instead.
+    for slope in (6..=32).map(f64::from).chain([6.5, 10.25, 17.75, 23.125]) {
+        let cone = Cone::new(Axis::z(), slope).expect("a positive slope");
+        for height_step in 1..40 {
+            let height = f64::from(height_step) * 0.37;
+            for out in [0.0, 1.0, 1024.0] {
+                let flat = a_leaning_plane(Point::new(out, out, height), slope);
+                measure(
+                    flat,
+                    cone,
+                    1.0 / 64.0,
+                    format!("parabola, slope {slope}, height {height}, out {out}"),
+                    &mut worst,
+                );
+            }
+        }
+    }
+
+    println!("and the parabola row past slope four: {worst:.4}");
 
     // The deflection, which the two rows above pin at `1/64`. It sets the step
     // count, so it is the one knob the parameter arithmetic hangs off.
