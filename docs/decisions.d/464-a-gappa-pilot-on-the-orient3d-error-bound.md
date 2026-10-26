@@ -15154,3 +15154,149 @@ And what is not a row: the zero branches (Q2801, Q2825), the products below
 normal (Q2802) and the route through `From<na::Isometry3<f64>>` (Q2803), which
 these scripts share with `point.g` and `vector.g`; and Q2700, which moves these
 scripts into `proofs/gappa/` with the rest of 464's.
+
+### 464.22 EVALUATION_ROUNDOFF's one stage
+
+DRAFT, Q2692 relay 1: the scripts below ran and proved; the write-up, the
+controls, `controls.py`, `all.sh` and `same.py` are not written yet.
+
+What ran, each through 464.13's `one.sh`: `stage.g` printed `stage exit 0
+0.85s` and `stage coq -Bcoq exit 0 coqc exit 0 2.49s lines 4529 hints 21`;
+`stage_e0.g` printed `stage_e0_mid exit 0 0.18s` and `stage_e0_mid coq -Bcoq
+exit 0 coqc exit 0 1.11s lines 1825 hints 9`, under its scratch name. The four
+edges, `stage.g` and `stage_e0.g` with `share` at `[0, 0]` and at `[1, 1]` and
+the averaging hints replaced by `XE / cE -> (rest * ((d0 - t0) / E) + share *
+((d1 - t1) / E)) / (1 + 9b-53);`, each exit 0. `stage.g` bounds `XMM` by
+`9.4369e-16` (`8.5u`) and `XE / cE` just under one; `share - A` within
+`2.77556e-16` (`2.5u`, not the doc's `3u`). `stage_e0.g` with `share in [0,
+1]` whole fails at `1.0005e-15` (`9.01u`), so the share split is needed.
+
+`stage.g`:
+
+```gappa
+@rnd = float<ieee_64, ne>;
+
+at = rnd(at_); below = rnd(below_); above = rnd(above_);
+d0 = rnd(d0_); d1 = rnd(d1_);
+
+num = rnd(at - below);
+den = rnd(above - below);
+share = rnd(num / den);
+rest = rnd(1 - share);
+z0 = rest * d0; z1 = share * d1;
+P0 = rnd(z0); P1 = rnd(z1);
+S = P0 + P1;
+out = rnd(S);
+
+A = (at - below) / (above - below);
+Ex = (1 - A) * t0 + A * t1;
+
+XE = rest * (d0 - t0) + share * (d1 - t1);
+cR = 2 * rest * E; cS = 2 * share * E;
+V = cR + cS;
+XM = (out - S) + (P0 - z0) + (P1 - z1) + (rest - (1 - share)) * t0 + (share - A) * (t1 - t0);
+XMM = (out - S) / M + (P0 - z0) / M + (P1 - z1) / M
+    + (rest - (1 - share)) * (t0 / M) + (share - A) * (t1 / M - t0 / M);
+cE = (1 + 9b-53) * E;
+cM = 9b-53 * M;
+D = cE + cM;
+
+{
+     |at| <= 1b1024 /\ |below| <= 1b1024 /\ |above| <= 1b1024
+  /\ above - below in [1b-1074, 1b1024]
+  /\ A in [0, 1]
+  /\ share in [1b-1074, 9007199254740991b-53]
+  /\ M in [1b-1022, 1b1024]
+  /\ t0 / M in [-1, 1] /\ t1 / M in [-1, 1]
+  /\ E / M in [1b-60, 1b-40]
+  /\ (d0 - t0) / E in [-1, 1] /\ (d1 - t1) / E in [-1, 1]
+->
+  share - A in ? /\ rest - (1 - share) in ? /\ XE / V in ? /\ XMM in ?
+  /\ (out - S) / M in ? /\ (P0 - z0) / M in ? /\ (P1 - z1) / M in ?
+  /\ XE / cE in ? /\ XM / cM in ?
+  /\ (out - Ex) / D in [-1, 1]
+}
+
+(out - Ex) / D -> ((D + (out - Ex)) - D) / D;
+D + (out - Ex) -> (cE + XE) + (cM + XM);
+(cE + XE) - cE -> XE;
+(cM + XM) - cM -> XM;
+
+XE / cE -> (XE / V) * (2 * (rest + share) / (1 + 9b-53));
+rest + share -> 1 + (rest - (1 - share));
+XE / V -> ((V + XE) - V) / V;
+V + XE -> (cR + rest * (d0 - t0)) + (cS + share * (d1 - t1));
+(cR + rest * (d0 - t0)) - cR -> rest * (d0 - t0);
+(cS + share * (d1 - t1)) - cS -> share * (d1 - t1);
+rest * (d0 - t0) / cR -> ((d0 - t0) / E) / 2;
+share * (d1 - t1) / cS -> ((d1 - t1) / E) / 2;
+
+XM / cM -> XMM / 9b-53;
+(P0 - z0) / M -> ((P0 - z0) / z0) * (z0 / M);
+(P1 - z1) / M -> ((P1 - z1) / z1) * (z1 / M);
+(out - S) / M -> ((out - S) / S) * (S / M);
+z0 / M -> rest * (d0 / M);
+z1 / M -> share * (d1 / M);
+d0 / M -> t0 / M + ((d0 - t0) / E) * (E / M);
+d1 / M -> t1 / M + ((d1 - t1) / E) * (E / M);
+S / M -> (P0 - z0) / M + (P1 - z1) / M + z0 / M + z1 / M;
+
+$ share in (0.5);
+$ z0 in (-1b-1022, 1b-1022);
+$ z1 in (-1b-1022, 1b-1022);
+$ S in (-1b-1022, 1b-1022);
+```
+
+`stage_e0.g`, the inputs within `2⁻⁶⁰ M` of the truth, stage 1's `E = 0`
+among them:
+
+```gappa
+@rnd = float<ieee_64, ne>;
+
+at = rnd(at_); below = rnd(below_); above = rnd(above_);
+d0 = rnd(d0_); d1 = rnd(d1_);
+
+num = rnd(at - below);
+den = rnd(above - below);
+share = rnd(num / den);
+rest = rnd(1 - share);
+z0 = rest * d0; z1 = share * d1;
+P0 = rnd(z0); P1 = rnd(z1);
+S = P0 + P1;
+out = rnd(S);
+
+A = (at - below) / (above - below);
+Ex = (1 - A) * t0 + A * t1;
+
+XMM = (out - S) / M + (P0 - z0) / M + (P1 - z1) / M
+    + (rest - (1 - share)) * (t0 / M) + (share - A) * (t1 / M - t0 / M);
+
+{
+     |at| <= 1b1024 /\ |below| <= 1b1024 /\ |above| <= 1b1024
+  /\ above - below in [1b-1074, 1b1024]
+  /\ A in [0, 1]
+  /\ share in [1b-1074, 9007199254740991b-53]
+  /\ M in [1b-1022, 1b1024]
+  /\ t0 / M in [-1, 1] /\ t1 / M in [-1, 1]
+  /\ (d0 - t0) / M in [-1b-60, 1b-60] /\ (d1 - t1) / M in [-1b-60, 1b-60]
+->
+  share - A in ? /\ rest - (1 - share) in ? /\ XMM in ?
+  /\ (out - S) / M in ? /\ (P0 - z0) / M in ? /\ (P1 - z1) / M in ?
+  /\ (out - Ex) / M in [-9b-53, 9b-53]
+}
+
+(out - Ex) / M -> XMM + rest * ((d0 - t0) / M) + share * ((d1 - t1) / M);
+(P0 - z0) / M -> ((P0 - z0) / z0) * (z0 / M);
+(P1 - z1) / M -> ((P1 - z1) / z1) * (z1 / M);
+(out - S) / M -> ((out - S) / S) * (S / M);
+z0 / M -> rest * (d0 / M);
+z1 / M -> share * (d1 / M);
+d0 / M -> t0 / M + (d0 - t0) / M;
+d1 / M -> t1 / M + (d1 - t1) / M;
+S / M -> (P0 - z0) / M + (P1 - z1) / M + z0 / M + z1 / M;
+
+$ share in (0.5);
+$ z0 in (-1b-1022, 1b-1022);
+$ z1 in (-1b-1022, 1b-1022);
+$ S in (-1b-1022, 1b-1022);
+```
