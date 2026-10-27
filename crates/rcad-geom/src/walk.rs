@@ -41,9 +41,9 @@ use crate::enclosure::{
 };
 use crate::exact::Exact;
 use crate::intersect::{
-    Question, TwoConesOffOneAxis, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_CONE_AND_A_BALL_CROSS,
-    WHERE_A_CONE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_CONES_CROSS,
-    WHERE_TWO_PIPES_CROSS, a_cones_slant_against_a_pipe_enclosing,
+    HowTwoConesOffOneAxisCross, Question, TwoConesOffOneAxis, WHERE_A_BALL_AND_A_PIPE_CROSS,
+    WHERE_A_CONE_AND_A_BALL_CROSS, WHERE_A_CONE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS,
+    WHERE_TWO_CONES_CROSS, WHERE_TWO_PIPES_CROSS, a_cones_slant_against_a_pipe_enclosing,
     a_cones_slant_against_a_pipe_exactly, ask, how_a_ball_on_a_cones_axis_meets_it,
     how_a_plane_leans_against_a_cone, how_two_cones_off_one_axis_cross, one_cone_either_way_round,
     two_cones_lean_apart_on_one_apex, whether_a_ball_runs_through_a_cones_apex,
@@ -1175,11 +1175,19 @@ fn what_a_run_between_these_two_lies_on(
         // where it is proved two loops, or one loop and two branches, by the
         // one function `intersect` names them with, so the walk refuses
         // exactly what the namer refuses, and a whole branch besides, which
-        // has no end to march to.
+        // has no end to march to. Two of one slope side by side cross in the
+        // hyperbola the flat surface halfway between them cuts out of one of
+        // them, and that cut is walked as a plane's, from the same flat
+        // surface and the same cone `intersect` named it by.
         [Surface::Cone(one), Surface::Cone(other)]
             if whether_two_cones_share_an_axis(&one, &other) == Decision::Pos =>
         {
-            let crossing = how_two_cones_off_one_axis_cross(&one, &other, policy, log)?;
+            let crossing = match how_two_cones_off_one_axis_cross(&one, &other, policy, log)? {
+                HowTwoConesOffOneAxisCross::HeldApart(crossing) => crossing,
+                HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { cone, flat } => {
+                    return where_a_plane_cuts_a_cone(&flat, &cone, run, policy, log);
+                }
+            };
             let seeds = match crossing.apex {
                 None => where_one_cone_reaches_across_another(
                     &crossing.ruled,

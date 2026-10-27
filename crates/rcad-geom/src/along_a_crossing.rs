@@ -160,10 +160,11 @@ use rcad_predicates::{
 use crate::enclosure::{cross_enclosing, dot_enclosing, exactly, gap_enclosing};
 use crate::exact::Exact;
 use crate::intersect::{
-    halfway_between_a_cones_apex_and_a_ball_on_its_axis, how_a_ball_on_a_cones_axis_meets_it,
-    how_a_plane_leans_against_a_pipe, how_two_cones_off_one_axis_cross,
-    whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
-    whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
+    HowTwoConesOffOneAxisCross, halfway_between_a_cones_apex_and_a_ball_on_its_axis,
+    how_a_ball_on_a_cones_axis_meets_it, how_a_plane_leans_against_a_pipe,
+    how_two_cones_off_one_axis_cross, whether_a_ball_runs_through_a_cones_apex,
+    whether_a_ball_sits_on_a_cones_axis, whether_a_cone_and_a_pipe_share_an_axis,
+    whether_two_cones_share_an_axis,
 };
 use crate::{
     Cone, Cylinder, Error, HalfSpace, HalfSpaceThroughAPoint, Plane, Point, Result, Sphere,
@@ -1152,6 +1153,9 @@ fn the_way_two_cones_on_one_axis_wind(
 /// the branches run off for ever, and the loop is not told apart from them
 /// here.
 ///
+/// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] where it proves the
+/// two of one slope side by side, whose crossing is one hyperbola.
+///
 /// Whatever else [`how_two_cones_off_one_axis_cross`] refuses but
 /// [`Error::Undecidable`], which is nothing known here instead: it is asked
 /// under a certified policy, since this function has no policy to ask it
@@ -1171,7 +1175,10 @@ fn the_way_a_loop_two_cones_cross_in_off_one_axis_winds(
         &Policy::certified(),
         &mut ProvenanceLog::new(),
     ) {
-        Ok(crossing) => crossing,
+        Ok(HowTwoConesOffOneAxisCross::HeldApart(crossing)) => crossing,
+        Ok(HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }) => {
+            return Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed);
+        }
         Err(Error::Undecidable { .. }) => return Ok(WhichWayItWinds::CannotTell),
         Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface) => {
             return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
@@ -1313,7 +1320,8 @@ impl Cone {
     /// `intersect` named and has no policy to hand here; and only where the
     /// answer is two loops. A loop and two branches is named by flat surfaces
     /// this does not read: each branch has one picker of its own, and is read
-    /// as it always was.
+    /// as it always was. So is the hyperbola two of one slope side by side
+    /// cross in, whose two branches are picked as a plane's cut of a cone.
     #[must_use]
     pub fn which_side_past_the_flat_surface_between_two_loops(
         &self,
@@ -1341,9 +1349,11 @@ impl Cone {
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         ) {
-            Ok(crossing) => crossing,
+            Ok(HowTwoConesOffOneAxisCross::HeldApart(crossing)) => crossing,
             Err(Error::Undecidable { .. }) => return Some(NOTHING_IS_KNOWN),
-            Err(_) => return None,
+            Ok(HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }) | Err(_) => {
+                return None;
+            }
         };
         if crossing.apex.is_some()
             || (*picker != crossing.across && *picker != crossing.across.reversed())
@@ -3181,9 +3191,10 @@ mod tests {
         let ball_beside =
             Surface::Sphere(Sphere::new(Point::new(1.0, 0.0, 0.0), 5.0).expect("a radius"));
         let cone = Surface::Cone(crate::Cone::new(Axis::z(), 1.0).expect("a slope"));
-        // Its apex one unit off the others' axis, which crosses the ball and
-        // the cone in a quartic. On the axis they are ordered, above, and so is
-        // the pipe, which is steeper than its skin.
+        // Its apex one unit off the others' axis, which crosses the ball in a
+        // quartic, and the cone, of its slope beside it, in the two branches of
+        // one hyperbola, which is not closed. On the axis they are ordered,
+        // above, and so is the pipe, which is steeper than its skin.
         let cone_beside = Surface::Cone(
             crate::Cone::new(
                 Axis::new(Point::new(1.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("an axis"),
@@ -3232,11 +3243,10 @@ mod tests {
             [&pipe, &pipe],
             // Two balls with the same centre have no line between them.
             [&ball, &ball],
-            // A cone against a ball or a second cone off its axis, or a pipe
-            // no steeper than its skin.
+            // A cone against a ball off its axis, or a pipe no steeper than
+            // its skin.
             [&cone_beside, &ball],
             [&ball, &cone_beside],
-            [&cone, &cone_beside],
             [&cone, &pipe_along_a_line_of_the_cone],
             [&pipe_along_a_line_of_the_cone, &cone],
             // Two cones of one apex meet there and nowhere else, and one cone
@@ -3263,6 +3273,13 @@ mod tests {
                 which_comes_first_round_a_crossing(pair, somewhere, somewhere, somewhere),
                 Err(Error::TheseTwoSurfacesDoNotCrossInAConic),
                 "{pair:?} does not cross in a conic"
+            );
+        }
+        for pair in [[&cone, &cone_beside], [&cone_beside, &cone]] {
+            assert_eq!(
+                which_comes_first_round_a_crossing(pair, somewhere, somewhere, somewhere),
+                Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
+                "{pair:?} cross in a hyperbola"
             );
         }
     }
