@@ -218,12 +218,12 @@ fn a_prism(
         let round_the_top: Vec<DraftStep> = (0..ring.len())
             .map(|i| prism.step(ring[i] + up, next(i) + up, 0))
             .collect();
-        top_wires.push(prism.builder.add_wire(&round_the_top).expect("a ring closes"));
+        top_wires.push(prism.wire(&round_the_top));
         let round_the_bottom: Vec<DraftStep> = (0..ring.len())
             .rev()
             .map(|i| prism.step(next(i), ring[i], 0))
             .collect();
-        bottom_wires.push(prism.builder.add_wire(&round_the_bottom).expect("a ring closes"));
+        bottom_wires.push(prism.wire(&round_the_bottom));
     }
     let mut shell = vec![
         prism.face([0.0, 0.0, top], [0.0, 0.0, 1.0], &top_wires),
@@ -239,7 +239,7 @@ fn a_prism(
                 prism.step(from, to, 0),
                 prism.step(to, to + up, which_edge_up(to, wall)),
             ];
-            let around = prism.builder.add_wire(&steps).expect("a wall closes");
+            let around = prism.wire(&steps);
             let ([x0, y0], [x1, y1]) = (corners[from], corners[to]);
             shell.push(prism.face([x0, y0, bottom], [y1 - y0, x0 - x1, 0.0], &[around]));
         }
@@ -276,6 +276,12 @@ impl Prism {
                 .add_coedge(edge, orientation)
                 .expect("an edge of this builder"),
         )
+    }
+
+    fn wire(&mut self, steps: &[DraftStep]) -> DraftWire {
+        self.builder
+            .add_wire(steps)
+            .expect("each ring of steps here closes")
     }
 
     fn face(
