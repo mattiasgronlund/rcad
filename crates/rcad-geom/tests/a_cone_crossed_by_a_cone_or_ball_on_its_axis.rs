@@ -575,25 +575,44 @@ fn two_cones_on_one_apex_a_rounding_short_of_touching_cross_along_their_two_othe
 /// angles `atan 1` and `atan ½` added. But the length-one direction stored for
 /// `(3, 0, 1)` has its parts a rounding off a ratio of three, and worked out
 /// exactly on the numbers stored, the flat surface that ruling would lie in
-/// cuts both cones in two rulings next to it. The enclosure of how far apart
-/// those two spread holds nothing, so the namer cannot tell their four halves
-/// apart, and refuses — a **gap**, since the four halves are there.
+/// cuts both cones in two rulings either side of it, `(x, ±y, 1)` where
+/// `x² + y² = 1` and `1.25·(ax + b)² = 2·(a² + b²)`, for `(a, 0, b)` the
+/// direction stored. There `1 − x²` is about `2.3e-17`, which `f64` cannot work
+/// out from `x`, so `y` below is that worked out to a hundred digits from the
+/// stored `a` and `b` and then rounded, and `x` rounds to one. The two rulings
+/// are that close, and the enclosure of how far apart they spread, built out of
+/// intervals from the start, holds nothing; the one built on the exact sign's
+/// own numbers tells their four halves apart.
 ///
 /// The pitch cones of a pair of mitre gears, slope one about `z` and the same
 /// cone turned a quarter turn about `y` by `Isometry::rotation` and
 /// `FRAC_PI_2`, are the same: the turned axis is stored as `(1, 0, 2⁻⁵²)`,
 /// which leans a rounding short of a right angle off `z`, so the two cones
-/// cross past touching and are refused alike (Q2871).
+/// cross past touching, along `(x, ±y, 1)` where `x = √(1 + 2⁻¹⁰⁴) − 2⁻⁵²`,
+/// which rounds to `1 − 2⁻⁵²`, and `y² = 1 − x²` is about `2·2⁻⁵²`.
 #[test]
-fn two_cones_on_one_apex_a_rounding_past_touching_are_refused() {
-    for lying in [
-        a_cone([0.0; 3], [3.0, 0.0, 1.0], 0.5),
-        a_cone([0.0; 3], [1.0, 0.0, 2.220446049250313e-16], 1.0),
+fn two_cones_on_one_apex_a_rounding_past_touching_cross_along_two_rulings_either_side_of_the_touch()
+{
+    for (lying, [x, y]) in [
+        (
+            a_cone([0.0; 3], [3.0, 0.0, 1.0], 0.5),
+            [1.0, 4.837928942964955e-9],
+        ),
+        (
+            a_cone([0.0; 3], [1.0, 0.0, f64::EPSILON], 1.0),
+            [1.0 - f64::EPSILON, 2.1073424255447014e-8],
+        ),
     ] {
-        assert_eq!(
-            named(&the_right_angled_cone(), &lying),
-            Err(Error::CannotNameWhichPieceOfACrossingThisIs),
-            "{lying:?}"
+        let upright = the_right_angled_cone();
+        let met = named(&upright, &lying);
+        let Ok(SurfaceMeet::Curves(runs)) = &met else {
+            panic!("the two crossing rulings are named: {met:?}");
+        };
+        assert_eq!(runs.len(), 4, "the four halves of two rulings: {runs:?}");
+        assert_these_are_the_halves_of_the_rulings(
+            runs,
+            &both_halves_of_each(&[[x, y, 1.0], [x, -y, 1.0]]),
+            [&upright, &lying],
         );
     }
 }

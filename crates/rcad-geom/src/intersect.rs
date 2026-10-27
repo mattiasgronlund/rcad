@@ -4413,9 +4413,12 @@ fn four_half_rulings_through_a_cones_apex(flat: &Plane, cone: &Cone) -> Result<S
     {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     }
-    let Some(halves) =
-        the_four_ways_two_rulings_leave_a_cones_apex(exactly(flat.normal().components()), cone)
-    else {
+    let normal = exactly(flat.normal().components());
+    let Some(halves) = the_four_ways_two_rulings_leave_a_cones_apex(
+        normal,
+        how_far_apart_two_rulings_through_a_cones_apex_spread(normal, cone),
+        cone,
+    ) else {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     };
 
@@ -4448,13 +4451,17 @@ fn four_half_rulings_through_a_cones_apex(flat: &Plane, cone: &Cone) -> Result<S
 /// The four ways the two rulings of a flat surface through a cone's apex leave
 /// it, each as an enclosure of the true direction:
 /// `±(‖w‖²·p + √(−E·‖w‖²)·(n × w))` and `±(‖w‖²·p − √(−E·‖w‖²)·(n × w))`, for
-/// `p = ‖n‖²·w − (n·w)·n`. `None` when the enclosure of `−E·‖w‖²` is wholly
-/// below nothing, which only a caller that has not proved `E` below nothing can
-/// hand in.
+/// `p = ‖n‖²·w − (n·w)·n`. `None` when `under_the_root`, the enclosure of
+/// `−E·‖w‖²`, is wholly below nothing, which only a caller that has not proved
+/// `E` below nothing can hand in.
 ///
 /// `normal` is an enclosure of the surface's normal `n`: a plane's stored one,
 /// or one [`the_rulings_two_cones_on_one_apex_share`] works out, and any length
 /// of it will do, since `±p` and `±√(−E·‖w‖²)·(n × w)` both scale with `‖n‖²`.
+/// `under_the_root` must enclose `−E·‖w‖²` for the same true `n` that
+/// `normal` encloses: [`how_far_apart_two_rulings_through_a_cones_apex_spread`]
+/// of `normal` does, and so does a tighter one worked out on that `n`'s exact
+/// numbers.
 ///
 /// **The root is rounded outwards** by [`root_enclosing`], one `f64` step at
 /// each end where `f64::sqrt` landed inside, which is an enclosure because that
@@ -4462,9 +4469,9 @@ fn four_half_rulings_through_a_cones_apex(flat: &Plane, cone: &Cone) -> Result<S
 /// stored numbers.
 fn the_four_ways_two_rulings_leave_a_cones_apex(
     normal: [Interval; 3],
+    under_the_root: Interval,
     cone: &Cone,
 ) -> Option<[[Interval; 3]; 4]> {
-    let under_the_root = how_far_apart_two_rulings_through_a_cones_apex_spread(normal, cone);
     if under_the_root.hi() < 0.0 {
         return None;
     }
@@ -6150,6 +6157,15 @@ fn where_a_point_stands_against_a_cone(point: Point, cone: &Cone) -> impl Predic
 /// where it decides, the pair is named as it was before the exact sign was
 /// here.
 ///
+/// **Where the exact sign says two rulings and the enclosure held nothing**,
+/// the two cones are a rounding or so off touching and the rulings a hair
+/// apart, and the root that parts them is taken of a second enclosure,
+/// [`how_far_apart_the_rulings_where_two_cones_cross_spread`], built on the
+/// exact sign's own numbers, whose width is a few roundings of `−E·‖w₁‖²`
+/// itself rather than of the numbers that cancel in it. The pitch cones of a pair of mitre
+/// gears turned into place by a quarter turn are such a pair, since the turned
+/// axis is stored a rounding off square.
+///
 /// The ruling a flat surface touches the first cone along is its axis laid
 /// into that surface, [`the_axis_laid_into_a_flat_surface_through_a_cones_apex`],
 /// and it is on the second cone too, since on either flat surface a way is on
@@ -6188,11 +6204,11 @@ fn where_a_point_stands_against_a_cone(point: Point, cone: &Cone) -> impl Predic
 /// # Errors
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where the exact sign says a
-/// flat surface cuts two rulings and the enclosure of `−E·‖w₁‖²` still holds
-/// nothing, which is where the two cones are a rounding or so off touching — a
-/// **gap**, since the four halves are there; where the exact sign needs a
-/// product outside `f64`'s range; and where anything above cannot be shown; and
-/// whatever [`HalfSpace::through_a_point_facing`] refuses.
+/// flat surface cuts two rulings and neither enclosure of `−E·‖w₁‖²` is above
+/// nothing — a **gap**, since the four halves are there; where the exact sign,
+/// or the second enclosure, needs a product outside `f64`'s range; and where
+/// anything above cannot be shown; and whatever
+/// [`HalfSpace::through_a_point_facing`] refuses.
 fn the_rulings_two_cones_on_one_apex_share(one: &Cone, other: &Cone) -> Result<SurfaceMeet> {
     let (first, second) = match Surface::Cone(*one).how_it_sorts_against(&Surface::Cone(*other)) {
         Ordering::Greater => (other, one),
@@ -6209,13 +6225,22 @@ fn the_rulings_two_cones_on_one_apex_share(one: &Cone, other: &Cone) -> Result<S
                 let along = the_axis_laid_into_a_flat_surface_through_a_cones_apex(normal, first);
                 halves.extend([(along, false), (along.map(|component| -component), false)]);
             }
-            Decision::Pos if spread.lo() > 0.0 => {
-                let Some(ways) = the_four_ways_two_rulings_leave_a_cones_apex(normal, first) else {
+            Decision::Pos => {
+                let under_the_root = if spread.lo() > 0.0 {
+                    spread
+                } else {
+                    how_far_apart_the_rulings_where_two_cones_cross_spread(first, second, side)
+                        .filter(|tighter| tighter.lo() > 0.0)
+                        .ok_or(Error::CannotNameWhichPieceOfACrossingThisIs)?
+                };
+                let Some(ways) =
+                    the_four_ways_two_rulings_leave_a_cones_apex(normal, under_the_root, first)
+                else {
                     unreachable!("a spread above nothing leaves the apex four ways");
                 };
                 halves.extend(ways.map(|way| (way, true)));
             }
-            Decision::Pos | Decision::Undecidable { .. } | _ => {
+            Decision::Undecidable { .. } | _ => {
                 return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
             }
         }
@@ -6374,6 +6399,102 @@ fn how_a_flat_surface_where_two_cones_cross_meets_them(
         return Decision::Neg;
     }
     let worked_out_exactly = || {
+        let terms = TheExactTermsWhereTwoConesCross::of(first, second, side)?;
+        let (r_sign, l_sign) = (terms.r.sign(), terms.leaning.sign());
+        if !(r_sign.is_certified() && l_sign.is_certified()) {
+            return None;
+        }
+        if l_sign == Decision::Zero || r_sign != l_sign {
+            return Some(terms.r.minus(&terms.leaning).sign());
+        }
+        let apart = terms.r.square_minus(&terms.l_squared()?)?;
+        Some(if r_sign == Decision::Pos {
+            apart.sign()
+        } else {
+            Exact::of(0.0).minus(&apart).sign()
+        })
+    };
+    worked_out_exactly().unwrap_or(Decision::Undecidable {
+        enclosure: spread.hi() - spread.lo(),
+    })
+}
+
+/// `−E·‖w₁‖² = W₁²·(R − L)` of
+/// [`how_a_flat_surface_where_two_cones_cross_meets_them`] as an enclosure
+/// built on the exact numbers its sign is read off, for
+/// [`the_rulings_two_cones_on_one_apex_share`] to take the root of where the
+/// exact sign is above nothing and
+/// [`how_far_apart_two_rulings_through_a_cones_apex_spread`] holds nothing.
+/// `None` where one of those numbers needs a product outside `f64`'s range.
+///
+/// # Why this one decides where that one does not
+///
+/// That one is built out of intervals from the start, so it carries the width
+/// of the two roots in `n±` through `E`'s cancellation: roundings of the
+/// numbers that cancel, which are more than what is left of `−E·‖w₁‖²` where
+/// the two cones are a rounding off touching. Here `R` is exact, and `L = ±2c·√(K·W₁·W₂)` holds one
+/// root, of an exact number, so each is enclosed to a rounding or two of
+/// itself. Where `R` and `L` are of opposite signs, or one is nothing, `R − L`
+/// is as large as the larger of the two, and those roundings are of that size.
+/// Where they share a sign `R − L` is what a cancellation leaves, and it is
+/// enclosed as `(R² − L²)/(R + L)` instead: `R² − L²` is exact, and `R + L` is
+/// no smaller than `R`, so the quotient is a few roundings of itself wide
+/// however little the cancellation leaves.
+///
+/// It encloses `−E·‖w₁‖²` for the true `n±`, the one with exact roots, which
+/// is the `n±` that [`square_to_where_two_cones_on_one_apex_cross`] encloses,
+/// so the two can be handed to [`the_four_ways_two_rulings_leave_a_cones_apex`]
+/// together.
+fn how_far_apart_the_rulings_where_two_cones_cross_spread(
+    first: &Cone,
+    second: &Cone,
+    side: f64,
+) -> Option<Interval> {
+    let terms = TheExactTermsWhereTwoConesCross::of(first, second, side)?;
+    let (r_sign, l_sign) = (terms.r.sign(), terms.leaning.sign());
+    if !(r_sign.is_certified() && l_sign.is_certified()) {
+        return None;
+    }
+    let r = terms.r.enclosure();
+    let l = Interval::exactly(2.0)
+        * terms.leaning.enclosure()
+        * root_enclosing(terms.k.times(&terms.lengths)?.enclosure());
+    let r_less_l = if l_sign == Decision::Zero || r_sign != l_sign {
+        r - l
+    } else {
+        quotient_or_everything(
+            terms
+                .r
+                .times(&terms.r)?
+                .minus(&terms.l_squared()?)
+                .enclosure(),
+            r + l,
+        )
+    };
+    let along_the_first = first.axis().direction().components();
+    let squared_first = Exact::dot_of(along_the_first, along_the_first)?.enclosure();
+    Some(squared_first * squared_first * r_less_l)
+}
+
+/// The exact numbers of [`how_a_flat_surface_where_two_cones_cross_meets_them`],
+/// worked out on the stored directions and slopes, for one of the two flat
+/// surfaces, `side` choosing which.
+struct TheExactTermsWhereTwoConesCross {
+    /// `K = (1 + s₁²)(1 + s₂²)`.
+    k: Exact,
+    /// `W₁·W₂`.
+    lengths: Exact,
+    /// `K·c²`.
+    k_c_squared: Exact,
+    /// `R = (s₁²s₂² − 1)·W₁·W₂ − K·c²`.
+    r: Exact,
+    /// `±c`, which has the sign of `L`.
+    leaning: Exact,
+}
+
+impl TheExactTermsWhereTwoConesCross {
+    /// `None` where one of them needs a product outside `f64`'s range.
+    fn of(first: &Cone, second: &Cone, side: f64) -> Option<Self> {
         let [along_the_first, along_the_second] =
             [first, second].map(|cone| cone.axis().direction().components());
         let first_slope = Exact::product_of(first.slope(), first.slope())?;
@@ -6390,24 +6511,21 @@ fn how_a_flat_surface_where_two_cones_cross_meets_them(
             .times(&lengths)?
             .minus(&k_c_squared);
         let leaning = c.times(&Exact::of(side))?;
-        let (r_sign, l_sign) = (r.sign(), leaning.sign());
-        if !(r_sign.is_certified() && l_sign.is_certified()) {
-            return None;
-        }
-        if l_sign == Decision::Zero || r_sign != l_sign {
-            return Some(r.minus(&leaning).sign());
-        }
-        let l_squared = Exact::of(4.0).times(&k_c_squared)?.times(&lengths)?;
-        let apart = r.square_minus(&l_squared)?;
-        Some(if r_sign == Decision::Pos {
-            apart.sign()
-        } else {
-            Exact::of(0.0).minus(&apart).sign()
+        Some(Self {
+            k,
+            lengths,
+            k_c_squared,
+            r,
+            leaning,
         })
-    };
-    worked_out_exactly().unwrap_or(Decision::Undecidable {
-        enclosure: spread.hi() - spread.lo(),
-    })
+    }
+
+    /// `L² = 4c²·K·W₁·W₂`, which holds no root.
+    fn l_squared(&self) -> Option<Exact> {
+        Exact::of(4.0)
+            .times(&self.k_c_squared)?
+            .times(&self.lengths)
+    }
 }
 
 /// Which row of [`where_two_cones_cross`]'s table two cones on one axis are.
