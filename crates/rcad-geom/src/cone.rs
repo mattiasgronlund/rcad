@@ -430,8 +430,18 @@ impl Predicate for HowFarFromTheSkin {
         let slope = self.cone.slope;
 
         // The bound below is a fraction of the permanent, which only bounds
-        // anything while every product keeps its relative accuracy. One of them
-        // in the subnormals and this level certifies a wrong sign.
+        // anything while the products keep their relative accuracy. Two of
+        // these checks carry a right sign: with the slope's square or `up`'s
+        // square below the normals, the axial term rounds to nothing and its
+        // share of the permanent with it, and this level certifies `Pos` for a
+        // point inside, such as `(2⁻⁴⁰, 0, 2⁵⁰¹)` with a slope of `2⁻⁵⁴⁰` about
+        // `z` (`docs/decisions.md` §464.31). Without the checks on the
+        // components' squares and on the axial term, Gappa proves the bound
+        // still holds with one, two or three of those four below the normals
+        // or rounding to zero, the other checks holding, where nothing
+        // cancels, no factor is zero and the first sum of `up` is normal.
+        // Without the checks on the six halves and the three up halves it has
+        // not been run. Every check stays either way.
         let halves = cross_product_halves_if_normal(from_apex, direction)?;
         let components = halves.map(|(left, right)| left - right);
         let up_halves: [f64; 3] = core::array::from_fn(|axis| from_apex[axis] * direction[axis]);
@@ -668,8 +678,12 @@ fn cross_component(
 /// product or the dot product down the axis cancels, but for the one case
 /// below. With nothing cancelling the least constant it proves is
 /// `11·epsilon + 99·epsilon²`. Nobody has tried the claim on `value` itself.
-/// The proof covers no zero difference or direction component, which have not
-/// been run.
+/// Where a difference or a direction component is zero, Gappa proves the bound
+/// on that sum at this constant too, in each of the 219 cases, and Coq checks
+/// each proof (§464.30), again but for the one case below. A direction zero in all three
+/// components and a zero slope never reach this level (the docs on
+/// [`Cone::basis`] and [`Cone::new`]), and a point at the apex has a bound of
+/// `0`, which `decide` does not compare against.
 ///
 /// Every step of that argument is a *relative* one, so as with every bound of
 /// this shape it holds only while nothing overflows or falls into the
@@ -684,6 +698,16 @@ fn cross_component(
 /// holds in each of those but one: where `up_reach` squared rounds to zero,
 /// level 1 certifies a wrong sign. A probe at a slope of `2⁵¹¹` shows one, and
 /// by hand the shape needs a slope of about `2⁷⁸` or more (§464.16's 6).
+///
+/// Of the products of `value`, the checks on the slope's square and on `up`'s
+/// square are needed: a probe takes either out and level 1 certifies a wrong
+/// sign on a cone [`Cone::new`] builds (§464.31's 2). The checks on the
+/// components' squares and on the axial term are not needed where one, two or
+/// three of those four products fall below the normals or round to zero with
+/// every other check holding, nothing cancels, no factor is zero and the first
+/// sum of `up` is normal: Gappa proves the bound on the sum at this constant in
+/// each of the 579 cases, and Coq checks each proof (§464.31's 4). The halves
+/// and the up halves below the normals have not been run.
 const SIDE_OF_CONE_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (12.0 + 96.0 * epsilon) * epsilon

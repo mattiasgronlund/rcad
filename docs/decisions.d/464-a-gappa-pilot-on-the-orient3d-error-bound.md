@@ -7747,8 +7747,12 @@ since run each zero difference and direction component, and each proves at
 the code's constant but for `up` cancelling with `R2` rounding to zero, the
 wrong sign of 6, which it leaves out; a direction zero in all three
 components, or a zero slope, does not reach `on_floats`, and a point at the
-apex meets a bound of `0`, which `decide` does not compare against. And the
-comments claim more than is proved. The doc comment on the constant writes `66ε` where
+apex meets a bound of `0`, which `decide` does not compare against. 464.31 has
+since run the checked products below the normals: the checks on the slope's
+square and on `up`'s carry a right sign, and in `cone.g`'s case, with one to
+three of the components' squares and the axial term below the normals or
+rounding to zero, every other check holding, each case proves at the code's
+constant. And the comments claim more than is proved. The doc comment on the constant writes `66ε` where
 it means `66ε²` and miscounts its own terms, and it says `on_floats` enforces
 the bottom end product by product, which is false: it checks neither `R2` nor
 the axial term `A`, and that is where the wrong sign lives (5). Fixing them,
@@ -7888,7 +7892,10 @@ Against what is proved:
   normals and not zero, of `A` below the normals or zero, and of the reach
   squares below the normals or zero: by 6 each of those proves. For the
   products `on_floats` checks it was not run, as 464.14's 6 ran the sphere's
-  squares (10).
+  squares (10). 464.31 has since run them: the slope's square and `up`'s are
+  needed, and in `cone.g`'s case, with one to three of the components' squares
+  and the axial term below the normals or rounding to zero, the rest holding,
+  each proves; the halves and the up halves have not been run.
 
 So the comments claim more than is proved, which is what the row asks, and the
 claim that the bottom end is enforced is false in a way that gives a wrong
@@ -20933,3 +20940,1111 @@ Its first line is `conezero.py`'s own, run again in the fresh directory; the
 parent's lines come after it because its output is buffered when it is not a
 terminal. The seven blocks are the five scripts and the two prints, this one
 among them.
+
+### 464.31 The side of rcad-geom's cone with a checked product below the normals
+
+Q2782 asked whether `HowFarFromTheSkin::on_floats` in
+`crates/rcad-geom/src/cone.rs` needs its `product_is_normal` checks, by running
+464.16's `cone.g` with one, two and three of the checked products below the
+normals, as 464.14's 6 ran the sphere's squares. Seven lanes took it on
+2026-10-27, at `f4634bba`. The first lane and its three relays wrote and ran
+the probe of 2, wrote `conelow.py`, tried it, and started the run. The second
+lane tallied the run and restated the comments in `cone.rs`, its first relay
+ran each print again, and its second wrote this.
+
+Two of the fifteen checks carry a right sign: the slope with itself, and `up`
+with itself. With either taken out, level 1 certifies `Pos` for a point
+inside, on a cone anyone can build through `Cone::new` (2, 3). With every
+check in, those two inputs are refused by every level, and that refusal is a
+row (8). The checks on the three components' squares and on the axial term
+are not needed in `cone.g`'s case, where nothing cancels, no factor is zero,
+the first sum of `up` is normal and every other check holds: with one, two or
+three of those four products below the normals or rounding to zero, Gappa
+proves the bound on `y` at the code's constant in each of 579 cases, and Coq
+checks each proof, modulo its hints (4, 5). The six halves and the three up
+halves without their checks, all four of those products at once, and a low
+product beside a cancelling component or `up` have not been run, which is two
+rows (8). `on_floats` keeps every check either way, as plane's, the sphere's
+and the cylinder's keep theirs (464.27's 6, 464.29's 4).
+
+**1. The checks.** At `f4634bba`, `on_floats` (`cone.rs:424-469`) first calls
+`cross_product_halves_if_normal` (`cone.rs:435`, defined at `584-594`), which
+checks, for each axis, the difference on the next axis with the direction
+component on the one after, the left half, and the difference on the one after
+with the direction component on the next, the right half. Then
+`stays_accurate` (`cone.rs:439-445`) checks each component of the cross
+product with itself, each difference with its own direction component, the up
+halves, the slope with itself, `up` with itself, and the slope squared with
+`up` squared, the axial term `along`. `product_is_normal(a, b)` passes a zero
+factor (`cascade.rs:67-69`), and `decide` compares only against a normal bound
+(`cascade.rs:125`). The probe of 2 numbers the fifteen:
+
+- 0 to 5: the halves, `2a` the left half of axis `a` and `2a + 1` its right.
+- 6 to 8: the components' squares, `sx`, `sy` and `sz` in `cone.g`.
+- 9 to 11: the up halves, `ux`, `uy` and `uz`.
+- 12: the slope's square, `ss`.
+- 13: `up`'s square, `w`.
+- 14: the axial term, `along = rnd(ss · w)`.
+
+**2. The probe.** An uncommitted patch to `cone.rs` added a `#[cfg(test)]`
+static `PROBE_SKIP`, a bit mask, and a function `probe_skips(check)` that
+reads it and is `false` outside tests. Each of the fifteen checks became
+`product_is_normal(..) || probe_skips(i)`, with `i` as in 1. A test in
+`mod tests`, on `Cone::new(Axis::z(), slope)`, so the apex is `0` and the
+direction `(0, 0, 1)`, takes each check out in turn and prints those whose
+loss changes whether `on_floats` gives a value:
+
+```rust
+#[test]
+fn probe_q2782() {
+    let inputs = [
+        ("slope squared below the normals", 2f64.powi(-540), [2f64.powi(-40), 0.0, 2f64.powi(501)]),
+        ("slope squared, made ordinary", 1.0, [0.5, 0.0, 1.0]),
+        ("up squared below the normals", 2f64.powi(60), [2f64.powi(-486), 0.0, 2f64.powi(-538)]),
+        ("up squared, made ordinary", 1.0, [2f64.powi(-8), 0.0, 1.0]),
+    ];
+    for (what, slope, at) in inputs {
+        let cone = Cone::new(Axis::z(), slope).unwrap();
+        let point = PredicatePoint::from(at);
+        let pred = HowFarFromTheSkin { cone, point };
+        println!(
+            "PROBE {what}: slope bits {:x}, point bits {:x} {:x} {:x}",
+            slope.to_bits(),
+            at[0].to_bits(),
+            at[1].to_bits(),
+            at[2].to_bits()
+        );
+        let mut masks = vec![("checks all", 0u32)];
+        for check in 0..15 {
+            PROBE_SKIP.store(1 << check, core::sync::atomic::Ordering::Relaxed);
+            let without = pred.on_floats();
+            PROBE_SKIP.store(0, core::sync::atomic::Ordering::Relaxed);
+            if without.is_some() != pred.on_floats().is_some() {
+                masks.push(("check left out", 1 << check));
+            }
+        }
+        for (how, mask) in masks {
+            PROBE_SKIP.store(mask, core::sync::atomic::Ordering::Relaxed);
+            let filtered = pred.on_floats().map(|f| (f.value, f.error_bound));
+            println!(
+                "PROBE {what}, {how} {:?}: on_floats {filtered:?}, decide {:?}, exactly {:?}",
+                (0..15).filter(|c| mask & (1 << c) != 0).collect::<Vec<_>>(),
+                decide(&pred),
+                pred.exactly()
+            );
+        }
+        PROBE_SKIP.store(0, core::sync::atomic::Ordering::Relaxed);
+        println!("PROBE {what}: side_of {:?}", cone.side_of(point));
+    }
+}
+```
+
+`mise exec -- just t -p rcad-geom probe_q2782 --no-capture` printed:
+
+```text
+PROBE slope squared below the normals: slope bits 1e30000000000000, point bits 3d70000000000000 0 5f40000000000000
+PROBE slope squared below the normals, checks all []: on_floats None, decide (Undecidable { enclosure: 2.117582368135751e-22 }, Interval), exactly None
+PROBE slope squared below the normals, check left out [12]: on_floats Some((8.271806125530277e-25, 1.1020259538958955e-39)), decide (Pos, Float), exactly None
+PROBE slope squared below the normals: side_of Undecidable { enclosure: 2.117582368135751e-22 }
+PROBE slope squared, made ordinary: slope bits 3ff0000000000000, point bits 3fe0000000000000 0 3ff0000000000000
+PROBE slope squared, made ordinary, checks all []: on_floats Some((-0.75, 1.6653345369377364e-15)), decide (Neg, Float), exactly Some(Neg)
+PROBE slope squared, made ordinary: side_of Neg
+PROBE up squared below the normals: slope bits 43b0000000000000, point bits 2190000000000000 0 1e50000000000000
+PROBE up squared below the normals, checks all []: on_floats None, decide (Undecidable { enclosure: 6.567258882077402e-288 }, Interval), exactly None
+PROBE up squared below the normals, check left out [13]: on_floats Some((2.505210450011216e-293, 3.337610787760805e-308)), decide (Pos, Float), exactly None
+PROBE up squared below the normals: side_of Undecidable { enclosure: 6.567258882077402e-288 }
+PROBE up squared, made ordinary: slope bits 3ff0000000000000, point bits 3f70000000000000 0 3ff0000000000000
+PROBE up squared, made ordinary, checks all []: on_floats Some((-0.9999847412109375, 1.3322879583409231e-15)), decide (Neg, Float), exactly Some(Neg)
+PROBE up squared, made ordinary: side_of Neg
+```
+
+So with every check in, level 1 refuses both inputs below the normals, level 2
+cannot decide, and level 3 refuses too, `exactly` returning `None`. With check
+12 taken out of the first, or 13 out of the second, level 1 says `Pos`, and no
+other single check changes whether level 1 answers. Each made ordinary is
+`Neg` at level 1 and at level 3. `truthl.py` (9) works out each value in exact
+rationals from the printed bits:
+
+```text
+slope squared below the normals: Neg, value -2.481541837659083e-24, numerator -3, denominator 2^80
+slope squared, made ordinary: Neg, value -0.75, numerator -3, denominator 2^2
+up squared below the normals: Neg, value -1.6417896684148504e-288, numerator -65535, denominator 2^972
+up squared, made ordinary: Neg, value -0.9999847412109375, numerator -65535, denominator 2^16
+```
+
+So both points are inside, and `Pos` is a wrong sign.
+
+Why, by arithmetic on those numbers. The value is `|f × d|² − s² (f · d)²`,
+`f` the point less the apex. In the first input only the half `ky = fx · dz =
+2⁻⁴⁰` is not zero, so `value` is `2⁻⁸⁰` and so is the permanent. `up = 2⁵⁰¹`,
+so `w = 2¹⁰⁰²`, but `ss = rnd(2⁻¹⁰⁸⁰) = 0`, so `along` and `A` are `0`, and
+the axial term drops out of `y` and of the permanent both. The true axial term
+is `2⁻¹⁰⁸⁰ · 2¹⁰⁰² = 2⁻⁷⁸`, so the true value is `2⁻⁸⁰ − 2⁻⁷⁸ = −3 · 2⁻⁸⁰`.
+Check 12 fails, `2⁻¹⁰⁸⁰` being below `2⁻¹⁰²²`, and check 14 passes, `ss`
+being `0`. The ordinary input is the slope `1` and the point `(0.5, 0, 1)`,
+whose value is `0.25 − 1`; the first input is it with `x` times `2⁻³⁹`, `z`
+times `2⁵⁰¹` and the slope times `2⁻⁵⁴⁰`, which multiplies both terms by
+`2⁻⁷⁸`.
+
+In the second, `ky = 2⁻⁴⁸⁶`, so `value` is `2⁻⁹⁷²` and so is the permanent.
+`up = 2⁻⁵³⁸`, so `w = rnd(2⁻¹⁰⁷⁶) = 0`, and so are `along`, `R2` and `A`. The
+bound `eb = B · 2⁻⁹⁷²`, `3.34e-308`, is normal, so `decide` compares against
+it. Check 13 fails, and check 14 passes, `w` being `0`. The true value is
+`2⁻⁹⁷² − 2¹²⁰ · 2⁻¹⁰⁷⁶ = 2⁻⁹⁷² − 2⁻⁹⁵⁶ = −65535 · 2⁻⁹⁷²`. The ordinary input
+is the slope `1` and the point `(2⁻⁸, 0, 1)`; the second input is it with `x`
+times `2⁻⁴⁷⁸`, `z` times `2⁻⁵³⁸` and the slope times `2⁶⁰`, which multiplies
+both terms by `2⁻⁹⁵⁶`.
+
+**3. Who can build them.** Anyone, through the public API. `rcad_geom::Cone`
+(`lib.rs:95`) and `Cone::new` (`cone.rs:87`) are public, and `new` takes any
+slope that is finite and above zero (`cone.rs:91-93`); `Axis::z()` is public
+(`point.rs:732`); `rcad_predicates::Point` (`lib.rs:90`) is built from an
+`[f64; 3]` (`point.rs:50`); and `side_of` is `SideOfSurface`'s (`lib.rs:94`),
+which `Cone` implements (`cone.rs:401-410`). So checks 12 and 13 carry a right
+sign. With them in, the two inputs are refused rather than answered wrongly.
+Each has a sign, and the same shape at ordinary numbers is decided, so the
+refusal is a gap and not a limit (§16.10). Both lie far outside §3.5's
+envelope, which fails loudly above about `1e11`: the first input's
+coordinates are `2⁵⁴¹` apart, and the second's `2⁵²` apart with a slope of
+`2⁶⁰`. So it is `refuses/D`, and a row (8). Which step of `exactly` gives up
+has not been traced.
+
+**4. The cases.** `conelow.py` (9) writes `cone.g`'s case with one, two or
+three of the four checked products that `y` adds taken out of the checks: the
+three components' squares (6 to 8) and the axial term (14). Checks 12 and 13
+stay, since 2 shows they are needed, and so do the halves and the up halves,
+whose losses reach `y` only through a product and need a form not yet written
+(8). With its check gone, a product `t = rnd(X)` is normal, which is
+`cone.g`, or one of:
+
+- `p`: below the normals and not zero. Then `|X| ≤ 2⁻¹⁰²²`, rounding being
+  monotone, and what its rounding cost, `t − X`, is at most `2⁻¹⁰⁷⁵`.
+- `o`: rounding to zero. Then `|X| ≤ 2⁻¹⁰⁷⁵` (464.27's `prodzero.g`), and it
+  is written as the `0` it rounds to and left out of the sums.
+
+A component's reach square `v = rnd(n · n)` is at least its square, so it is
+no longer forced normal either: it is `n`, normal, `s`, below the normals and
+not zero, or `u`, rounding to zero, and where the square is `p` it is not
+zero. In the same way `A = rnd(ss · R2)` is at least `along`: `n`, normal, or
+`a`, below the normals, zero or not, as `conezero.py`'s `a` (464.30). With one
+component's check kept, its reach square is normal, so the sum before `A` is
+normal, and `R2 ≥ w` stays normal, the check on `up` being kept. So a
+component's state is two letters, `pn`, `ps`, `on`, `os` or `ou`, and the
+axial term's one of `pn`, `pa`, `on` or `oa`. One product low is `3 · 5 + 4 =
+19` cases, two are `3 · 25 + 3 · 5 · 4 = 135`, and three are `125 + 3 · 25 ·
+4 = 425`: 579 in all, each `conelow_<key><state>[_<key><state>...].g`, the
+key `x`, `y`, `z` or `A`, with a control `c_conelow_<...>_half.g` at `B =
+1b-54;`.
+
+How a case is written, beyond `cone.g`:
+
+- What the low products cost is an amount `D`, carried apart from the fifteen
+  pieces and set against `eb`, as 464.27's 3 carried its amount: for a square
+  in `p`, `s − Xs` times the roundings of the sums that carry it; for one in
+  `o`, `−Xs`, its square being carried as `q²` with no rounding of its own;
+  and for the axial term, `XL − along` in `p` or `XL` in `o`, with `XL = ss ·
+  w` and the axial term's `KA` the rounding of `w` alone. The step to `eb` is
+  then `(y − Ex) / eb -> ((y − Ex − D) / P15) · (Phat / P) · (P / eb) + D /
+  eb`, with `D` in the goal so that Gappa bounds it.
+- A rounded sum of two doubles with no normal term, `s01`, `s012` or a partial
+  sum of `P`, `vp1` or `vp2`, gets the hypothesis that it is within
+  `lemma.g`'s bound of its exact sum: below the normals it is exact (464.16's
+  `sumexact.g`), and at or above them `lemma.g` bounds it.
+- A reach square in `s` or `u` is not exact, since `n = rnd(|h| + |k|)`, so
+  its shift from its piece of `Phat` is `(|h| + |k|)² − v`, or `(|h| + |k|)²`
+  in `u`, which hints tie to `Xv` through the rounding of `n`. For `A` in `a`
+  the shift is `ss G² − A`.
+
+Before the run, the first lane's third relay tried cases under `one1.sh` at
+`T=120`. Its first try crashed Gappa, exit 139, in each of the three cases
+with `A` in `a`, `conelow_Apa`, `conelow_Aoa` and `conelow_xps_yps_Apa`, on the
+hint `ss * (G * G) -> XA * ((G * G) / R2);`. That print was not kept: the
+second try wrote over it. Three changes to `conelow_Apa.g` each proved: `v0`
+without the hint, `v2` with `(ss * (G * G) - A) / P -> (XA * ((G * G) / R2) -
+A) / P;`, and `v1` with `ss * (G * G) - A -> (XA - A) + XA * ((G * G) / R2 -
+1);`, which `conelow.py` now writes, with its comment. Then 16 cases, the
+three with `A` in `a` among them, each exited 0, in 8.87 s (`conelow_xon`) to
+16.06 s (`conelow_yps_zou_Aoa`), and 3 controls each exited 1.
+
+`conegdiff.py` (9) copies `cone.g` out of 464.16 and diffs `conelow_none.g`,
+which is `make({})`, against it. `python3 conegdiff.py <this file>` printed:
+
+```text
+blocks like cone.g in 464.16: 1
+--- cone.g
++++ conelow_none.g
+@@ -1,6 +1,6 @@
+-# restates: crates/rcad-geom/src/cone.rs on_floats at 2538ee89
+-# restates: crates/rcad-geom/src/cone.rs cross_product_halves_if_normal at 2538ee89
+-# restates: crates/rcad-geom/src/cone.rs cross_product_halves at 2538ee89
+-# restates: crates/rcad-geom/src/cone.rs SIDE_OF_CONE_ERROR_BOUND at 2538ee89
+-# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at 2538ee89
+-# restates: crates/rcad-predicates/src/cascade.rs decide at 2538ee89
++# restates: crates/rcad-geom/src/cone.rs on_floats at f4634bba
++# restates: crates/rcad-geom/src/cone.rs cross_product_halves_if_normal at f4634bba
++# restates: crates/rcad-geom/src/cone.rs cross_product_halves at f4634bba
++# restates: crates/rcad-geom/src/cone.rs SIDE_OF_CONE_ERROR_BOUND at f4634bba
++# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at f4634bba
++# restates: crates/rcad-predicates/src/cascade.rs decide at f4634bba
+@@ -7,0 +8 @@
++# cone.g with every product normal.
+@@ -152,4 +153,5 @@
+-  # The permanent's three squares are normal too, since no component is
+-  # zero here: |q| <= n, rounding being monotone and |h - k| <= |h| + |k|,
+-  # so v = rnd(n * n) >= rnd(q * q) = s, which is normal. In the same way
+-  # |up| <= R, so R2 >= w and A >= along, both normal.
++  # The permanent's three squares: |q| <= n, rounding being monotone and
++  # |h - k| <= |h| + |k|, so v = rnd(n * n) >= rnd(q * q) = s, which is
++  # normal where s is, and otherwise as the case says. In the same way
++  # |up| <= R, so R2 >= w, which is normal, and A >= along, normal where
++  # along is.
+```
+
+So the generator's case with every product normal is `cone.g` but for comment
+lines.
+
+**5. What they print.** `runl.sh` (9) ran the 579 cases with `gappa -Bcoq` and
+`coqc`, and their 579 controls, 22 at a time, and `startl.sh` (9) started it
+detached. By the times of the files it wrote, it ran from 08:25:28 to 09:05:31
+UTC. `tallyl.py` (9) counts them:
+
+- Each of the 579 exits 0 at the code's `B`, in 12.19 s
+  (`conelow_xon_yon_zon`) to 50.24 s (`conelow_yos_zps_Apa`).
+- `(y − Ex − D) / P15` is within `1.11022e-15`, `10u`, in the 364 cases where
+  the axial term is low, and within `1.22125e-15`, `11u`, in the 215 where it
+  is not. The `10u` is because a case with `along` low carries its rounding in
+  `D` and not in `KA`, so `KA` has one rounding fewer. The `11u` is `cone.g`'s
+  own (464.16's 3).
+- `coqc` accepts all 579: 17425 lines with 60 hints (`conelow_xon_zon`) to
+  23445 lines with 67 hints (`conelow_yos_zos_Aoa`), in 23.75 to 81.05 s each.
+- No `.out`, `.bcoq` or `.coqc` of the 579 has a line other than its results
+  and "assumed to be nonzero" warnings.
+
+Gappa does not write the same proof each run (464.4), so the sizes are this
+run's. Each proof stands on its hints and on what Gappa took to be nonzero, as
+464.15's 8 says of its own.
+
+**6. The controls.** At `B = 1b-54;`, `u / 2`, each of the 579 must fail, and
+each exits 1. Gappa's best for a goal it does not prove can change from one
+run to the next (464.26), so these are this run's figures, each a bound Gappa
+found on the size of `(y − Ex) / eb` and not an exact value: `[-20, 20]` in
+each of the 364 whose case is within `10u`, and `[-22, 22]` in each of the 215
+whose case is within `11u`. Each is its case's own bound on `y` over `u / 2`.
+So none of the 579 proofs came from a contradiction in its hypotheses.
+
+**7. What `cone.rs` said, and says now.** At `f4634bba` the comment above the
+checks, `cone.rs:432-434`, said, as 464.16's 5 quotes it:
+
+> The bound below is a fraction of the permanent, which only bounds anything
+> while every product keeps its relative accuracy. One of them in the
+> subnormals and this level certifies a wrong sign.
+
+By 2 and 4 that is true of two checks, false of four in `cone.g`'s case, and
+not run of the other nine. It now says:
+
+> The bound below is a fraction of the permanent, which only bounds anything
+> while the products keep their relative accuracy. Two of these checks carry
+> a right sign: with the slope's square or `up`'s square below the normals,
+> the axial term rounds to nothing and its share of the permanent with it,
+> and this level certifies `Pos` for a point inside, such as `(2⁻⁴⁰, 0, 2⁵⁰¹)`
+> with a slope of `2⁻⁵⁴⁰` about `z` (`docs/decisions.md` §464.31). Without
+> the checks on the components' squares and on the axial term, Gappa proves
+> the bound still holds with one, two or three of those four below the
+> normals or rounding to zero, the other checks holding, where nothing
+> cancels, no factor is zero and the first sum of `up` is normal. Without the
+> checks on the six halves and the three up halves it has not been run. Every
+> check stays either way.
+
+The doc on `SIDE_OF_CONE_ERROR_BOUND` ends with a paragraph saying the same,
+citing 2 and 4 here. Comment only: lines that run 0.
+
+**8. What this leaves.**
+
+- A row: run `conelow.py` extended to the six halves and the three up halves
+  below the normals, checks 0 to 5 and 9 to 11 left out, one to three at a
+  time, then restate the comment and the doc by what it shows. A half below
+  the normals loses some `η ≤ 2⁻¹⁰⁷⁵`, which reaches `y` multiplied by its
+  component, and an up half's loss reaches it multiplied by `ss · up`, so a
+  proof needs the component's size tied to the permanent's, as 464.29's 4
+  argues by hand; that form is not written.
+- A row: run `conelow.py` with each of `conesplit.py`'s other base states, a
+  component cancelling and the axial `e`, `c`, `a`, `s` and `t` of 464.16's 6,
+  under one to three of the four products below the normals, and with all
+  four below at once, then restate the comment by what it shows.
+- A row, `refuses/D`: `Cone::side_of` is `Undecidable` on the two inputs of 2,
+  each `Neg` in exact rationals and decided once scaled to ordinary numbers
+  (3). Which step of `exactly` gives up has not been traced.
+- Not a row: Q2779 is the wrong sign where `up` cancels and `R2` rounds to
+  zero, which no case here has. Q2700 moves into `proofs/gappa/` each script a
+  row of 464 appended, and this section's are among them.
+- Not a row: `just claim-section` was not run for this subsection. It hands
+  out top-level section numbers, and 464.29's 6 records that it once handed
+  out 468, which is a gap. `find46431.sh`, run before this was committed,
+  looked for a `### 464.31` heading on every branch and in every worktree, and
+  found none.
+
+**9. The scripts.** To run them again, save `conelow.py`, `runl.sh` and
+`startl.sh` beside 464.13's `one.sh` and 464.15's `one1.sh`, and run
+`./startl.sh`; it writes `runl.txt`, which ends `done`, and `python3
+tallyl.py` counts it. `conegdiff.py` diffs the generator's case with every
+product normal against 464.16's `cone.g`, `truthl.py` works out 2's signs, and
+`samel.py` checks that each block here is the file that ran.
+
+`conelow.py`, whole:
+
+```python
+"""Write cone.g's cases where one, two or three of the four checked products
+that y adds are below the normals, one script per case and a control at
+B = u / 2 beside each.
+
+The four are the squares of the three cross-product components, sx, sy and sz
+(product_is_normal(component, component)), and the axial term, along
+(product_is_normal(slope * slope, up * up)). Everything else is cone.g's case
+(464.16): no component and not up cancels, and every other check of
+cross_product_halves_if_normal and stays_accurate holds. With its check left
+out, a product t = rnd(X) is normal, which is cone.g, or one of:
+
+p  it rounds to a double neither zero nor normal: then |X| <= 2^-1022,
+   rounding being monotone, and what its rounding cost, t - X, is an amount
+   of at most 2^-1075;
+o  it rounds to zero: then |X| <= 2^-1075 (464.27's prodzero.g), and it is
+   written as the 0 it rounds to and left out of the sums, so the amount is
+   its whole exact product.
+
+A component's reach square v = rnd(n * n) is at least its square s, since
+|q| <= n, rounding being monotone and |h - k| <= |h| + |k|; so it is no
+longer forced normal either, and is one of:
+
+n  normal;
+s  below the normals and not zero, its exact square at most 2^-1022;
+u  rounding to zero, its exact square at most 2^-1075 (464.14's tinysq.g),
+   written as that 0 and left out of P's sums;
+
+and where s is p, v is not zero, so it is n or s. In the same way A =
+rnd(ss * R2) is at least along: n normal, or a, below the normals, zero or
+not, as conezero.py's a. A is the last term P adds, and with a component's
+check kept that component's reach square is normal, so the sum before A is
+normal. R2 >= w stays normal, the check on up being kept.
+
+So a component's state is two letters, its square's and its reach square's:
+pn, ps, on, os or ou; the axial term's is pn, pa, on or oa. The names are
+conelow_<key><state>[_<key><state>...].g and c_conelow_<...>_half.g, the key
+x, y or z for a component and A for the axial term. make({}) is cone.g in
+this form, which conelow_none.g is and which is not run. Run as:
+python3 conelow.py
+"""
+import itertools
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+AXES = "xyz"
+B_CODE = "B = 12b-53 + 3b-101;"
+B_HALF = "B = 1b-54;"
+LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
+HALVES = {"x": ("fy * dz", "fz * dy"), "y": ("fz * dx", "fx * dz"), "z": ("fx * dy", "fy * dx")}
+COMPONENT_STATES = ("pn", "ps", "on", "os", "ou")
+AXIAL_STATES = ("pn", "pa", "on", "oa")
+SAYS_SQUARE = {"p": "rounds below the normals and not to zero", "o": "rounds to zero"}
+SAYS_REACH = {"n": "its reach square normal", "s": "its reach square below the normals and not zero",
+              "u": "its reach square rounding to zero"}
+SAYS_A = {"n": "A normal", "a": "A below the normals or zero"}
+PAIRS = ("xx", "yy", "zz", "xy", "xz", "yz")
+
+
+def left_sum(terms, rounded):
+    """Sum terms left to right as Rust adds them, each sum rounded or not."""
+    acc = None
+    for t in terms:
+        if acc is None:
+            acc = t
+        else:
+            acc = f"rnd({acc} + {t})" if rounded else f"({acc} + {t})"
+    return acc
+
+
+def reach(a):
+    return f"(|h{a}| + |k{a}|) * (|h{a}| + |k{a}|)"
+
+
+def describe(st):
+    said = []
+    for a in AXES:
+        if st[a] != "N":
+            said.append(f"s{a} {SAYS_SQUARE[st[a][0]]}, {SAYS_REACH[st[a][1]]}")
+    if st["A"] != "N":
+        said.append(f"along {SAYS_SQUARE[st['A'][0]]}, {SAYS_A[st['A'][1]]}")
+    return "; ".join(said) if said else "every product normal"
+
+
+def make(low, b=B_CODE):
+    st = {k: low.get(k, "N") for k in "xyzA"}
+    sq = [a for a in AXES if st[a][0] != "o"]
+    lo = [a for a in AXES if st[a] != "N"]
+    plow = [a for a in lo if st[a][0] == "p"]
+    vn = [a for a in AXES if st[a] == "N" or st[a][1] == "n"]
+    vs = [a for a in lo if st[a][1] == "s"]
+    vu = [a for a in lo if st[a][1] == "u"]
+    kept = [a for a in AXES if a not in vu]
+    alow = st["A"] != "N"
+    has_along = st["A"][0] != "o"
+    xa = st["A"] in ("pa", "oa")
+    shifted = bool(vs or vu or xa)
+    amount = bool(lo or alow)
+    s01_rounds = "x" in sq and "y" in sq
+    s012_rounds = "z" in sq and ("x" in sq or "y" in sq)
+    s01_normal = any(st[a] == "N" for a in "xy" if a in sq)
+    s01_hyp = s01_rounds and not s01_normal
+    s012_hyp = s012_rounds and not s01_normal and st["z"] != "N"
+    src = [
+        "# restates: crates/rcad-geom/src/cone.rs on_floats at f4634bba",
+        "# restates: crates/rcad-geom/src/cone.rs cross_product_halves_if_normal at f4634bba",
+        "# restates: crates/rcad-geom/src/cone.rs cross_product_halves at f4634bba",
+        "# restates: crates/rcad-geom/src/cone.rs SIDE_OF_CONE_ERROR_BOUND at f4634bba",
+        "# restates: crates/rcad-predicates/src/cascade.rs product_is_normal at f4634bba",
+        "# restates: crates/rcad-predicates/src/cascade.rs decide at f4634bba",
+        "# HowFarFromTheSkin::on_floats and SIDE_OF_CONE_ERROR_BOUND, rcad-geom's cone.",
+        f"# cone.g with {describe(st)}.",
+        "@rnd = float<ieee_64, ne>;",
+        "",
+        "# The point, the apex, the axis direction and the slope, each an f64.",
+        "px = rnd(px_); py = rnd(py_); pz = rnd(pz_);",
+        "ox = rnd(ox_); oy = rnd(oy_); oz = rnd(oz_);",
+        "dx = rnd(dx_); dy = rnd(dy_); dz = rnd(dz_);",
+        "sl = rnd(sl_);",
+        "",
+        "# What on_floats computes, line for line.",
+        "Fx = px - ox; Fy = py - oy; Fz = pz - oz;",
+        "fx = rnd(Fx); fy = rnd(Fy); fz = rnd(Fz);",
+        "",
+        "# cross_product_halves: h is each component's left half, k its right half.",
+        "hx = rnd(fy * dz); kx = rnd(fz * dy);",
+        "hy = rnd(fz * dx); ky = rnd(fx * dz);",
+        "hz = rnd(fx * dy); kz = rnd(fy * dx);",
+        "Qx = hx - kx; Qy = hy - ky; Qz = hz - kz;",
+        "qx = rnd(Qx); qy = rnd(Qy); qz = rnd(Qz);",
+        "",
+        "# up_halves, and up, summed left to right as Rust adds them.",
+        "ux = rnd(fx * dx); uy = rnd(fy * dy); uz = rnd(fz * dz);",
+        "U01 = ux + uy; u01 = rnd(U01);",
+        "U = u01 + uz; up = rnd(U);",
+        "",
+    ]
+    if lo or alow:
+        src += ["# A product below the normals is named by its exact value X. One that",
+                "# rounds to zero is written as the 0 it rounds to and left out of the",
+                "# sums, adding zero to a double giving the double back (464.13's",
+                "# addzero.g)."]
+    if lo:
+        src.append(" ".join(f"Xs{a} = q{a} * q{a};" for a in lo))
+    src.append(" ".join(f"s{a} = rnd(Xs{a});" if a in plow else f"s{a} = rnd(q{a} * q{a});" for a in sq))
+    src += ["ss = rnd(sl * sl);", "w = rnd(up * up);"]
+    if alow:
+        src.append("XL = ss * w;" + (" along = rnd(XL);" if has_along else ""))
+    else:
+        src.append("along = rnd(ss * w);")
+    sxy = [a for a in "xy" if a in sq]
+    if s01_rounds:
+        src.append("S01 = sx + sy; s01 = rnd(S01);")
+    elif sxy:
+        src.append(f"s01 = s{sxy[0]};")
+    if s012_rounds:
+        src.append("S012 = s01 + sz; s012 = rnd(S012);")
+    elif sxy:
+        src.append("s012 = s01;")
+    elif sq:
+        src.append("s012 = sz;")
+    if sq:
+        src.append("y = s012 - along;" if has_along else "y = s012;")
+    else:
+        src.append("y = -along;" if has_along else "y = 0;")
+    src += ["value = rnd(y);", "",
+            "# The permanent: each half's reach squared, then the slope squared times the",
+            "# reach of up squared.",
+            "nx = rnd(|hx| + |kx|); ny = rnd(|hy| + |ky|); nz = rnd(|hz| + |kz|);"]
+    if vs or vu:
+        src.append(" ".join(f"Xv{a} = n{a} * n{a};" for a in lo if a in vs or a in vu))
+    src.append(" ".join(f"v{a} = rnd(Xv{a});" if a in vs else f"v{a} = rnd(n{a} * n{a});" for a in kept))
+    src += ["R01 = rnd(|ux| + |uy|); R = rnd(R01 + |uz|);", "R2 = rnd(R * R);",
+            "XA = ss * R2; A = rnd(XA);" if xa else "A = rnd(ss * R2);"]
+    terms = [f"v{a}" for a in kept] + ["A"]
+    normal = {f"v{a}" for a in vn} | (set() if xa else {"A"})
+    acc, acc_normal, named = terms[0], terms[0] in normal, []
+    for t in terms[1:]:
+        if acc_normal or t in normal:
+            acc, acc_normal = f"rnd({acc} + {t})", True
+        else:
+            named.append(len(named) + 1)
+            src.append(f"VP{named[-1]} = {acc} + {t}; vp{named[-1]} = rnd(VP{named[-1]});")
+            acc = f"vp{named[-1]}"
+    if named:
+        src.insert(len(src) - len(named), "# A sum with no normal term is named, for its line below.")
+    src += [f"P = {acc};", "", b, "eb = rnd(B * P);", "",
+            "# The true value of the same inputs.",
+            "Cx = Fy * dz - Fz * dy; Cy = Fz * dx - Fx * dz; Cz = Fx * dy - Fy * dx;",
+            "Dt = Fx * dx + Fy * dy + Fz * dz;",
+            "Ex = Cx * Cx + Cy * Cy + Cz * Cz - sl * sl * (Dt * Dt);",
+            "",
+            "# The permanent with no rounding of its own.",
+            "G = |ux| + |uy| + |uz|;",
+            "Phat = (|hx| + |kx|) * (|hx| + |kx|) + (|hy| + |ky|) * (|hy| + |ky|)",
+            "     + (|hz| + |kz|) * (|hz| + |kz|) + ss * (G * G);"]
+    if shifted:
+        src += ["# The same with v in place of each reach square below the normals that",
+                "# does not round to zero, without each that does"
+                + (", and with A in place of" if xa else ","),
+                "# " + ("ss G^2, " if xa else "") + "added as P adds."]
+        phatx = [f"v{a}" if a in vs else reach(a) for a in kept] + ["A" if xa else "ss * (G * G)"]
+        src.append(f"Phatx = {left_sum(phatx, False)};")
+    src += ["", "# What each rounding multiplied its argument by.",
+            "rfx = fx / Fx; rfy = fy / Fy; rfz = fz / Fz;",
+            "rhx = hx / (fy * dz); rkx = kx / (fz * dy);",
+            "rhy = hy / (fz * dx); rky = ky / (fx * dz);",
+            "rhz = hz / (fx * dy); rkz = kz / (fy * dx);",
+            "rqx = qx / Qx; rqy = qy / Qy; rqz = qz / Qz;"]
+    rs = [f"rs{a} = s{a} / (q{a} * q{a});" for a in AXES if st[a] == "N"]
+    if rs:
+        src.append(" ".join(rs))
+    rsum = (["rs01 = s01 / S01;"] if s01_rounds else []) + (["rs012 = s012 / S012;"] if s012_rounds else [])
+    if rsum:
+        src.append(" ".join(rsum))
+    src += ["rux = ux / (fx * dx); ruy = uy / (fy * dy); ruz = uz / (fz * dz);",
+            "ru01 = u01 / U01; rU = up / U;",
+            "rss = ss / (sl * sl); rw = w / (up * up);" + ("" if alow else " ral = along / (ss * w);"),
+            "",
+            "# Each component's square, as y carries it, is (h - k)^2 times K; the true",
+            "# one is (h a - k b)^2, a and b undoing the roundings of h and k."]
+    if lo:
+        src += ["# A square below the normals has no rounding of its own in K: what that",
+                "# rounding cost is in the amount. One that rounds to zero is carried",
+                "# as q^2, and the amount takes it back."]
+
+    def carry(a):
+        out = []
+        if a in sq:
+            if a in "xy" and s01_rounds:
+                out.append("rs01")
+            if s012_rounds:
+                out.append("rs012")
+        return out
+
+    for a in AXES:
+        src.append(f"K{a} = " + " * ".join([f"rq{a}", f"rq{a}"] + ([f"rs{a}"] if st[a] == "N" else []) + carry(a)) + ";")
+    src += ["ax = 1 / (rfy * rhx); bx = 1 / (rfz * rkx);",
+            "ay = 1 / (rfz * rhy); by = 1 / (rfx * rky);",
+            "az = 1 / (rfx * rhz); bz = 1 / (rfy * rkz);",
+            "",
+            "# So each component's error is three terms, one for each piece of its",
+            "# reach squared: h^2, k^2 and 2 |h| |k|. W is each term's error over its",
+            "# piece."]
+    for a in AXES:
+        src.append(f"WH{a} = K{a} - a{a} * a{a}; WK{a} = K{a} - b{a} * b{a}; WX{a} = K{a} - a{a} * b{a};")
+    for a in AXES:
+        src.append(f"cH{a} = |h{a}| * |h{a}|; cK{a} = |k{a}| * |k{a}|; cX{a} = 2 * |h{a}| * |k{a}|;")
+    for a in AXES:
+        src.append(f"eH{a} = h{a} * h{a} * WH{a}; eK{a} = k{a} * k{a} * WK{a}; eX{a} = -(2 * h{a} * k{a} * WX{a});")
+    src += ["",
+            "# The axial term, as y carries it, is ss (gx ux + gy uy + gz uz)^2 times KA,",
+            "# g undoing nothing and folding in the roundings of the two sums; the true",
+            "# one is sl^2 (Dt)^2 = ss (ex ux + ey uy + ez uz)^2 / rss, e undoing the",
+            "# roundings of f and of the product. So its error is six terms, one for each",
+            "# piece of ss G^2: ss u^2 for each of the three, and 2 ss |u| |u'| for each",
+            "# pair. W is each term's error over its piece."]
+    if alow:
+        src += ["# along below the normals has no rounding of its own in KA: y carries",
+                "# ss w, and the amount takes back what along differs from it by."]
+    src += ["KA = rw;" if alow else "KA = rw * ral;",
+            "gx = ru01 * rU; gy = ru01 * rU; gz = rU;",
+            "ex = 1 / (rfx * rux); ey = 1 / (rfy * ruy); ez = 1 / (rfz * ruz);"]
+    for p in PAIRS:
+        src.append(f"WA{p} = KA * g{p[0]} * g{p[1]} - e{p[0]} * e{p[1]} / rss;")
+    src += ["cAxx = ss * |ux| * |ux|; cAyy = ss * |uy| * |uy|; cAzz = ss * |uz| * |uz|;",
+            "cAxy = 2 * ss * |ux| * |uy|; cAxz = 2 * ss * |ux| * |uz|; cAyz = 2 * ss * |uy| * |uz|;",
+            "eAxx = -(ss * ux * ux * WAxx); eAyy = -(ss * uy * uy * WAyy); eAzz = -(ss * uz * uz * WAzz);",
+            "eAxy = -(2 * ss * ux * uy * WAxy); eAxz = -(2 * ss * ux * uz * WAxz);",
+            "eAyz = -(2 * ss * uy * uz * WAyz);"]
+    if amount:
+        src += ["", "# What y carries less what K and KA say it carries: the amount."]
+        ds = []
+        for a in lo:
+            if a in plow:
+                src.append(f"D{a} = (s{a} - Xs{a})" + "".join(f" * {r}" for r in carry(a)) + ";")
+            else:
+                src.append(f"D{a} = -Xs{a};")
+            ds.append(f"D{a}")
+        if alow:
+            src.append("DA = XL - along;" if has_along else "DA = XL;")
+            ds.append("DA")
+        src.append("D = " + " + ".join(ds) + ";")
+    src += ["",
+            "# The same permanent, as four blocks of the fifteen pieces the error is",
+            "# averaged over: each component's reach squared, and the axial term.",
+            "P3x = cHx + cKx + cXx; P3y = cHy + cKy + cXy; P3z = cHz + cKz + cXz;",
+            "SA = cAxx + cAyy + cAzz + cAxy + cAxz + cAyz;",
+            "P15 = P3x + P3y + P3z + SA;",
+            "",
+            "# Each component's square as y carries it, and the axial term as Ex has it.",
+            "Yx = Kx * Qx * Qx; Yy = Ky * Qy * Qy; Yz = Kz * Qz * Qz;",
+            "At = sl * sl * (Dt * Dt);",
+            "",
+            "{",
+            "  # Every input is a finite f64.",
+            "     |px| <= 1b1024 /\\ |py| <= 1b1024 /\\ |pz| <= 1b1024",
+            "  /\\ |ox| <= 1b1024 /\\ |oy| <= 1b1024 /\\ |oz| <= 1b1024",
+            "  /\\ |dx| <= 1b1024 /\\ |dy| <= 1b1024 /\\ |dz| <= 1b1024",
+            "  /\\ |sl| <= 1b1024",
+            "  # No factor is zero, no component cancels to zero and nor does up. For an",
+            "  # f64 that is the same as being at least the smallest subnormal.",
+            "  /\\ |fx| >= 1b-1074 /\\ |fy| >= 1b-1074 /\\ |fz| >= 1b-1074",
+            "  /\\ |dx| >= 1b-1074 /\\ |dy| >= 1b-1074 /\\ |dz| >= 1b-1074",
+            "  /\\ |sl| >= 1b-1074",
+            "  /\\ |qx| >= 1b-1074 /\\ |qy| >= 1b-1074 /\\ |qz| >= 1b-1074",
+            "  /\\ |up| >= 1b-1074",
+            "  # The first sum of up is a normal number; where it is not, it is exact,",
+            "  # and that is another case.",
+            "  /\\ |u01| >= 1b-1022"]
+    if amount:
+        src += ["  # product_is_normal on the six halves (cross_product_halves_if_normal),",
+                "  # and on the components, the three up halves, the slope, up and the",
+                "  # axial term whose checks are kept (stays_accurate)."]
+    else:
+        src += ["  # product_is_normal on the six halves (cross_product_halves_if_normal),",
+                "  # and on the three components, the three up halves, the slope, up and the",
+                "  # axial term (stays_accurate)."]
+    src += ["  /\\ |hx| >= 1b-1022 /\\ |kx| >= 1b-1022 /\\ |hy| >= 1b-1022",
+            "  /\\ |ky| >= 1b-1022 /\\ |hz| >= 1b-1022 /\\ |kz| >= 1b-1022"]
+    checked = [a for a in AXES if st[a] == "N"]
+    if checked:
+        src.append("  /\\ " + " /\\ ".join(f"|s{a}| >= 1b-1022" for a in checked))
+    src += ["  /\\ |ux| >= 1b-1022 /\\ |uy| >= 1b-1022 /\\ |uz| >= 1b-1022",
+            "  /\\ |ss| >= 1b-1022 /\\ |w| >= 1b-1022" + ("" if alow else " /\\ |along| >= 1b-1022")]
+    if amount:
+        src += ["  # The products whose checks are left out, as the case says: below the",
+                "  # normals and not zero, or rounding to zero."]
+        rows = []
+        for a in lo:
+            rows.append(f"|Xs{a}| <= 1b-1022 /\\ s{a} >= 1b-1074" if a in plow else f"|Xs{a}| <= 1b-1075")
+        if alow:
+            rows.append("|XL| <= 1b-1022 /\\ along >= 1b-1074" if has_along else "|XL| <= 1b-1075")
+        src.append("  /\\ " + "\n  /\\ ".join(rows))
+    src += ["  # The permanent's three squares: |q| <= n, rounding being monotone and",
+            "  # |h - k| <= |h| + |k|, so v = rnd(n * n) >= rnd(q * q) = s, which is",
+            "  # normal where s is, and otherwise as the case says. In the same way",
+            "  # |up| <= R, so R2 >= w, which is normal, and A >= along, normal where",
+            "  # along is."]
+    vrows = []
+    for a in AXES:
+        if a in vs:
+            vrows.append(f"Xv{a} <= 1b-1022 /\\ v{a} >= 1b-1074")
+        elif a in vu:
+            vrows.append(f"Xv{a} <= 1b-1075")
+        else:
+            vrows.append(f"|v{a}| >= 1b-1022")
+    src.append("  /\\ " + " /\\ ".join(vrows))
+    src += ["  /\\ |R2| >= 1b-1022 /\\ " + ("XA <= 1b-1022" if xa else "|A| >= 1b-1022"),
+            "  # The bound is normal, which decide checks.",
+            "  /\\ |eb| >= 1b-1022",
+            "  # What lemma.g proves each of those gives.",
+            f"  /\\ hx -/ fy * dz {LEMMA}",
+            f"  /\\ kx -/ fz * dy {LEMMA}",
+            f"  /\\ hy -/ fz * dx {LEMMA}",
+            f"  /\\ ky -/ fx * dz {LEMMA}",
+            f"  /\\ hz -/ fx * dy {LEMMA}",
+            f"  /\\ kz -/ fy * dx {LEMMA}"]
+    src += [f"  /\\ s{a} -/ q{a} * q{a} {LEMMA}" for a in checked]
+    src += [f"  /\\ ux -/ fx * dx {LEMMA}",
+            f"  /\\ uy -/ fy * dy {LEMMA}",
+            f"  /\\ uz -/ fz * dz {LEMMA}",
+            f"  /\\ u01 -/ U01 {LEMMA}",
+            f"  /\\ ss -/ sl * sl {LEMMA}",
+            f"  /\\ w -/ up * up {LEMMA}"]
+    if not alow:
+        src.append(f"  /\\ along -/ ss * w {LEMMA}")
+    src += [f"  /\\ v{a} -/ n{a} * n{a} {LEMMA}" for a in vn]
+    src.append(f"  /\\ R2 -/ R * R {LEMMA}")
+    if not xa:
+        src.append(f"  /\\ A -/ ss * R2 {LEMMA}")
+    src.append(f"  /\\ eb -/ B * P {LEMMA}")
+    if s01_hyp or s012_hyp or named:
+        src += ["  # A rounded sum of two doubles with no normal term: below the normals",
+                "  # it is exact (464.16's sumexact.g), and at or above them lemma.g",
+                "  # bounds it, so it is within lemma.g's bound either way."]
+        if s01_hyp:
+            src.append(f"  /\\ s01 -/ S01 {LEMMA}")
+        if s012_hyp:
+            src.append(f"  /\\ s012 -/ S012 {LEMMA}")
+        src += [f"  /\\ vp{i} -/ VP{i} {LEMMA}" for i in named]
+    src += ["  # x / |x| is in [-1, 1] for any x that is not zero.",
+            "  /\\ hx / |hx| in [-1, 1] /\\ kx / |kx| in [-1, 1]",
+            "  /\\ hy / |hy| in [-1, 1] /\\ ky / |ky| in [-1, 1]",
+            "  /\\ hz / |hz| in [-1, 1] /\\ kz / |kz| in [-1, 1]",
+            "  /\\ ux / |ux| in [-1, 1] /\\ uy / |uy| in [-1, 1] /\\ uz / |uz| in [-1, 1]",
+            "->"]
+    err = "(y - Ex - D)" if amount else "(y - Ex)"
+    goal = f"  {err} / P15 in ?"
+    goal += " /\\ P -/ Phatx in ? /\\ P in ?" if shifted else " /\\ P -/ Phat in ?"
+    goal += " /\\ D in ?" if amount else ""
+    src += [goal, "  /\\ (y - Ex) / eb in [-1, 1]", "}", "",
+            "# How far each rounding is from the identity.",
+            "fx / Fx -> 1 + (fx - Fx) / Fx;",
+            "fy / Fy -> 1 + (fy - Fy) / Fy;",
+            "fz / Fz -> 1 + (fz - Fz) / Fz;"]
+    for a in AXES:
+        for h, prod in zip("hk", HALVES[a]):
+            src.append(f"{h}{a} / ({prod}) -> 1 + ({h}{a} - {prod}) / ({prod});")
+    src += [f"q{a} / Q{a} -> 1 + (q{a} - Q{a}) / Q{a};" for a in AXES]
+    src += [f"s{a} / (q{a} * q{a}) -> 1 + (s{a} - q{a} * q{a}) / (q{a} * q{a});" for a in checked]
+    if s01_rounds:
+        src.append("s01 / S01 -> 1 + (s01 - S01) / S01;")
+    if s012_rounds:
+        src.append("s012 / S012 -> 1 + (s012 - S012) / S012;")
+    src += [f"u{a} / (f{a} * d{a}) -> 1 + (u{a} - f{a} * d{a}) / (f{a} * d{a});" for a in AXES]
+    src += ["u01 / U01 -> 1 + (u01 - U01) / U01;",
+            "up / U -> 1 + (up - U) / U;",
+            "ss / (sl * sl) -> 1 + (ss - sl * sl) / (sl * sl);",
+            "w / (up * up) -> 1 + (w - up * up) / (up * up);"]
+    if not alow:
+        src.append("along / (ss * w) -> 1 + (along - ss * w) / (ss * w);")
+    carried = "XL" if alow else "along"
+    src += ["",
+            "# The error is the sum of four blocks' errors, each the sum of its pieces'",
+            "# errors, each a fraction of its own piece of the permanent; add_rr then",
+            "# averages them. In blocks so that no hint's identity spans all fifteen",
+            "# pieces, as cyl.g learned.",
+            f"{err} / P15 -> ((P15 + {err}) - P15) / P15;",
+            f"P15 + {err} -> (P3x + (Yx - Cx * Cx)) + (P3y + (Yy - Cy * Cy)) + (P3z + (Yz - Cz * Cz))"
+            f" + (SA + (At - {carried}));"]
+    src += [f"P3{a} + (Y{a} - C{a} * C{a}) -> (cH{a} + eH{a}) + (cK{a} + eK{a}) + (cX{a} + eX{a});" for a in AXES]
+    src.append(f"SA + (At - {carried}) -> " + " + ".join(f"(cA{p} + eA{p})" for p in PAIRS) + ";")
+    for a in AXES:
+        for p in "HKX":
+            src.append(f"(c{p}{a} + e{p}{a}) - c{p}{a} -> e{p}{a};")
+    src += [f"(cA{p} + eA{p}) - cA{p} -> eA{p};" for p in PAIRS]
+    for a in AXES:
+        src += [f"eH{a} / cH{a} -> (h{a} / |h{a}|) * (h{a} / |h{a}|) * WH{a};",
+                f"eK{a} / cK{a} -> (k{a} / |k{a}|) * (k{a} / |k{a}|) * WK{a};",
+                f"eX{a} / cX{a} -> -((h{a} / |h{a}|) * (k{a} / |k{a}|) * WX{a});"]
+    src += [f"eA{p} / cA{p} -> -((u{p[0]} / |u{p[0]}|) * (u{p[1]} / |u{p[1]}|) * WA{p});" for p in PAIRS]
+    src += ["", "# From the fifteen pieces to the permanent on_floats rounds, and on to eb."]
+    if amount:
+        src += ["# What the products below the normals cost is an amount, and eb being",
+                "# normal keeps it small against eb.",
+                "(y - Ex) / eb -> ((y - Ex - D) / P15) * (Phat / P) * (P / eb) + D / eb;"]
+    else:
+        src.append("(y - Ex) / eb -> ((y - Ex) / P15) * (Phat / P) * (P / eb);")
+    if shifted:
+        shift = [f"({reach(a)} - v{a})" if a in vs else reach(a) for a in lo if a in vs or a in vu]
+        if xa:
+            shift.append("(ss * (G * G) - A)")
+        src += ["# A reach square below the normals is off from its piece of Phat by an",
+                "# amount, as A is where it is below the normals, and eb being normal",
+                "# keeps P large enough that the amount is small against it.",
+                f"Phat / P -> Phatx / P + ({' + '.join(shift)}) / P;",
+                "Phatx / P -> 1 / (1 + (P - Phatx) / Phatx);",
+                "P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));",
+                "P -> eb / (B * (1 + (eb - B * P) / (B * P)));",
+                "# Each such piece is its rounded reach squared, times how far that",
+                "# rounding moved it."]
+        for a in lo:
+            if a in vs or a in vu:
+                r = f"(|h{a}| + |k{a}|)"
+                src += [f"{reach(a)} -> Xv{a} * (({r} / n{a}) * ({r} / n{a}));",
+                        f"{r} / n{a} -> 1 / (1 + (n{a} - {r}) / {r});"]
+        if xa:
+            src += ["# ss G^2 is off from A by what rounding XA cost, and by XA times how",
+                    "# far R2 is from G^2.",
+                    "ss * (G * G) - A -> (XA - A) + XA * ((G * G) / R2 - 1);",
+                    "(G * G) / R2 -> 1 / (1 + (R2 - G * G) / (G * G));"]
+    else:
+        src += ["Phat / P -> 1 / (1 + (P - Phat) / Phat);",
+                "P / eb -> 1 / (B * (1 + (eb - B * P) / (B * P)));"]
+    return "\n".join(src) + "\n"
+
+
+def name(low):
+    return "conelow_" + "_".join(f"{k}{s}" for k, s in low.items())
+
+
+def write(path, text):
+    with open(path, "w") as out:
+        out.write(text)
+
+
+write("conelow_none.g", make({}))
+count = 0
+for many in (1, 2, 3):
+    for keys in itertools.combinations("xyzA", many):
+        for states in itertools.product(*[AXIAL_STATES if k == "A" else COMPONENT_STATES for k in keys]):
+            low = dict(zip(keys, states))
+            write(f"{name(low)}.g", make(low))
+            write(f"c_{name(low)}_half.g", make(low, B_HALF))
+            count += 1
+print("cases written:", count)
+```
+
+`conegdiff.py`, whole:
+
+```python
+"""Copy cone.g out of 464.16 byte for byte, and diff conelow_none.g against
+it. Run as: python3 conegdiff.py <doc>"""
+import difflib
+import os
+import re
+import sys
+
+here = os.path.dirname(os.path.abspath(__file__))
+text = open(sys.argv[1]).read()
+sec = text[text.index("### 464.16"):text.index("### 464.17")]
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+want = [body for lang, body in FENCED.findall(sec)
+        if body.startswith("# restates: crates/rcad-geom/src/cone.rs on_floats at 2538ee89\n")
+        and "\nP = rnd(rnd(rnd(vx + vy) + vz) + A);\n" in body]
+print("blocks like cone.g in 464.16:", len(want))
+open(os.path.join(here, "cone.g"), "w").write(want[0])
+mine = open(os.path.join(here, "conelow_none.g")).read()
+for line in difflib.unified_diff(want[0].split("\n"), mine.split("\n"), "cone.g", "conelow_none.g", lineterm="", n=0):
+    print(line)
+```
+
+`runl.sh`, whole:
+
+```bash
+#!/bin/bash
+# conelow.py's 579 cases, each with gappa -Bcoq and coqc when it proves, and
+# their 579 controls at u/2, 22 at a time: the cases first. Writes runl.txt,
+# which ends "done".
+cd "$(dirname "$0")"
+python3 conelow.py
+{
+  for f in conelow_*.g; do
+    [ "$f" = conelow_none.g ] || echo "./one.sh $f coq"
+  done
+  for f in c_conelow_*_half.g; do
+    echo "./one1.sh $f"
+  done
+} > runl.jobs
+{
+  wc -l < runl.jobs
+  xargs -P 22 -L 1 env < runl.jobs
+} > runl.txt 2>&1
+echo done >> runl.txt
+```
+
+`startl.sh`, whole:
+
+```bash
+#!/bin/bash
+# Start runl.sh detached in its own process group and print its pid.
+cd "$(dirname "$0")"
+setsid nohup ./runl.sh > runl.nohup 2>&1 &
+echo $!
+```
+
+`tallyl.py`, whole:
+
+```python
+"""Tally runl.txt and the .out files of conelow.py's 579 cases: for each case
+its exit, the relative bound on y that it prints, and its coqc line; for each
+control its exit and best. Prints one line per case, then counts. Run as:
+python3 tallyl.py"""
+import collections
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+run = open("runl.txt").read()
+cases = sorted(f[:-2] for f in os.listdir(".")
+               if f.startswith("conelow_") and f.endswith(".g") and f != "conelow_none.g")
+
+
+def short(out, goal):
+    m = re.search(r"^  " + goal + r" in \[[^{]*\{([^,]*),[^}]*\}, [^{]*\{([^,]*),", out, re.M)
+    return f"[{m.group(1)}, {m.group(2)}]" if m else "-"
+
+
+def control(name):
+    ex = re.search(rf"^{name} exit (\d+) ([\d.]+)s$", run, re.M)
+    out = open(f"{name}.out").read() if os.path.exists(f"{name}.out") else ""
+    best = re.search(r"best: (\[[^\]]*\])", out)
+    return (ex.group(1) if ex else "?", best.group(1) if best else "pointless" if "pointless" in out else "-")
+
+
+ybounds = collections.Counter()
+bests = collections.Counter()
+exits = collections.Counter()
+coq = []
+times = []
+for c in cases:
+    out = open(f"{c}.out").read() if os.path.exists(f"{c}.out") else ""
+    ex = re.search(rf"^{c} exit (\d+) ([\d.]+)s$", run, re.M)
+    cq = re.search(rf"^{c} coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$", run, re.M)
+    ctl = control(f"c_{c}_half")
+    y = short(out, r"\([^\n]*? - Ex[^\n]*?\) / P15")
+    ybounds[y] += 1
+    bests[ctl] += 1
+    exits[ex.group(1) if ex else "?"] += 1
+    if ex:
+        times.append((float(ex.group(2)), c))
+    if cq:
+        coq.append((int(cq.group(4)), int(cq.group(5)), c, cq.group(1), cq.group(2), float(cq.group(3))))
+    print(c, "exit", ex.group(1) if ex else "?", ex.group(2) if ex else "", "y", y,
+          "coq", cq.groups() if cq else "-", "ctl", *ctl)
+print("y bounds", dict(ybounds))
+print("controls, exit and best", dict(bests))
+print("case exits", dict(exits))
+print("cases exit 0:", len(re.findall(r"^conelow_\w+ exit 0 ", run, re.M)), "of", len(cases))
+print("controls at u/2 exit 1:", len(re.findall(r"^c_conelow_\w+_half exit 1 ", run, re.M)), "of", len(cases))
+times.sort()
+if times:
+    print("case times", times[0], times[-1])
+print("coq ok:", sum(1 for x in coq if x[3] == "0" and x[4] == "0"), "of", len(coq))
+if coq:
+    coq.sort()
+    print("coq smallest", coq[0][:3], "largest", coq[-1][:3], "times", min(x[5] for x in coq), max(x[5] for x in coq))
+
+
+def other_lines(f):
+    return [line for line in open(f).read().split("\n")
+            if line and "assumed to be nonzero" not in line
+            and not line.startswith(("Results:", "  "))]
+
+
+warn = [f for f in os.listdir(".") if f.startswith("conelow_") and f.endswith((".out", ".bcoq", ".coqc"))
+        and other_lines(f)]
+print("files with a line other than results and 'assumed to be nonzero':", sorted(warn))
+```
+
+After its line for each case, `python3 tallyl.py` prints:
+
+```text
+y bounds {'[-1.11022e-15, 1.11022e-15]': 364, '[-1.22125e-15, 1.22125e-15]': 215}
+controls, exit and best {('1', '[-20, 20]'): 364, ('1', '[-22, 22]'): 215}
+case exits {'0': 579}
+cases exit 0: 579 of 579
+controls at u/2 exit 1: 579 of 579
+case times (12.19, 'conelow_xon_yon_zon') (50.24, 'conelow_yos_zps_Apa')
+coq ok: 579 of 579
+coq smallest (17425, 60, 'conelow_xon_zon') largest (23445, 67, 'conelow_yos_zos_Aoa') times 23.75 81.05
+files with a line other than results and 'assumed to be nonzero': []
+```
+
+`truthl.py`, whole:
+
+```python
+"""The probe's two inputs, and each made ordinary, in exact rationals: the
+value |(p - o) x d|^2 - slope^2 ((p - o) . d)^2 about Axis::z() (o = 0,
+d = (0, 0, 1)), from the bits the probe printed. Run as: python3 truthl.py"""
+import struct
+from fractions import Fraction
+
+
+def double(bits):
+    return Fraction(struct.unpack(">d", bytes.fromhex(bits))[0])
+
+
+def value(slope, point):
+    d = (Fraction(0), Fraction(0), Fraction(1))
+    f = point
+    c = (f[1] * d[2] - f[2] * d[1], f[2] * d[0] - f[0] * d[2], f[0] * d[1] - f[1] * d[0])
+    up = f[0] * d[0] + f[1] * d[1] + f[2] * d[2]
+    return c[0] ** 2 + c[1] ** 2 + c[2] ** 2 - slope ** 2 * up ** 2
+
+
+INPUTS = [
+    ("slope squared below the normals", "1e30000000000000", ("3d70000000000000", "0000000000000000", "5f40000000000000")),
+    ("slope squared, made ordinary", "3ff0000000000000", ("3fe0000000000000", "0000000000000000", "3ff0000000000000")),
+    ("up squared below the normals", "43b0000000000000", ("2190000000000000", "0000000000000000", "1e50000000000000")),
+    ("up squared, made ordinary", "3ff0000000000000", ("3f70000000000000", "0000000000000000", "3ff0000000000000")),
+]
+for what, slope, point in INPUTS:
+    v = value(double(slope), tuple(double(b) for b in point))
+    sign = "Neg" if v < 0 else "Pos" if v > 0 else "Zero"
+    print(f"{what}: {sign}, value {float(v)!r}, numerator {v.numerator}, denominator 2^{v.denominator.bit_length() - 1}")
+```
+
+`samel.py`, whole:
+
+```python
+"""Check that each script 464.31 appends whole is byte for byte the file that
+was run, in the directory given; that one.sh and one1.sh there are 464.13's
+and 464.15's blocks; and that conelow.py, run again in a fresh directory from
+the appended text, writes what was run.
+Run as: python3 samel.py <doc> <dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, ran = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+sec = text[text.index("### 464.31"):]
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+blocks = FENCED.findall(sec)
+print("code blocks in 464.31:", len(blocks))
+marks = {
+    "conelow.py": '"""Write cone.g\'s cases where one, two or three of the four checked',
+    "conegdiff.py": '"""Copy cone.g out of 464.16 byte for byte',
+    "runl.sh": "#!/bin/bash\n# conelow.py's 579 cases",
+    "startl.sh": "#!/bin/bash\n# Start runl.sh detached",
+    "tallyl.py": '"""Tally runl.txt',
+    "truthl.py": '"""The probe\'s two inputs, and each made ordinary, in exact rationals',
+    "samel.py": '"""Check that each script 464.31 appends whole',
+}
+found = {}
+for lang, body in blocks:
+    for name, mark in marks.items():
+        if body.startswith(mark):
+            assert name not in found, name
+            found[name] = body
+for name in marks:
+    if name not in found:
+        print(name, "not appended")
+        continue
+    path = os.path.abspath(__file__) if name == "samel.py" else os.path.join(ran, name)
+    print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+for sub, end, name, mark in (("### 464.13", "### 464.14", "one.sh", "#!/bin/bash\n# Run one Gappa script under 464.4's pin"),
+                             ("### 464.15", "### 464.16", "one1.sh", "#!/bin/bash\n# one.sh with the timeout taken from T")):
+    s = text[text.index(sub):text.index(end)]
+    want = [body for lang, body in FENCED.findall(s) if body.startswith(mark)]
+    assert len(want) == 1, (name, len(want))
+    print(name, "is", sub[4:], "block:", open(os.path.join(ran, name)).read() == want[0])
+
+fresh = tempfile.mkdtemp()
+open(os.path.join(fresh, "conelow.py"), "w").write(found["conelow.py"])
+subprocess.run(["python3", "conelow.py"], cwd=fresh, check=True)
+written = sorted(f for f in os.listdir(fresh) if f.endswith(".g"))
+same = [f for f in written if os.path.exists(os.path.join(ran, f))
+        and filecmp.cmp(os.path.join(fresh, f), os.path.join(ran, f), shallow=False)]
+differ = [f for f in written if os.path.exists(os.path.join(ran, f)) and f not in same]
+absent = [f for f in written if not os.path.exists(os.path.join(ran, f))]
+extra = sorted(f for f in os.listdir(ran) if f.endswith(".g") and f not in written and f.startswith(("conelow_", "c_conelow_")))
+print("written again:", len(written), "same as run:", len(same), "differ:", differ, "not run:", absent,
+      "run, not written:", extra)
+shutil.rmtree(fresh)
+```
+
+It prints:
+
+```text
+cases written: 579
+code blocks in 464.31: 13
+conelow.py same
+conegdiff.py same
+runl.sh same
+startl.sh same
+tallyl.py same
+truthl.py same
+samel.py same
+one.sh is 464.13 block: True
+one1.sh is 464.15 block: True
+written again: 1159 same as run: 1159 differ: [] not run: [] run, not written: []
+```
+
+Its first line is `conelow.py`'s own, run again in the fresh directory; the
+parent's lines come after it because its output is buffered when it is not a
+terminal. The thirteen blocks are the probe test, its print, `truthl.py`'s
+print, `conegdiff.py`'s print, the seven scripts, `tallyl.py`'s print and this
+one.
