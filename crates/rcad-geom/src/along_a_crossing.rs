@@ -1395,6 +1395,52 @@ impl Cone {
                 .side_of(PredicatePoint::from(crossing.crossed.apex().coordinates())),
         )
     }
+
+    /// Where this cone and `other` are of one slope side by side: the flat
+    /// surface halfway between their apexes, and the one of the two that
+    /// surface is cut from. The two cross in the one hyperbola that flat
+    /// surface cuts out of either, and `intersect` names it, and `walk`
+    /// marches it, as this very flat surface's cut of this very cone, so
+    /// points along it go in the order they go in along a flat surface's cut
+    /// of a cone. The answer is the same whichever way round the pair comes,
+    /// since `intersect` sorts the pair first.
+    ///
+    /// Nothing where the two are not side by side as `walk` asks it: where
+    /// they share an apex, are not proved off one axis, or cross in anything
+    /// else. Asked under a certified policy, as
+    /// [`Cone::which_side_past_the_flat_surface_between_two_loops`] asks it
+    /// and for the same reason: a fuse reads it with no policy to hand.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`] where whether the two are side by side could not
+    /// be settled.
+    pub fn the_flat_surface_halfway_to_a_cone_beside_it(
+        &self,
+        other: &Self,
+    ) -> Result<Option<(Plane, Self)>> {
+        if self.apex() == other.apex()
+            || whether_two_cones_share_an_axis(self, other) != Decision::Pos
+        {
+            return Ok(None);
+        }
+        match how_two_cones_off_one_axis_cross(
+            self,
+            other,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) {
+            Ok(HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { cone, flat }) => {
+                Ok(Some((flat, cone)))
+            }
+            Ok(
+                HowTwoConesOffOneAxisCross::HeldApart(_)
+                | HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. },
+            ) => Ok(None),
+            Err(undecided @ Error::Undecidable { .. }) => Err(undecided),
+            Err(_) => Ok(None),
+        }
+    }
 }
 
 /// Which way one of the circles a ball on a cone's axis crosses it in runs, for
@@ -3146,6 +3192,58 @@ mod tests {
             on_one_apex
                 .which_side_past_the_flat_surface_between_two_loops(&wide, &through_the_wide_apex),
             None
+        );
+    }
+
+    /// Two cones of slope a half up `z`, one from the origin and one three
+    /// along `x`, are mirror images across `x = 1.5` and cross in the
+    /// hyperbola that flat surface cuts out of either, so both ways round
+    /// that flat surface comes back, with the cone from the origin, the one
+    /// that sorts first. Two cones on one axis, two on one apex, and two
+    /// that cross in two loops get nothing.
+    #[test]
+    fn two_cones_of_one_slope_side_by_side_hand_back_the_flat_surface_halfway() {
+        let up_z_from = |x: f64| {
+            Cone::new(
+                Axis::new(Point::new(x, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("an axis"),
+                0.5,
+            )
+            .expect("a slope")
+        };
+        let (one, beside) = (up_z_from(0.0), up_z_from(3.0));
+        let halfway =
+            Plane::from_point_and_normal(Point::new(1.5, 0.0, 0.0), Vector::new(1.0, 0.0, 0.0))
+                .expect("a flat surface");
+        for (this, other) in [(one, beside), (beside, one)] {
+            assert_eq!(
+                this.the_flat_surface_halfway_to_a_cone_beside_it(&other)
+                    .expect("side by side is decided"),
+                Some((halfway, one)),
+                "{this:?} against {other:?}"
+            );
+        }
+        let on_one_apex = Cone::new(
+            Axis::new(Point::origin(), Vector::new(1.0, 0.0, 0.0)).expect("an axis"),
+            0.5,
+        )
+        .expect("a slope");
+        for (what, other) in [
+            ("on one axis", a_cone_up_z(2.0, 0.5)),
+            ("on one apex", on_one_apex),
+        ] {
+            assert_eq!(
+                one.the_flat_surface_halfway_to_a_cone_beside_it(&other)
+                    .expect("decided"),
+                None,
+                "{what}"
+            );
+        }
+        assert_eq!(
+            a_thin_cone_lying_across_z_at_four()
+                .the_flat_surface_halfway_to_a_cone_beside_it(&a_cone_up_z(0.0, 1.0))
+                .expect("decided"),
+            None,
+            "two loops"
         );
     }
 
