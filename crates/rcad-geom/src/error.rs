@@ -318,11 +318,17 @@ pub enum Error {
     ///
     /// **`intersect` and `walk` give this for two cones of one slope off one
     /// axis that are exactly mirror images and touch** (Q2813), as one turned
-    /// about a line through a point of the other's axis is. Their crossing is
-    /// two flat cuts of either cone, which meet where the two touch, and nothing
-    /// names those cuts yet. `rcad-topo`'s `a_funnel_with_a_leaning_spout.rs`
-    /// fuses two pointed cones a quarter turn apart, which touch inside both
-    /// faces, and every fuse is refused with this.
+    /// about a line through a point of the other's axis is, **in two cases
+    /// only**. Their crossing is two flat cuts of either cone, which meet where
+    /// the two touch, and since Q2868 `intersect` names those cuts as four arcs
+    /// from touch to touch where the flat surface halfway between the apexes
+    /// cuts an ellipse out of them, as for `rcad-topo`'s two pointed cones a
+    /// quarter turn apart in `a_funnel_with_a_leaning_spout.rs`. What is left
+    /// is the pair whose flat surface halfway cuts a hyperbola or a parabola,
+    /// whose pieces either side of the touches are not one arc each, such as
+    /// two cones of slope one on `(0, 5, 3)` from the origin and on
+    /// `(0, 5, −3)` from `(0, 0, 30)`; and the pair with each apex on the
+    /// other cone, which touch all along the straight line between the apexes.
     ///
     /// **A gap** (§16.10, §31.9). [`EdgeRun`](crate::EdgeRun) *can* say this:
     /// the two loops of a pinch are the two sides of one half-space through the
@@ -367,6 +373,10 @@ pub enum Error {
     /// rulings next to the touch, and the enclosure of how far apart those two
     /// spread holds nothing, so their four halves are not told apart.
     /// `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs` pins it.
+    ///
+    /// So are two cones of one slope that are mirror images and touch at two
+    /// points where the two flat surfaces that pick their four arcs apart do
+    /// not come out as numbers `f64` holds exactly (Q2868), also a **gap**.
     #[error(
         "this crossing comes in two pieces and no half-space square to both surfaces can be \
          written down in f64 to tell them apart"
@@ -435,9 +445,10 @@ pub enum Error {
     /// across the flat surface halfway between their apexes, and can **touch**
     /// at two points, where their crossing runs through itself. Where the
     /// numbers stored are exactly mirror images and the two touch, the pair is
-    /// refused as
+    /// named as four arcs of two flat cuts that meet at the touches (Q2868),
+    /// or refused as
     /// [`ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`](Self::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
-    /// instead (Q2813). Two of one slope side by side are mirror images too,
+    /// where that variant says, and not here. Two of one slope side by side are mirror images too,
     /// and cross in the one hyperbola the flat surface halfway between them
     /// cuts out of either, which is named as that cut (Q2867). Mirror images
     /// with each apex inside the other cone stay here, which cross in two flat

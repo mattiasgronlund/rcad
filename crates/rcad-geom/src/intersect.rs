@@ -167,9 +167,11 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// cross the other twice, once each side of it, or one loop and two branches
 /// that run off for ever, held apart by two flat surfaces (Q2812), or, for two
 /// of one slope side by side, the hyperbola the flat surface halfway between
-/// their apexes cuts out of either (Q2867) — see
-/// [`how_two_cones_off_one_axis_cross`] for which shapes stay refused, and why
-/// two cones of one slope that are mirror images and touch are refused as a
+/// their apexes cuts out of either (Q2867), or, for two of one slope that are
+/// mirror images and touch at two points, the four arcs of the two flat cuts
+/// that meet there (Q2868) — see [`how_two_cones_off_one_axis_cross`] for which
+/// shapes stay refused, and why two mirror images that touch all along a line,
+/// or whose flat surface halfway cuts no ellipse out of them, are refused as a
 /// crossing that touches itself (Q2813). Two cones
 /// with one apex, one slope and their axes along one line are the same surface
 /// and come back as one, **whichever way each axis points** — see

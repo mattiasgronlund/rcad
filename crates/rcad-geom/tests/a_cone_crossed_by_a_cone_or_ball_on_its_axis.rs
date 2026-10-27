@@ -25,10 +25,14 @@
 //! which crosses the cone in a circle and the apex apart from it. A second cone
 //! of the same slope turned about a line through a point of the first's axis is
 //! more than an overlap: the two are mirror images, and can touch at two points.
-//! Where they do, and the numbers stored are exactly mirror images, the pair is
-//! refused as a crossing that touches itself. Where each apex is inside the
-//! other cone they cross in two flat cuts held apart, and are refused as any
-//! other overlap is. Where the turned axis was rounded they are not mirror
+//! Where they do, and the numbers stored are exactly mirror images, they cross
+//! in two flat cuts that meet at the touches: `intersect` names them as four
+//! arcs from touch to touch where the flat surface halfway between the apexes
+//! cuts an ellipse out of them, and `walk` marches each, and the pair is
+//! refused as a crossing that touches itself where that cut is a hyperbola, or
+//! where the two touch all along a line. Where each apex is inside the other
+//! cone they cross in two flat cuts held apart, and are refused as any other
+//! overlap is. Where the turned axis was rounded they are not mirror
 //! images, do not touch, and are refused as any other overlap is. Two of one
 //! slope side by side are mirror images too, and cross in the one hyperbola
 //! the flat surface halfway between them cuts out of either: `intersect` names
@@ -1078,8 +1082,13 @@ fn where_a_spout_line_meets_the_funnel(
 /// whose numbers as written are exact but whose second axis is rounded on its
 /// own when stored.
 ///
-/// The pair is refused as a crossing that touches itself, by the namer and by
-/// the walker, whichever cone comes first.
+/// The flat surface halfway, `z = 15`, cuts a **hyperbola** out of either cone,
+/// not an ellipse: its normal leans further from the axis than the cone's side
+/// does, `2·(n·w)² < W·|n|²` for `n` its normal and `w` the axis as written.
+/// The hyperbola's branch through the touches is cut in three there, and
+/// the pickers that name the four arcs of two ellipses would put two of those
+/// pieces in one corner. So the pair is refused as a crossing that touches
+/// itself, by the namer and by the walker, whichever cone comes first.
 #[test]
 fn two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points() {
     let x_squared = 136;
@@ -1101,6 +1110,12 @@ fn two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_t
         one, other,
         "the two cones are square to one direction at (±√136, 8, 15), \
          since each normal's first number is the first number of the pair times x"
+    );
+    let dot = |a: [i64; 3], b: [i64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let (along, halfway) = ([0, 5, 3], [0, 0, 30]);
+    assert!(
+        2 * dot(halfway, along).pow(2) < dot(along, along) * dot(halfway, halfway),
+        "z = 15 leans further from the axis than the cone's side does, so cuts a hyperbola"
     );
     assert_refused_as_touching_itself(
         &a_cone([0.0; 3], [0.0, 5.0, 3.0], 1.0),
