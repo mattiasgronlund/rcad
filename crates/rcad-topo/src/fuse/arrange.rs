@@ -5563,6 +5563,17 @@ impl<'f> Arrangement<'f> {
     /// cut asks this function again with a node that names no third plane,
     /// which is not the arm that reads the other nodes, so that reading goes
     /// no deeper (`a_place_off_a_line_between_two_cuts_puts_them_in_the_order_its_sides_do`).
+    ///
+    /// **A node off the line on one cut names their order too.** It is one
+    /// point with that cut's meet, so the side of the other cut it is on is
+    /// the side that meet is on. Skipped, a node a step off the line on the
+    /// second cut and after the first, where the line puts the first after
+    /// the second, made the same loop with an equality in it, and
+    /// [`Arrangement::nodes_along`] kept the first cut between two nodes it
+    /// proved one point (Q2840). A node on both cuts, where they cross a
+    /// rounding off the line, is one point with each meet, which no order of
+    /// two places on the line keeps, so it leaves the planes unable to say
+    /// (`a_place_off_a_line_on_one_cut_puts_the_cuts_in_the_order_its_sides_do`).
     fn as_the_planes_say(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         let partner = self.crossings[crossing].partner;
         let (Some(flat), Some(partner)) = (self.surface.as_plane(), partner.as_plane()) else {
@@ -5584,7 +5595,7 @@ impl<'f> Arrangement<'f> {
         );
         let decided = match (the_third_plane(mine), the_third_plane(theirs)) {
             (Some(mine), Some(theirs)) => {
-                let mut as_a_place_between_them_says = (0..self.nodes.len())
+                let mut as_each_place_off_the_line_says = (0..self.nodes.len())
                     .filter(|&node| {
                         self.nodes[node].crossings.contains(&crossing)
                             && self
@@ -5592,22 +5603,32 @@ impl<'f> Arrangement<'f> {
                                 .is_some_and(|three| the_third_plane(three).is_none())
                     })
                     .filter_map(|off_the_line| {
-                        let sides = [first, second].map(|cut| {
+                        let [to_the_first, to_the_second] = [first, second].map(|cut| {
                             let (side, _) = self
                                 .as_proved_before_any_policy(crossing, off_the_line, cut)
                                 .expect("a line two planes cross in is ordered along an axis");
                             side
                         });
-                        matches!(
-                            sides,
-                            [Decision::Neg, Decision::Pos] | [Decision::Pos, Decision::Neg]
-                        )
-                        .then_some(sides[1])
+                        match (to_the_first, to_the_second) {
+                            (Decision::Neg | Decision::Zero, Decision::Pos)
+                            | (Decision::Neg, Decision::Zero) => Some(Some(Decision::Pos)),
+                            (Decision::Pos | Decision::Zero, Decision::Neg)
+                            | (Decision::Pos, Decision::Zero) => Some(Some(Decision::Neg)),
+                            (Decision::Zero, Decision::Zero) => Some(None),
+                            (Decision::Pos, Decision::Pos)
+                            | (Decision::Neg, Decision::Neg)
+                            | (Decision::Undecidable { .. }, _)
+                            | (_, Decision::Undecidable { .. }) => None,
+                            (other, decided) => panic!(
+                                "a sign came back with a decision nothing here knows: \
+                                 {other:?}, {decided:?}"
+                            ),
+                        }
                     });
-                if let Some(said) = as_a_place_between_them_says.next() {
-                    return as_a_place_between_them_says
-                        .all(|again| again == said)
-                        .then_some(said);
+                if let Some(said) = as_each_place_off_the_line_says.next() {
+                    return said.filter(|&said| {
+                        as_each_place_off_the_line_says.all(|again| again == Some(said))
+                    });
                 }
                 rcad_predicates::which_meet_comes_first_along_a_line(
                     line,
@@ -20148,6 +20169,205 @@ mod tests {
             None,
             "two places off the line that put the cuts each way round leave the planes unable to say"
         );
+    }
+
+    /// The same top and cuts, with a place a step up, at `y = 1 + u`, exactly
+    /// on the second cut. It is after the first cut, where the line puts the
+    /// first cut after the second, and on the second cut it is one point with
+    /// that cut's meet on the line. Asked of the planes alone, the three went
+    /// round in a loop again: the second cut, then the first, then the place
+    /// that is one point with the second. `nodes_along` kept the first cut
+    /// between two nodes it proved one point (Q2840).
+    ///
+    /// So a place on one cut and on a side of the other puts the two cuts in
+    /// the order its sides do, as a place between them does. The meet of the
+    /// top and both cuts, a rounding off the line, is one point with each
+    /// cut's meet, which no order of two places on the line keeps, so with it
+    /// on the line the planes cannot say.
+    #[test]
+    fn a_place_off_a_line_on_one_cut_puts_the_cuts_in_the_order_its_sides_do() {
+        let step = f64::EPSILON;
+        let (model, cube) = a_cube_of_side_two();
+        let top = the_top_of_a_cube(&model, cube);
+        let line = [0.0, 1.0, 0.0, -1.0];
+        let cuts = [[1.0, -1.0, 0.0, 0.0], [2.0, 1.0, 0.0, -3.0]];
+        let face = cut_by(&top, &[line, cuts[0], cuts[1]]);
+        let mut arrangement = drawn_up_to_its_corners(&face);
+        let along = the_crossing_of_the_cut(&arrangement, line);
+        let flat = arrangement.surface;
+        let partner = arrangement.crossings[along].partner;
+        let [first_cut, second_cut] = cuts
+            .map(|cut| arrangement.crossings[the_crossing_of_the_cut(&arrangement, cut)].partner);
+        let a_step_up = Surface::Plane(
+            Plane::from_coefficients([0.0, 1.0, 0.0, -(1.0 + step)]).expect("a plane"),
+        );
+        let mut placed = |three: [Surface; 3]| {
+            arrangement
+                .nodes
+                .push(a_node_where_three_planes_meet(three, along));
+            arrangement.nodes.len() - 1
+        };
+        let on_the_first = placed([flat, partner, first_cut]);
+        let on_the_second = placed([flat, partner, second_cut]);
+        let up_on_the_second = placed([flat, a_step_up, second_cut]);
+        let mut log = ProvenanceLog::new();
+        arrangement
+            .work_out_how_each_crossing_runs(&mut log)
+            .expect("every crossing here is a line");
+
+        let by_the_line = rcad_predicates::which_meet_comes_first_along_a_line(
+            [flat, partner].map(|surface| surface.as_plane().expect("a plane").coefficients()),
+            first_cut.as_plane().expect("a plane").coefficients(),
+            second_cut.as_plane().expect("a plane").coefficients(),
+        )
+        .expect("three planes meeting at one point");
+        assert!(
+            matches!(by_the_line, Decision::Pos | Decision::Neg),
+            "the two cuts cross the line at two places: {by_the_line:?}"
+        );
+        let three = [on_the_first, on_the_second, up_on_the_second];
+        for one in three {
+            for other in three.into_iter().filter(|&other| other != one) {
+                let (by_the_boxes, _) = arrangement
+                    .as_the_boxes_say(along, one, other)
+                    .expect("boxes along an axis");
+                assert!(
+                    matches!(by_the_boxes, Decision::Undecidable { .. }),
+                    "the boxes of nodes {one} and {other} cannot say: {by_the_boxes:?}"
+                );
+            }
+        }
+        let ask = |arrangement: &Arrangement<'_>, first: usize, second: usize| {
+            let (decided, _) = arrangement
+                .as_proved_before_any_policy(along, first, second)
+                .expect("boxes along an axis");
+            decided
+        };
+        assert_eq!(
+            ask(&arrangement, on_the_second, up_on_the_second),
+            Decision::Zero,
+            "the place a step up is on the second cut"
+        );
+        assert_eq!(
+            ask(&arrangement, on_the_first, up_on_the_second),
+            the_other_way(by_the_line),
+            "and after the first cut, where the line puts the first cut after the second"
+        );
+
+        assert_eq!(
+            ask(&arrangement, on_the_first, on_the_second),
+            the_other_way(by_the_line),
+            "the two cuts in the order the place on one of them puts them in"
+        );
+        for hint in [
+            three,
+            [three[2], three[1], three[0]],
+            [three[1], three[2], three[0]],
+        ] {
+            let in_order = arrangement
+                .nodes_along(along, &hint, &Policy::certified(), &mut log)
+                .expect("every pair is put in order before any policy");
+            assert!(log.is_empty(), "no policy was asked: {log:?}");
+            for (at, &earlier) in in_order.iter().enumerate() {
+                for (between, &later) in in_order[at + 1..].iter().enumerate() {
+                    let decided = ask(&arrangement, earlier, later);
+                    assert!(
+                        matches!(decided, Decision::Pos | Decision::Zero),
+                        "node {earlier} is not after node {later} in {in_order:?}: {decided:?}"
+                    );
+                    if decided == Decision::Zero {
+                        assert_eq!(
+                            between, 0,
+                            "nodes {earlier} and {later}, one point, are next to each other in \
+                             {in_order:?}"
+                        );
+                    }
+                }
+            }
+        }
+
+        arrangement.nodes.push(a_node_where_three_planes_meet(
+            [flat, first_cut, second_cut],
+            along,
+        ));
+        let where_the_cuts_cross = arrangement.nodes.len() - 1;
+        for cut in [on_the_first, on_the_second] {
+            assert_eq!(
+                ask(&arrangement, cut, where_the_cuts_cross),
+                Decision::Zero,
+                "where the cuts cross is on each"
+            );
+        }
+        assert_eq!(
+            arrangement.as_the_planes_say(along, on_the_first, on_the_second),
+            None,
+            "a place on both cuts leaves the planes unable to say"
+        );
+    }
+
+    /// The same top, and two places a step up, at `y = 1 + u`, with
+    /// `x − y = u/2` and `3u/2`: `x = 1 + 3u/2` and `1 + 5u/2`, a step apart,
+    /// in boxes that overlap. Neither is the meet of the line's two planes and
+    /// a third, so neither names a plane that cuts the line where it is, and
+    /// nothing before a policy puts them in order, so a certified
+    /// `nodes_along` refuses. The order exists, so the refusal is a gap, and
+    /// no fuse has been shown to reach it (Q2840).
+    #[test]
+    fn two_places_a_step_off_a_line_in_boxes_that_overlap_are_not_put_in_order_before_any_policy() {
+        let step = f64::EPSILON;
+        let (model, cube) = a_cube_of_side_two();
+        let top = the_top_of_a_cube(&model, cube);
+        let line = [0.0, 1.0, 0.0, -1.0];
+        let face = cut_by(&top, &[line]);
+        let mut arrangement = drawn_up_to_its_corners(&face);
+        let along = the_crossing_of_the_cut(&arrangement, line);
+        let flat = arrangement.surface;
+        let a_step_up = Surface::Plane(
+            Plane::from_coefficients([0.0, 1.0, 0.0, -(1.0 + step)]).expect("a plane"),
+        );
+        let mut placed = |x_less_y: f64| {
+            let across = Plane::from_coefficients([1.0, -1.0, 0.0, -x_less_y]).expect("a plane");
+            arrangement.nodes.push(a_node_where_three_planes_meet(
+                [flat, a_step_up, Surface::Plane(across)],
+                along,
+            ));
+            arrangement.nodes.len() - 1
+        };
+        let nearer = placed(0.5 * step);
+        let farther = placed(1.5 * step);
+        let mut log = ProvenanceLog::new();
+        arrangement
+            .work_out_how_each_crossing_runs(&mut log)
+            .expect("every crossing here is a line");
+
+        for (one, other) in [(nearer, farther), (farther, nearer)] {
+            let (by_the_boxes, _) = arrangement
+                .as_the_boxes_say(along, one, other)
+                .expect("boxes along an axis");
+            assert!(
+                matches!(by_the_boxes, Decision::Undecidable { .. }),
+                "the boxes cannot say: {by_the_boxes:?}"
+            );
+            assert_eq!(
+                arrangement.as_the_planes_say(along, one, other),
+                None,
+                "nor can the planes"
+            );
+            let (decided, _) = arrangement
+                .as_proved_before_any_policy(along, one, other)
+                .expect("boxes along an axis");
+            assert!(
+                matches!(decided, Decision::Undecidable { .. }),
+                "nor anything else asked before a policy: {decided:?}"
+            );
+        }
+        for hint in [[nearer, farther], [farther, nearer]] {
+            let refused = arrangement.nodes_along(along, &hint, &Policy::certified(), &mut log);
+            assert!(
+                matches!(refused, Err(crate::Error::Undecidable { .. })),
+                "a certified order refuses: {refused:?}"
+            );
+        }
     }
 
     /// A node on the crossing `on` where the `three` planes meet, boxed as
