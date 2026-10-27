@@ -30,18 +30,20 @@
 //! second a quarter turn off the first, so that every number is exact and the
 //! two are exactly mirror images and touch. Since row Q2868 `intersect` names
 //! their crossing as four arcs of two flat cuts that meet where the two touch,
-//! and every fuse of the pair is refused further on, where two regions of one
-//! face are not told apart. A fifth came with it: the same two side
-//! by side, which are mirror images too but cross in one hyperbola and do not
-//! touch. Since row Q2867 `intersect` names that hyperbola as the flat surface
-//! halfway between the two cuts it out of either, and since row Q2879 the fuse
-//! orders points along it as along that flat surface's cut of a cone, so every
-//! fuse of the pair answers.
+//! since row Q2886 the fuse puts a node at each touch and tells each face's
+//! regions apart, and since row Q2902 it names each edge of the answer from
+//! its end away from a touch, so every fuse of the pair answers and measures
+//! what the two share. A fifth came with it: the same two side by side, which
+//! are mirror images too but cross in one hyperbola and do not touch. Since
+//! row Q2867 `intersect` names that hyperbola as the flat surface halfway
+//! between the two cuts it out of either, and since row Q2879 the fuse orders
+//! points along it as along that flat surface's cut of a cone, so every fuse
+//! of the pair answers.
 //!
 //! Each answer that comes back is to be certified, sound, and measure as the
-//! others that came back say it must: the union and the intersection together
-//! hold each solid once, and each solid less the other is that solid less the
-//! intersection.
+//! two solids alone bound it and as the others that came back say it must: the
+//! union and the intersection together hold each solid once, and each solid
+//! less the other is that solid less the intersection.
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -55,10 +57,6 @@ use cones::{a_frustum, a_pointed_cone};
 /// curved surface.
 const A_CONE_ACROSS_A_CURVED_SURFACE: &str =
     "geometry: a cone crossing another curved surface is a degree-four space curve";
-
-/// What `fuse` says where it cannot tell two regions of one face apart.
-const A_FACE_WHOSE_REGIONS_ARE_NOT_TOLD_APART: &str =
-    "two regions of one face could not be told apart";
 
 /// **A funnel with a leaning spout.** The funnel is a frustum of slope a half
 /// with its apex at the origin, cut two and eight up, so of radius one and
@@ -89,7 +87,7 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 /// `two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points`
 /// in `rcad-geom`
 /// shows the touch on a pair whose numbers are exact, and
-/// [`two_pointed_cones_a_quarter_turn_apart_touch_and_no_fuse_tells_a_faces_regions_apart`]
+/// [`two_pointed_cones_eight_high_a_quarter_turn_apart_answer_every_fuse`]
 /// on the same two cones a quarter turn apart, where every number is exact.
 ///
 /// Every fuse is refused where `intersect` names the crossing.
@@ -111,24 +109,94 @@ fn two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule() {
 /// `(±√1.92, 0.8, 3.2)`, inside both faces, where their crossing runs through
 /// itself. Since row Q2868 `intersect` names that crossing as four arcs, from
 /// touch to touch, of the two ellipses `y + z = 4` and `z − y = 2.4` cut out
-/// of either cone, and `walk` marches them. Every fuse is refused further on,
-/// in `fuse/arrange.rs`, where two regions of one face are not told apart.
+/// of either cone, and `walk` marches them. Since row Q2886 the fuse puts a
+/// node at each touch on both walls and orders each arc round a point of the
+/// straight line through the touches, so it tells each face's regions apart.
+///
+/// The two are tangent at a touch, so which way the crossing runs there
+/// cannot be read off the touch's rounded point, where `∇S × ∇T` is a
+/// rounding. Read there, an edge from a touch was picked by that rounding, and
+/// the union with the other solid first measured `273.28`, more than the
+/// `268.08` the two cones hold together. Since row Q2902 `fuse/assemble.rs`
+/// knows each touch from how the arrangement named it, as it knows two pipes'
+/// (`docs/decisions.md` §448.3), and reads the way at an edge's other end.
+/// Every fuse answers, under every rule both ways round, and the intersection
+/// measures what the two share.
 ///
 /// Eight high, the ellipse in `y + z = 4` reaches up to `(0, −4, 8)`, where
-/// both caps' rims pass. Ten high, neither cap meets the other solid, so the
-/// crossing is the two ellipses alone, and every fuse is refused the same: the
-/// rims are not what stops them.
+/// both caps' rims pass.
 #[test]
-fn two_pointed_cones_a_quarter_turn_apart_touch_and_no_fuse_tells_a_faces_regions_apart() {
-    for shape in [
+fn two_pointed_cones_eight_high_a_quarter_turn_apart_answer_every_fuse() {
+    every_fuse_answers_and_the_intersection_is_what_the_two_share(
         two_pointed_cones_a_quarter_turn_apart,
+        8.0,
+    );
+}
+
+/// **The same two pointed cones, ten high.** Neither cap meets the other
+/// solid, so the crossing is the two ellipses alone. Every fuse answers, and
+/// the intersection measures what the two share, which lies below both caps
+/// and so is what the eight-high pair share.
+#[test]
+fn two_pointed_cones_ten_high_a_quarter_turn_apart_answer_every_fuse() {
+    every_fuse_answers_and_the_intersection_is_what_the_two_share(
         two_pointed_cones_ten_high_a_quarter_turn_apart,
-    ] {
-        assert_eq!(
-            every_fuse_of(shape).refusals(),
-            [[Some(A_FACE_WHOSE_REGIONS_ARE_NOT_TOLD_APART); 2]; 3]
-        );
-    }
+        10.0,
+    );
+}
+
+/// Fails unless every fuse of the two cones `shape` builds `high` high a
+/// quarter turn apart answers, and the intersection measures what
+/// [`what_two_cones_a_quarter_turn_apart_share`] adds up.
+fn every_fuse_answers_and_the_intersection_is_what_the_two_share(
+    shape: fn(&mut Model) -> (SolidKey, SolidKey),
+    high: f64,
+) {
+    let fused = every_fuse_of(shape);
+    assert_eq!(fused.refusals(), [[None; 2]; 3]);
+    let [Ok(intersection), _] = fused.answers[1] else {
+        unreachable!("every fuse answered")
+    };
+    about_the_same(
+        intersection,
+        (what_two_cones_a_quarter_turn_apart_share(high), 0.01),
+        "the intersection against what the two share",
+    );
+}
+
+/// What the two pointed cones [`two_pointed_cones_this_high_a_quarter_turn_apart`]
+/// builds `high` high share, added up a slice at a time.
+///
+/// The first holds `x² + y² ≤ (z/2)²` for `z` from nought to `high`, and the
+/// second is its mirror image across `y + z = 4`, which takes `(x, y, z)` to
+/// `(x, 4 − z, 4 − y)`. So at height `z` and across at `y` the two share the
+/// `x` with `x² ≤ (z/2)² − y²` and `x² ≤ ((4 − y)/2)² − (4 − z)²`, where
+/// `4 − y` is from nought to `high`. Taken at the middle of each of 1000 steps
+/// up and 1000 across, the sum is `46.2231`; it moves by `1.5e−3` from 500
+/// steps and by `4.8e−4` on to 2000, so it is within a hundredth of the
+/// volume.
+fn what_two_cones_a_quarter_turn_apart_share(high: f64) -> f64 {
+    const STEPS: u32 = 1000;
+    let up = high / f64::from(STEPS);
+    (0..STEPS)
+        .map(|step_up| {
+            let z = (f64::from(step_up) + 0.5) * up;
+            let radius = z / 2.0;
+            let across = 2.0 * radius / f64::from(STEPS);
+            (0..STEPS)
+                .map(|step_across| {
+                    let y = -radius + (f64::from(step_across) + 0.5) * across;
+                    let up_the_second = 4.0 - y;
+                    if !(0.0..=high).contains(&up_the_second) {
+                        return 0.0;
+                    }
+                    let in_the_first = radius * radius - y * y;
+                    let in_the_second = (up_the_second / 2.0).powi(2) - (4.0 - z).powi(2);
+                    2.0 * in_the_first.min(in_the_second).max(0.0).sqrt() * across * up
+                })
+                .sum::<f64>()
+        })
+        .sum()
 }
 
 /// **Two pointed cones side by side.** Both have slope a half and height
@@ -281,7 +349,10 @@ impl Fused {
 
 /// Fuses the two solids `shape` builds under every rule both ways round, and
 /// checks that each answer that comes back is certified, sound, and measures
-/// as the others that came back say it must.
+/// as the two solids alone bound it and as the others that came back say it
+/// must: a union no less than the larger solid and no more than the two
+/// together, an intersection no more than the smaller, and a difference no
+/// more than its argument.
 fn every_fuse_of(shape: fn(&mut Model) -> (SolidKey, SolidKey)) -> Fused {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -317,6 +388,42 @@ fn every_fuse_of(shape: fn(&mut Model) -> (SolidKey, SolidKey)) -> Fused {
         both_alone[0].0 + both_alone[1].0,
         both_alone[0].1 + both_alone[1].1,
     );
+    let [smaller, larger] = if both_alone[0].0 <= both_alone[1].0 {
+        both_alone
+    } else {
+        [both_alone[1], both_alone[0]]
+    };
+    for (way, order) in ["the first solid first", "the other first"]
+        .into_iter()
+        .enumerate()
+    {
+        if let Ok(&union) = unions[way].as_ref() {
+            no_more_than(
+                larger,
+                union,
+                &format!("{order}: the larger solid alone against the union"),
+            );
+            no_more_than(
+                union,
+                together,
+                &format!("{order}: the union against the two alone"),
+            );
+        }
+        if let Ok(&intersection) = intersections[way].as_ref() {
+            no_more_than(
+                intersection,
+                smaller,
+                &format!("{order}: the intersection against the smaller solid alone"),
+            );
+        }
+        if let Ok(&less) = differences[way].as_ref() {
+            no_more_than(
+                less,
+                both_alone[way],
+                &format!("{order}: the difference against its argument alone"),
+            );
+        }
+    }
     for (way, order) in ["the first solid first", "the other first"]
         .into_iter()
         .enumerate()
@@ -367,6 +474,19 @@ fn about_the_same(got: (f64, f64), want: (f64, f64), what: &str) {
         got.1,
         want.0,
         want.1
+    );
+}
+
+/// Fails unless `small`, a volume and the error published with it, can be no
+/// more than `big` within their errors.
+fn no_more_than(small: (f64, f64), big: (f64, f64), what: &str) {
+    assert!(
+        small.0 - small.1 <= big.0 + big.1,
+        "{what}: {} give or take {} is more than {} give or take {}",
+        small.0,
+        small.1,
+        big.0,
+        big.1
     );
 }
 
