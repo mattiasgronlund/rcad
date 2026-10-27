@@ -18358,7 +18358,7 @@ fn the_side_of_a_cone_touching_it_a_cone_lies_on(
 /// **Two cones on one apex leaning apart are the other pair**, and
 /// `rcad-geom`'s `the_rulings_two_cones_on_one_apex_share` names only halves:
 /// each by a corner of two flat surfaces through the apex or three, and the
-/// direction is [`the_way_a_half_ruling_two_cones_share_leaves_the_apex`].
+/// direction is the way out [`a_half_ruling_two_cones_share`] reads.
 /// Both gradients are nothing at the apex there, not one, so no node there has
 /// a direction of its own to read.
 ///
@@ -18528,7 +18528,9 @@ fn the_half_ruling_two_cones_share(
 
 /// The way the half ruling two cones on one apex share that `corner` picks
 /// out leaves the apex, as an enclosure of the true direction, or `None` where
-/// no one way out can be shown to lie in that corner.
+/// no one way out can be shown to lie in that corner. Only the tests ask it
+/// this way; the fuse reads the whole of [`a_half_ruling_two_cones_share`].
+#[cfg(test)]
 fn the_way_a_half_ruling_two_cones_share_leaves_the_apex(
     one: &Cone,
     other: &Cone,
@@ -18616,7 +18618,7 @@ fn a_half_ruling_two_cones_share(
 ///
 /// A plane through the apex hands in its own normal, and two cones on one apex
 /// the two flat surfaces their crossing lies on
-/// ([`the_way_a_half_ruling_two_cones_share_leaves_the_apex`]).
+/// ([`a_half_ruling_two_cones_share`]).
 ///
 /// **Every enclosure here is interval `+ − ×` on the stored numbers, and the
 /// one root is [`root_enclosing`], the same copy `rcad-geom` rounds its own
