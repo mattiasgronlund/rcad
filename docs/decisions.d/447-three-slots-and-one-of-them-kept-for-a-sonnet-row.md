@@ -1,4 +1,4 @@
-## 447. Four slots, one kept for a Sonnet row, and a bar on what the load costs — 2026-10-13
+## 447. Three slots again, one kept for a Sonnet row — 2026-10-13
 
 *Mattias, 2026-10-13. The session asked whether to let Sonnet rows from tier 2
 on into the fill beside tier 1. He answered "Yes and Yes. Could we increase the
@@ -8,12 +8,13 @@ passed §397.7's load bar on every one of them, so it first wrote this section
 as three slots. Mattias then asked "Why is the bar so low, isn't there 24
 hyper-threads on this CPU, what do you see/think is the consequence of pushing
 to many simultanious slots?" 447.3 is the answer the session gave, and he
-answered "Yes!". This amends §397.7, and is the record Q853 asked for. The
+answered "Yes!". This amends §397.7, and is the record Q853 asked for. 447.6
+then read 447.3's own bar once four slots had run with the kept Sonnet slot,
+and both halves of it were passed; 447.7 is Q2892 acting on that reading. The
 file keeps the name it was first written under, because rows name it.*
 
-In short: four slots stay, and one of them is kept for a Sonnet row while one
-is ready. §397.7's load bar is replaced by a bar on what the load costs: how
-often the gate's test step runs past the 600 s a call is given. There is no
+In short: three slots again, now that 447.3's bar is passed at four (§447.7).
+One of the three is kept for a Sonnet row while one is ready. There is no
 fifth slot.
 
   447.1   Why the Sonnet rows were not reached
@@ -22,6 +23,7 @@ fifth slot.
   447.4   The rows
   447.5   What Q1932 built
   447.6   447.3's bars, read again with the kept Sonnet slot
+  447.7   Back to three, by 447.3's bar
 
 ### 447.1 Why the Sonnet rows were not reached
 
@@ -345,3 +347,35 @@ since are themselves slower-running (fuzz triage, soaks) than the median row of
 two weeks ago. Any of those would
 lower the rate on their own, without the slot count or the kept Sonnet slot
 costing anything; this reading cannot tell them apart, and does not try to.
+
+### 447.7 Back to three, by 447.3's bar
+
+447.6 read both of 447.3's "back to three" conditions at four slots with the
+kept Sonnet slot, and both were passed, independently: 303 of 737 fresh main
+test steps since 10-13 21:35 UTC ran past 600 s, 41.1% against the 10% bar;
+and catch-ups were 225 of 487 lane merges over the same window, 46.2% against
+the 35% bar. 447.3 said either alone sends the cap back. Q2892 (this row) acts
+on it: `queue_slots` goes from 4 to 3, with the comment above it rewritten to
+argue from this section, as Q1931 (72b8321d) first moved it to three and Q1946
+(072686e8d) moved it back; the same two selftest lines move again
+(`check-queue-selftest`), and the dispatch-lanes skill's cap sentence with
+them. The note `queue next` prints past the cap, and the comment in
+`check-queue-api-selftest` that named where the real cap is pinned, both cited
+§397.7 by then-habit after 447.3 replaced its load bar; both now cite this
+section instead, since this is where the cap's current value is argued.
+
+**The Sonnet slot stays kept, so tier 1's Opus rows now get two slots, not
+three.** 447.3's "one of the four is kept for a Sonnet row" and its reasons
+(§446.2's figures on what a closed Sonnet row versus an Opus row leaves
+behind) did not depend on the total being four; nothing in 447.6's reading
+touches them either. Three slots, one kept, leaves two for Opus.
+
+**One thing 447.6 did not weigh: the suite has grown.** Gate summary lines in
+the transcripts put the main test step at about 3 600 tests on 2026-10-10 (3
+531 to 3 709 across that day's runs), against 4 615 at `4c41703a` today, a 27%
+rise. A bigger suite runs longer at the same load, which pushes the test-step
+bar (600 s) up for a reason that has nothing to do with how many slots are
+filled or how costly the load is per §447.3's argument. 447.6 did not cross-
+check its 41.1% and 46.2% against this growth, and neither does this section;
+a later reading of the bar at three slots should weigh how much of any change
+in the share past 600 s is the suite growing rather than the slot count.
