@@ -33,8 +33,9 @@
 //! branch between them, an endless piece beyond each, and the far branch.
 //! `walk` marches each, and the pair is refused as a crossing that touches
 //! itself where the two touch all along a line. Where each apex is inside the other
-//! cone they cross in two flat cuts held apart, and are refused as any other
-//! overlap is. Where the turned axis was rounded they are not mirror
+//! cone they cross in two flat cuts held apart, which never meet: `intersect`
+//! names each whole branch, ellipse or parabola of the two, and `walk` marches
+//! each. Where the turned axis was rounded they are not mirror
 //! images, do not touch, and are refused as any other overlap is. Two of one
 //! slope side by side are mirror images too, and cross in the one hyperbola
 //! the flat surface halfway between them cuts out of either: `intersect` names
