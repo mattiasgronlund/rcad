@@ -1166,7 +1166,7 @@ enum HowItRuns {
     /// It neither closes nor runs on for ever: an arc of two cones that touch
     /// ([`ArcOfTwoCones`]), from one touch to the other. The order is how far
     /// round a point on its chord a point is ([`round_a_point_on_its_chord`]).
-    RoundAPointOnItsChord { arc: ArcOfTwoCones },
+    RoundAPointOnItsChord { arc: Box<ArcOfTwoCones> },
 }
 
 impl HowItRuns {
@@ -4403,7 +4403,8 @@ impl<'f> Arrangement<'f> {
                 continue;
             }
             if let Some(arc) = self.crossings[crossing].arc_of_two_cones {
-                self.crossings[crossing].order = HowItRuns::RoundAPointOnItsChord { arc };
+                self.crossings[crossing].order =
+                    HowItRuns::RoundAPointOnItsChord { arc: Box::new(arc) };
                 continue;
             }
             let partner = self.crossings[crossing].partner;
