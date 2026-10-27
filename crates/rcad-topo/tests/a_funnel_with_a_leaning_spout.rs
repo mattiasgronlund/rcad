@@ -30,8 +30,9 @@
 //! second a quarter turn off the first, so that every number is exact and the
 //! two are exactly mirror images and touch. Since row Q2868 `intersect` names
 //! their crossing as four arcs of two flat cuts that meet where the two touch,
-//! and every fuse of the pair is refused further on, where two regions of one
-//! face are not told apart. A fifth came with it: the same two side
+//! and since row Q2886 the fuse puts a node at each touch and tells each face's
+//! regions apart, but every fuse of the pair is still refused when its answer
+//! is meshed. A fifth came with it: the same two side
 //! by side, which are mirror images too but cross in one hyperbola and do not
 //! touch. Since row Q2867 `intersect` names that hyperbola as the flat surface
 //! halfway between the two cuts it out of either, and since row Q2879 the fuse
@@ -56,9 +57,20 @@ use cones::{a_frustum, a_pointed_cone};
 const A_CONE_ACROSS_A_CURVED_SURFACE: &str =
     "geometry: a cone crossing another curved surface is a degree-four space curve";
 
-/// What `fuse` says where it cannot tell two regions of one face apart.
-const A_FACE_WHOSE_REGIONS_ARE_NOT_TOLD_APART: &str =
-    "two regions of one face could not be told apart";
+/// What `fuse` says where a face of its answer has a hole and goes too far
+/// round its surface for the mesher to cut it up.
+const A_FACE_GOING_TOO_FAR_ROUND: &str =
+    "a curved face with a hole in it goes too far round its surface to be meshed";
+
+/// What `fuse` says where a face of its answer looks to the mesher like one
+/// curve right round its surface with the material outside it.
+const A_FACE_RIGHT_ROUND_WITH_NO_SEAM: &str =
+    "a curved face is bounded by one curve right round it and has no seam to open at";
+
+/// What `fuse` says where the mesher's walk along an arc of two cones cannot
+/// tell which arc it is.
+const AN_ARC_NOT_TOLD_FROM_ITS_SIBLINGS: &str = "geometry: this crossing comes in two pieces and \
+     no half-space square to both surfaces can be written down in f64 to tell them apart";
 
 /// **A funnel with a leaning spout.** The funnel is a frustum of slope a half
 /// with its apex at the origin, cut two and eight up, so of radius one and
@@ -89,7 +101,7 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 /// `two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points`
 /// in `rcad-geom`
 /// shows the touch on a pair whose numbers are exact, and
-/// [`two_pointed_cones_a_quarter_turn_apart_touch_and_no_fuse_tells_a_faces_regions_apart`]
+/// [`two_pointed_cones_eight_high_a_quarter_turn_apart_are_refused_where_their_answer_is_meshed`]
 /// on the same two cones a quarter turn apart, where every number is exact.
 ///
 /// Every fuse is refused where `intersect` names the crossing.
@@ -111,24 +123,58 @@ fn two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule() {
 /// `(±√1.92, 0.8, 3.2)`, inside both faces, where their crossing runs through
 /// itself. Since row Q2868 `intersect` names that crossing as four arcs, from
 /// touch to touch, of the two ellipses `y + z = 4` and `z − y = 2.4` cut out
-/// of either cone, and `walk` marches them. Every fuse is refused further on,
-/// in `fuse/arrange.rs`, where two regions of one face are not told apart.
+/// of either cone, and `walk` marches them. Since row Q2886 the fuse puts a
+/// node at each touch on both walls and orders each arc round a point of the
+/// straight line through the touches, so it tells each face's regions apart.
+///
+/// Every fuse is still refused when its answer is meshed. `fuse/assemble.rs`
+/// reads which way an arc from a touch runs off the touch's rounded point,
+/// where the two cones are tangent, so the edge is picked the wrong way round
+/// its ellipse and the mesher sees faces that are not there. Two pipes of one
+/// width get their touches marked against that (§448.3); two cones do not yet.
 ///
 /// Eight high, the ellipse in `y + z = 4` reaches up to `(0, −4, 8)`, where
-/// both caps' rims pass. Ten high, neither cap meets the other solid, so the
-/// crossing is the two ellipses alone, and every fuse is refused the same: the
-/// rims are not what stops them.
+/// both caps' rims pass.
 #[test]
-fn two_pointed_cones_a_quarter_turn_apart_touch_and_no_fuse_tells_a_faces_regions_apart() {
-    for shape in [
-        two_pointed_cones_a_quarter_turn_apart,
-        two_pointed_cones_ten_high_a_quarter_turn_apart,
-    ] {
-        assert_eq!(
-            every_fuse_of(shape).refusals(),
-            [[Some(A_FACE_WHOSE_REGIONS_ARE_NOT_TOLD_APART); 2]; 3]
-        );
-    }
+fn two_pointed_cones_eight_high_a_quarter_turn_apart_are_refused_where_their_answer_is_meshed() {
+    assert_eq!(
+        every_fuse_of(two_pointed_cones_a_quarter_turn_apart).refusals(),
+        [
+            [
+                Some(
+                    "a face of this solid could not be cut into triangles: the boundary \
+                     crosses itself, at the side leaving corner 13"
+                ),
+                Some(AN_ARC_NOT_TOLD_FROM_ITS_SIBLINGS)
+            ],
+            [Some(A_FACE_RIGHT_ROUND_WITH_NO_SEAM); 2],
+            [
+                Some(
+                    "a face of this solid could not be cut into triangles: the boundary \
+                     crosses itself, at the side leaving corner 15"
+                ),
+                Some(A_FACE_RIGHT_ROUND_WITH_NO_SEAM)
+            ]
+        ]
+    );
+}
+
+/// **The same two pointed cones, ten high.** Neither cap meets the other
+/// solid, so the crossing is the two ellipses alone, and every fuse is refused
+/// when its answer is meshed, as the eight-high pair's is.
+#[test]
+fn two_pointed_cones_ten_high_a_quarter_turn_apart_are_refused_where_their_answer_is_meshed() {
+    assert_eq!(
+        every_fuse_of(two_pointed_cones_ten_high_a_quarter_turn_apart).refusals(),
+        [
+            [
+                Some(A_FACE_GOING_TOO_FAR_ROUND),
+                Some(AN_ARC_NOT_TOLD_FROM_ITS_SIBLINGS)
+            ],
+            [Some(A_FACE_RIGHT_ROUND_WITH_NO_SEAM); 2],
+            [Some(A_FACE_GOING_TOO_FAR_ROUND); 2]
+        ]
+    );
 }
 
 /// **Two pointed cones side by side.** Both have slope a half and height
