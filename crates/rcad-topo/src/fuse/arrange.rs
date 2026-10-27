@@ -9081,7 +9081,7 @@ impl<'f> Arrangement<'f> {
     /// The arc leaves a touch along its own tangent there, which is square to
     /// the arc's plane and to the cone, so along `n × ∇S` for the plane's
     /// normal `n`, turned to point into the arc: the way `into` does, since
-    /// the arc lies on that side of its chord. The touch behind the chord's
+    /// the arc lies on that side of its chord. The touch ahead of the chord's
     /// centre along `from` is where the angle round it starts, and the arc
     /// runs forward out of it where forward is the way the angle grows
     /// ([`ArcOfTwoCones::forward_runs_anticlockwise`]), and into the other.
@@ -16686,6 +16686,195 @@ fn the_way_a_picker_leans(normal: [f64; 3], ways: [[f64; 3]; 2]) -> Option<[Opti
     )
 }
 
+/// One of the four arcs two cones of one slope cross in where they are mirror
+/// images and touch at two points ([`ArcOfTwoCones`]), read off the run
+/// [`intersect`](rcad_geom::intersect) named, and `None` for every other run.
+///
+/// `intersect` picks each arc by a corner of two flat surfaces `G₁ ≥ 0` and
+/// `G₂ ≥ 0`, stored exactly, that both hold the chord
+/// ([`Cone::the_pickers_of_a_mirror_image_that_touches_it`]). Where the arc
+/// is in front of both or behind both, it is of the ellipse `G₁ − G₂ = 0`, on
+/// the side of `G₁ + G₂` the corner says; where it is in front of one alone,
+/// it is of `G₁ + G₂ = 0`, on the side of `G₁ − G₂`. Everything here is worked
+/// from those two and from the cone that sorts first, which that call hands
+/// back in one order whichever way round it is asked, so both cones' faces
+/// build the same arc bit for bit, and name its nodes alike.
+///
+/// **The chord's centre is where the two flat surfaces meet a third**, `g₃·x
+/// = g₃·a` for the first cone's apex `a` and `g₃ = W·u − k(u·w)·w`, with `u =
+/// g₁ × g₂` along the chord and `W`, `k` and `w` as in `Q(y) = W|y|² − k(y·w)²`,
+/// `y = x − a`. On that surface the part of `Q(m + t·u)` in `t` alone, `2t·g₃·y`,
+/// is nothing, so the two touches lie as far either side of `m`: `m` is the
+/// chord's middle, and strictly inside the cone, as near as `g₃` worked in
+/// `f64` is to its true value. The three meet where `g₃·u = Q(u)` is not
+/// nothing, which holds for every direction in an ellipse's plane.
+///
+/// **This runs before any crossing of two cones that touch is built, and only
+/// for a run picked by two flat half-spaces**, so no other pair of cones asks
+/// how the two cross here.
+///
+/// # Errors
+///
+/// [`Error::Undecidable`] where how the two cones cross could not be settled,
+/// or where a sign the arc is read off cannot be told: the three flat
+/// surfaces' determinant, which side of its chord the arc is on, that the
+/// centre is inside the cone and the chord and `into` are not along it, or
+/// which way `∇S × ∇Q` runs at the arc's middle.
+///
+/// # Panics
+///
+/// If a picker of the run is neither of the two flat surfaces nor either one
+/// turned round, which is `intersect` naming an arc it did not pick by them.
+fn an_arc_of_two_cones(
+    surface: &Surface,
+    partner: &Surface,
+    run: &NamedRun,
+    log: &mut ProvenanceLog,
+) -> Result<Option<ArcOfTwoCones>> {
+    let (Surface::Cone(mine), Surface::Cone(theirs)) = (surface, partner) else {
+        return Ok(None);
+    };
+    let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+        return Ok(None);
+    };
+    let [Picker::InFrontOf(first), Picker::InFrontOf(second)] = picked_by[..] else {
+        return Ok(None);
+    };
+    let Some((pickers, cone, _)) = mine.the_pickers_of_a_mirror_image_that_touches_it(theirs)?
+    else {
+        return Ok(None);
+    };
+    let picked = [first, second];
+    let corner = [0, 1].map(|which| {
+        if picked[which] == pickers[which] {
+            true
+        } else if picked[which] == pickers[which].reversed() {
+            false
+        } else {
+            panic!(
+                "an arc of two cones that touch is picked by a corner of the two flat \
+                 surfaces through where they touch: {picked:?} against {pickers:?}"
+            )
+        }
+    });
+    let inputs = [
+        PredicatePoint::from(pickers[0].normal().components()),
+        PredicatePoint::from(pickers[1].normal().components()),
+        PredicatePoint::from(cone.apex().coordinates()),
+    ];
+    let refused = |log: &mut ProvenanceLog| {
+        gave_up(
+            WHICH_WAY_A_CROSSING_RUNS,
+            &inputs,
+            Measures::ManyLengths { how_many: 4 },
+            log,
+        )
+    };
+
+    let [one, other] = pickers.map(|picker| picker.normal().components().map(Interval::exactly));
+    let [one_offset, other_offset] = pickers.map(|picker| Interval::exactly(picker.offset()));
+    let added = [0, 1, 2].map(|axis| one[axis] + other[axis]);
+    let taken = [0, 1, 2].map(|axis| one[axis] - other[axis]);
+    let (plane_normal, plane_offset, across) = if corner[0] == corner[1] {
+        (taken, one_offset - other_offset, added)
+    } else {
+        (added, one_offset + other_offset, taken)
+    };
+    let the_arcs_side = if corner[0] {
+        Decision::Pos
+    } else {
+        Decision::Neg
+    };
+
+    let up = cone.axis().direction().components().map(Interval::exactly);
+    let apex = cone.apex().coordinates().map(Interval::exactly);
+    let slope = Interval::exactly(cone.slope());
+    let (squared_up, steepness) = (dot_of(up, up), Interval::exactly(1.0) + slope * slope);
+    let form = |one: [Interval; 3], other: [Interval; 3]| {
+        squared_up * dot_of(one, other) - steepness * dot_of(one, up) * dot_of(other, up)
+    };
+
+    let along_f64 = pickers[0].normal().cross(pickers[1].normal());
+    let up_f64 = cone.axis().direction();
+    let middling_f64 = along_f64 * up_f64.dot(up_f64)
+        - up_f64 * ((1.0 + cone.slope() * cone.slope()) * along_f64.dot(up_f64));
+    let middling_offset =
+        Interval::exactly(middling_f64.dot(Vector::from(cone.apex().coordinates())));
+    let middling = middling_f64.components().map(Interval::exactly);
+    let chord = cross_of_intervals(one, other);
+    let [across_one, across_other] = [
+        cross_of_intervals(other, middling),
+        cross_of_intervals(middling, one),
+    ];
+    let determinant = dot_of(one, across_one);
+    if determinant.contains_zero() {
+        return Err(refused(log));
+    }
+    let centre = [0, 1, 2].map(|axis| {
+        quotient_of(
+            one_offset * across_one[axis]
+                + other_offset * across_other[axis]
+                + middling_offset * chord[axis],
+            determinant,
+        )
+    });
+
+    let in_its_plane = cross_of_intervals(plane_normal, chord);
+    let side = dot_of(in_its_plane, across).sign();
+    let (from, into) = if side == the_arcs_side {
+        (chord, in_its_plane)
+    } else if side == the_other_way(the_arcs_side) {
+        (chord.map(|part| -part), in_its_plane.map(|part| -part))
+    } else {
+        return Err(refused(log));
+    };
+
+    let off_the_apex = [0, 1, 2].map(|axis| centre[axis] - apex[axis]);
+    let inside = form(off_the_apex, off_the_apex);
+    let [along_the_chord, along_into] = [chord, into].map(|way| form(way, way));
+    if [inside.sign(), along_the_chord.sign(), along_into.sign()]
+        != [Decision::Neg, Decision::Pos, Decision::Pos]
+    {
+        return Err(refused(log));
+    }
+    let both_ways = |way: [Interval; 3], squared: Interval| {
+        let half_of_the_middle_term = form(off_the_apex, way);
+        let reach =
+            root_enclosing(half_of_the_middle_term * half_of_the_middle_term - squared * inside);
+        [
+            -half_of_the_middle_term - reach,
+            -half_of_the_middle_term + reach,
+        ]
+        .map(|over| {
+            let how_far = quotient_of(over, squared);
+            as_exact_as_it_is(PredicatePoint::Constructed(
+                [0, 1, 2].map(|axis| centre[axis] + how_far * way[axis]),
+            ))
+        })
+    };
+    let touches = both_ways(chord, along_the_chord);
+    let [_, middle] = both_ways(into, along_into);
+
+    let forward = cross_of(gradient_at(surface, middle), gradient_at(partner, middle));
+    let forward_runs_anticlockwise =
+        match dot_of(forward, cross_of_intervals(plane_normal, into)).sign() {
+            Decision::Pos => true,
+            Decision::Neg => false,
+            Decision::Zero | Decision::Undecidable { .. } | _ => return Err(refused(log)),
+        };
+    Ok(Some(ArcOfTwoCones {
+        corner,
+        centre,
+        plane_normal,
+        plane_offset,
+        from,
+        into,
+        touches,
+        middle,
+        forward_runs_anticlockwise,
+    }))
+}
+
 /// A corner of a face, or of a face of another solid cutting it, with four or
 /// more planes round it, read as the one point all of them run through
 /// ([`Arrangement::as_read_round_a_corner`]). `by_a_plane` in
@@ -19218,6 +19407,46 @@ fn along_a_bend(
         decided
     } else {
         the_other_way(decided)
+    }
+}
+
+/// The sign of how far `other` lies past `one` along an arc of two cones that
+/// touch ([`ArcOfTwoCones`]).
+///
+/// **Seen from a point strictly inside its chord, an arc turns through a half
+/// turn and never back**: it is convex, and runs once from one end of the
+/// chord to the other. So the angle round the chord's centre from `from`
+/// towards `into` is a total order along it, nought at one touch and a half
+/// turn at the other, and for `p` and `q` the two points seen from the centre,
+/// `(p × q)·n` for the arc's plane's normal `n` is above nothing just where
+/// `q` is further round, since `from × into` runs along `n`. That is nothing
+/// for the two touches, a half turn apart, so where it cannot be told, a point
+/// ahead of the centre along `from` is less than a quarter turn round and one
+/// behind it more, and that orders the two.
+fn round_a_point_on_its_chord(
+    arc: &ArcOfTwoCones,
+    one: PredicatePoint,
+    other: PredicatePoint,
+) -> Decision {
+    let [mine, theirs] = [one, other].map(|point| {
+        let boxed = point.enclosure();
+        [0, 1, 2].map(|axis| boxed[axis] - arc.centre[axis])
+    });
+    let turned = dot_of(cross_of_intervals(mine, theirs), arc.plane_normal).sign();
+    let ahead = [mine, theirs].map(|seen| dot_of(seen, arc.from).sign());
+    let anticlockwise = if matches!(turned, Decision::Pos | Decision::Neg) {
+        turned
+    } else if ahead == [Decision::Pos, Decision::Neg] {
+        Decision::Pos
+    } else if ahead == [Decision::Neg, Decision::Pos] {
+        Decision::Neg
+    } else {
+        turned
+    };
+    if arc.forward_runs_anticlockwise {
+        anticlockwise
+    } else {
+        the_other_way(anticlockwise)
     }
 }
 
