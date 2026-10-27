@@ -1623,8 +1623,9 @@ _record-green steps:
 # after it, a second failure the block does not name, steps that run in turn
 # when they were told they could run at once, and a third word `1` that does not
 # run them in turn. The two about time use `_gate-selftest-sleep`, and they
-# measure what no load can shorten: three two-second sleeps in turn take six
-# seconds at least, so the one that wants them at once asks for under five.
+# assert directly on the start and end each run logs — overlapped for steps
+# meant to run at once, not overlapped for steps meant to run in turn — rather
+# than on a wall-clock bound that load can stretch underneath it.
 [private]
 check-gate-summary-selftest:
     #!/usr/bin/env bash
@@ -1682,20 +1683,39 @@ check-gate-summary-selftest:
     grep -qx 'also failed: no-such-other-step' <<<"$got" \
         || fail "a gate with two failures named only one"
 
-    # At once. Three steps that each take two seconds, given three slots.
-    began=$(date +%s%N)
-    got=$($j --set gate_steps '_gate-selftest-sleep _gate-selftest-sleep _gate-selftest-sleep' \
+    # At once. Three steps that each take two seconds, given three slots. Each
+    # logs its own start and end to a file (GATE_SELFTEST_TIMES), so this asks
+    # directly whether they overlapped rather than reading a wall-clock bound,
+    # the way Q1774's overlap() does for check-fuzz-overnight-selftest.
+    times="$dir/once-times"
+    : >"$times"
+    got=$(GATE_SELFTEST_TIMES="$times" $j --set gate_steps '_gate-selftest-sleep _gate-selftest-sleep _gate-selftest-sleep' \
             --set gate_log "$dir/once.log" gate quiet reuse 3 2>&1) \
         || fail "three steps that sleep failed"
-    took=$(( ($(date +%s%N) - began) / 1000000 ))
-    [ "$took" -lt 5000 ] || fail "three two-second steps given three slots took $took ms, so they ran in turn"
-    # And in turn, when told to.
-    began=$(date +%s%N)
-    got=$($j --set gate_steps '_gate-selftest-sleep _gate-selftest-sleep' \
+    starts=$(awk '$1 == "start" {print $2}' "$times" | sort -n)
+    ends=$(awk '$1 == "end" {print $2}' "$times" | sort -n)
+    [ "$(grep -c . <<<"$starts")" -eq 3 ] \
+        || fail "three steps given three slots logged $(grep -c . <<<"$starts") starts in $times, not three"
+    latest_start=$(tail -n1 <<<"$starts")
+    earliest_end=$(head -n1 <<<"$ends")
+    [ "$latest_start" -lt "$earliest_end" ] \
+        || fail "three two-second steps given three slots did not overlap, so they ran in turn"
+    # And in turn, when told to. Serial here means the opposite of the overlap
+    # above: the step that finished first must have finished before the step
+    # that started last had started.
+    times="$dir/turn-times"
+    : >"$times"
+    got=$(GATE_SELFTEST_TIMES="$times" $j --set gate_steps '_gate-selftest-sleep _gate-selftest-sleep' \
             --set gate_log "$dir/turn.log" gate quiet reuse 1 2>&1) \
         || fail "two steps that sleep failed"
-    took=$(( ($(date +%s%N) - began) / 1000000 ))
-    [ "$took" -ge 4000 ] || fail "two two-second steps given one slot took $took ms, so they ran at once"
+    starts=$(awk '$1 == "start" {print $2}' "$times" | sort -n)
+    ends=$(awk '$1 == "end" {print $2}' "$times" | sort -n)
+    [ "$(grep -c . <<<"$starts")" -eq 2 ] \
+        || fail "two steps given one slot logged $(grep -c . <<<"$starts") starts in $times, not two"
+    latest_start=$(tail -n1 <<<"$starts")
+    earliest_end=$(head -n1 <<<"$ends")
+    [ "$earliest_end" -le "$latest_start" ] \
+        || fail "two two-second steps given one slot overlapped, so they ran at once"
     got=$($j --set gate_steps list --set gate_log "$dir/jobs.log" gate quiet reuse many 2>&1) \
         && fail "a gate told to run 'many' steps at once ran anyway"
     grep -q "not 'many'" <<<"$got" || fail "a gate given a bad count did not say what it was given"
@@ -1860,11 +1880,22 @@ check-pre-gate-selftest:
     grep -qx 'line 100' "$kept" || fail "the log a cut failure names does not hold the rest"
     rm -rf "$(dirname "$kept")"
 
-    began=$(date +%s%N)
-    got=$($j --set pre_gate_steps '_gate-selftest-sleep _gate-selftest-sleep _gate-selftest-sleep' pre-gate 2>&1) \
+    # Each step logs its own start and end to a file (GATE_SELFTEST_TIMES), so
+    # this asks directly whether they overlapped rather than reading a
+    # wall-clock bound, the way Q1774's overlap() does for
+    # check-fuzz-overnight-selftest.
+    times=$(mktemp)
+    got=$(GATE_SELFTEST_TIMES="$times" $j --set pre_gate_steps '_gate-selftest-sleep _gate-selftest-sleep _gate-selftest-sleep' pre-gate 2>&1) \
         || fail "three steps that sleep failed"
-    took=$(( ($(date +%s%N) - began) / 1000000 ))
-    [ "$took" -lt 5000 ] || fail "three two-second steps took $took ms, so they ran in turn"
+    starts=$(awk '$1 == "start" {print $2}' "$times" | sort -n)
+    ends=$(awk '$1 == "end" {print $2}' "$times" | sort -n)
+    [ "$(grep -c . <<<"$starts")" -eq 3 ] \
+        || fail "three steps given pre-gate's own concurrency logged $(grep -c . <<<"$starts") starts in $times, not three"
+    latest_start=$(tail -n1 <<<"$starts")
+    earliest_end=$(head -n1 <<<"$ends")
+    rm -f "$times"
+    [ "$latest_start" -lt "$earliest_end" ] \
+        || fail "three two-second steps given pre-gate's own concurrency did not overlap, so they ran in turn"
 
     got=$($j --set pre_gate_steps no-such-step pre-gate list 2>&1) \
         && fail "a failing pre-gate let the recipe after it run and exit 0"
@@ -1885,7 +1916,14 @@ _pre-gate-selftest-long:
 
 # A gate step that takes two seconds and does nothing else, so that
 # `check-gate-summary-selftest` and `check-pre-gate-selftest` can tell steps run
-# at once from steps run in turn by the clock.
+# at once from steps run in turn — by the start and end each run logs, not by a
+# wall-clock bound, the same reason Q1774's e38b2995 gave `overlap()` to
+# `check-fuzz-overnight-selftest` (§372).
+#
+# Given `GATE_SELFTEST_TIMES`, a path, it appends its own `start <ns>` and
+# `end <ns>` lines there, around the sleep, so a caller can read when every run
+# began and ended and assert directly that several overlapped or that two did
+# not, instead of reading how long the whole batch took.
 #
 # Given `GATE_SELFTEST_HOLD`, a path, it does not sleep: it adds a line to
 # `<path>.ran` as it starts and then waits while the path is there, so that
@@ -1898,7 +1936,10 @@ _gate-selftest-sleep:
     set -euo pipefail
     hold=${GATE_SELFTEST_HOLD:-}
     if [ -z "$hold" ]; then
+        times=${GATE_SELFTEST_TIMES:-}
+        [ -z "$times" ] || printf 'start %s\n' "$(date +%s%N)" >>"$times"
         sleep 2
+        [ -z "$times" ] || printf 'end %s\n' "$(date +%s%N)" >>"$times"
         exit 0
     fi
     echo "$$" >>"$hold.ran"
