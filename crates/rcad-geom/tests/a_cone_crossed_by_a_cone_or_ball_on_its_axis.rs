@@ -28,9 +28,11 @@
 //! Where they do, and the numbers stored are exactly mirror images, they cross
 //! in two flat cuts that meet at the touches: `intersect` names them as four
 //! arcs from touch to touch where the flat surface halfway between the apexes
-//! cuts an ellipse out of them, and `walk` marches each, and the pair is
-//! refused as a crossing that touches itself where that cut is a hyperbola, or
-//! where the two touch all along a line. Where each apex is inside the other
+//! cuts an ellipse out of them, and as six pieces where it cuts a hyperbola:
+//! the other cut either side of the touches, the arc of the hyperbola's near
+//! branch between them, an endless piece beyond each, and the far branch.
+//! `walk` marches each, and the pair is refused as a crossing that touches
+//! itself where the two touch all along a line. Where each apex is inside the other
 //! cone they cross in two flat cuts held apart, and are refused as any other
 //! overlap is. Where the turned axis was rounded they are not mirror
 //! images, do not touch, and are refused as any other overlap is. Two of one
@@ -1104,10 +1106,11 @@ fn where_a_spout_line_meets_the_funnel(
 /// The flat surface halfway, `z = 15`, cuts a **hyperbola** out of either cone,
 /// not an ellipse: its normal leans further from the axis than the cone's side
 /// does, `2·(n·w)² < W·|n|²` for `n` its normal and `w` the axis as written.
-/// The hyperbola's branch through the touches is cut in three there, and
-/// the pickers that name the four arcs of two ellipses would put two of those
-/// pieces in one corner. So the pair is refused as a crossing that touches
-/// itself, by the namer and by the walker, whichever cone comes first.
+/// The second flat surface, `y = 8`, cuts an ellipse, which meets the
+/// hyperbola's near branch at the touches and cuts it in three there: the arc
+/// between the touches and an endless piece beyond each. `intersect` names six
+/// pieces, those three, the far branch, and the ellipse either side of the
+/// touches, and `walk` marches each.
 #[test]
 fn two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points() {
     let x_squared = 136;
@@ -1136,9 +1139,44 @@ fn two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_t
         2 * dot(halfway, along).pow(2) < dot(along, along) * dot(halfway, halfway),
         "z = 15 leans further from the axis than the cone's side does, so cuts a hyperbola"
     );
-    assert_refused_as_touching_itself(
+    assert_named_as_a_hyperbola_and_an_ellipse_that_meet_where_they_touch(
         &a_cone([0.0; 3], [0.0, 5.0, 3.0], 1.0),
         &a_cone([0.0, 0.0, 30.0], [0.0, 5.0, -3.0], 1.0),
+        [([0.0, 0.0, 1.0], 15.0), ([0.0, 1.0, 0.0], 8.0)],
+        [[0.0; 3], [0.0, 5.0, 3.0]],
+    );
+}
+
+/// The pair of
+/// [`two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points`]
+/// with both axes leaning out of `x = 0`: slope one about `(1, 5, 3)` from the
+/// origin and about `(1, 5, −3)` from `(0, 0, 30)`, mirror images across
+/// `z = 15`. With `u = x + 5y` the two forms differ by `24·(z − 15)·(u − 42.5)`,
+/// so they cross in the hyperbola `z = 15` cuts, `2·90² = 16200` being below
+/// `35·900 = 31500`, and the ellipse `x + 5y = 42.5` cuts, which meet where
+/// `26y² − 425y + 1593.75 = 0`, twice.
+///
+/// The flat surface holding both axes is no coordinate plane here, and faces
+/// along `(−5, 1, 0)`, which `intersect` must write down exactly to tell the
+/// two endless pieces of the near branch apart.
+#[test]
+fn two_mirror_cones_leaning_out_of_every_coordinate_plane_touch_at_two_points_too() {
+    let [one, other] = [[1.0, 5.0, 3.0], [1.0, 5.0, -3.0]].map(|along| {
+        let direction = Axis::new(Point::from([0.0; 3]), Vector::from(along))
+            .expect("a direction")
+            .direction();
+        [direction.x(), direction.y(), direction.z()]
+    });
+    assert_eq!(
+        [one[0], one[1], -one[2]],
+        other,
+        "the two axes are stored alike but for the sign of the last number"
+    );
+    assert_named_as_a_hyperbola_and_an_ellipse_that_meet_where_they_touch(
+        &a_cone([0.0; 3], [1.0, 5.0, 3.0], 1.0),
+        &a_cone([0.0, 0.0, 30.0], [1.0, 5.0, -3.0], 1.0),
+        [([0.0, 0.0, 1.0], 15.0), ([1.0, 5.0, 0.0], 42.5)],
+        [[0.0; 3], [1.0, 5.0, 3.0]],
     );
 }
 
@@ -1339,43 +1377,7 @@ fn assert_named_as_two_flat_cuts_that_meet_where_they_touch(
     let mut walked_on = [0; 2];
     for run in runs {
         for along in [[one, other], [other, one]] {
-            let walked = walk(
-                run,
-                along,
-                Deflection::of(0.01).expect("a length above zero"),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .unwrap_or_else(|refused| panic!("{run:?} is walked, not refused {refused:?}"));
-            assert!(
-                walked.points().len() > 8,
-                "an ellipse at a deflection of a hundredth takes more than eight pieces"
-            );
-            let room = walked.deviation().magnitude();
-            let off_each = flats.map(|(normal, offset)| {
-                walked
-                    .points()
-                    .iter()
-                    .map(|point| {
-                        let [x, y, z] = point.coordinates();
-                        (normal[0] * x + normal[1] * y + normal[2] * z - offset).abs()
-                            / Vector::from(normal).length()
-                    })
-                    .fold(0.0, f64::max)
-            });
-            let Some(cut) = off_each.iter().position(|off| *off <= room) else {
-                panic!("{run:?} is {off_each:?} off the two cuts, past the published {room:e}");
-            };
-            walked_on[cut] += 1;
-            for point in walked.points() {
-                for surface in along {
-                    let off = how_far_off(surface, *point);
-                    assert!(
-                        off <= room,
-                        "{point:?} is {off:e} off {surface:?}, past the published {room:e}"
-                    );
-                }
-            }
+            walked_on[the_flat_cut_walked(run, along, flats).0] += 1;
         }
     }
     assert_eq!(
@@ -1383,6 +1385,115 @@ fn assert_named_as_two_flat_cuts_that_meet_where_they_touch(
         [4, 4],
         "two pieces on each cut, each walked both ways round"
     );
+    assert_a_loop_stated_right_round_is_not_named(one, other);
+}
+
+/// `intersect` names the pair's crossing in six pieces whichever comes first,
+/// and `walk` marches each, either way round the pair. Of the two flat cuts
+/// `flats`, each written `(normal, offset)`, the first is a hyperbola and the
+/// second an ellipse, which meets the hyperbola's near branch where the cones
+/// touch and cuts it in three: four pieces lie on the hyperbola, that arc, the
+/// two endless pieces beyond it and the far branch, and two on the ellipse,
+/// one either side of the touches. Every point of the far branch is behind
+/// the apex of the cone written `[apex, axis]`, and every other point ahead of
+/// it. A loop stated right round the crossing is none of them, and is refused.
+fn assert_named_as_a_hyperbola_and_an_ellipse_that_meet_where_they_touch(
+    one: &Surface,
+    other: &Surface,
+    flats: [([f64; 3], f64); 2],
+    [apex, axis]: [[f64; 3]; 2],
+) {
+    let met = named(one, other);
+    let Ok(SurfaceMeet::Curves(runs)) = &met else {
+        panic!("six pieces of a hyperbola and an ellipse, and not {met:?}");
+    };
+    assert_eq!(runs.len(), 6, "{runs:?}");
+    let ahead = |point: &Point| {
+        let [x, y, z] = point.coordinates();
+        (x - apex[0]) * axis[0] + (y - apex[1]) * axis[1] + (z - apex[2]) * axis[2]
+    };
+    let mut walked_on = [0; 2];
+    let mut behind_the_apex = 0;
+    for run in runs {
+        for along in [[one, other], [other, one]] {
+            let (cut, points) = the_flat_cut_walked(run, along, flats);
+            walked_on[cut] += 1;
+            let behind = points.iter().all(|point| ahead(point) < 0.0);
+            assert!(
+                behind || points.iter().all(|point| ahead(point) > 0.0),
+                "{run:?} lies in one nappe: {points:?}"
+            );
+            if behind {
+                assert_eq!(cut, 0, "only the hyperbola reaches the far nappe: {run:?}");
+                behind_the_apex += 1;
+            }
+        }
+    }
+    assert_eq!(
+        walked_on,
+        [8, 4],
+        "four pieces on the hyperbola and two on the ellipse, each walked both ways round"
+    );
+    assert_eq!(
+        behind_the_apex, 2,
+        "one piece, the far branch, behind the apex, walked both ways round"
+    );
+    assert_a_loop_stated_right_round_is_not_named(one, other);
+}
+
+/// Walks `run` along `along` at a deflection of a hundredth, checks that every
+/// point is on both cones within the bound the walker publishes, and says which
+/// of the two flat cuts `flats`, each written `(normal, offset)`, it walked,
+/// with the points walked. A run with no ends is the whole of the curve its
+/// pickers name, as `walk` says, so a piece's walk is all of that cut, or all
+/// of that branch.
+fn the_flat_cut_walked(
+    run: &NamedRun,
+    along: [&Surface; 2],
+    flats: [([f64; 3], f64); 2],
+) -> (usize, Vec<Point>) {
+    let walked = walk(
+        run,
+        along,
+        Deflection::of(0.01).expect("a length above zero"),
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    )
+    .unwrap_or_else(|refused| panic!("{run:?} is walked, not refused {refused:?}"));
+    assert!(
+        walked.points().len() > 8,
+        "a flat cut at a deflection of a hundredth takes more than eight pieces"
+    );
+    let room = walked.deviation().magnitude();
+    let off_each = flats.map(|(normal, offset)| {
+        walked
+            .points()
+            .iter()
+            .map(|point| {
+                let [x, y, z] = point.coordinates();
+                (normal[0] * x + normal[1] * y + normal[2] * z - offset).abs()
+                    / Vector::from(normal).length()
+            })
+            .fold(0.0, f64::max)
+    });
+    let Some(cut) = off_each.iter().position(|off| *off <= room) else {
+        panic!("{run:?} is {off_each:?} off the two cuts, past the published {room:e}");
+    };
+    for point in walked.points() {
+        for surface in along {
+            let off = how_far_off(surface, *point);
+            assert!(
+                off <= room,
+                "{point:?} is {off:e} off {surface:?}, past the published {room:e}"
+            );
+        }
+    }
+    (cut, walked.points().to_vec())
+}
+
+/// `walk` refuses a loop stated right round the crossing of two flat cuts that
+/// meet where the cones touch, whichever comes first: it is neither cut.
+fn assert_a_loop_stated_right_round_is_not_named(one: &Surface, other: &Surface) {
     let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
         .expect("a whole loop needs nothing picking it");
     for along in [[one, other], [other, one]] {
