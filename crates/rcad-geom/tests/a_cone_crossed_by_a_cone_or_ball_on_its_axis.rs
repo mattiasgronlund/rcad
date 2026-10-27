@@ -1259,6 +1259,7 @@ fn two_cones_of_one_slope_a_quarter_turn_apart_touch_unless_each_apex_is_inside_
         &turned(2.0),
         [([0.0, 1.0, 1.0], 4.0), ([0.0, -1.0, 1.0], -2.4)],
         [2, 2],
+        0,
     );
 }
 
@@ -1280,6 +1281,27 @@ fn two_mirror_cones_facing_each_other_cross_in_an_ellipse_and_a_hyperbola_held_a
         &a_cone([0.0, 0.0, 10.0], [0.0, 1.0, -5.0], 1.0),
         [([0.0, 0.0, 1.0], 5.0), ([0.0, 1.0, 0.0], -12.0)],
         [1, 2],
+        1,
+    );
+}
+
+/// Two cones of slope two facing each other, each apex inside the other: one
+/// on the origin about `(0, 1, 2)` and one on `(0, 0, 10)` about `(0, 1, −2)`,
+/// mirror images across `z = 5`. That flat surface leans as the cones' own
+/// straight lines do, since `(0, 0, 1)` is a quarter turn less the half-angle
+/// `atan 2` off the axis, so it cuts a parabola out of either. Their crossing
+/// is that parabola and the hyperbola `y = −7.5` cuts out of either, the flat
+/// surface `f·y = N·Q(n)` with `f = (0, 20000, 0)`, `N = 100` and
+/// `Q(n) = −1500`. `intersect` names the parabola and the two branches, and
+/// `walk` marches each, none of them closed.
+#[test]
+fn two_mirror_cones_facing_each_other_cross_in_a_parabola_and_a_hyperbola_held_apart() {
+    assert_named_as_two_flat_cuts_held_apart(
+        &a_cone([0.0; 3], [0.0, 1.0, 2.0], 2.0),
+        &a_cone([0.0, 0.0, 10.0], [0.0, 1.0, -2.0], 2.0),
+        [([0.0, 0.0, 1.0], 5.0), ([0.0, 1.0, 0.0], -7.5)],
+        [1, 2],
+        0,
     );
 }
 
@@ -1454,19 +1476,20 @@ fn assert_named_as_two_flat_cuts_that_meet_where_they_touch(
 }
 
 /// `intersect` names the pair's crossing in one piece for each of the
-/// branches or the ellipse the two flat cuts `flats`, each written `(normal,
-/// offset)`, are made of, whichever comes first, `pieces[i]` of them on
-/// `flats[i]`, and `walk` marches each, either way round the pair. A cut in
-/// one piece is an ellipse, and one in two a hyperbola. The two cuts never
-/// meet, so each piece is the whole of a branch or of the ellipse:
-/// a branch is refused as not closed, and an ellipse is not. A loop stated
-/// right round the crossing is no one piece, and is refused: as not closed
-/// where every piece is a branch.
+/// branches, the ellipse or the parabola the two flat cuts `flats`, each
+/// written `(normal, offset)`, are made of, whichever comes first,
+/// `pieces[i]` of them on `flats[i]`, and `walk` marches each, either way
+/// round the pair, each piece on a curve of its own. The two cuts never meet,
+/// so each piece is the whole of a branch, a parabola or an ellipse, and
+/// `ellipses` of them close: a branch or a parabola is refused as not closed,
+/// and an ellipse is not. A loop stated right round the crossing is no one
+/// piece, and is refused: as not closed where no piece is an ellipse.
 fn assert_named_as_two_flat_cuts_held_apart(
     one: &Surface,
     other: &Surface,
     flats: [([f64; 3], f64); 2],
     pieces: [usize; 2],
+    ellipses: usize,
 ) {
     let met = named(one, other);
     let Ok(SurfaceMeet::Curves(runs)) = &met else {
@@ -1475,9 +1498,14 @@ fn assert_named_as_two_flat_cuts_held_apart(
     assert_eq!(runs.len(), pieces[0] + pieces[1], "{runs:?}");
     let mut walked_on = [0; 2];
     let mut closed = 0;
+    let mut starts: Vec<Point> = Vec::with_capacity(runs.len());
     for run in runs {
         for along in [[one, other], [other, one]] {
-            walked_on[the_flat_cut_walked(run, along, flats).0] += 1;
+            let (cut, points) = the_flat_cut_walked(run, along, flats);
+            walked_on[cut] += 1;
+            if along[0] == one {
+                starts.push(points[0]);
+            }
             match where_a_closed_crossing_starts(run, along, &mut ProvenanceLog::new()) {
                 Ok(_) => closed += 1,
                 Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed) => (),
@@ -1490,10 +1518,14 @@ fn assert_named_as_two_flat_cuts_held_apart(
         pieces.map(|on_this_cut| 2 * on_this_cut),
         "each piece walked both ways round"
     );
-    let ellipses = pieces
-        .iter()
-        .filter(|on_this_cut| **on_this_cut == 1)
-        .count();
+    for (which, start) in starts.iter().enumerate() {
+        for other_start in &starts[which + 1..] {
+            assert!(
+                (*start - *other_start).length() > 1.0,
+                "two pieces walked from one place, {start:?} and {other_start:?}"
+            );
+        }
+    }
     assert_eq!(closed, 2 * ellipses, "only an ellipse closes");
     let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
         .expect("a whole loop needs nothing picking it");
