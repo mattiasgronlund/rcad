@@ -1180,6 +1180,45 @@ fn two_mirror_cones_leaning_out_of_every_coordinate_plane_touch_at_two_points_to
     );
 }
 
+/// A run stated right round the crossing of the pair of
+/// [`two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points`],
+/// starting and ending at a vertex of the hyperbola `z = 15` cuts, `(0, 3.75, 15)`
+/// on the near branch or `(0, −60, 15)` on the far one, both on both cones
+/// since `16y² + 900y − 3600` is nought there. Neither is on the ellipse
+/// `y = 8` cuts, so the run can only be on a branch, and a branch runs on for
+/// ever: refused as not closed, by the walker as by
+/// [`where_a_closed_crossing_starts`], and not marched from its start back to
+/// that same point.
+#[test]
+fn a_run_stated_right_round_from_a_vertex_of_the_hyperbola_is_refused_as_not_closed() {
+    let one = a_cone([0.0; 3], [0.0, 5.0, 3.0], 1.0);
+    let other = a_cone([0.0, 0.0, 30.0], [0.0, 5.0, -3.0], 1.0);
+    for vertex in [[0.0, 3.75, 15.0], [0.0, -60.0, 15.0]] {
+        let at = PredicatePoint::from(vertex);
+        let stated = NamedRun::new(EdgeRun::RightRoundWhereItsFacesCross, [at, at])
+            .expect("a closed run's two ends are one point");
+        for along in [[&one, &other], [&other, &one]] {
+            assert_eq!(
+                walk(
+                    &stated,
+                    along,
+                    Deflection::of(0.01).expect("a length above zero"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .err(),
+                Some(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
+                "{vertex:?}"
+            );
+            assert_eq!(
+                where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new()).err(),
+                Some(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
+                "{vertex:?}"
+            );
+        }
+    }
+}
+
 /// Two cones of one slope, the second the first turned a quarter about the
 /// line along `x` through `(0, 0, 4)`, which puts its apex at `(0, 4, 4)` and
 /// its axis along `-y`, every number exact: mirror images across the flat
