@@ -826,9 +826,18 @@ ${START(lane)}`
 
 // The lane before has let go of the branch with `git switch --detach`, as
 // lane.md tells it to; the `-C` fallback covers one that did not.
+//
+// `lane.writeSet` is the row's take, frozen once in `briefed()` and never
+// refreshed across relays, so it is not what a relay owns: a lane before this
+// one may have narrowed the hold down from it, and the fill may since have
+// given a freed entry to another row (§424, Q2406). lanes.js has no
+// fs/child_process access of its own to read the current hold itself, so the
+// relay reads it the way `START()` already has a lane read its own
+// `git rev-parse` -- by running a command and reporting back what it printed.
 function RELAY(lane, before, n) {
   const branch = branchOf(lane)
-  return `Queue ${rowsOf(lane)}. You own these files and no others: ${lane.writeSet.join(', ')}.
+  const ids = lane.queueId.split(',')
+  return `Queue ${rowsOf(lane)}. Your write set was taken as ${lane.writeSet.join(', ')}, but a lane before you may have narrowed the hold down from it, and the fill may since have given a freed entry to another row: own the row's current hold, not the taken set above (§424). Before you edit anything, run ${ids.map((id) => `mise exec -- just queue show ${id}`).join(', then ')}. Where it prints a row "narrowed to" a set, that narrowed set, not the taken set above, is what you own until you narrow or widen it again; where it prints no such line, you own the taken set above. Never edit outside your current hold: widen it first with \`mise exec -- just queue narrow <id> <write set>\`, and if the widen is refused, stop and report it as blocked, naming the entry and the hold the refusal quotes.
 Your branch: ${branch}, which you carry on: you are relay ${n} of at most ${MAX_RELAYS} (§416).
 
 A lane before you did part of this row, passed its context budget, committed its work to ${branch} at ${before.landed_sha} and handed it to you. Its handoff, which is where you start:
