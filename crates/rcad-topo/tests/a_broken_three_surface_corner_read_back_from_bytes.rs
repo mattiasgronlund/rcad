@@ -1267,65 +1267,53 @@ fn a_pyramid_turned_and_cut_on_one_side_of_the_x_axis_answers_as_the_true_planes
 }
 
 /// **Drawing the pyramid's `+y` face as two coplanar pieces instead of one
-/// changes the fuse's answer, though the two pyramids are the same solid.**
-/// Built as one triangle,
+/// does not change the fuse's answer**, since the two pyramids are the same
+/// solid: both rules under both policies answer as
 /// [`a_pyramid_turned_and_cut_on_one_side_of_the_x_axis_answers_as_the_true_planes_do`]
-/// answers both rules under both policies with nothing in the log, the true
-/// planes' faces and sides. Built with the `+y` face in two pieces that the
-/// fuse joins back into one before it bakes the solid, the apex is solved by
-/// `corner_of_every_vertex_left`, which still passes `None` for
-/// `derive_a_corner`'s `choosing_among`, as before Q2815, and keeps the speck
-/// Q2815 cut off the ordinary apex: `certified` refuses both rules at the
-/// range check, over a ratio of `6.1e15`, where the one-triangle pyramid
-/// answers; `tolerant(100)` answers with the range check in the log and a
-/// face more than the true planes keep, the intersection 5 faces and 18
-/// sides and the difference 8 and 34, as `bake` gave the ordinary apex
-/// before Q2815. A gap, not a limit: the choice Q2815 added to one call to
-/// `derive_a_corner` is not made from `corner_of_every_vertex_left`'s (§448).
+/// does, the intersection in 4 faces and 12 sides and the difference in 7 and
+/// 28, with nothing in the log. The fuse joins the two pieces back into one
+/// plane before it bakes the solid, and `corner_of_every_vertex_left` solves
+/// the apex from the joined planes. Up to Q2874 it kept the least box there,
+/// as before Q2815, and so kept the speck Q2815 cut off the one-triangle
+/// pyramid's apex: `certified` refused both rules at the range check, over a
+/// ratio of `6.1e15`, and `tolerant(100)` answered with the range check in
+/// the log, the intersection in 5 faces and 18 sides and the difference in 8
+/// and 34. Since Q2874 it chooses among the triples round a convex corner of
+/// the joined faces as `place_a_corner` does round a corner of the faces as
+/// stored (§448).
 #[test]
-fn a_pyramid_with_a_split_plus_y_face_cut_on_one_side_of_the_x_axis_keeps_the_speck_q2815_cut_off()
+fn a_pyramid_with_a_split_plus_y_face_cut_on_one_side_of_the_x_axis_answers_as_the_true_planes_do()
 {
     let wedge = A_WEDGE_ON_ONE_SIDE_OF_THE_X_AXIS;
     let placement = the_turn_that_keeps_a_speck_on_the_plus_y_face();
-    for (rule, tolerant_left) in [
+    for (rule, left) in [
         (
             Rule::Intersection,
             FacesAndSides {
-                faces: 5,
-                sides: 18,
+                faces: 4,
+                sides: 12,
             },
         ),
         (
             Rule::Difference,
             FacesAndSides {
-                faces: 8,
-                sides: 34,
+                faces: 7,
+                sides: 28,
             },
         ),
     ] {
-        let case = format!("{wedge:?} {rule:?}, the pyramid's +y face in two pieces");
-        match the_wedge_through_the_split_pyramids_apex_and_its_faces(
-            wedge,
-            placement,
-            rule,
-            &Policy::certified(),
-        ) {
-            Err(Error::Invalid(Invalid::DynamicRangeTooWide { ratio })) => {
-                assert!(ratio > 1e15, "{case}: certified, a range of {ratio}");
+        for policy in [Policy::certified(), Policy::tolerant(100.0)] {
+            let case =
+                format!("{policy:?}, {wedge:?} {rule:?}, the pyramid's +y face in two pieces");
+            match the_wedge_through_the_split_pyramids_apex_and_its_faces(
+                wedge, placement, rule, &policy,
+            ) {
+                Ok((named, faces)) => {
+                    assert_eq!(named, Vec::<&str>::new(), "{case}");
+                    assert_eq!(faces, left, "{case}");
+                }
+                Err(refused) => panic!("{case} came back {refused:?}"),
             }
-            other => panic!("{case}: certified came back {other:?}"),
-        }
-        match the_wedge_through_the_split_pyramids_apex_and_its_faces(
-            wedge,
-            placement,
-            rule,
-            &Policy::tolerant(100.0),
-        ) {
-            Ok((named, faces)) => {
-                assert_eq!(named, [DYNAMIC_RANGE_CHECK], "{case}: tolerant(100)");
-                assert_eq!(faces, tolerant_left, "{case}: tolerant(100)");
-            }
-            Err(refused) => panic!("{case}: tolerant(100) came back {refused:?}"),
         }
     }
 }
