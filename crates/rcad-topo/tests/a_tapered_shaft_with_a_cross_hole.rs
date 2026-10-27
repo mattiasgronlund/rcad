@@ -29,9 +29,9 @@
 //! refused the cone's as a wire that will not lie flat, so the leaning bar and
 //! the ball each answered three of their six fuses: the intersection both
 //! ways round, and the other solid less the cone. Each answer is certified,
-//! sound, and measures as the others say it must: the union and the
-//! intersection together hold each solid once, and each solid less the other
-//! is that solid less the intersection.
+//! sound, and measures as the two solids alone bound it and as the others say
+//! it must: the union and the intersection together hold each solid once, and
+//! each solid less the other is that solid less the intersection.
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -176,7 +176,10 @@ impl Fused {
 
 /// Fuses the two solids `shape` builds under every rule both ways round, and
 /// checks that each answer that comes back is certified, sound, and measures
-/// as the others that came back say it must.
+/// as the two solids alone bound it and as the others that came back say it
+/// must: a union no less than the larger solid and no more than the two
+/// together, an intersection no more than the smaller, and a difference no
+/// more than its argument.
 fn every_fuse_of(shape: fn(&mut Model) -> (SolidKey, SolidKey)) -> Fused {
     let policy = Policy::certified();
     let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
@@ -212,6 +215,39 @@ fn every_fuse_of(shape: fn(&mut Model) -> (SolidKey, SolidKey)) -> Fused {
         both_alone[0].0 + both_alone[1].0,
         both_alone[0].1 + both_alone[1].1,
     );
+    let [smaller, larger] = if both_alone[0].0 <= both_alone[1].0 {
+        both_alone
+    } else {
+        [both_alone[1], both_alone[0]]
+    };
+    for (way, order) in ["cone first", "the other first"].into_iter().enumerate() {
+        if let Ok(&union) = unions[way].as_ref() {
+            no_more_than(
+                larger,
+                union,
+                &format!("{order}: the larger solid alone against the union"),
+            );
+            no_more_than(
+                union,
+                together,
+                &format!("{order}: the union against the two alone"),
+            );
+        }
+        if let Ok(&intersection) = intersections[way].as_ref() {
+            no_more_than(
+                intersection,
+                smaller,
+                &format!("{order}: the intersection against the smaller solid alone"),
+            );
+        }
+        if let Ok(&less) = differences[way].as_ref() {
+            no_more_than(
+                less,
+                both_alone[way],
+                &format!("{order}: the difference against its argument alone"),
+            );
+        }
+    }
     for (way, order) in ["cone first", "the other first"].into_iter().enumerate() {
         let Ok(&intersection) = intersections[way].as_ref() else {
             continue;
@@ -259,6 +295,19 @@ fn about_the_same(got: (f64, f64), want: (f64, f64), what: &str) {
         got.1,
         want.0,
         want.1
+    );
+}
+
+/// Fails unless `small`, a volume and the error published with it, can be no
+/// more than `big` within their errors.
+fn no_more_than(small: (f64, f64), big: (f64, f64), what: &str) {
+    assert!(
+        small.0 - small.1 <= big.0 + big.1,
+        "{what}: {} give or take {} is more than {} give or take {}",
+        small.0,
+        small.1,
+        big.0,
+        big.1
     );
 }
 
