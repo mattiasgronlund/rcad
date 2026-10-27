@@ -212,8 +212,15 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 /// a figure of eight, a plane cutting a torus in a quartic, every pair with a
 /// torus on it but a plane, a cone against a pipe no steeper than its skin or
 /// a ball off its axis, two cones off one axis whose crossing is not proved two
-/// loops, two cones of one apex, and a ball on a cone's axis that misses it or
+/// loops, bar the two side by side below, two cones of one apex, and a ball on
+/// a cone's axis that misses it or
 /// runs through its apex.
+///
+/// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for two cones of one
+/// slope side by side, their axes one direction and the line between their
+/// apexes square to it, which cross in the one hyperbola the flat surface
+/// halfway between their apexes cuts out of either: a curve that runs off for
+/// ever, with nothing to go round.
 ///
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a plane
 /// resting on a torus's tube, which touches it all the way round one circle

@@ -26,9 +26,13 @@
 //! of the same slope turned about a line through a point of the first's axis is
 //! more than an overlap: the two are mirror images, and can touch at two points.
 //! Where they do, and the numbers stored are exactly mirror images, the pair is
-//! refused as a crossing that touches itself. Where the turned axis was rounded
-//! they are not mirror images, do not touch, and are refused as any other
-//! overlap is.
+//! refused as a crossing that touches itself. Where each apex is inside the
+//! other cone they cross in two flat cuts held apart, and are refused as any
+//! other overlap is. Where the turned axis was rounded they are not mirror
+//! images, do not touch, and are refused as any other overlap is. Two of one
+//! slope side by side are mirror images too, and cross in the one hyperbola
+//! the flat surface halfway between them cuts out of either: `intersect` names
+//! its two branches as that cut, and `walk` marches each whole branch.
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Error, HalfSpaceThroughAPoint, NamedRun, Picker, Point,
@@ -1119,8 +1123,9 @@ fn two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_t
 /// `(0, 1, −1)`. Of slope two, half-angle `1.11`, the apex is inside it, and
 /// the line along `x` through `(0, 3.2, 0.8)`, the only place they could
 /// touch, stays outside the upright cone, where `x² + y² − 4z²` is
-/// `x² + 7.68`: they cross without touching, and are refused as any other
-/// overlap is.
+/// `x² + 7.68`: they cross without touching, in two flat cuts of either cone
+/// held apart, one in the flat surface halfway between the apexes. Nothing
+/// names two such cuts yet, so the pair is refused as any other overlap is.
 #[test]
 fn two_cones_of_one_slope_a_quarter_turn_apart_touch_unless_each_apex_is_inside_the_other() {
     let upright = |slope| a_cone([0.0; 3], [0.0, 0.0, 1.0], slope);

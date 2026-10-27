@@ -165,7 +165,9 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// cone that shares neither its axis nor its apex** (Q2667): two loops held
 /// apart by a flat surface, where every straight line of one cone is proved to
 /// cross the other twice, once each side of it, or one loop and two branches
-/// that run off for ever, held apart by two flat surfaces (Q2812) — see
+/// that run off for ever, held apart by two flat surfaces (Q2812), or, for two
+/// of one slope side by side, the hyperbola the flat surface halfway between
+/// their apexes cuts out of either (Q2867) — see
 /// [`how_two_cones_off_one_axis_cross`] for which shapes stay refused, and why
 /// two cones of one slope that are mirror images and touch are refused as a
 /// crossing that touches itself (Q2813). Two cones
@@ -196,7 +198,8 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// running through itself.
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a cone against a
-/// second cone that shares neither its axis nor its apex, for a ball whose skin
+/// second cone that shares neither its axis nor its apex and is not proved to
+/// cross it in any of the shapes named above, for a ball whose skin
 /// runs through the apex, on the axis or off it, and for the shapes off the axis
 /// a pipe or a ball is not proved to cross it in: a pipe along one of the cone's
 /// straight lines, a pipe steeper than the cone whose skin runs through the
@@ -5145,7 +5148,8 @@ fn how_far_along_the_axis_the_two_circles_sit(cone: &Cone, pipe: &Cylinder) -> I
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the two share
 /// neither an axis nor an apex and [`how_two_cones_off_one_axis_cross`] proves
-/// their crossing neither two loops nor one loop and two branches, and
+/// their crossing neither two loops, nor one loop and two branches, nor the
+/// hyperbola two of one slope side by side cross in, and
 /// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] where it finds
 /// them of one slope, mirror images, and touching.
 ///
