@@ -9776,6 +9776,35 @@ check-fuzz-overnight-selftest:
     # real loss here is a filesystem whose order is not acting as roughly
     # uniform, not a flake.
     #
+    # Q2509: `find "$base"` walks the whole shared build directory, and up
+    # to three gates can be running this same arm at once in this one tree
+    # (§372) — each plants its own `-$tag` pair under that same `$base`
+    # while this one is probing. `head -n1` can then meet another arm's or
+    # another gate's own rlib before it ever meets one of this attempt's
+    # own 26 tries, and no probe letter this attempt plants will ever match
+    # it — failing all 8 real-name retries for a reason that has nothing to
+    # do with this run's own luck, the same "none of 26 ... on 8 different
+    # real names" message a genuine run of bad luck gives. So `find`'s
+    # output is filtered, after the walk and without re-sorting it, down to
+    # just the two paths this attempt itself just made: whichever of those
+    # two `find` met first is what this attempt's own luck says, with
+    # everyone else's rlibs left out of the count.
+    #
+    # The filter is pulled out into `filter_pattern` so a made-up, fixed
+    # listing can run through the exact same grep this loop uses, instead
+    # of waiting on a real directory's walk order to put a foreign name
+    # first the way a real sibling gate would. Below, `check_tag` plants no
+    # real files; it feeds `filter_pattern`'s own pattern two made-up lines
+    # at a time — a decoy standing in for another gate's rlib, listed
+    # first, beside one of this check's own two names — and asks which one
+    # `grep | head -n1` kept. Run once against the real name and once
+    # against the stale one, so each half of the filter's `|` is the one
+    # that has to reject the decoy, not just whichever half happens to
+    # match first. That decides every single time this check runs, not
+    # only on average the way the real probe below still does: a real
+    # decoy's own luck at sorting first is still the probe's problem; a
+    # decoy's name failing to match the filter never is.
+    #
     # Named so every directory this makes ends in `-$tag`: the retry's own
     # discriminator goes in front of it, never after, so `clean_up`'s
     # `selftest-*"$tag"` glob still sweeps every attempt, tried or kept, with
@@ -9792,6 +9821,25 @@ check-fuzz-overnight-selftest:
     : >"$dir/log"
     base="fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing"
     outer_tag="$tag"
+    filter_pattern() {
+        printf '/(selftest-%s|selftest-stale-%s-%s)/' "$1" "$2" "$1"
+    }
+
+    check_tag="check-$outer_tag"
+    check_probe="zz"
+    check_pattern=$(filter_pattern "$check_tag" "$check_probe")
+    decoy_line="$base/selftest-decoy-$outer_tag/out/librcad_fuzz_timing-selftest-decoy-$outer_tag.rlib"
+    real_line="$base/selftest-$check_tag/out/librcad_fuzz_timing-selftest-$check_tag.rlib"
+    stale_line="$base/selftest-stale-$check_probe-$check_tag/out/librcad_fuzz_timing-selftest-stale-$check_probe-$check_tag.rlib"
+
+    check_first=$(printf '%s\n%s\n' "$decoy_line" "$real_line" | grep -E "$check_pattern" | head -n1 || true)
+    [ "$check_first" = "$real_line" ] \
+        || fail "Q2509 regression: filter_pattern picked '$check_first' instead of this check's own real line, with a decoy standing in for a sibling gate's own rlib (§372) ahead of it"
+
+    check_first=$(printf '%s\n%s\n' "$decoy_line" "$stale_line" | grep -E "$check_pattern" | head -n1 || true)
+    [ "$check_first" = "$stale_line" ] \
+        || fail "Q2509 regression: filter_pattern picked '$check_first' instead of this check's own stale line, with a decoy standing in for a sibling gate's own rlib (§372) ahead of it"
+
     stale=""
     attempt=0
     while [ -z "$stale" ] && [ "$attempt" -lt 8 ]; do
@@ -9805,7 +9853,9 @@ check-fuzz-overnight-selftest:
             stale_out="$base/selftest-stale-$probe-$tag/out"
             mkdir -p "$stale_out"
             touch "$stale_out/librcad_fuzz_timing-selftest-stale-$probe-$tag.rlib"
-            first=$(find "$base" -name 'librcad_fuzz_timing-*.rlib' | head -n1)
+            first=$(find "$base" -name 'librcad_fuzz_timing-*.rlib' \
+                | grep -E "$(filter_pattern "$tag" "$probe")" \
+                | head -n1 || true)
             case "$first" in
                 *"/selftest-stale-$probe-$tag/"*) stale="$probe"; break ;;
             esac
