@@ -5852,12 +5852,10 @@ impl<'f> Arrangement<'f> {
         else {
             return None;
         };
-        let ([Surface::Plane(_), Surface::Cylinder(pipe)]
-        | [Surface::Cylinder(pipe), Surface::Plane(_)]) = &**wound_as
-        else {
-            return None;
-        };
-        let along = pipe.axis().direction().components().map(Interval::exactly);
+        let along = axis_a_plane_and_its_partner_wind_round(wound_as)?
+            .direction()
+            .components()
+            .map(Interval::exactly);
         let climbs = |low: PredicatePoint, high: PredicatePoint| {
             let [low, high] = [low, high].map(|place| place.enclosure());
             dot_of([0, 1, 2].map(|axis| high[axis] - low[axis]), along).sign()
@@ -15176,26 +15174,38 @@ fn along_the_stretch_between_the_two(
     (off_the_stretch && proved && at_one == at_other).then_some(at_one)
 }
 
-/// Whether the loop `pair` cross in, a plane's round a pipe, climbs the pipe's
-/// axis at `place`, read off its box: the sign of `(∇S × ∇T) · w`, for `w` the
-/// axis direction.
+/// The axis a plane's loop round `pair`'s other surface, a pipe or a cone,
+/// turns about: `None` for every other pair.
+fn axis_a_plane_and_its_partner_wind_round(pair: &[Surface; 2]) -> Option<Axis> {
+    match pair {
+        [Surface::Plane(_), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Plane(_)] => Some(pipe.axis()),
+        [Surface::Plane(_), Surface::Cone(cone)] | [Surface::Cone(cone), Surface::Plane(_)] => {
+            Some(cone.axis())
+        }
+        _ => None,
+    }
+}
+
+/// Whether the loop `pair` cross in, a plane's round a pipe or a cone, climbs
+/// the axis at `place`, read off its box: the sign of `(∇S × ∇T) · w`, for `w`
+/// the axis direction.
 ///
 /// # Panics
 ///
-/// If `pair` is not a plane and a pipe, which the caller has checked.
+/// If `pair` is not a plane and a pipe or a cone, which the caller has
+/// checked.
 fn climbs_at(pair: &[Surface; 2], place: PredicatePoint) -> Decision {
-    let ([Surface::Plane(_), Surface::Cylinder(pipe)]
-    | [Surface::Cylinder(pipe), Surface::Plane(_)]) = pair
-    else {
-        unreachable!("only a plane's loop round a pipe climbs its axis: {pair:?}")
+    let Some(axis) = axis_a_plane_and_its_partner_wind_round(pair) else {
+        unreachable!("only a plane's loop round a pipe or a cone climbs its axis: {pair:?}")
     };
-    let along = pipe.axis().direction().components().map(Interval::exactly);
+    let along = axis.direction().components().map(Interval::exactly);
     let runs = cross_of(gradient_at(&pair[0], place), gradient_at(&pair[1], place));
     dot_of(runs, along).sign()
 }
 
-/// Whether the loop climbs the pipe's axis at the start: off its box, and,
-/// where that cannot say and the start is a point, worked out exactly.
+/// Whether the loop climbs the axis at the start: off its box, and, where
+/// that cannot say and the start is a point, worked out exactly.
 ///
 /// With `x` the start less the axis origin `o`, `n` the plane's normal and
 /// `w` the axis direction, the pipe's gradient is `|w|²x − (w·x)w`
@@ -15205,6 +15215,11 @@ fn climbs_at(pair: &[Surface; 2], place: PredicatePoint) -> Decision {
 /// about `(1, 1, 1)` are points `1.8e16` to `3.6e16` from the origin, and over
 /// each of them the intervals came out undecided, with enclosures of `13.6` to
 /// `30.8`, where the exact `det[x, n, w]` decided every one.
+///
+/// **A cone's gradient carries the same `w × n` term, scaled.** Its gradient
+/// is `|w|²x − (1 + slope²)(w·x)w` ([`gradient_at`]), so the extra factor
+/// multiplies a term along `w`, and `(w × n) · w` is nothing: crossed with `n`
+/// and dotted with `w` it drops out, leaving the one formula for both.
 fn climbs_at_the_start(pair: &[Surface; 2], from: PredicatePoint) -> Decision {
     let read = climbs_at(pair, from);
     if read == Decision::Pos || read == Decision::Neg {
@@ -15212,13 +15227,10 @@ fn climbs_at_the_start(pair: &[Surface; 2], from: PredicatePoint) -> Decision {
     }
     let exactly = || {
         let start = from.exact_coordinates()?;
-        let ([Surface::Plane(flat), Surface::Cylinder(pipe)]
-        | [Surface::Cylinder(pipe), Surface::Plane(flat)]) = pair
-        else {
-            unreachable!("only a plane's loop round a pipe climbs its axis: {pair:?}")
-        };
-        let origin = pipe.axis().origin().coordinates();
-        let along = pipe.axis().direction().components();
+        let winds_round = axis_a_plane_and_its_partner_wind_round(pair)?;
+        let flat = pair.iter().find_map(Surface::as_plane)?;
+        let origin = winds_round.origin().coordinates();
+        let along = winds_round.direction().components();
         let normal = flat.normal().components();
         (0..3).try_fold(Vec::new(), |so_far, axis| {
             let [next, after] = [(axis + 1) % 3, (axis + 2) % 3];
@@ -15259,14 +15271,11 @@ fn climbs_where_two_planes_cross(
     other: &Plane,
     place: PredicatePoint,
 ) -> Option<Decision> {
-    let ([Surface::Plane(flat), Surface::Cylinder(pipe)]
-    | [Surface::Cylinder(pipe), Surface::Plane(flat)]) = pair
-    else {
-        unreachable!("only a plane's loop round a pipe climbs its axis: {pair:?}")
-    };
+    let winds_round = axis_a_plane_and_its_partner_wind_round(pair)?;
+    let flat = pair.iter().find_map(Surface::as_plane)?;
     let [mine, theirs] = [flat, other].map(Plane::coefficients);
     let [n, m] = [mine, theirs].map(|[a, b, c, _]| [a, b, c]);
-    let w = pipe.axis().direction().components();
+    let w = winds_round.direction().components();
     let exactly_dotted = |one: [f64; 3], other: [f64; 3]| {
         (0..3).try_fold(Vec::new(), |so_far, axis| {
             Some(exactly_added(
@@ -15284,7 +15293,7 @@ fn climbs_where_two_planes_cross(
             so_far + Interval::exactly(entry)
         });
     let [normal, facing, along] = [n, m, w].map(|vector| vector.map(Interval::exactly));
-    let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
+    let origin = winds_round.origin().coordinates().map(Interval::exactly);
     let off_the_origin =
         |offset: f64, facing: [Interval; 3]| -(Interval::exactly(offset) + dot_of(facing, origin));
     let [mine_off, theirs_off] = [
