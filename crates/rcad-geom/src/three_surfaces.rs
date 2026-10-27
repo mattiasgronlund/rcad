@@ -265,8 +265,9 @@ pub enum MeetOfThree {
 impl MeetOfThree {
     /// This meet, which [`meet_of_three_surfaces`] handed back for `surfaces`,
     /// with the box round a meet of **three planes, or of two planes and a
-    /// ball, a pipe or a cone,** narrowed by one checked step. Any other meet
-    /// comes back as it is.
+    /// ball, a pipe or a cone,** narrowed by one checked step, and round a meet
+    /// of **one plane and two of those** narrowed by checked steps. Any other
+    /// meet comes back as it is.
     ///
     /// Cramer's rule sums its numerators in intervals, and each numerator is a
     /// small number built out of products near one that all round. Where two of
@@ -304,6 +305,16 @@ impl MeetOfThree {
     /// again, is one the step cannot narrow, and this boxes it between two
     /// neighbouring `f64` on each axis (§406.3).
     ///
+    /// **One plane and two quadrics take the step again and again**, with the
+    /// plane in the first row and each quadric in a row of its own, until a
+    /// step narrows no side ([`narrowed_onto_two_quadrics_by_checked_steps`]).
+    /// The pitch cones of a pair of mitre gears, the second turned a quarter
+    /// by a rotation that stores its axis `2⁻⁵²` off `x`, meet the first one's
+    /// cap in a box `3.65e−8` along `y` that also holds where the second one's
+    /// cap meets the first cap and cone, `1.2e−24` further up. Narrowed, the
+    /// box is one `f64` along `y` and stops at the one `f64` between the two,
+    /// so it holds the meet and not the other (Q2906).
+    ///
     /// **Why this is not what [`meet_of_three_surfaces`] hands back to everyone.**
     /// A narrower box round a meet is not a narrower box round a stored corner:
     /// `rcad-topo`'s `bake.rs` derives a face's corners through
@@ -331,11 +342,27 @@ impl MeetOfThree {
     /// points, and a corner placed from where they overlap would be nowhere.
     #[must_use]
     pub fn boxed_tight(&self, surfaces: [&Surface; 3]) -> MeetOfThree {
-        let [Surface::Plane(one), Surface::Plane(other), third] = in_a_fixed_order(surfaces) else {
+        let [Surface::Plane(one), second, third] = in_a_fixed_order(surfaces) else {
             return self.clone();
         };
         let MeetOfThree::At(places) = self else {
             return self.clone();
+        };
+        let Surface::Plane(other) = second else {
+            let (Some(mine), Some(theirs)) = (
+                how_a_surface_is_written(&second),
+                how_a_surface_is_written(&third),
+            ) else {
+                return self.clone();
+            };
+            return MeetOfThree::At(
+                places
+                    .iter()
+                    .map(|&place| {
+                        narrowed_onto_two_quadrics_by_checked_steps(&one, [&mine, &theirs], place)
+                    })
+                    .collect(),
+            );
         };
         if let Surface::Plane(last) = third {
             return MeetOfThree::At(
@@ -1346,16 +1373,7 @@ fn the_step_onto_the_quadric(
         -how_far_a_quadric_reaches_at(quadric, guess)?.enclosure(),
     ];
     let [one, other] = planes.map(|plane| plane.normal().components());
-    let row: [Interval; 3] = core::array::from_fn(|axis| {
-        (0..3).fold(
-            Interval::exactly(2.0) * quadric.half_linear[axis].enclosure(),
-            |so_far, column| {
-                so_far
-                    + quadric.squared[axis][column].enclosure()
-                        * (boxed[column] + Interval::exactly(guess[column]))
-            },
-        )
-    });
+    let row = the_row_a_quadric_steps_by(quadric, boxed, guess);
     let flat = nearly_cross_of(one, other)?.map(|component| component.enclosure());
     let across = [
         cross_enclosing(exactly(other), row),
@@ -1369,6 +1387,126 @@ fn the_step_onto_the_quadric(
         });
         quotient_or_everything(over, determinant)
     }))
+}
+
+/// `place`, a box round where a plane and two quadrics meet, narrowed by
+/// checked steps from its middle until one narrows no side:
+/// [`narrowed_onto_a_quadric_by_one_checked_step`]'s step, with the plane in
+/// the first row and each quadric in a row of its own.
+///
+/// **Why one step is not enough.** Where a plane cuts two quadrics in curves
+/// that cross at a small angle, [`two_points_or_nowhere`]'s rounds stop with a
+/// wide box: `3.65e−8` along `y` where a cap `z = 1` cuts two cones of slope
+/// one on one apex, one up `z` and one up `(1, 0, 2⁻⁵²)`. The determinant
+/// there is about `8y`, small beside the rows, so one step from the middle
+/// narrows that box only to `4.1e−9`. Each step after it starts closer and
+/// narrows more: `1.1e−10`, `8.2e−14`, `4.6e−20`, and then one `f64`,
+/// `3.3e−24`, after five steps; the sixth narrows nothing and ends it.
+///
+/// **No step loses a meet.** The row identity the step rests on holds at every
+/// point inside the box where the plane and both quadrics are nothing, so each
+/// stepped box holds every meet the box it was stepped from held, not only the
+/// one it was handed back for.
+///
+/// **The box is handed back as it was where no step can be taken**: a side
+/// that runs on for ever, a product that overflows, or a determinant whose
+/// enclosure reaches zero, which two curves that touch rather than cross give.
+///
+/// # Panics
+///
+/// If a stepped box and the box it was stepped from do not overlap, as
+/// [`narrowed_by_one_checked_step`] does.
+fn narrowed_onto_two_quadrics_by_checked_steps(
+    flat: &Plane,
+    quadrics: [&HowASurfaceIsWritten; 2],
+    place: PredicatePoint,
+) -> PredicatePoint {
+    let PredicatePoint::Constructed(mut boxed) = place else {
+        return place;
+    };
+    if !boxed
+        .iter()
+        .all(|side| side.lo().is_finite() && side.hi().is_finite())
+    {
+        return place;
+    }
+    for _ in 0..MOST_CHECKED_STEPS {
+        let guess = boxed.map(|side| 0.5 * side.lo() + 0.5 * side.hi());
+        let Some(step) = the_step_onto_two_quadrics(flat, quadrics, boxed, guess) else {
+            break;
+        };
+        let stepped: [Interval; 3] = core::array::from_fn(|axis| {
+            where_two_boxes_of_one_number_overlap(
+                Interval::exactly(guess[axis]) + step[axis],
+                boxed[axis],
+            )
+        });
+        let narrowed = stepped
+            .iter()
+            .zip(&boxed)
+            .any(|(after, before)| after.lo() > before.lo() || after.hi() < before.hi());
+        boxed = stepped;
+        if !narrowed {
+            break;
+        }
+    }
+    PredicatePoint::Constructed(boxed)
+}
+
+/// The most checked steps [`narrowed_onto_two_quadrics_by_checked_steps`]
+/// takes. It stops at the first step that narrows no side, so this only says
+/// how long it may go on, as [`MOST_ROUNDS_ROUND_A_CROSSING`] does for the
+/// rounds before it. The cap across the two cones it names stops after six.
+const MOST_CHECKED_STEPS: usize = 64;
+
+/// How far the meet of a plane and two quadrics inside `boxed` is from
+/// `guess`, as an enclosure, or `None` where a product it needs overflows.
+fn the_step_onto_two_quadrics(
+    flat: &Plane,
+    [mine, theirs]: [&HowASurfaceIsWritten; 2],
+    boxed: [Interval; 3],
+    guess: [f64; 3],
+) -> Option<[Interval; 3]> {
+    let misses = [
+        how_far_a_guess_misses(flat, guess)?,
+        -how_far_a_quadric_reaches_at(mine, guess)?.enclosure(),
+        -how_far_a_quadric_reaches_at(theirs, guess)?.enclosure(),
+    ];
+    let normal = exactly(flat.normal().components());
+    let [my_row, their_row] =
+        [mine, theirs].map(|quadric| the_row_a_quadric_steps_by(quadric, boxed, guess));
+    let across = [
+        cross_enclosing(my_row, their_row),
+        cross_enclosing(their_row, normal),
+        cross_enclosing(normal, my_row),
+    ];
+    let determinant = dot_enclosing(normal, across[0]);
+    Some(core::array::from_fn(|axis| {
+        let over = (0..3).fold(Interval::exactly(0.0), |so_far, which| {
+            so_far + misses[which] * across[which][axis]
+        });
+        quotient_or_everything(over, determinant)
+    }))
+}
+
+/// `M(boxed + guess) + 2b`, the row a quadric takes in a checked step from
+/// `guess` to a meet inside `boxed`, worked out in intervals
+/// ([`narrowed_onto_a_quadric_by_one_checked_step`] says why it holds).
+fn the_row_a_quadric_steps_by(
+    quadric: &HowASurfaceIsWritten,
+    boxed: [Interval; 3],
+    guess: [f64; 3],
+) -> [Interval; 3] {
+    core::array::from_fn(|axis| {
+        (0..3).fold(
+            Interval::exactly(2.0) * quadric.half_linear[axis].enclosure(),
+            |so_far, column| {
+                so_far
+                    + quadric.squared[axis][column].enclosure()
+                        * (boxed[column] + Interval::exactly(guess[column]))
+            },
+        )
+    })
 }
 
 /// `Q(guess)` for a quadric written out, from the stored numbers with nothing
@@ -7360,6 +7498,90 @@ mod tests {
         let x = (16.0 - y * y).sqrt();
         narrow_boxes_near(&answer, &[[x, y, 8.0], [-x, y, 8.0]]);
         assert_eq!(meet([&turned, &cap, &upright]), Ok(answer), "in any order");
+    }
+
+    /// The pitch cones of a pair of mitre gears: two cones of slope one on one
+    /// apex, one up `z` and one turned a quarter about `y` by a rotation that
+    /// leaves its axis `(1, 0, s)` for `s = 2⁻⁵²`, and the first one's cap
+    /// `z = 1`. The turned cone is `(1 + s²)|p|² − 2(x + sz)²`, and on the cap
+    /// and the circle `x² + y² = 1` that is nothing where `(x + s)² = 1 + s²`,
+    /// so the meet above `y = 0` is where `x² + 2sx − 1 = 0` and
+    /// `y⁴ + 4s²y² − 4s² = 0`. The turned cone's own cap, `x + sz = 1`, meets
+    /// the first cap and cone `1.2e−24` further up `y`, where `y² = 2s − s²`,
+    /// and one `f64` lies between the two. The box the meet comes back in is
+    /// `3.65e−8` along `y` and holds both. Narrowed, it must hold the first and
+    /// not the second, or `rcad-topo` cannot put the two in order along the
+    /// crossing and every fuse of the two frustums refuses (Q2906).
+    #[test]
+    fn a_cap_across_the_pitch_cones_of_mitre_gears_narrows_round_its_meet_and_not_the_next() {
+        let s = 2f64.powi(-52);
+        let cap = flat([0.0, 0.0, -1.0], [0.0, 0.0, 1.0]);
+        let upright = a_cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0);
+        let lying = upright.transformed(
+            &crate::Isometry::rotation(&Axis::y(), core::f64::consts::FRAC_PI_2).expect("an angle"),
+        );
+        let Surface::Cone(turned) = lying else {
+            panic!("a cone turned is a cone: {lying:?}");
+        };
+        assert_eq!(turned.axis().direction().components(), [1.0, 0.0, s]);
+        assert_eq!(turned.apex().coordinates(), [0.0, 0.0, 0.0]);
+
+        let three = [&cap, &upright, &lying];
+        let wide = meet(three).expect("two bands that cross are answered");
+        let tight = wide.boxed_tight(three);
+        let (MeetOfThree::At(wide_places), MeetOfThree::At(tight_places)) = (&wide, &tight) else {
+            panic!("expected points, got {wide:?} and {tight:?}");
+        };
+        let which = wide_places
+            .iter()
+            .position(|place| place.enclosure()[1].hi() > 1e-8)
+            .unwrap_or_else(|| panic!("no meet above y = 0 in {wide:?}"));
+        let before = wide_places[which].enclosure();
+        assert!(before[1].hi() > 3e-8, "the box it starts from: {before:?}");
+        let after = tight_places[which].enclosure();
+        assert!(
+            (0..3).all(|axis| before[axis].lo() <= after[axis].lo()
+                && after[axis].hi() <= before[axis].hi()),
+            "{after:?} is not inside {before:?}"
+        );
+
+        let sign_of = |terms: &[(f64, &[f64])]| {
+            let mut total = Exact::of(0.0);
+            for (factor, powers) in terms {
+                let mut product = Exact::of(*factor);
+                for &power in *powers {
+                    product = product.times(&Exact::of(power)).expect("in range");
+                }
+                total = total.plus(&product);
+            }
+            total.sign()
+        };
+        let where_x_crosses = |x: f64| sign_of(&[(1.0, &[x, x]), (2.0 * s, &[x]), (-1.0, &[])]);
+        let where_y_crosses =
+            |y: f64| sign_of(&[(1.0, &[y, y, y, y]), (4.0, &[s, s, y, y]), (-4.0, &[s, s])]);
+        let [x, y, z] = after;
+        assert!(
+            matches!(where_x_crosses(x.lo()), Decision::Neg | Decision::Zero),
+            "{x:?}"
+        );
+        assert!(
+            matches!(where_x_crosses(x.hi()), Decision::Pos | Decision::Zero),
+            "{x:?}"
+        );
+        assert!(
+            y.lo() <= 0.0 || matches!(where_y_crosses(y.lo()), Decision::Neg | Decision::Zero),
+            "{y:?}"
+        );
+        assert!(
+            matches!(where_y_crosses(y.hi()), Decision::Pos | Decision::Zero),
+            "{y:?}"
+        );
+        assert!(z.lo() <= 1.0 && 1.0 <= z.hi(), "{z:?}");
+        assert_eq!(
+            sign_of(&[(1.0, &[y.hi(), y.hi()]), (-2.0 * s, &[]), (1.0, &[s, s])]),
+            Decision::Neg,
+            "{y:?} reaches the turned cone's cap"
+        );
     }
 
     /// `-0.0 == 0.0`, so no pin that compares corners sees which zero a corner
