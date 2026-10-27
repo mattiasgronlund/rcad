@@ -13430,7 +13430,7 @@ mod tests {
 
     use rcad_predicates::{Decision, Interval, Policy, ProvenanceLog};
 
-    use crate::{DraftStep, Invalid, Rule, SolidBuilder};
+    use crate::{DraftStep, Invalid, Rule, SolidBuilder, SolidKey};
 
     use super::super::Scratch;
     use super::super::select::choose;
@@ -15437,42 +15437,16 @@ mod tests {
     /// A refusal of the answer's mesh names a face the caller can look up: the
     /// input face the refused face was cut from.
     ///
-    /// The answer is swept in a model of its own that is dropped straight
-    /// after, so a key into it is a key into nothing. Handed back as it was, it
-    /// gave `KeyFromAnotherModel` to anyone who asked the caller's model for
-    /// the face (Q2288).
-    ///
-    /// A unit cube with a ball of `13 · 2⁻⁴⁸` on its corner is placed, and its
-    /// answer cannot be meshed under any rule
-    /// (`a_ball_smaller_than_the_room_on_a_cube_corner_is_placed_and_its_answer_cannot_be_meshed`
-    /// in `tests/two_meets_reach_one_corner.rs`).
+    /// The fuse writes the answer's shells into a model of its own to read off
+    /// a mesh which way each one faces (`Assembly::nest_the_shells`), and drops
+    /// that model when it returns, so a key into it is a key into nothing.
+    /// Handed back as it was, it gave `KeyFromAnotherModel` to anyone who asked
+    /// the caller's model for the face (Q2288). The answer here is refused
+    /// there, under every rule.
     #[test]
     fn a_refusal_of_the_answers_mesh_names_the_input_face_it_was_cut_from() {
-        let s = f64::powi(2.0, -48);
         for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-            let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
-            let cube = model
-                .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
-                .expect("a unit cube");
-            let ball = model
-                .add_ball(
-                    13.0 * s,
-                    &Isometry::translation(Vector::new(3.0 * s, 4.0 * s, 12.0 * s))
-                        .expect("a finite shift"),
-                )
-                .expect("a positive radius");
-            let faces_of_the_inputs: Vec<FaceKey> = [cube, ball]
-                .into_iter()
-                .flat_map(|solid| {
-                    model
-                        .solid(solid)
-                        .expect("this model made the key")
-                        .faces()
-                        .map(|face| face.key())
-                        .collect::<Vec<FaceKey>>()
-                })
-                .collect();
-
+            let (mut model, cube, ball) = a_unit_cube_with_a_ball_too_small_to_mesh_on_its_corner();
             let refused = model.fuse(
                 &[cube],
                 &[ball],
@@ -15480,27 +15454,107 @@ mod tests {
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             );
-            let face = match refused {
-                Err(
-                    Error::CannotMeshAFace { face, .. }
-                    | Error::AWireWillNotLieFlatOnItsFace { face }
-                    | Error::ACurvedFaceGoesRightRoundWithNoSeam { face },
-                ) => face,
-                Err(other) => panic!("{rule:?}: {other:?}"),
-                Ok(_) => panic!(
-                    "{rule:?}: the fuse answered, so this needs another answer that cannot be \
-                     meshed"
-                ),
-            };
-            assert!(
-                faces_of_the_inputs.contains(&face),
-                "{rule:?}: {face:?} is no face of the cube or the ball"
-            );
-            assert!(
-                model.face(face).is_ok(),
-                "{rule:?}: the caller's model holds the face the refusal names"
-            );
+            the_face_named_is_one_of_the_inputs(&model, [cube, ball], rule, refused);
         }
+    }
+
+    /// The same of the sweep of the answer in `Assembly::commit`, which
+    /// meshes it in a throwaway model of its own.
+    ///
+    /// The answer is the one above, put into one solid per shell by hand,
+    /// since asking which shell is inside which would mesh it and refuse
+    /// before the commit is reached.
+    #[test]
+    fn a_refusal_of_the_sweep_of_the_answer_names_the_input_face_it_was_cut_from() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let (mut model, cube, ball) = a_unit_cube_with_a_ball_too_small_to_mesh_on_its_corner();
+            let scratch = Scratch::split_both_groups(&model, &[cube], &[ball], &policy, &mut log)
+                .expect("the cube and the ball split each other");
+            let chosen = choose(&model, &scratch, rule, &policy, &mut log).expect("pieces kept");
+            let mut assembly = assemble(
+                &model,
+                &scratch,
+                &chosen,
+                &scratch.names_of_one_point,
+                None,
+                &policy,
+                &mut log,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("an answer to write");
+            assembly.solids = (0..assembly.shells.len())
+                .map(|outer| Lump {
+                    outer,
+                    voids: Vec::new(),
+                })
+                .collect();
+
+            let refused = assembly.commit(&mut model, None, &policy, &mut log);
+            the_face_named_is_one_of_the_inputs(&model, [cube, ball], rule, refused);
+        }
+    }
+
+    /// A unit cube, and a ball of `13 · 2⁻⁴⁸` on its corner whose answer
+    /// under any rule is placed and cannot be meshed
+    /// (`a_ball_smaller_than_the_room_on_a_cube_corner_is_placed_and_its_answer_cannot_be_meshed`
+    /// in `tests/two_meets_reach_one_corner.rs`).
+    fn a_unit_cube_with_a_ball_too_small_to_mesh_on_its_corner() -> (Model, SolidKey, SolidKey) {
+        let s = f64::powi(2.0, -48);
+        let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+        let cube = model
+            .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a unit cube");
+        let ball = model
+            .add_ball(
+                13.0 * s,
+                &Isometry::translation(Vector::new(3.0 * s, 4.0 * s, 12.0 * s))
+                    .expect("a finite shift"),
+            )
+            .expect("a positive radius");
+        (model, cube, ball)
+    }
+
+    /// Asserts that `refused` is a refusal to mesh a face, and that the face it
+    /// names is a face of one of `inputs` in `model`.
+    fn the_face_named_is_one_of_the_inputs<T>(
+        model: &Model,
+        inputs: [SolidKey; 2],
+        rule: Rule,
+        refused: Result<T, Error>,
+    ) {
+        let face = match refused {
+            Err(
+                Error::CannotMeshAFace { face, .. }
+                | Error::AWireWillNotLieFlatOnItsFace { face }
+                | Error::ACurvedFaceGoesRightRoundWithNoSeam { face },
+            ) => face,
+            Err(other) => panic!("{rule:?}: {other:?}"),
+            Ok(_) => panic!(
+                "{rule:?}: the answer was written, so this needs another answer that cannot be \
+                 meshed"
+            ),
+        };
+        let faces_of_the_inputs: Vec<FaceKey> = inputs
+            .into_iter()
+            .flat_map(|solid| {
+                model
+                    .solid(solid)
+                    .expect("this model made the key")
+                    .faces()
+                    .map(|face| face.key())
+                    .collect::<Vec<FaceKey>>()
+            })
+            .collect();
+        assert!(
+            faces_of_the_inputs.contains(&face),
+            "{rule:?}: {face:?} is no face of the cube or the ball"
+        );
+        assert!(
+            model.face(face).is_ok(),
+            "{rule:?}: the caller's model holds the face the refusal names"
+        );
     }
 
     /// What one write of an answer made, in a form two models can be compared
