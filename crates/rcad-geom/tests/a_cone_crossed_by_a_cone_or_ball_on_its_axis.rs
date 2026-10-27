@@ -1444,7 +1444,9 @@ fn assert_named_as_a_hyperbola_and_an_ellipse_that_meet_where_they_touch(
 /// Walks `run` along `along` at a deflection of a hundredth, checks that every
 /// point is on both cones within the bound the walker publishes, and says which
 /// of the two flat cuts `flats`, each written `(normal, offset)`, it walked,
-/// with the points walked.
+/// with the points walked. A run with no ends is the whole of the curve its
+/// pickers name, as `walk` says, so a piece's walk is all of that cut, or all
+/// of that branch.
 fn the_flat_cut_walked(
     run: &NamedRun,
     along: [&Surface; 2],
