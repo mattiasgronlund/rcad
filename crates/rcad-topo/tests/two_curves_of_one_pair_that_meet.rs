@@ -1358,42 +1358,33 @@ fn two_cones_on_one_apex_leaning_apart_answer_every_fuse_under_a_tolerant_policy
 /// the apex and a step out along a ruling the two touch along, where the cross
 /// of their gradients is nothing, until Q2872.
 ///
-/// Since Q2872 the intersection answers, empty, both ways round. The union and
-/// both differences are still refused `ResultIsNotManifold`, an edge with one
-/// face along it: `which_arc_of_a_circle_walked_this_way` in
-/// `fuse/assemble.rs` signs a side of two cones by the side of the other cone
-/// the material lies on, which along a touching ruling is the same either
-/// side of the line while the two pieces walk it opposite ways, so the two
-/// pieces of one cone that meet there key the line as two edges. The row
-/// Q2872's merge adds is for that.
+/// After Q2872 the intersection answered, empty, both ways round, and the
+/// union and both differences were refused `ResultIsNotManifold`, an edge
+/// with one face along it: `which_arc_of_a_circle_walked_this_way` in
+/// `fuse/assemble.rs` signed a side of two cones by the side of the other
+/// cone the material lies on, which along a touching ruling is the same
+/// either side of the line while the two pieces walk it opposite ways, so the
+/// two pieces of one cone that meet there keyed the line as two edges. A
+/// ruling is straight, so there is no second arc between its two corners to
+/// tell it from, and since Q2880 two cones that cross in straight lines get no
+/// sign, as two pipes on parallel axes get none.
+///
+/// The union then came back as the two frustums with each side still in the
+/// four pieces the arrangement cut it into, along the two rulings and the
+/// two halves of the hyperbola the other frustum's near cap plane leaves on
+/// it: two solids of six faces. The joining gives a rim back whole only where
+/// nothing but its own two arcs ends at a corner, and it counted the other
+/// frustum's edges at the two corners the two share, `(1, 0, 1)` and
+/// `(2, 0, 2)`, so it kept every cut as an edge. Since Q2880 it counts the
+/// edges of the rim's own shell alone.
 #[test]
-fn the_pitch_cones_of_a_pair_of_mitre_gears_touch_along_a_ruling_and_only_the_intersection_answers()
-{
+fn the_pitch_cones_of_a_pair_of_mitre_gears_touch_along_a_ruling_and_every_fuse_answers() {
     let frustum = 7.0 * PI / 3.0;
-    for (rule, first_first) in six_fuses() {
-        if rule == Rule::Intersection {
-            the_fuse_answers(
-                the_pitch_cones_of_a_pair_of_mitre_gears,
-                (rule, first_first),
-                [frustum, frustum, 0.0],
-                [&[3, 3], &[], &[3], &[3]],
-            );
-        } else {
-            let said = fuse(
-                &mut a_model(),
-                the_pitch_cones_of_a_pair_of_mitre_gears,
-                rule,
-                first_first,
-            );
-            assert!(
-                matches!(
-                    said,
-                    Err(rcad_topo::Error::ResultIsNotManifold { count: 1 })
-                ),
-                "{rule:?} (first first: {first_first}): {said:?}"
-            );
-        }
-    }
+    every_fuse_answers(
+        the_pitch_cones_of_a_pair_of_mitre_gears,
+        [frustum, frustum, 0.0],
+        [&[3, 3], &[], &[3], &[3]],
+    );
 }
 
 fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
