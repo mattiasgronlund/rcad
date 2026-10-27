@@ -16232,6 +16232,15 @@ fn how_a_crossing_runs(
             }
         }
     }
+    // Two cones of one slope side by side cross in the hyperbola the flat
+    // surface halfway between their apexes cuts out of either, and `walk`
+    // marches each branch as that flat surface's cut of one of the two, so a
+    // branch is ordered as that plane's endless bend across that cone.
+    if let (Surface::Cone(one), Surface::Cone(other)) = (surface, partner)
+        && let Some((flat, cone)) = one.the_flat_surface_halfway_to_a_cone_beside_it(other)?
+    {
+        return how_an_endless_bend_runs(surface, partner, &flat, &cone, at, log);
+    }
     // Everything left is either a conic or a quartic. A conic is ordered by one
     // determinant: three points on a convex curve run round it in the order
     // they wind (§34.5). A quartic is ordered by one only where it runs once

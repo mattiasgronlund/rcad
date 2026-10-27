@@ -141,11 +141,32 @@ fn two_pointed_cones_a_quarter_turn_apart_touch_and_no_fuse_tells_a_faces_region
 /// orders the points along it as it orders a plane's endless bend across a
 /// cone, by that flat surface and that cone, and every fuse answers, under
 /// every rule both ways round.
+///
+/// The intersection is two halves of one shape either side of `x = 1.5`: the
+/// part of the first cone past it, which at height `2r` is the piece of a
+/// circle of radius `r` past a line `c = 1.5` from its centre, of area
+/// `r² acos(c/r) − c√(r² − c²)`, for `r` from `c` up to the top's four.
+/// Taken up the height that is
+/// `4[(r³/3) acos(c/r) − (2c/3) r√(r² − c²) + (c³/3) ln((r + √(r² − c²))/c)]`
+/// at `r = 4`, about 49.2755, which the intersection measures within its
+/// error.
 #[test]
 fn two_pointed_cones_side_by_side_do_not_touch_and_answer_every_fuse() {
-    assert_eq!(
-        every_fuse_of(two_pointed_cones_side_by_side).refusals(),
-        [[None; 2]; 3]
+    let fused = every_fuse_of(two_pointed_cones_side_by_side);
+    assert_eq!(fused.refusals(), [[None; 2]; 3]);
+
+    let (c, r) = (1.5_f64, 4.0_f64);
+    let across = (r * r - c * c).sqrt();
+    let shared = 4.0
+        * (r.powi(3) / 3.0 * (c / r).acos() - 2.0 * c / 3.0 * r * across
+            + c.powi(3) / 3.0 * ((r + across) / c).ln());
+    let [Ok(intersection), _] = fused.answers[1] else {
+        unreachable!("every fuse answered")
+    };
+    about_the_same(
+        intersection,
+        (shared, 0.0),
+        "the intersection against what the two share",
     );
 }
 
