@@ -2537,7 +2537,7 @@ impl Assembly {
             });
         rings.iter().all(|ring| {
             ring.len() == 1
-                || (may_close_up && self.a_ring_that_closes_up(ring, dissolved))
+                || (may_close_up && self.a_ring_that_closes_up(ring, along, dissolved))
                 || self.a_ring_goes_right_round(ring, &surface) == Some(false)
         })
     }
@@ -2552,14 +2552,23 @@ impl Assembly {
     /// says a ring closes up where that does not close it up. A corner the two
     /// pieces either side of meet at the apex of a cone is never walked
     /// straight through ([`Assembly::is_the_apex_of_a_cone_along`]).
-    fn a_ring_that_closes_up(&self, ring: &[Dart], dissolved: &[bool]) -> bool {
+    fn a_ring_that_closes_up(
+        &self,
+        ring: &[Dart],
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+    ) -> bool {
+        let shells = joined_across(along, &vec![true; along.len()], self.faces.len());
+        let its_shell = shells.leader(ring[0].face);
         let pieces: Vec<usize> = ring.iter().map(|&dart| self.edge_of(dart)).collect();
         ring.len() > 1
             && self.are_pieces_of_one_closed_curve(&pieces)
             && ring.iter().all(|&dart| {
                 let corner = self.starts_at(dart);
                 let ending_here: Vec<usize> = (0..self.edges.len())
-                    .filter(|&edge| !dissolved[edge])
+                    .filter(|&edge| {
+                        !dissolved[edge] && shells.leader(along[edge][0].face) == its_shell
+                    })
                     .flat_map(|edge| {
                         self.edges[edge]
                             .ends
@@ -12526,7 +12535,7 @@ fn which_arc_of_a_circle_walked_this_way(
                 is_written_the_other_way_round(&flat),
             )
         }
-        [Surface::Cylinder(_), Surface::Cylinder(_)]
+        [Surface::Cylinder(_), Surface::Cylinder(_)] | [Surface::Cone(_), Surface::Cone(_)]
             if the_crossing_of_these_runs_straight(&meet.carried_by) != Some(false) =>
         {
             return Ok(None);
