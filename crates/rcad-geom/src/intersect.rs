@@ -54,6 +54,7 @@ use crate::enclosure::{
 };
 use crate::exact::{Exact, Nearly, binary_exponent, multiplied_by_a_power_of_two};
 use crate::half_space::normals_exactly_square_to;
+use crate::real_roots::where_a_polynomial_is_zero;
 use crate::{
     Cone, Cylinder, EdgeRun, Error, HalfSpace, HalfSpaceThroughAPoint, NamedRun, Picker, Plane,
     Point, Result, Sphere, Surface, SurfaceMeet, Torus, Vector,
@@ -5229,11 +5230,14 @@ fn where_two_cones_cross(
 /// each apex inside the other cross in, which never meet, each whole curve
 /// picked by the corner of the same two flat surfaces it lies in: the two
 /// branches of a hyperbola and an ellipse or a parabola, or two hyperbolas'
-/// four branches.
+/// four branches. Or the loop and two branches
+/// [`a_loop_and_two_branches_that_nearly_meet`] proves where
+/// [`how_two_cones_off_one_axis_cross`] proves nothing.
 ///
 /// # Errors
 ///
-/// What [`how_two_cones_off_one_axis_cross`] refuses, and what
+/// What [`how_two_cones_off_one_axis_cross`] refuses but for the crossings
+/// [`a_loop_and_two_branches_that_nearly_meet`] proves, and what
 /// [`where_a_plane_and_a_cone_cross`] refuses of the hyperbola.
 fn the_pieces_two_cones_off_one_axis_cross_in(
     one: &Cone,
@@ -5241,43 +5245,68 @@ fn the_pieces_two_cones_off_one_axis_cross_in(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<SurfaceMeet> {
-    let crossing = match how_two_cones_off_one_axis_cross(one, other, policy, log)? {
-        HowTwoConesOffOneAxisCross::HeldApart(crossing) => crossing,
-        HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { cone, flat } => {
+    let crossing = match how_two_cones_off_one_axis_cross(one, other, policy, log) {
+        Ok(HowTwoConesOffOneAxisCross::HeldApart(crossing)) => crossing,
+        Ok(HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { cone, flat }) => {
             return where_a_plane_and_a_cone_cross(&flat, &cone, policy, log);
         }
-        HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch {
+        Ok(HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch {
             other,
             pickers,
             halfway,
             ..
-        } => {
+        }) => {
             return Ok(the_pieces_of_two_flat_cuts_picked_by(
                 pickers, halfway, &other,
             ));
         }
-        HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart {
+        Ok(HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart {
             other,
             pickers,
             halfway,
             ..
-        } => {
+        }) => {
             return Ok(the_pieces_of_two_flat_cuts_held_apart(
                 pickers, halfway, &other,
             ));
         }
+        Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface) => {
+            let Some(crossing) = a_loop_and_two_branches_that_nearly_meet(one, other)? else {
+                return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface);
+            };
+            return Ok(a_loop_and_two_branches_picked_by(
+                crossing.ruled,
+                crossing.apex,
+                [crossing.across.reversed(), crossing.across].map(Picker::from),
+            ));
+        }
+        Err(refused) => return Err(refused),
     };
     let Some(apex) = crossing.apex else {
         return two_loops_picked_either_side_of(Picker::from(crossing.across), &crossing.ruled);
     };
-    let across = crossing.across;
-    let and = Surface::Cone(crossing.ruled);
+    Ok(a_loop_and_two_branches_picked_by(
+        crossing.ruled,
+        apex,
+        [crossing.across.reversed(), crossing.across].map(Picker::from),
+    ))
+}
+
+/// The loop in front of `apex` and behind the flat surface `[behind, beyond]`
+/// pick either side of, the branch beyond it, and the branch behind `apex`,
+/// each named as part of where `ruled` is crossed.
+fn a_loop_and_two_branches_picked_by(
+    ruled: Cone,
+    apex: HalfSpaceThroughAPoint,
+    [behind, beyond]: [Picker; 2],
+) -> SurfaceMeet {
+    let and = Surface::Cone(ruled);
     let pieces: [SmallVec<[Picker; 1]>; 3] = [
-        smallvec![Picker::from(apex), Picker::from(across.reversed())],
-        smallvec![Picker::from(across)],
+        smallvec![Picker::from(apex), behind],
+        smallvec![beyond],
         smallvec![Picker::from(apex.reversed())],
     ];
-    Ok(SurfaceMeet::Curves(
+    SurfaceMeet::Curves(
         pieces
             .into_iter()
             .map(|picked_by| {
@@ -5285,7 +5314,7 @@ fn the_pieces_two_cones_off_one_axis_cross_in(
                     .expect("picked_by always holds the flat pickers just built")
             })
             .collect(),
-    ))
+    )
 }
 
 /// The pieces two flat cuts that meet where two cones touch are named in. Where
@@ -5377,6 +5406,382 @@ fn the_whole_of_each_piece_of_the_crossing_with(
             })
             .collect(),
     )
+}
+
+/// One loop and two branches that run off for ever, which
+/// [`a_loop_and_two_branches_that_nearly_meet`] proves two cones off one axis
+/// cross in: the loop is in front of `apex` and behind `across`, one branch is
+/// in front of `across`, and the other is behind `apex`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ALoopAndTwoBranchesThatNearlyMeet {
+    /// The cone each of whose straight lines out of its apex crosses the other
+    /// once on the loop, and once more on a branch but for two of them.
+    pub(crate) ruled: Cone,
+    /// A flat surface, slanted to `ruled`'s axis, that every straight line of
+    /// `ruled` on the loop's side crosses between the loop and the branch
+    /// beyond it. `ruled`'s apex is behind it.
+    pub(crate) across: HalfSpace,
+    /// The flat surface through `ruled`'s apex square to its axis, facing the
+    /// nappe of `ruled` the loop is on.
+    pub(crate) apex: HalfSpaceThroughAPoint,
+}
+
+/// Where two cones cross in one loop and two branches that run off for ever,
+/// proved with a flat surface slanted to the axis of one of them: the
+/// crossing, and nothing where no flat surface tried proves it.
+///
+/// # The family it proves
+///
+/// A cone turned off another of its slope about a line through a point of the
+/// other's axis, each apex outside the other cone, is a mirror image of it and
+/// touches it at two points, and [`two_flat_cuts_that_meet_where_they_touch`]
+/// names their crossing. Where the turned axis was rounded when written or
+/// stored, the two are not quite mirror images and do not touch: near each
+/// touch of the exact pair, a loop and a branch pass close by each other, a
+/// hair apart. A flat surface that holds such a loop apart from the branch it
+/// nearly meets runs between them at both near touches, and
+/// [`how_two_cones_off_one_axis_cross`] tries none that does. The flat
+/// surfaces tried here are the two pickers `P ± βF` of
+/// [`TwoFlatCuts`], worked out from the stored pair, which for the
+/// exact pair run through both its touches; whichever proves the crossing
+/// names it. For both pairs `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs`
+/// pins, the one that does is read along the turned cone. The proof itself
+/// asks nothing of mirrors and holds for any flat surface that passes it.
+///
+/// # Read along the straight lines of one cone
+///
+/// Call `X` the cone `ruled`, with apex `a`, axis `w`, slope `s`,
+/// `k = 1 + s²` and `W = w·w`, so that `X` is `Q(y) = W|y|² − k(y·w)² = 0`
+/// for `y = x − a`, and `Y` the cone `crossed`, `Q_Y(y) = y·M·y = 0` for
+/// `y = x − b`, its apex `b` and `M = V·I − k_Y·v vᵀ`. A straight line of `X`
+/// is `y = t·d` for `d` with `Q(d) = 0`, every `t`, and along it `Q_Y` is
+/// `q(t) = A·t² − 2B·t + C` with `A = Q_Y(d)`, `B = d·M·n`, `C = Q_Y(n)` and
+/// `n = b − a`. The flat surface is `g·x = c`, and `h = c − g·a`.
+///
+/// Every question below is a sign worked out exactly, and each must come out
+/// as asked:
+///
+/// 1. **`C > 0`**: `a` is outside `Y`, so `q(0) > 0` on every line.
+/// 2. **`A` changes sign at just two lines.** With `d = w + s‖w‖e`,
+///    `d·v = c_v + s·S·cos θ` for `c_v = w·v` and `S² = VW − c_v²`, and `A` is
+///    `kVW − k_Y(d·v)²`, zero where `|d·v| = Λ`, `Λ² = kVW/k_Y`. Just one of
+///    `±Λ` is strictly inside the range of `d·v` and the other is outside it
+///    exactly where `|Λ − |c_v|| < s·S < Λ + |c_v|`, which squared is
+///    `4k·k_Y·c_v²·VW > (kVW + k_Y(c_v² − s²S²))²`.
+/// 3. **`k(g·w)² > s²W|g|²`**: the flat surface cuts an ellipse out of `X`,
+///    and `g·d` has the sign of `g·w` on the nappe `w` points into.
+/// 4. **`h ≠ 0`**: with `ν` the sign of `h·(g·w)`, every line `d` of the nappe
+///    `ν·w` points into meets the flat surface once, at `t_G = h/(g·d) > 0`,
+///    and the other nappe never does.
+/// 5. **`Φ(d) = (g·d)²·q(t_G)` is nowhere zero on `X`.** `Φ` is the quadratic
+///    form `h²M − h(g mᵀ + m gᵀ) + C·g gᵀ` for `m = M·n`. Written as a
+///    quadratic in the number `d` has most of along `w`, the resultant of `Q`
+///    and `Φ` in it is a quartic in the other two, and where its leading
+///    number is not zero and [`where_a_polynomial_is_zero`] finds it no real
+///    root, no line of `X` but the apex is on both.
+/// 6. **`Φ < 0` on `X`**, read off the two lines of `X` in the flat surface
+///    through `w` along the number eliminated, which `w` being inside `X`
+///    makes real: `Φ` is one sign on `X`, by 5, and `T`, the sum of `Φ` at
+///    both, has it.
+///
+/// Then on every line of the nappe `ν·w`, `q(0) > 0 > q(t_G)`, so `q` has one
+/// root between the apex and the flat surface, where it changes sign, and
+/// those roots are one smooth loop. Its other root is beyond the flat surface
+/// where `A > 0`, behind the apex, on the other nappe, where `A < 0`, and
+/// nowhere where `A = 0`; by 2 the lines of each sign are one arc of them, so
+/// each kind of other root is one branch, running off for ever where `A`
+/// nears zero. The flat surface through `a` square to `w` meets `X` at `a`
+/// alone, which is not on `Y` by 1, so it holds the loop and the branch beyond
+/// the flat surface in front of it and the other branch behind.
+///
+/// **The pair is sorted first**, as [`how_two_cones_off_one_axis_cross`] sorts
+/// it, and then tried as `X` and `Y` both ways round, so which cone is ruled,
+/// and which flat surface holds the pieces apart, is the same whichever way
+/// round the pair came in.
+///
+/// # Errors
+///
+/// Whatever [`HalfSpace::new`] and [`HalfSpaceThroughAPoint::new`] refuse,
+/// which finite numbers that passed 3 and 4 never meet.
+pub(crate) fn a_loop_and_two_branches_that_nearly_meet(
+    one: &Cone,
+    other: &Cone,
+) -> Result<Option<ALoopAndTwoBranchesThatNearlyMeet>> {
+    let (first, second) = match Surface::Cone(*one).how_it_sorts_against(&Surface::Cone(*other)) {
+        Ordering::Greater => (other, one),
+        Ordering::Less | Ordering::Equal => (one, other),
+    };
+    for (ruled, crossed) in [(first, second), (second, first)] {
+        let Some(pickers) =
+            TwoFlatCuts::of(ruled, crossed).and_then(|made_of| made_of.the_two_pickers())
+        else {
+            continue;
+        };
+        for (normal, offset) in pickers {
+            let Some([apex_in_front, loop_where_the_axis_points]) =
+                how_a_flat_surface_parts_a_loop_from_two_branches(ruled, crossed, normal, offset)
+            else {
+                continue;
+            };
+            let across = HalfSpace::new(Vector::from(normal), offset)?;
+            let up = ruled.axis().direction();
+            return Ok(Some(ALoopAndTwoBranchesThatNearlyMeet {
+                ruled: *ruled,
+                across: if apex_in_front {
+                    across.reversed()
+                } else {
+                    across
+                },
+                apex: HalfSpaceThroughAPoint::new(
+                    ruled.apex(),
+                    if loop_where_the_axis_points { up } else { -up },
+                )?,
+            }));
+        }
+    }
+    Ok(None)
+}
+
+/// Whether `normal·x = offset` passes the six questions of
+/// [`a_loop_and_two_branches_that_nearly_meet`] for `ruled` and `crossed`,
+/// and where it does, whether `ruled`'s apex is in front of it and whether
+/// the loop is on the nappe `ruled`'s axis points into. Nothing where it does
+/// not, or where a product on the way cannot be formed exactly.
+fn how_a_flat_surface_parts_a_loop_from_two_branches(
+    ruled: &Cone,
+    crossed: &Cone,
+    normal: [f64; 3],
+    offset: f64,
+) -> Option<[bool; 2]> {
+    let apex = ruled.apex().coordinates();
+    let up = ruled.axis().direction().components();
+    let along = crossed.axis().direction().components();
+    let apart = Exact::gap_between(apex, crossed.apex().coordinates());
+    let apex_outside = a_cones_form_exactly(crossed, &apart)?;
+    if apex_outside.sign() != Decision::Pos {
+        return None;
+    }
+
+    let squared_up = Exact::dot_of(up, up)?;
+    let squared_along = Exact::dot_of(along, along)?;
+    let both = squared_up.times(&squared_along)?;
+    let leaning = Exact::dot_of(up, along)?;
+    let leaning_squared = leaning.times(&leaning)?;
+    let spread = both.minus(&leaning_squared);
+    let squared_slope = Exact::product_of(ruled.slope(), ruled.slope())?;
+    let widened = Exact::of(1.0).plus(&squared_slope);
+    let crossed_widened =
+        Exact::of(1.0).plus(&Exact::product_of(crossed.slope(), crossed.slope())?);
+    let level = widened
+        .times(&both)?
+        .plus(&crossed_widened.times(&leaning_squared.minus(&squared_slope.times(&spread)?))?);
+    let reach = widened
+        .times(&crossed_widened)?
+        .times(&leaning_squared)?
+        .times(&both)?;
+    let twice_reach = reach.plus(&reach);
+    if twice_reach
+        .plus(&twice_reach)
+        .minus(&level.times(&level)?)
+        .sign()
+        != Decision::Pos
+    {
+        return None;
+    }
+
+    let facing = Exact::dot_of(normal, up)?;
+    let an_ellipse = widened.times(&facing)?.times(&facing)?.minus(
+        &squared_slope
+            .times(&squared_up)?
+            .times(&Exact::dot_of(normal, normal)?)?,
+    );
+    if an_ellipse.sign() != Decision::Pos {
+        return None;
+    }
+    let ahead = Exact::of(offset).minus(&Exact::dot_of(normal, apex)?);
+    let [apex_behind, facing_up] = [&ahead, &facing].map(|value| match value.sign() {
+        Decision::Pos => Some(true),
+        Decision::Neg => Some(false),
+        Decision::Zero | Decision::Undecidable { .. } | _ => None,
+    });
+    let [Some(apex_behind), Some(facing_up)] = [apex_behind, facing_up] else {
+        return None;
+    };
+
+    let ruled_form = a_cones_form_as_numbers(&squared_up, &widened, up)?;
+    let crossed_form = a_cones_form_as_numbers(&squared_along, &crossed_widened, along)?;
+    let [x, y, z] = crossed_form
+        .each_ref()
+        .map(|row| Exact::dot_of_two_exact(row, &apart));
+    let pushed = [x?, y?, z?];
+    let ahead_squared = ahead.times(&ahead)?;
+    let on_the_flat = every_number_of(core::array::from_fn(|i| {
+        core::array::from_fn(|j| {
+            let paired = pushed[j]
+                .times(&Exact::of(normal[i]))?
+                .plus(&pushed[i].times(&Exact::of(normal[j]))?);
+            Some(
+                ahead_squared
+                    .times(&crossed_form[i][j])?
+                    .minus(&ahead.times(&paired)?)
+                    .plus(&apex_outside.times(&Exact::product_of(normal[i], normal[j])?)?),
+            )
+        })
+    }))?;
+
+    let most = (0..3)
+        .max_by(|i, j| up[*i].abs().total_cmp(&up[*j].abs()))
+        .expect("three numbers");
+    let [first, second] = match most {
+        0 => [1, 2],
+        1 => [0, 2],
+        _ => [0, 1],
+    };
+    let order = [first, second, most];
+    let ruled_quadratic = as_a_quadratic_in_one_number(&ruled_form, order);
+    let flat_quadratic = as_a_quadratic_in_one_number(&on_the_flat, order);
+    if ruled_quadratic[2][0].sign() == Decision::Zero {
+        return None;
+    }
+    let shared = the_resultant_of_two_quadratics(&ruled_quadratic, &flat_quadratic)?;
+    if matches!(shared[4].sign(), Decision::Zero) {
+        return None;
+    }
+    let highest_first: Vec<Exact> = shared.iter().rev().cloned().collect();
+    let found = where_a_polynomial_is_zero(&highest_first)?;
+    if !(found.at.is_empty() && found.or_maybe_at.is_empty()) {
+        return None;
+    }
+
+    let through_the_axis = if up[first] == 0.0 && up[second] == 0.0 {
+        [1.0, 0.0]
+    } else {
+        [up[first], up[second]]
+    };
+    let [q0, q1, q2] = the_quadratic_along(&ruled_quadratic, through_the_axis)?;
+    let [p0, p1, p2] = the_quadratic_along(&flat_quadratic, through_the_axis)?;
+    let q1_squared = q1.times(&q1)?;
+    let q0_q2 = q0.times(&q2)?;
+    let twice_q0_q2 = q0_q2.plus(&q0_q2);
+    if q1_squared.minus(&twice_q0_q2.plus(&twice_q0_q2)).sign() == Decision::Neg {
+        return None;
+    }
+    let p0_q2 = p0.times(&q2)?;
+    let both_values = p2
+        .times(&q1_squared.minus(&twice_q0_q2))?
+        .minus(&p1.times(&q1)?.times(&q2)?)
+        .plus(&p0_q2.plus(&p0_q2).times(&q2)?);
+    if both_values.sign() != Decision::Neg {
+        return None;
+    }
+    Some([!apex_behind, apex_behind == facing_up])
+}
+
+/// `W·I − k·u uᵀ`, the numbers of a cone's form about `up`, exactly.
+fn a_cones_form_as_numbers(
+    squared_up: &Exact,
+    widened: &Exact,
+    up: [f64; 3],
+) -> Option<[[Exact; 3]; 3]> {
+    every_number_of(core::array::from_fn(|i| {
+        core::array::from_fn(|j| {
+            let along = widened.times(&Exact::product_of(up[i], up[j])?)?;
+            Some(if i == j {
+                squared_up.minus(&along)
+            } else {
+                Exact::of(0.0).minus(&along)
+            })
+        })
+    }))
+}
+
+/// All nine numbers, or nothing where one of them is missing.
+fn every_number_of(numbers: [[Option<Exact>; 3]; 3]) -> Option<[[Exact; 3]; 3]> {
+    let [x, y, z] = numbers.map(|[x, y, z]| Some([x?, y?, z?]));
+    Some([x?, y?, z?])
+}
+
+/// The quadratic form `numbers` as `f₂·z² + f₁·z + f₀` in `z`, the number
+/// `order[2]` names, each `fᵢ` a polynomial in `x`, the number `order[0]`
+/// names, lowest power first, with the number `order[1]` names set to one:
+/// `f₀` of degree two, `f₁` of one and `f₂` of nought.
+fn as_a_quadratic_in_one_number(
+    numbers: &[[Exact; 3]; 3],
+    [x, y, z]: [usize; 3],
+) -> [Vec<Exact>; 3] {
+    let twice = |value: &Exact| value.plus(value);
+    [
+        vec![
+            numbers[y][y].clone(),
+            twice(&numbers[x][y]),
+            numbers[x][x].clone(),
+        ],
+        vec![twice(&numbers[y][z]), twice(&numbers[x][z])],
+        vec![numbers[z][z].clone()],
+    ]
+}
+
+/// `(a₂b₀ − a₀b₂)² − (a₂b₁ − a₁b₂)(a₁b₀ − a₀b₁)`, the resultant of the two
+/// quadratics `a` and `b` of [`as_a_quadratic_in_one_number`] in `z`: a
+/// polynomial in `x` of degree four, lowest power first, nothing just where
+/// the two share a root `z`, real or not, or where `a₂` is nothing.
+fn the_resultant_of_two_quadratics(a: &[Vec<Exact>; 3], b: &[Vec<Exact>; 3]) -> Option<Vec<Exact>> {
+    let crossed = |one: &[Exact], two: &[Exact], three: &[Exact], four: &[Exact]| {
+        Some(polynomial_minus(
+            &polynomial_times(one, two)?,
+            &polynomial_times(three, four)?,
+        ))
+    };
+    let ends = crossed(&a[2], &b[0], &a[0], &b[2])?;
+    let tops = crossed(&a[2], &b[1], &a[1], &b[2])?;
+    let bottoms = crossed(&a[1], &b[0], &a[0], &b[1])?;
+    crossed(&ends, &ends, &tops, &bottoms)
+}
+
+/// The product of two polynomials, lowest power first.
+fn polynomial_times(one: &[Exact], other: &[Exact]) -> Option<Vec<Exact>> {
+    let mut product = vec![Exact::of(0.0); one.len() + other.len() - 1];
+    for (i, left) in one.iter().enumerate() {
+        for (j, right) in other.iter().enumerate() {
+            product[i + j] = product[i + j].plus(&left.times(right)?);
+        }
+    }
+    Some(product)
+}
+
+/// The difference of two polynomials, lowest power first.
+fn polynomial_minus(one: &[Exact], other: &[Exact]) -> Vec<Exact> {
+    let zero = Exact::of(0.0);
+    (0..one.len().max(other.len()))
+        .map(|power| {
+            one.get(power)
+                .unwrap_or(&zero)
+                .minus(other.get(power).unwrap_or(&zero))
+        })
+        .collect()
+}
+
+/// The three numbers of [`as_a_quadratic_in_one_number`]'s quadratic on the
+/// straight line through the origin where `x` and the number set to one are
+/// `at`, each `fᵢ` read as the form of its degree in the two.
+fn the_quadratic_along(quadratic: &[Vec<Exact>; 3], at: [f64; 2]) -> Option<[Exact; 3]> {
+    let [x, y] = at;
+    let [f0, f1, f2] = quadratic.each_ref().map(|part| {
+        let degree = part.len() - 1;
+        let mut total = Exact::of(0.0);
+        for (power, number) in part.iter().enumerate() {
+            let mut term = number.clone();
+            for _ in 0..power {
+                term = term.times(&Exact::of(x))?;
+            }
+            for _ in power..degree {
+                term = term.times(&Exact::of(y))?;
+            }
+            total = total.plus(&term);
+        }
+        Some(total)
+    });
+    Some([f0?, f1?, f2?])
 }
 
 /// Two cones off one axis whose crossing is proved two loops, or one loop and
@@ -5638,7 +6043,10 @@ pub(crate) enum TheCutHalfway {
 /// shape. Among the pairs refused is a cone turned off another
 /// of its slope whose turned axis was rounded when written or stored, so that
 /// the two are not exactly mirror images, do not touch, and pass close by
-/// each other where the exact pair would touch.
+/// each other where the exact pair would touch. `intersect` names those
+/// as one loop and two branches where
+/// [`a_loop_and_two_branches_that_nearly_meet`] proves it, but `walk.rs` and
+/// `along_a_crossing.rs`, which ask here, still refuse them.
 ///
 /// [`Error::NotFinite`] where the gap between two apexes side by side, or how
 /// far the flat surface halfway between them is from the origin, leaves

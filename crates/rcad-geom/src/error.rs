@@ -457,30 +457,33 @@ pub enum Error {
     /// cuts out of either, which is named as that cut (Q2867). Mirror images
     /// with each apex inside the other cone cross in two flat cuts held apart,
     /// and are named as each whole curve of the two (Q2878). Pairs whose turned
-    /// axis was rounded stay here, which are not quite mirror images:
+    /// axis was rounded are not quite mirror images:
     /// the turn's `sin` and `cos` rounded, as for `rcad-topo`'s funnel with a
     /// leaning spout turned `0.3`, whose branches pass about `3e-8` apart instead
     /// of through each other, and an apex at `(0, 150, 90)` with its axis along
     /// `(0, -15, 8)` against slope one about `z`, whose numbers as written are
     /// exact but whose axis `Axis::new` rounds when it stores it at length one.
-    /// `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs` pins each kind.
+    /// `intersect` names both as one loop and two branches (Q2893), and `walk`
+    /// still refuses each piece of them, and a loop stated right round, with
+    /// this. `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs` pins each kind.
     ///
-    /// **The rounded pairs are to be answered by telling their branches apart,
+    /// **The rounded pairs are answered by telling their branches apart,
     /// never by naming where they nearly meet** (Q2869). The stored cones do
     /// not touch: naming the touches of the exact pair would answer a shape
     /// nobody stored, and put a node where the two skins are apart. And they
     /// are far enough apart for `f64` to tell: worked out exactly from the
     /// stored numbers, the funnel's branches pass about `6e-8` apart and the
     /// `(0, 150, 90)` pair's about `7e-7`, near each touch of the exact pair,
-    /// some eight orders above the rounding of either. So the refusal is a
-    /// **gap**. The rounded term of either form is the same sign at both
-    /// touches, so each crossing is one loop and two branches, and the exact
-    /// pair's own picker `P − βF` of `intersect.rs`'s
-    /// `two_flat_cuts_that_meet_where_they_touch` runs between the loop and
-    /// the branch it nearly meets, at both places; the other branch is in the
-    /// other nappe. What is missing is the proof that this flat surface meets
-    /// the stored crossing nowhere, which is a quartic with no real root, and
-    /// a walk that marches the tight bend each piece makes near a touch.
+    /// some eight orders above the rounding of either. The rounded term of
+    /// either form is the same sign at both touches, so each crossing is one
+    /// loop and two branches, and one of the two pickers `P ± βF` of
+    /// `intersect.rs`'s `two_flat_cuts_that_meet_where_they_touch`, worked out
+    /// from the stored pair, runs between the loop and the branch it nearly
+    /// meets, at both places; the other branch is in the other nappe.
+    /// `intersect.rs`'s `a_loop_and_two_branches_that_nearly_meet` proves that
+    /// flat surface meets the stored crossing nowhere, through a quartic
+    /// with no real root. What is missing, and a **gap**, is a walk that
+    /// marches the tight bend each piece makes near a touch.
     ///
     /// **A ball through the apex is the one coaxial pair left here**, and it is
     /// not a degree-four curve: the crossing is one circle and the apex apart
