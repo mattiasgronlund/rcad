@@ -34,10 +34,11 @@
 //! regions apart, and since row Q2902 it names each edge of the answer from
 //! its end away from a touch, so every fuse of the pair answers and measures
 //! what the two share. A fifth came with it: the same two side by side, which
-//! are mirror images too but cross in one hyperbola and do not touch. Since row Q2867 `intersect` names that hyperbola as the flat surface
-//! halfway between the two cuts it out of either, and since row Q2879 the fuse
-//! orders points along it as along that flat surface's cut of a cone, so every
-//! fuse of the pair answers.
+//! are mirror images too but cross in one hyperbola and do not touch. Since
+//! row Q2867 `intersect` names that hyperbola as the flat surface halfway
+//! between the two cuts it out of either, and since row Q2879 the fuse orders
+//! points along it as along that flat surface's cut of a cone, so every fuse
+//! of the pair answers.
 //!
 //! Each answer that comes back is to be certified, sound, and measure as the
 //! two solids alone bound it and as the others that came back say it must: the
