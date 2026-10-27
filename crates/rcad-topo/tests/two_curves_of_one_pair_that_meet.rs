@@ -1339,56 +1339,60 @@ fn two_cones_on_one_apex_leaning_apart_answer_every_fuse_under_a_tolerant_policy
 /// the origin, the two cones touch along the rulings `(1, 0, ±1)` and cross
 /// nowhere, and the two frustums meet along `t·(1, 0, 1)` for `t` from 1 to 2.
 /// By hand the intersection is empty, each frustum less the other is itself,
-/// `7π/3`, and the union is two solids that share an edge, which is not a
-/// manifold.
+/// `7π/3` with its three faces, and the union is the two frustums as they
+/// stand, two solids that touch along that line, as two bars side by side are
+/// (`fuses_that_touch.rs`).
 ///
-/// Every fuse is refused `Undecidable` on which way a crossing runs, asked at
-/// the apex and a step out along a ruling the two touch along: the two cones
-/// are tangent all along it, so the cross of their gradients there is nothing
-/// (Q2872).
+/// Each frustum's cone touches the other cone along two half rulings out of
+/// the apex: the upright one along `(1, 0, 1)`, its seam, and `(−1, 0, 1)`,
+/// and the lying one along `(1, 0, 1)` and `(1, 0, −1)`, its seam. Off those
+/// lines each frustum's side is outside the other cone, and the arrangement
+/// reads that off the two flat surfaces through the apex the two cones cross
+/// on (Q2872).
 ///
 /// Every fuse was refused `CannotNameWhichPieceOfACrossingThisIs` until Q2870,
 /// because `intersect` could not name the rulings the two touch along. Once it
 /// named them, every fuse panicked, because the arrangement read each of
-/// those rulings leaving the apex twice in the one corner.
+/// those rulings leaving the apex twice in the one corner, and after Q2870
+/// every fuse was refused `Undecidable` on which way a crossing runs, asked at
+/// the apex and a step out along a ruling the two touch along, where the cross
+/// of their gradients is nothing, until Q2872.
+///
+/// Since Q2872 the intersection answers, empty, both ways round. The union and
+/// both differences are still refused `ResultIsNotManifold`, an edge with one
+/// face along it: `which_arc_of_a_circle_walked_this_way` in
+/// `fuse/assemble.rs` signs a side of two cones by the side of the other cone
+/// the material lies on, which along a touching ruling is the same either
+/// side of the line while the two pieces walk it opposite ways, so the two
+/// pieces of one cone that meet there key the line as two edges. The row
+/// Q2872's merge adds is for that.
 #[test]
-fn the_pitch_cones_of_a_pair_of_mitre_gears_touch_along_a_ruling_and_every_fuse_is_refused_at_the_apex()
- {
+fn the_pitch_cones_of_a_pair_of_mitre_gears_touch_along_a_ruling_and_only_the_intersection_answers()
+{
+    let frustum = 7.0 * PI / 3.0;
     for (rule, first_first) in six_fuses() {
-        let mut model = a_model();
-        let said = fuse(
-            &mut model,
-            the_pitch_cones_of_a_pair_of_mitre_gears,
-            rule,
-            first_first,
-        );
-        let what = format!("{rule:?} (first first: {first_first})");
-        let Err(rcad_topo::Error::Undecidable { records }) = &said else {
-            panic!("{what}: should be refused Undecidable, and said {said:?}");
-        };
-        let [refused] = records.records() else {
-            panic!("{what}: should be refused on one question: {records:#?}");
-        };
-        assert_eq!(
-            refused.predicate(),
-            "which way a crossing runs",
-            "{what}: {refused:#?}"
-        );
-        let [apex, a_step_out] = refused.inputs() else {
-            panic!("{what}: should be asked at the apex and a step out: {refused:#?}");
-        };
-        assert_eq!(
-            apex.enclosure().map(|side| (side.lo(), side.hi())),
-            [(0.0, 0.0); 3],
-            "{what}: {refused:#?}"
-        );
-        let [x, y, z] = a_step_out
-            .enclosure()
-            .map(|side| (side.lo() + side.hi()) / 2.0);
-        assert!(
-            z >= 1.0 && y.abs() <= 1e-9 && (x.abs() - z).abs() <= 1e-9,
-            "{what}: a step out should be along (±1, 0, 1): {refused:#?}"
-        );
+        if rule == Rule::Intersection {
+            the_fuse_answers(
+                the_pitch_cones_of_a_pair_of_mitre_gears,
+                (rule, first_first),
+                [frustum, frustum, 0.0],
+                [&[3, 3], &[], &[3], &[3]],
+            );
+        } else {
+            let said = fuse(
+                &mut a_model(),
+                the_pitch_cones_of_a_pair_of_mitre_gears,
+                rule,
+                first_first,
+            );
+            assert!(
+                matches!(
+                    said,
+                    Err(rcad_topo::Error::ResultIsNotManifold { count: 1 })
+                ),
+                "{rule:?} (first first: {first_first}): {said:?}"
+            );
+        }
     }
 }
 
