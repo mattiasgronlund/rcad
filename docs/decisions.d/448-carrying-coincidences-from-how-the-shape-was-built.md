@@ -538,7 +538,9 @@ such a corner of the solid it is placed against. The doc comments of
 at `c3b3afeff`, for which three planes `bake` solves such a corner from (the
 paragraphs "Since Q2815" below); the doc comments of `derive_a_corner` and
 `ACornerReadAsOnePoint::lets_a_crossing_in_through_a_face_it_does_not_cut`
-say how.*
+say how. Amended by Q2874, written at `2dce325ce`, for the corners of joined
+faces, which choose too (the paragraph "Since Q2874" below); the doc comments
+of `corner_of_every_vertex_left` and `the_joined_corner_is_convex` say how.*
 
 **What the reading is.** Take a corner of the input with four or more planes
 round it (`BakedCorner::around`), one of which misses the point `bake` solved
@@ -789,8 +791,12 @@ line in, so that triple is passed over. Three things narrow where it is asked:
   the ones round the corner, either way round. So `Scratch::split_both_groups`
   bakes the arguments and the tools in one call, and each solid's corners see
   the other's planes.
-- The joined faces of a wholly flat solid, `corner_of_every_vertex_left`, make
-  no choice and keep the least box, as before Q2815.
+- The joined faces of a wholly flat solid, `corner_of_every_vertex_left`, made
+  no choice up to Q2874 and kept the least box. Since Q2874 they choose as
+  above, round a corner `the_joined_corner_is_convex` proves convex: the same
+  test, asked of the joined planes, which face out of the solid already, and
+  of where the model puts each far end once placed, since those planes are
+  placed (the paragraph "Since Q2874" below).
 
 **Why it asks the reading and not the true planes.** The reading is what the
 face is drawn in. Shifted to `(7, −5, 2.5)` after a tenth of a radian about
@@ -853,7 +859,31 @@ section files a row for the last alone:
   in the log under both policies. The other 18 are refused at the range check
   under `certified`, as at `f7bde708`, and are not traced
   (`a_placed_pyramid_cut_by_a_wedge_through_its_apex_answers_under_tolerant_where_q2583_found_it_refused`).
-- A corner of the joined faces of a wholly flat solid makes no choice. Whether
-  one needs it is not measured, and no shape found so far does. The row from
-  Q2815 builds the pin's pyramid with a side face in two coplanar pieces, so
-  that the fuse joins them, and asks whether it keeps the speck on `+y`.
+- A corner of the joined faces of a wholly flat solid made no choice. The row
+  from Q2815, Q2865, built the pin's pyramid with its `+y` face in two
+  coplanar pieces, so that the fuse joins them, and found it kept the speck
+  on `+y`. Q2874 closed it, in the paragraph below.
+
+**Since Q2874, a corner of joined faces chooses too.** Built with its `+y`
+face in two coplanar pieces that meet at the middle of its base edge, the
+pyramid above is the same solid, but the fuse joins the two pieces back into
+one plane before it bakes the solid, and `corner_of_every_vertex_left` solved
+its apex. It passed `None` for `derive_a_corner`'s choice, so it took the
+least box and kept the speck: `certified` refused the
+difference and the intersection at the range check over a ratio of
+`6.1e15`, and `tolerant(100)` answered them with the range check in the log,
+in 8 faces and 34 sides and 5 and 18. It now hands `derive_a_corner` the
+joined planes, which face out of the solid already, as `outward`, round a
+corner `the_joined_corner_is_convex` proves convex. That is
+`the_planes_round_a_convex_corner`'s test, the far end of every side leaving
+the corner behind every plane round it but the two the side runs between,
+asked of the joined faces' sides and planes. The joined planes are placed,
+so each far end is asked where the model puts it once placed, the box that
+move cost included, and not as stored. Both rules then answer under both
+policies as the one-triangle pyramid does, in 7 faces and 28 sides and 4 and
+12, with nothing in the log
+(`a_pyramid_with_a_split_plus_y_face_cut_on_one_side_of_the_x_axis_answers_as_the_true_planes_do`).
+
+`mise exec -- just t -E
+'test(/a_broken_three_surface_corner_read_back_from_bytes::/)'`, at
+`9229f4c7b`: 29 tests run, 29 passed.
