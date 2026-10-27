@@ -842,7 +842,8 @@ struct Crossing {
     reaches_the_face: bool,
     /// Where it runs through a cone's apex, for one of the two rulings a plane
     /// through the apex cuts or a half of one, or a half of a ruling two cones
-    /// on one apex share, and `None` for every other crossing (§347).
+    /// on one apex cross along, and `None` for every other crossing (§347). A
+    /// half two cones touch along is `touching` instead.
     through_an_apex: Option<ThroughAnApex>,
     /// Where the partner rests along the face's surface on one straight line
     /// and crosses it nowhere, and `None` for every other crossing.
@@ -867,21 +868,24 @@ struct Crossing {
 /// One straight line a plane or a pipe rests along a pipe on, the fillet's
 /// touch among them — a wall on `y = −2` against a bar of radius two, or two
 /// bars side by side, two radii apart — or a plane rests along a cone's side
-/// on.
+/// on, or one half of a ruling two cones on one apex touch along, as the pitch
+/// cones of a pair of mitre gears do.
 ///
 /// **`∇S × ∇Q` is nothing along the whole line**, because the two surfaces are
 /// tangent there and their gradients are parallel. So neither of the two things
 /// every other crossing reads off that cross product is there to read. Its
-/// direction is the pipe's own axis, which is a stored triple, or the cone's
-/// ruling ([`the_ruling_a_plane_rests_along`]); and the region left of it is
+/// direction is the pipe's own axis, which is a stored triple, the cone's
+/// ruling ([`the_ruling_a_plane_rests_along`]), or the half's way out of the
+/// apex ([`a_half_ruling_two_cones_touch_along`]); and the region left of it is
 /// not the partner's negative side, because the face lies on one side of the
 /// partner on **both** sides of the line.
 #[derive(Clone, Copy)]
 struct AlongATouch {
     /// The pipe's axis direction, exactly as stored, or the ruling's, up the
-    /// nappe the cone's axis points into. Which way it points is the
-    /// crossing's forward direction, and nothing else reads it: no gradient is
-    /// there to agree with.
+    /// nappe the cone's axis points into, or for a half ruling two cones touch
+    /// along, out of their apex. Which way it points is the crossing's forward
+    /// direction, and nothing else reads it: no gradient is there to agree
+    /// with.
     along: [Interval; 3],
     /// Which side of the partner the face lies on, either side of the line.
     face_lies_on: Decision,
@@ -18361,9 +18365,11 @@ fn the_side_of_a_cone_touching_it_a_cone_lies_on(
 /// Whether `∇S × ∇Q` runs towards the apex or away from it is read a step out,
 /// at `apex + d` for the direction `d`, as the sign of `(∇S × ∇Q) · d`. That
 /// is nothing only where the plane rests along the cone, or the two cones
-/// along each other. A plane resting along a cone is named as one bare line,
-/// and never comes here, but two cones on one apex that touch along a ruling
-/// are named as its two halves, and are refused here (Q2872).
+/// along each other, and neither is asked here. A plane resting along a cone
+/// is named as one bare line, and never comes here. Two cones on one apex that
+/// touch along a ruling are named as its two halves, and each is an
+/// [`AlongATouch`] ([`a_half_ruling_two_cones_touch_along`]), so this is `None`
+/// for it; until Q2872 each was refused here.
 ///
 /// # Errors
 ///
@@ -18408,8 +18414,8 @@ fn a_ruling_through_an_apex(
         Decision::Pos => false,
         Decision::Neg => true,
         // Nothing in the reals only along a ruling two cones touch along,
-        // where no way along is known. A tolerant policy can also read a
-        // narrow box as nothing.
+        // which is read as a touch and never asked here. A tolerant policy
+        // can read a narrow box as nothing.
         Decision::Zero | Decision::Undecidable { .. } | _ => {
             return Err(gave_up(
                 WHICH_WAY_A_CROSSING_RUNS,
@@ -18601,7 +18607,10 @@ fn a_half_ruling_two_cones_share(
 /// either holds that one way out, so both read in its corner. The enclosure
 /// holds nothing wherever the surface touches and `n` carries a root, as for
 /// two cones on one apex that touch along a ruling, and so cannot tell a
-/// touching surface from one that cuts two rulings or none (Q2870).
+/// touching surface from one that cuts two rulings or none (Q2870). That same
+/// asked answer, [`Decision::Zero`] for the surface the way was worked out on,
+/// is how a half two cones touch along is told from one they cross along
+/// ([`AHalfRulingTwoConesShare::is_one_they_touch_along`], Q2872).
 /// [`Decision::Undecidable`] for any surface is `None`, since its ways are not
 /// known; `rcad-geom` names no half of such a pair.
 ///
