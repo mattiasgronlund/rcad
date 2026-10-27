@@ -18897,8 +18897,8 @@ the 82 cases, and Coq checks each proof, modulo its hints. Each control at
 `u / 2` fails. A zero radius, and a direction with all three components zero,
 do not reach `on_floats`. So with 464.15 every pattern of zero and nonzero
 factors that reaches `on_floats` is run, and the bound holds on `y` in each.
-The doc comment on the constant still says these branches have not been run,
-which is a row (6).
+The doc comment on the constant said these branches had not been run, which
+was a row (6); Q2875 restated it by this section.
 
 **1. Which zeros get through.** `product_is_normal(a, b)` is `a == 0.0 || b
 == 0.0 || (a * b).abs() >= f64::MIN_POSITIVE` (`cascade.rs:67` at
@@ -19002,7 +19002,7 @@ proves, so there is no wrong sign to look for.
   says "Neither proof covers a zero difference, direction component or radius,
   which have not been run." By 1 to 3 the first two are run and prove, and
   the third does not reach `on_floats`. It is a comment that claims less than
-  is proved, not a wrong answer.
+  is proved, not a wrong answer. Q2875 was that row, and the doc now says so.
 - Not a row: Q2700 moves into `proofs/gappa/` each script a row of 464
   appended, and this section's are among them. Q2773 runs `cylsplit.py` with
   the checked products below the normals, which this section does not.

@@ -578,8 +578,12 @@ fn cross_component(
 /// `9*epsilon + 70*epsilon^2`. On `value` itself the two forms tried prove the
 /// bound only at
 /// `10*epsilon + 82*epsilon^2`, two `epsilon^2` above this constant, and nobody
-/// has looked for an input where `value` lands past it. Neither proof covers a
-/// zero difference, direction component or radius, which have not been run.
+/// has looked for an input where `value` lands past it. The bound on the sum is
+/// proved where a difference or a direction component is zero too, in each of
+/// 82 cases, and Coq accepts each proof (§464.28). A zero radius, and a
+/// direction zero in all three components, do not reach `on_floats`:
+/// [`Cylinder::new`] refuses the first, and the doc on [`Cylinder::basis`] says
+/// why no axis is the second.
 ///
 /// Every step of that argument is a *relative* one, so as with every bound of
 /// this shape it holds only while nothing overflows or falls into the
