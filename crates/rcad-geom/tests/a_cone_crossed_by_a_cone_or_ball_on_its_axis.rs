@@ -36,7 +36,9 @@
 //! cone they cross in two flat cuts held apart, which never meet: `intersect`
 //! names each whole branch, ellipse or parabola of the two, and `walk` marches
 //! each. Where the turned axis was rounded they are not mirror
-//! images, do not touch, and are refused as any other overlap is. Two of one
+//! images and do not touch, but cross in one loop and two branches that pass
+//! close by each other where the exact pair would touch: `intersect` names the
+//! three, and `walk` refuses each. Two of one
 //! slope side by side are mirror images too, and cross in the one hyperbola
 //! the flat surface halfway between them cuts out of either: `intersect` names
 //! its two branches as that cut, and `walk` marches each whole branch.
@@ -1100,7 +1102,7 @@ fn where_a_spout_line_meets_the_funnel(
 /// alike but for the sign of the last number, so the pair stored is still
 /// exactly mirror images across `z = 15`. This pair turned so that the first's
 /// axis is `z`, and made `√34` times as large, is the second pair of
-/// [`two_cones_whose_turned_axis_is_rounded_are_not_mirror_images_and_are_refused_as_any_overlap_is`],
+/// [`two_cones_whose_turned_axis_is_rounded_cross_in_a_loop_and_two_branches_that_nearly_meet`],
 /// whose numbers as written are exact but whose second axis is rounded on its
 /// own when stored.
 ///
@@ -1414,36 +1416,113 @@ fn two_cones_of_one_slope_side_by_side_cross_in_one_hyperbola_and_do_not_touch()
 ///
 /// So in each pair the second's axis is not exactly the mirror image of the
 /// first's across the flat surface halfway between the apexes, and the two do
-/// not touch. Nothing proves either crossing one loop and two branches, and
-/// both are refused as a degree-four curve, by the namer and by the walker,
-/// and not as a crossing that touches itself.
+/// not touch: near each place the exact pair touches, a loop and a branch pass
+/// close by each other. `intersect` names three pieces, the loop and two
+/// branches, and every point of the crossing found along a straight line of
+/// the turned cone out of its apex is picked by exactly one of them. `walk`
+/// does not march them yet, and refuses each, and the whole crossing, as a
+/// degree-four curve and not as a crossing that touches itself.
 #[test]
-fn two_cones_whose_turned_axis_is_rounded_are_not_mirror_images_and_are_refused_as_any_overlap_is()
-{
+fn two_cones_whose_turned_axis_is_rounded_cross_in_a_loop_and_two_branches_that_nearly_meet() {
     let (sin, cos) = 0.3_f64.sin_cos();
     let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
         .expect("a whole loop needs nothing picking it");
-    for [upright, turned] in [
-        [
-            a_cone([0.0; 3], [0.0, 0.0, 1.0], 0.5),
-            a_cone([0.0, 4.0 * sin, 4.0 - 4.0 * cos], [0.0, -sin, cos], 0.5),
-        ],
-        [
-            the_right_angled_cone(),
-            a_cone([0.0, 150.0, 90.0], [0.0, -15.0, 8.0], 1.0),
-        ],
+    for (slope, apex, along_the_turned) in [
+        (0.5, [0.0, 4.0 * sin, 4.0 - 4.0 * cos], [0.0, -sin, cos]),
+        (1.0, [0.0, 150.0, 90.0], [0.0, -15.0, 8.0]),
     ] {
-        assert_eq!(
-            named(&upright, &turned),
-            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+        let upright = a_cone([0.0; 3], [0.0, 0.0, 1.0], slope);
+        let turned = a_cone(apex, along_the_turned, slope);
+        let met = named(&upright, &turned);
+        let Ok(SurfaceMeet::Curves(runs)) = &met else {
+            panic!("a loop and two branches, and not {met:?}");
+        };
+        assert_eq!(runs.len(), 3, "{runs:?}");
+        let mut picked = [0; 3];
+        for point in
+            points_where_the_lines_of_a_cone_meet_an_upright_one(slope, apex, along_the_turned)
+        {
+            let picked_by: Vec<usize> = (0..3)
+                .filter(|which| {
+                    the_pickers_of(&runs[*which])
+                        .iter()
+                        .all(|picker| picker.side_of_point(point) == Decision::Pos)
+                })
+                .collect();
+            let [which] = picked_by.as_slice() else {
+                panic!("{point:?} is picked by one piece, not by {picked_by:?} of {runs:?}");
+            };
+            picked[*which] += 1;
+        }
+        assert!(
+            picked.iter().all(|count| *count > 0),
+            "every piece holds points of the crossing: {picked:?}"
         );
         for along in [[&upright, &turned], [&turned, &upright]] {
             assert_eq!(
                 where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new()).err(),
                 Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
             );
+            for run in runs {
+                assert_eq!(
+                    walk(
+                        run,
+                        along,
+                        Deflection::of(0.01).expect("a length above zero"),
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new()
+                    )
+                    .err(),
+                    Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
+                    "{run:?}"
+                );
+            }
         }
     }
+}
+
+/// Where the straight lines out of `apex` along the cone of `slope` about
+/// `along`, at a thousand turns round it, meet the cone of the same slope about
+/// `z` with its apex at the origin, `x² + y² = slope²·z²`: both places on each
+/// line that meets it twice.
+fn points_where_the_lines_of_a_cone_meet_an_upright_one(
+    slope: f64,
+    apex: [f64; 3],
+    along: [f64; 3],
+) -> Vec<PredicatePoint> {
+    let length = (along[0] * along[0] + along[1] * along[1] + along[2] * along[2]).sqrt();
+    let up = along.map(|part| part / length);
+    let square = if up[0].abs() < 0.5 {
+        [0.0, up[2], -up[1]]
+    } else {
+        [up[2], 0.0, -up[0]]
+    };
+    let square_length =
+        (square[0] * square[0] + square[1] * square[1] + square[2] * square[2]).sqrt();
+    let first = square.map(|part| part / square_length);
+    let second = [
+        up[1] * first[2] - up[2] * first[1],
+        up[2] * first[0] - up[0] * first[2],
+        up[0] * first[1] - up[1] * first[0],
+    ];
+    let form = |p: [f64; 3], q: [f64; 3]| p[0] * q[0] + p[1] * q[1] - slope * slope * p[2] * q[2];
+    let mut points = Vec::new();
+    for step in 0..1000 {
+        let (sin, cos) = (f64::from(step) * core::f64::consts::TAU / 1000.0).sin_cos();
+        let d: [f64; 3] =
+            std::array::from_fn(|i| up[i] + slope * (cos * first[i] + sin * second[i]));
+        let [a, b, c] = [form(d, d), form(apex, d), form(apex, apex)];
+        let spread = b * b - a * c;
+        if spread <= 0.0 || a == 0.0 {
+            continue;
+        }
+        for t in [(-b - spread.sqrt()) / a, (-b + spread.sqrt()) / a] {
+            points.push(PredicatePoint::from(std::array::from_fn::<f64, 3, _>(
+                |i| apex[i] + t * d[i],
+            )));
+        }
+    }
+    points
 }
 
 /// `intersect` names the pair's crossing in four pieces whichever comes first,
