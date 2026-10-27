@@ -1441,6 +1441,52 @@ impl Cone {
             Err(_) => Ok(None),
         }
     }
+
+    /// Where this cone and `other` are of one slope, mirror images of each
+    /// other, and touch at two points: the two flat surfaces, stored exactly,
+    /// that pick the four arcs they cross in, then the cone of the two that
+    /// sorts first and the other. `intersect` names each arc by a corner of
+    /// these two, so the answer is the same whichever way round the pair
+    /// comes. Both surfaces pass exactly through the straight line the two
+    /// touches lie on: the arc in the flat surface halfway between the apexes
+    /// lies in the sum of the two forms, and the other arc in their
+    /// difference.
+    ///
+    /// Nothing where the two do not cross so, asked under a certified policy
+    /// as [`Cone::the_flat_surface_halfway_to_a_cone_beside_it`] asks it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`] where how the two cross could not be settled.
+    pub fn the_pickers_of_a_mirror_image_that_touches_it(
+        &self,
+        other: &Self,
+    ) -> Result<Option<([HalfSpace; 2], Self, Self)>> {
+        if self.apex() == other.apex()
+            || whether_two_cones_share_an_axis(self, other) != Decision::Pos
+        {
+            return Ok(None);
+        }
+        match how_two_cones_off_one_axis_cross(
+            self,
+            other,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) {
+            Ok(HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch {
+                cone,
+                other,
+                pickers,
+                ..
+            }) => Ok(Some((pickers, cone, other))),
+            Ok(
+                HowTwoConesOffOneAxisCross::HeldApart(_)
+                | HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. },
+            ) => Ok(None),
+            Err(undecided @ Error::Undecidable { .. }) => Err(undecided),
+            Err(_) => Ok(None),
+        }
+    }
 }
 
 /// Which way one of the circles a ball on a cone's axis crosses it in runs, for
@@ -3244,6 +3290,44 @@ mod tests {
                 .expect("decided"),
             None,
             "two loops"
+        );
+    }
+
+    /// Two cones of slope a half, one up `z` from the origin and one from
+    /// `(0, 4, 4)` along `-y`, are mirror images across `y + z = 4` and touch
+    /// at two points, so both ways round the same two pickers come back with
+    /// the same two cones. Two cones side by side get nothing.
+    #[test]
+    fn two_cones_of_one_slope_that_touch_hand_back_the_pickers_of_their_four_arcs() {
+        let up_z = a_cone_up_z(0.0, 0.5);
+        let along_minus_y = Cone::new(
+            Axis::new(Point::new(0.0, 4.0, 4.0), Vector::new(0.0, -1.0, 0.0)).expect("an axis"),
+            0.5,
+        )
+        .expect("a slope");
+        let one_way = up_z
+            .the_pickers_of_a_mirror_image_that_touches_it(&along_minus_y)
+            .expect("decided")
+            .expect("the two touch");
+        let other_way = along_minus_y
+            .the_pickers_of_a_mirror_image_that_touches_it(&up_z)
+            .expect("decided")
+            .expect("the two touch");
+        assert_eq!(one_way, other_way);
+        let (_, cone, other) = one_way;
+        assert!(
+            (cone, other) == (up_z, along_minus_y) || (cone, other) == (along_minus_y, up_z),
+            "{cone:?} and {other:?}"
+        );
+        let beside = Cone::new(
+            Axis::new(Point::new(3.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("an axis"),
+            0.5,
+        )
+        .expect("a slope");
+        assert_eq!(
+            up_z.the_pickers_of_a_mirror_image_that_touches_it(&beside)
+                .expect("decided"),
+            None
         );
     }
 

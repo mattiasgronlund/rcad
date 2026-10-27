@@ -89,7 +89,7 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 /// `two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points`
 /// in `rcad-geom`
 /// shows the touch on a pair whose numbers are exact, and
-/// [`two_pointed_cones_a_quarter_turn_apart_touch_and_no_fuse_tells_a_faces_regions_apart`]
+/// [`two_pointed_cones_eight_high_a_quarter_turn_apart_no_fuse_tells_a_faces_regions_apart`]
 /// on the same two cones a quarter turn apart, where every number is exact.
 ///
 /// Every fuse is refused where `intersect` names the crossing.
@@ -115,20 +115,25 @@ fn two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule() {
 /// in `fuse/arrange.rs`, where two regions of one face are not told apart.
 ///
 /// Eight high, the ellipse in `y + z = 4` reaches up to `(0, −4, 8)`, where
-/// both caps' rims pass. Ten high, neither cap meets the other solid, so the
-/// crossing is the two ellipses alone, and every fuse is refused the same: the
-/// rims are not what stops them.
+/// both caps' rims pass, and every fuse is still refused there.
 #[test]
-fn two_pointed_cones_a_quarter_turn_apart_touch_and_no_fuse_tells_a_faces_regions_apart() {
-    for shape in [
-        two_pointed_cones_a_quarter_turn_apart,
-        two_pointed_cones_ten_high_a_quarter_turn_apart,
-    ] {
-        assert_eq!(
-            every_fuse_of(shape).refusals(),
-            [[Some(A_FACE_WHOSE_REGIONS_ARE_NOT_TOLD_APART); 2]; 3]
-        );
-    }
+fn two_pointed_cones_eight_high_a_quarter_turn_apart_no_fuse_tells_a_faces_regions_apart() {
+    assert_eq!(
+        every_fuse_of(two_pointed_cones_a_quarter_turn_apart).refusals(),
+        [[Some(A_FACE_WHOSE_REGIONS_ARE_NOT_TOLD_APART); 2]; 3]
+    );
+}
+
+/// **The same two pointed cones, ten high.** Neither cap meets the other
+/// solid, so the crossing is the two ellipses alone. Since row Q2886 the fuse
+/// puts a node at each touch on both walls and orders each arc round a point
+/// of the straight line through the touches, and every fuse answers.
+#[test]
+fn two_pointed_cones_ten_high_a_quarter_turn_apart_answer_every_fuse() {
+    assert_eq!(
+        every_fuse_of(two_pointed_cones_ten_high_a_quarter_turn_apart).refusals(),
+        [[None; 2]; 3]
+    );
 }
 
 /// **Two pointed cones side by side.** Both have slope a half and height
