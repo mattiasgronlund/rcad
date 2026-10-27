@@ -54,6 +54,7 @@ use crate::enclosure::{
 };
 use crate::exact::{Exact, Nearly, binary_exponent, multiplied_by_a_power_of_two};
 use crate::half_space::normals_exactly_square_to;
+use crate::real_roots::where_a_polynomial_is_zero;
 use crate::{
     Cone, Cylinder, EdgeRun, Error, HalfSpace, HalfSpaceThroughAPoint, NamedRun, Picker, Plane,
     Point, Result, Sphere, Surface, SurfaceMeet, Torus, Vector,
@@ -5361,11 +5362,9 @@ fn the_pieces_of_two_flat_cuts_picked_by(
 /// in front of `across`, and the other is behind `apex`.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ALoopAndTwoBranchesThatNearlyMeet {
-    /// The cone each of whose straight lines out of its apex crosses `crossed`
+    /// The cone each of whose straight lines out of its apex crosses the other
     /// once on the loop, and once more on a branch but for two of them.
     pub(crate) ruled: Cone,
-    /// The cone those straight lines cross.
-    pub(crate) crossed: Cone,
     /// A flat surface, slanted to `ruled`'s axis, that every straight line of
     /// `ruled` on the loop's side crosses between the loop and the branch
     /// beyond it. `ruled`'s apex is behind it.
@@ -5387,12 +5386,14 @@ pub(crate) struct ALoopAndTwoBranchesThatNearlyMeet {
 /// names their crossing. Where the turned axis was rounded when written or
 /// stored, the two are not quite mirror images and do not touch: near each
 /// touch of the exact pair, a loop and a branch pass close by each other, a
-/// hair apart. [`how_two_cones_off_one_axis_cross`] proves none of these,
-/// since every flat surface it tries is square to an axis, and a loop and a
-/// branch that nearly meet are held apart only by one that runs between them
-/// at both near touches. The flat surfaces tried here are the two pickers of
-/// the exact pair, `P ± βF` of [`TwoFlatCutsThatMeet`], which run through both
-/// its touches, and whichever proves the crossing names it. The proof itself
+/// hair apart. A flat surface that holds such a loop apart from the branch it
+/// nearly meets runs between them at both near touches, and
+/// [`how_two_cones_off_one_axis_cross`] tries none that does. The flat
+/// surfaces tried here are the two pickers `P ± βF` of
+/// [`TwoFlatCutsThatMeet`], worked out from the stored pair, which for the
+/// exact pair run through both its touches; whichever proves the crossing
+/// names it. For both pairs `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs`
+/// pins, the one that does is read along the turned cone. The proof itself
 /// asks nothing of mirrors and holds for any flat surface that passes it.
 ///
 /// # Read along the straight lines of one cone
@@ -5474,7 +5475,6 @@ pub(crate) fn a_loop_and_two_branches_that_nearly_meet(
             let up = ruled.axis().direction();
             return Ok(Some(ALoopAndTwoBranchesThatNearlyMeet {
                 ruled: *ruled,
-                crossed: *crossed,
                 across: if apex_in_front {
                     across.reversed()
                 } else {
@@ -5946,7 +5946,10 @@ pub(crate) enum TheCutHalfway {
 /// other cone, whose two flat cuts stay apart, and a cone turned off another
 /// of its slope whose turned axis was rounded when written or stored, so that
 /// the two are not exactly mirror images, do not touch, and pass close by
-/// each other where the exact pair would touch.
+/// each other where the exact pair would touch. `intersect` names those last
+/// as one loop and two branches where
+/// [`a_loop_and_two_branches_that_nearly_meet`] proves it, but `walk.rs` and
+/// `along_a_crossing.rs`, which ask here, still refuse them.
 ///
 /// [`Error::NotFinite`] where the gap between two apexes side by side, or how
 /// far the flat surface halfway between them is from the origin, leaves
