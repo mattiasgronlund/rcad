@@ -7892,12 +7892,14 @@ fn one_unbroken_stretch_of_one_ring(rings: &[Vec<Dart>], darts: &[Dart]) -> Opti
 ///
 /// **Both halves of that are asked here rather than left to the sweep, and that
 /// is the difference between a refusal and a corrupt solid.**
-/// `Assembly::commit` re-validates what it wrote, but only in a debug build and
-/// only as a *panic* — it is there to catch a bug in this crate, and a release
-/// build would write the answer out regardless. A curved answer whose two faces
-/// along one side disagree which way they face is exactly that, so it is asked
-/// before anything is written and comes back as a refusal (§4.1: refusing beats
-/// corrupting, and both beat crashing on a caller's solid).
+/// `Assembly::commit` re-validates what it wrote too, in every build, not only
+/// a debug one: it builds the whole answer into a throwaway model first and
+/// sweeps that, coming back with a refusal, `Error::TheFuseWroteABrokenAnswer`,
+/// rather than a panic, if the sweep finds anything wrong (§87). A curved
+/// answer whose two faces along one side disagree which way they face is
+/// exactly that, so it is asked before anything is written and comes back as a
+/// refusal here as well (§4.1: refusing beats corrupting, and both beat
+/// crashing on a caller's solid).
 ///
 /// # Errors
 ///
