@@ -5397,6 +5397,42 @@ pub(crate) enum HowTwoConesOffOneAxisCross {
         pickers: [HalfSpace; 2],
         halfway: TheCutHalfway,
     },
+    /// Two cones of one slope that are mirror images across the flat surface
+    /// halfway between their apexes, each apex inside the other cone: they
+    /// cross in the two flat cuts `flats` make of `cone`, the one that sorts
+    /// first, and those two never meet. `other`, `flats` and `pickers` are
+    /// worked out as for [`Self::InTwoFlatCutsThatMeetWhereTheyTouch`]. The cut
+    /// by `flats[1]` is always a hyperbola, and `halfway` says what the cut by
+    /// `flats[0]` is.
+    ///
+    /// Each corner of `pickers` holds one whole curve, and none is split. Call
+    /// the nappe of `cone` that `other`'s apex is inside the near one. In
+    /// front of both is the branch of `flats[1]`'s cut on the near nappe, and
+    /// behind both its branch on the far one. In front of the first alone is
+    /// the cut by `flats[0]`, which is all on the near nappe where it is an
+    /// ellipse or a parabola, and its branch on the near nappe where it is a
+    /// hyperbola; in front of the second alone is that hyperbola's far branch,
+    /// and nothing where there is none.
+    InTwoFlatCutsHeldApart {
+        cone: Cone,
+        other: Cone,
+        flats: [Plane; 2],
+        pickers: [HalfSpace; 2],
+        halfway: WhichConic,
+    },
+}
+
+/// Which conic a flat surface that misses a cone's apex cuts out of it.
+/// Exhaustive on purpose: these are the three there are.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WhichConic {
+    /// One closed curve, on one nappe.
+    AnEllipse,
+    /// One endless curve, on one nappe, where the flat surface leans as the
+    /// cone's own straight lines do.
+    AParabola,
+    /// Two endless branches, one on each nappe.
+    AHyperbola,
 }
 
 /// What the flat surface halfway between two mirror images that touch at two
@@ -6025,14 +6061,14 @@ enum MirrorImages {
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where a product on the way
 /// cannot be formed exactly, and what
-/// [`TwoFlatCutsThatMeet::what_holds_the_hyperbolas_pieces_apart`] refuses.
+/// [`TwoFlatCuts::what_holds_the_hyperbolas_pieces_apart`] refuses.
 ///
 /// [`Error::NotFinite`] where a flat surface's numbers leave `f64`'s range.
 fn two_flat_cuts_that_meet_where_they_touch(
     first: &Cone,
     second: &Cone,
 ) -> Result<HowTwoConesOffOneAxisCross> {
-    let Some(made_of) = TwoFlatCutsThatMeet::of(first, second) else {
+    let Some(made_of) = TwoFlatCuts::of(first, second) else {
         return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
     };
     let halfway = match made_of.an_ellipse_halfway.sign() {
@@ -6045,36 +6081,88 @@ fn two_flat_cuts_that_meet_where_they_touch(
             return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
         }
     };
-    let [here, there] = [first.apex(), second.apex()].map(|apex| apex.coordinates());
-    let middle = Point::from(core::array::from_fn(|axis| {
-        0.5 * here[axis] + 0.5 * there[axis]
-    }));
-    let [a, b, c] = made_of.second.0.each_ref().map(Exact::nearest_f64);
-    let flats = [
-        Plane::from_point_and_normal(middle, second.apex() - first.apex())?,
-        Plane::from_coefficients([a, b, c, -made_of.second.1.nearest_f64()])?,
-    ];
-    let Some([one_side, other_side]) = made_of.the_two_pickers() else {
-        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
-    };
+    let (flats, pickers) = made_of.the_flats_and_their_pickers(first, second)?;
     Ok(
         HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch {
             cone: *first,
             other: *second,
             flats,
-            pickers: [
-                HalfSpace::new(Vector::from(one_side.0), one_side.1)?,
-                HalfSpace::new(Vector::from(other_side.0), other_side.1)?,
-            ],
+            pickers,
             halfway,
         },
     )
 }
 
-/// The exact numbers [`two_flat_cuts_that_meet_where_they_touch`] is made of,
-/// each flat surface's form at `x` written as a normal and an offset, `g·x −
-/// c`, with `a` the first apex.
-struct TwoFlatCutsThatMeet {
+/// The two flat cuts two mirror images with each apex inside the other cross
+/// in, and the two flat surfaces that pick them apart, one whole curve in
+/// each corner, as [`HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart`]
+/// holds them. `first` is the cone that sorts first and `second` the other.
+///
+/// The flat surfaces `P = 0` and `F = 0` and the pickers `G₁ = P + βF` and
+/// `G₂ = P − βF` are those of [`two_flat_cuts_that_meet_where_they_touch`],
+/// whose working does not ask where `b` is. With `b` inside `first`, `Q(n)` is
+/// below zero, so `F` cuts a hyperbola, by the rule given there, and `P` cuts
+/// an ellipse, a parabola or a hyperbola by the sign of `k(w·n)² − s²WN`,
+/// which is asked. The two cuts meet only where the cones touch, which
+/// [`how_two_mirror_images_stand`] proves is nowhere, so `F` keeps one sign
+/// along each curve of the cut by `P`, and `P` along each branch of the cut
+/// by `F`.
+///
+/// # Which corner holds which curve
+///
+/// Neither form changes where `w` is turned round, since `f` has it twice, so
+/// take `w·n > 0`: `w` points into the nappe `b` is inside, the near one. On
+/// `P = 0`, `F = N(2k(w·n)(w·y) − WN)`, and on `F = 0`,
+/// `P = (N/(w·n))(2(w·y) − WN/(k(w·n)))`. So each form is below zero all over
+/// the far nappe, where `w·y < 0`, which puts `F`'s far branch behind both
+/// pickers, where `G₁ = G₂ = P`, and `P`'s far branch, where there is one, in
+/// front of the second alone, where `G₂ = −βF` and `β > 0`.
+///
+/// `P` is above zero far out along `F`'s near branch, where `w·y` grows
+/// without end, so that branch is in front of both. `F` is above zero at `n/2`,
+/// where `w·y = (w·n)/2` and `k(w·n)² > WN` is `Q(n) < 0`, and `n/2` is on `P`
+/// inside `first`, so inside `P`'s near curve: the ellipse, the parabola or
+/// the near branch. The straight line `F = 0` in `P` misses that curve, so it
+/// misses its inside too, since a line that ran inside it without crossing it
+/// would stay inside it for ever: no straight line fits inside an ellipse or a
+/// branch, and inside a parabola only one along its axis, which runs along a
+/// straight line of `first`, along which `w·y` changes, where it is the same
+/// all along `F = 0` in `P`. So `F` is above zero all over the near curve,
+/// which is in front of the first picker alone.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where a product on the way
+/// cannot be formed exactly.
+///
+/// [`Error::NotFinite`] where a flat surface's numbers leave `f64`'s range.
+fn two_flat_cuts_held_apart(first: &Cone, second: &Cone) -> Result<HowTwoConesOffOneAxisCross> {
+    let Some(made_of) = TwoFlatCuts::of(first, second) else {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    };
+    let halfway = match made_of.an_ellipse_halfway.sign() {
+        Decision::Pos => WhichConic::AnEllipse,
+        Decision::Zero => WhichConic::AParabola,
+        Decision::Neg => WhichConic::AHyperbola,
+        Decision::Undecidable { .. } | _ => {
+            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+        }
+    };
+    let (flats, pickers) = made_of.the_flats_and_their_pickers(first, second)?;
+    Ok(HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart {
+        cone: *first,
+        other: *second,
+        flats,
+        pickers,
+        halfway,
+    })
+}
+
+/// The exact numbers the two flat cuts two mirror images cross in are made
+/// of, as [`two_flat_cuts_that_meet_where_they_touch`] works them out, each
+/// flat surface's form at `x` written as a normal and an offset, `g·x − c`,
+/// with `a` the first apex.
+struct TwoFlatCuts {
     /// `k(w·n)² − s²WN`, above zero just where the flat surface halfway cuts an
     /// ellipse.
     an_ellipse_halfway: Exact,
@@ -6087,7 +6175,7 @@ struct TwoFlatCutsThatMeet {
     second: ([Exact; 3], Exact),
 }
 
-impl TwoFlatCutsThatMeet {
+impl TwoFlatCuts {
     /// The numbers for `first` and `second`, or nothing where a product on the
     /// way cannot be formed exactly.
     fn of(first: &Cone, second: &Cone) -> Option<Self> {
@@ -6125,6 +6213,42 @@ impl TwoFlatCutsThatMeet {
             ),
             second: (across, second_reach),
         })
+    }
+
+    /// `P = 0` and `F = 0` as flat surfaces, the first from the point halfway
+    /// between the apexes and the gap between them, as two of one slope side
+    /// by side have theirs, and the second from `F`'s numbers each rounded
+    /// once; then `G₁` and `G₂` as half-spaces.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where
+    /// [`TwoFlatCuts::the_two_pickers`] cannot work out the pickers, and
+    /// [`Error::NotFinite`] where a flat surface's numbers leave `f64`'s range.
+    fn the_flats_and_their_pickers(
+        &self,
+        first: &Cone,
+        second: &Cone,
+    ) -> Result<([Plane; 2], [HalfSpace; 2])> {
+        let [here, there] = [first.apex(), second.apex()].map(|apex| apex.coordinates());
+        let middle = Point::from(core::array::from_fn(|axis| {
+            0.5 * here[axis] + 0.5 * there[axis]
+        }));
+        let [a, b, c] = self.second.0.each_ref().map(Exact::nearest_f64);
+        let flats = [
+            Plane::from_point_and_normal(middle, second.apex() - first.apex())?,
+            Plane::from_coefficients([a, b, c, -self.second.1.nearest_f64()])?,
+        ];
+        let Some([one_side, other_side]) = self.the_two_pickers() else {
+            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+        };
+        Ok((
+            flats,
+            [
+                HalfSpace::new(Vector::from(one_side.0), one_side.1)?,
+                HalfSpace::new(Vector::from(other_side.0), other_side.1)?,
+            ],
+        ))
     }
 
     /// The two flat surfaces through `first`'s apex that
