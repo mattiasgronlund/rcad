@@ -13576,6 +13576,12 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
 # `held` is held by a queue row, `unlanded` is on no landed ref, and
 # `origin-only` is only on `origin/main`, so all four stay, as does `main`.
 # `released` was held, and its row's release is what lets it go.
+#
+# The sweep itself runs twice, started together, against this one fixture
+# (§315). Neither may exit nonzero or print git's `fatal` from a tree the
+# other already removed, and the one that loses the race for the lock must
+# still report the twelve kept trees, with nothing left for it to remove or
+# delete.
 [private]
 check-prune-worktrees-selftest:
     #!/usr/bin/env bash
@@ -13648,7 +13654,23 @@ check-prune-worktrees-selftest:
         || fail "a live tree alongside a gone one was not marked"
     (cd "$dir/busy/" && exec sleep 300) &
     busy=$!
-    got=$(just prune-worktrees "$dir/runner" "$dir/rcad-fuzz.service")
+    # Two sweeps started together, the shape of two runs whose rows land in
+    # one push sending their pruners at once (§315). The lock serializes
+    # them: whichever reaches it first does the real removal and deletion,
+    # and the other waits, then finds its own work already done.
+    just prune-worktrees "$dir/runner" "$dir/rcad-fuzz.service" >"$dir/sweep-a" 2>&1 &
+    sweep_a=$!
+    just prune-worktrees "$dir/runner" "$dir/rcad-fuzz.service" >"$dir/sweep-b" 2>&1 &
+    sweep_b=$!
+    rc_a=0; wait "$sweep_a" || rc_a=$?
+    rc_b=0; wait "$sweep_b" || rc_b=$?
+    got=$(cat "$dir/sweep-a")
+    got_b=$(cat "$dir/sweep-b")
+    [ "$rc_a" = 0 ] && [ "$rc_b" = 0 ] \
+        || fail "a sweep started beside another exited nonzero: a=$rc_a b=$rc_b"$'\n'"$got"$'\n'"$got_b"
+    ! grep -qi fatal <<<"$got"$'\n'"$got_b" \
+        || fail "a sweep hit git's fatal error instead of waiting out the other"
+    got="$got"$'\n'"$got_b"
     [ -d "$dir/hub/.git" ] || fail "the hub was removed"
     expect_kept() {
         [ -d "$dir/$1" ] || fail "the $1 tree was removed"
@@ -13684,6 +13706,8 @@ check-prune-worktrees-selftest:
     done
     grep -qxF "12 worktree(s) kept; 3 branch(es) main holds deleted" <<<"$got" \
         || fail "the tally is not the twelve kept trees and the three deleted branches"
+    grep -qxF "12 worktree(s) kept; 0 branch(es) main holds deleted" <<<"$got" \
+        || fail "the sweep that waited out the other did not find its work already done"
 
 # Where this repo stands, in one call.
 #
