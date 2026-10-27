@@ -923,3 +923,37 @@ one of three candidates in that count.
   direction.
 - **Never work around a refusal**, for the reason given under rscene above.
   Counting a refusal as a refusal is exactly what this consumer already does.
+
+## rcad-brep
+
+Reads OCCT's `.brep` text files into a `Model`, and will write a `Model`'s
+solids back out. Lives at `~/git/mattiasgronlund/rcad-brep`, and depends on the
+`rcad` facade at a pinned git rev, which it bumps and rcad never does. Its own
+`docs/roadmap.md` is its design doc, and **row 3 of the table in its §10 is its
+rule for what it asks of rcad**: rcad answers to STEP and to the kernel, never
+to rcad-brep, and rcad-brep adapts to rcad as it is. Read that row rather than
+a summary here.
+
+### What rcad answered
+
+- **An edge with four faces along it** (`docs/decisions.md` §469). OCCT's
+  checker calls such an edge valid in a `.brep`. rcad refuses it as
+  `ADraftEdgeIsNotWalkedByTwoCoedges { count: 4 }`, and that stays. rcad
+  already holds the same solid written as **two edges** on that line, two faces
+  each, which is how the fuse writes a solid that touches itself along a line.
+  So rcad-brep splits the edge, pairing each face that walks it forward with
+  one that walks it reversed. With four faces either such pairing is sound, and
+  which way each face walks the edge is all the reader needs: no geometry. With
+  six or more, pair faces that sit next to each other round the line. rcad does
+  not check that today, and whether a pairing that crosses is a sound solid is
+  Q2912. `crates/rcad/tests/what_rcad_brep_asks_through_the_front_door.rs` pins
+  all of this through the facade alone. Whether splitting the edge is reading
+  the file or repairing it, under rcad-brep's own row 7, is for rcad-brep to
+  say.
+
+### What rcad asks in return
+
+- **Never work around a refusal**, for the reason given under rscene above.
+- **Say so if a `.brep` ever holds six or more faces along one edge.** No solid
+  in rcad's STEP corpus does (§469.2), so it would be the first real solid to
+  reach Q2912's question.
