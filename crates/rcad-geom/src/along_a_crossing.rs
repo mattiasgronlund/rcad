@@ -1160,8 +1160,9 @@ fn the_way_two_cones_on_one_axis_wind(
 /// or a loop and two branches, where it proves it a loop and two branches:
 /// the branches run off for ever, and the loop is not told apart from them
 /// here, and where it proves it two flat cuts that meet where the two cones
-/// touch, two ellipses or a hyperbola and an ellipse, which is no one closed
-/// curve to go round.
+/// touch, two ellipses or a hyperbola and an ellipse, or two flat cuts held
+/// apart, where each apex is inside the other, a hyperbola and an ellipse, a
+/// parabola or a hyperbola, none of which is one closed curve to go round.
 ///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] where it proves the
 /// two of one slope side by side, whose crossing is one hyperbola.
@@ -1189,7 +1190,10 @@ fn the_way_a_loop_two_cones_cross_in_off_one_axis_winds(
         Ok(HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }) => {
             return Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed);
         }
-        Ok(HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. }) => {
+        Ok(
+            HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. }
+            | HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart { .. },
+        ) => {
             return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
         }
         Err(Error::Undecidable { .. }) => return Ok(WhichWayItWinds::CannotTell),
@@ -1336,7 +1340,9 @@ impl Cone {
     /// as it always was. So is the hyperbola two of one slope side by side
     /// cross in, whose two branches are picked as a plane's cut of a cone, and
     /// the two ellipses two mirror images that touch cross in, whose four arcs
-    /// are picked by flat surfaces through the straight line the two meet on.
+    /// are picked by flat surfaces through the straight line the two meet on,
+    /// and the two flat cuts two mirror images with each apex inside the other
+    /// cross in, each whole curve picked by the same two flat surfaces.
     #[must_use]
     pub fn which_side_past_the_flat_surface_between_two_loops(
         &self,
@@ -1368,7 +1374,8 @@ impl Cone {
             Err(Error::Undecidable { .. }) => return Some(NOTHING_IS_KNOWN),
             Ok(
                 HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }
-                | HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. },
+                | HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. }
+                | HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart { .. },
             )
             | Err(_) => {
                 return None;
@@ -1436,7 +1443,8 @@ impl Cone {
             }
             Ok(
                 HowTwoConesOffOneAxisCross::HeldApart(_)
-                | HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. },
+                | HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. }
+                | HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart { .. },
             ) => Ok(None),
             Err(undecided @ Error::Undecidable { .. }) => Err(undecided),
             Err(_) => Ok(None),
@@ -1482,7 +1490,8 @@ impl Cone {
             }) => Ok(Some((pickers, cone, other))),
             Ok(
                 HowTwoConesOffOneAxisCross::HeldApart(_)
-                | HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. },
+                | HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }
+                | HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart { .. },
             ) => Ok(None),
             Err(undecided @ Error::Undecidable { .. }) => Err(undecided),
             Err(_) => Ok(None),

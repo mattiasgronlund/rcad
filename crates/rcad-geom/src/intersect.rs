@@ -5225,7 +5225,11 @@ fn where_two_cones_cross(
 /// of the two flat cuts two mirror images that touch cross in, each picked by
 /// the corner of two flat surfaces it lies in: four arcs of two ellipses, or
 /// six pieces of a hyperbola and an ellipse, four of them split in two corners
-/// by one more flat surface each.
+/// by one more flat surface each. Or the two flat cuts two mirror images with
+/// each apex inside the other cross in, which never meet, each whole curve
+/// picked by the corner of the same two flat surfaces it lies in: the two
+/// branches of a hyperbola and an ellipse or a parabola, or two hyperbolas'
+/// four branches.
 ///
 /// # Errors
 ///
@@ -5249,6 +5253,16 @@ fn the_pieces_two_cones_off_one_axis_cross_in(
             ..
         } => {
             return Ok(the_pieces_of_two_flat_cuts_picked_by(
+                pickers, halfway, &other,
+            ));
+        }
+        HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart {
+            other,
+            pickers,
+            halfway,
+            ..
+        } => {
+            return Ok(the_pieces_of_two_flat_cuts_held_apart(
                 pickers, halfway, &other,
             ));
         }
@@ -5285,17 +5299,7 @@ fn the_pieces_of_two_flat_cuts_picked_by(
     halfway: TheCutHalfway,
     other: &Cone,
 ) -> SurfaceMeet {
-    let and = Surface::Cone(*other);
-    let corner = |[mine, theirs]: [bool; 2]| -> SmallVec<[Picker; 1]> {
-        let [mine, theirs] = [(0, mine), (1, theirs)].map(|(which, in_front)| {
-            Picker::from(if in_front {
-                pickers[which]
-            } else {
-                pickers[which].reversed()
-            })
-        });
-        smallvec![mine, theirs]
-    };
+    let corner = |in_front| the_corner_of(pickers, in_front);
     let split = |picked_by: SmallVec<[Picker; 1]>, by: HalfSpaceThroughAPoint| {
         [by, by.reversed()].map(|side| {
             let mut picked_by = picked_by.clone();
@@ -5316,6 +5320,54 @@ fn the_pieces_of_two_flat_cuts_picked_by(
                 .collect()
         }
     };
+    the_whole_of_each_piece_of_the_crossing_with(other, pieces)
+}
+
+/// The pieces two flat cuts held apart are named in, one whole curve in each
+/// corner `pickers` make, as [`HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart`]
+/// says which: the second cut's near branch in front of both, its far branch
+/// behind both, the first cut's ellipse, parabola or near branch in front of
+/// the first alone, and, where that cut is a hyperbola, its far branch in front
+/// of the second alone.
+fn the_pieces_of_two_flat_cuts_held_apart(
+    pickers: [HalfSpace; 2],
+    halfway: WhichConic,
+    other: &Cone,
+) -> SurfaceMeet {
+    let corners: &[[bool; 2]] = match halfway {
+        WhichConic::AnEllipse | WhichConic::AParabola => {
+            &[[true, true], [false, false], [true, false]]
+        }
+        WhichConic::AHyperbola => &[[true, true], [false, false], [true, false], [false, true]],
+    };
+    the_whole_of_each_piece_of_the_crossing_with(
+        other,
+        corners
+            .iter()
+            .map(|in_front| the_corner_of(pickers, *in_front)),
+    )
+}
+
+/// The two pickers that pick the corner in front of each `pickers` that
+/// `in_front` says, and behind the others.
+fn the_corner_of(pickers: [HalfSpace; 2], in_front: [bool; 2]) -> SmallVec<[Picker; 1]> {
+    let [mine, theirs] = [0, 1].map(|which| {
+        Picker::from(if in_front[which] {
+            pickers[which]
+        } else {
+            pickers[which].reversed()
+        })
+    });
+    smallvec![mine, theirs]
+}
+
+/// Each of `pieces` as the whole of the part of the crossing with `other` it
+/// picks.
+fn the_whole_of_each_piece_of_the_crossing_with(
+    other: &Cone,
+    pieces: impl IntoIterator<Item = SmallVec<[Picker; 1]>>,
+) -> SurfaceMeet {
+    let and = Surface::Cone(*other);
     SurfaceMeet::Curves(
         pieces
             .into_iter()
@@ -5351,7 +5403,7 @@ pub(crate) struct TwoConesOffOneAxis {
 
 /// What [`how_two_cones_off_one_axis_cross`] proves of two cones off one axis.
 /// Exhaustive on purpose: `intersect`, `walk` and `along_a_crossing` each
-/// match it, and a fourth shape is one each of them must be taught.
+/// match it, and a fifth shape is one each of them must be taught.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum HowTwoConesOffOneAxisCross {
     /// Two loops, or one loop and two branches, held apart by flat surfaces.
@@ -5551,6 +5603,15 @@ pub(crate) enum TheCutHalfway {
 /// an ellipse or a hyperbola:
 /// [`HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch`].
 ///
+/// # Two mirror images held apart
+///
+/// Where none of the four proves the crossing either way round and they are
+/// mirror images, not side by side, with each apex inside the other cone,
+/// their crossing is the same two flat cuts of either cone, which never meet,
+/// since the two touch nowhere. The cuts are named, whether the one halfway is
+/// an ellipse, a parabola or a hyperbola:
+/// [`HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart`].
+///
 /// # Errors
 ///
 /// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] where none of
@@ -5562,8 +5623,9 @@ pub(crate) enum TheCutHalfway {
 /// of [`two_flat_cuts_that_meet_where_they_touch`] would hold together.
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where two mirror images
-/// touch at two points and a product on the way to the flat surfaces that
-/// pick the pieces apart cannot be formed exactly, or the flat surface halfway
+/// touch at two points, or are held apart, and a product on the way to the
+/// flat surfaces that pick the pieces apart cannot be formed exactly, or,
+/// where they touch, the flat surface halfway
 /// cuts a hyperbola and the one that holds both axes does not come out as
 /// numbers `f64` holds exactly: a **gap**, since the pieces are there.
 ///
@@ -5573,8 +5635,7 @@ pub(crate) enum TheCutHalfway {
 /// signs, where each kind of branch may come in two, and every pair the
 /// enclosures above are too loose for. A **gap** where the crossing is two
 /// loops, or a loop and two branches, and the curve is there whatever its
-/// shape. Among the pairs refused are mirror images with each apex inside the
-/// other cone, whose two flat cuts stay apart, and a cone turned off another
+/// shape. Among the pairs refused is a cone turned off another
 /// of its slope whose turned axis was rounded when written or stored, so that
 /// the two are not exactly mirror images, do not touch, and pass close by
 /// each other where the exact pair would touch.
@@ -5619,9 +5680,8 @@ pub(crate) fn how_two_cones_off_one_axis_cross(
         Some(MirrorImages::TouchingAlongALine) => {
             Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
         }
-        Some(MirrorImages::CutTwiceApart) | None => {
-            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
-        }
+        Some(MirrorImages::CutTwiceApart) => two_flat_cuts_held_apart(first, second),
+        None => Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
     }
 }
 
@@ -5927,7 +5987,8 @@ fn where_every_line_crosses_a_flat_inside(
 /// where `Q(n) > 0`, that is where `b` is outside `one`; all along the straight
 /// line from `a` to `b` where `Q(n) = 0`, `b` on `one`, since the doubled line
 /// is that one and both cones are tangent to the flat surface along it; and
-/// nowhere where `b` is inside `one`, where the two cuts stay apart.
+/// nowhere where `b` is inside `one`, where the two cuts stay apart and
+/// [`two_flat_cuts_held_apart`] names them.
 ///
 /// **Unless `w·n = 0`**, asked exactly. `u × n` is `−k(w·n)(w × n)`, so with
 /// the axes not on one line the flat surface `y·u = 0` is parallel to `P` just
@@ -6006,7 +6067,8 @@ enum MirrorImages {
     /// Each apex is on the other cone, and the two touch all along the
     /// straight line between the apexes.
     TouchingAlongALine,
-    /// Each apex is inside the other cone, and the two flat cuts stay apart.
+    /// Each apex is inside the other cone, and the two flat cuts their
+    /// crossing is made of stay apart.
     CutTwiceApart,
 }
 

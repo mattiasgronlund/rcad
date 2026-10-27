@@ -43,7 +43,7 @@ use crate::exact::Exact;
 use crate::intersect::{
     HowTwoConesOffOneAxisCross, Question, TheCutHalfway, TwoConesOffOneAxis,
     WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_CONE_AND_A_BALL_CROSS, WHERE_A_CONE_AND_A_PIPE_CROSS,
-    WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_CONES_CROSS, WHERE_TWO_PIPES_CROSS,
+    WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_CONES_CROSS, WHERE_TWO_PIPES_CROSS, WhichConic,
     a_cones_slant_against_a_pipe_enclosing, a_cones_slant_against_a_pipe_exactly, ask,
     how_a_ball_on_a_cones_axis_meets_it, how_a_plane_leans_against_a_cone,
     how_two_cones_off_one_axis_cross, one_cone_either_way_round, two_cones_lean_apart_on_one_apex,
@@ -1185,7 +1185,10 @@ fn what_a_run_between_these_two_lies_on(
         // that touch cross in two flat surfaces' cuts of one of them, an
         // ellipse and an ellipse or a hyperbola, and each of the pieces
         // `intersect` names is walked on the one of those curves its pickers
-        // hold.
+        // hold. Two mirror images held apart, each apex inside the other,
+        // cross in two such cuts that never meet, a hyperbola and an ellipse,
+        // a parabola or a hyperbola, and each whole curve is walked the same
+        // way.
         [Surface::Cone(one), Surface::Cone(other)]
             if whether_two_cones_share_an_axis(&one, &other) == Decision::Pos =>
         {
@@ -1202,6 +1205,16 @@ fn what_a_run_between_these_two_lies_on(
                 } => {
                     return which_of_two_flat_cuts_of_a_cone_this_run_is(
                         &cone, &flats, &halfway, run, policy, log,
+                    );
+                }
+                HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart {
+                    cone,
+                    flats,
+                    halfway,
+                    ..
+                } => {
+                    return which_of_two_flat_cuts_held_apart_this_run_is(
+                        &cone, &flats, halfway, run, policy, log,
                     );
                 }
             };
@@ -6233,6 +6246,208 @@ fn which_piece_of_a_hyperbola_and_an_ellipse_this_run_is(
         return Ok(held.remove(0));
     }
     Err(Error::CannotNameWhichPieceOfACrossingThisIs)
+}
+
+/// Which curve of the two cuts `flats` make of `cone` the run is on, where two
+/// mirror images with each apex inside the other cross in those two and they
+/// never meet: the cut by `flats[0]`, the ellipse or the parabola `halfway`
+/// says, or a branch of the hyperbola it says, or a branch of the hyperbola
+/// `flats[1]` cuts.
+///
+/// The ends answer first, as in [`which_of_these_conics_this_run_is`]: a curve
+/// is kept where every end is on its flat surface, and a branch where the ends
+/// are also on the side of the apex
+/// [`which_way_the_branch_these_ends_are_on_opens`] names. A run with no ends
+/// keeps every curve.
+///
+/// # Then the pickers, asked where each curve is well inside its corner
+///
+/// `intersect` names each whole curve by the corner of two flat surfaces it
+/// lies in, and the curves never meet, so a curve is held where every picker
+/// holds one point of it. The ellipse is asked where it is furthest from
+/// `flats[1]`, and a parabola or a branch at its vertex.
+///
+/// A run stated right round the crossing has no picker, so every curve left is
+/// held, and it is refused. One where only branches or a parabola are left
+/// cannot close.
+///
+/// # Errors
+///
+/// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run stated right
+/// round where the ends leave no ellipse, said before the branch is named, as
+/// `where_a_plane_cuts_a_cone` says it from the cut alone.
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where `flats[0]` does not
+/// cut the curve `halfway` says and `flats[1]` a hyperbola once each is
+/// rounded, and where the ends and the pickers leave more than one curve or
+/// none; what [`which_way_the_branch_these_ends_are_on_opens`] and
+/// [`what_a_plane_cuts_out_of_a_cone`] refuse; and
+/// [`Error::CannotWorkOutHowBigACrossingIs`] where how far off an end can be
+/// does not come out finite or a point asked is not a point.
+fn which_of_two_flat_cuts_held_apart_this_run_is(
+    cone: &Cone,
+    flats: &[Plane; 2],
+    halfway: WhichConic,
+    run: &NamedRun,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<WhatARunLiesOn> {
+    let mut candidates: Vec<ACurveOfTwoCutsHeldApart> = Vec::with_capacity(4);
+    match (halfway, what_a_plane_cuts_out_of_a_cone(&flats[0], cone)?) {
+        (WhichConic::AnEllipse, APlanesCutOfACone::AnEllipse(ellipse)) => {
+            let [one_side, other_side] =
+                furthest_either_side_of(&ellipse, &flats[1]).map(|angle| ellipse.at(angle));
+            let further_from = |point: Point| flats[1].signed_distance_to(point).abs();
+            let size = ellipse.the_size_it_was_worked_out_from();
+            candidates.push(ACurveOfTwoCutsHeldApart {
+                flat: 0,
+                opening: None,
+                closes: true,
+                asked_at: if further_from(one_side) >= further_from(other_side) {
+                    one_side
+                } else {
+                    other_side
+                },
+                size,
+                deviation: POINT_ALONG_A_CROSSING_ROUNDOFF * size,
+                lies_on: WhatARunLiesOn::Conic(ellipse),
+            });
+        }
+        (WhichConic::AParabola, APlanesCutOfACone::AParabola(bend)) => {
+            candidates.push(ACurveOfTwoCutsHeldApart {
+                flat: 0,
+                opening: None,
+                closes: false,
+                asked_at: bend.at(0.0),
+                size: bend.size,
+                deviation: POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF * bend.size,
+                lies_on: WhatARunLiesOn::Parabola(bend),
+            });
+        }
+        (WhichConic::AHyperbola, APlanesCutOfACone::AHyperbola(branches)) => {
+            candidates.extend(ACurveOfTwoCutsHeldApart::both_branches(0, &branches));
+        }
+        (
+            WhichConic::AnEllipse | WhichConic::AParabola | WhichConic::AHyperbola,
+            APlanesCutOfACone::StraightLines
+            | APlanesCutOfACone::AnEllipse(_)
+            | APlanesCutOfACone::AParabola(_)
+            | APlanesCutOfACone::AHyperbola(_),
+        ) => return Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+    }
+    let APlanesCutOfACone::AHyperbola(branches) = what_a_plane_cuts_out_of_a_cone(&flats[1], cone)?
+    else {
+        return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+    };
+    candidates.extend(ACurveOfTwoCutsHeldApart::both_branches(1, &branches));
+
+    let ends: Vec<PredicatePoint> = run
+        .ends()
+        .into_iter()
+        .filter(|end| *end != nowhere_in_particular())
+        .collect();
+    let middles: Vec<Point> = ends
+        .iter()
+        .map(|end| Point::from(end.enclosure().map(middle_of)))
+        .collect();
+    let mut on_the_ends = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        let room =
+            POINT_ALONG_A_CROSSING_ROUNDOFF * (candidate.size + run.how_far_out_it_was_stored());
+        if !room.is_finite() {
+            return Err(Error::CannotWorkOutHowBigACrossingIs);
+        }
+        if middles
+            .iter()
+            .all(|end| flats[candidate.flat].signed_distance_to(*end).abs() <= room)
+        {
+            on_the_ends.push(candidate);
+        }
+    }
+    let mut candidates = on_the_ends;
+    if run.run().it_comes_back_to_where_it_started()
+        && !candidates.is_empty()
+        && candidates.iter().all(|candidate| !candidate.closes)
+    {
+        return Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed);
+    }
+    if !ends.is_empty()
+        && candidates
+            .iter()
+            .any(|candidate| candidate.opening.is_some())
+    {
+        let of_the_ends = which_way_the_branch_these_ends_are_on_opens(
+            cone.axis().direction(),
+            cone.apex(),
+            &ends,
+            policy,
+            log,
+        )?;
+        candidates.retain(|candidate| {
+            candidate
+                .opening
+                .is_none_or(|opening| opening == of_the_ends)
+        });
+    }
+    if candidates.len() == 1 {
+        return Ok(candidates.remove(0).lies_on);
+    }
+
+    let picked_by = the_half_spaces_that_pick(run);
+    let mut held = Vec::with_capacity(1);
+    for candidate in candidates {
+        if picked_by.is_empty()
+            || every_half_space_holds(
+                picked_by,
+                candidate.asked_at,
+                candidate.deviation,
+                policy,
+                log,
+            )?
+        {
+            held.push(candidate.lies_on);
+        }
+    }
+    if held.len() == 1 {
+        return Ok(held.remove(0));
+    }
+    Err(Error::CannotNameWhichPieceOfACrossingThisIs)
+}
+
+/// One curve of two flat cuts held apart, as
+/// [`which_of_two_flat_cuts_held_apart_this_run_is`] weighs it.
+struct ACurveOfTwoCutsHeldApart {
+    /// Which of the two flat surfaces cuts it.
+    flat: usize,
+    /// For a branch, its `s`, as [`the_branch_opening`] reads it.
+    opening: Option<f64>,
+    /// Whether it is an ellipse, the one curve here that comes back to where
+    /// it started.
+    closes: bool,
+    /// The one point of it the pickers are asked at.
+    asked_at: Point,
+    size: f64,
+    deviation: f64,
+    lies_on: WhatARunLiesOn,
+}
+
+impl ACurveOfTwoCutsHeldApart {
+    /// The two branches of the hyperbola `flats[flat]` cuts, each asked at its
+    /// vertex.
+    fn both_branches(flat: usize, branches: &[HyperbolaBranch; 2]) -> [Self; 2] {
+        [1.0, -1.0].map(|opening| {
+            let branch = the_branch_opening(branches, opening);
+            Self {
+                flat,
+                opening: Some(opening),
+                closes: false,
+                asked_at: branch.at(0.0),
+                size: branch.size,
+                deviation: POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF * branch.size,
+                lies_on: WhatARunLiesOn::OneBranchOfAHyperbola(branch),
+            }
+        })
+    }
 }
 
 /// Whether some one of `points` is held by every one of `picked_by`.
