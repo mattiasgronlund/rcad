@@ -21,6 +21,7 @@ fifth slot.
   447.3   What is decided
   447.4   The rows
   447.5   What Q1932 built
+  447.6   447.3's bars, read again with the kept Sonnet slot
 
 ### 447.1 Why the Sonnet rows were not reached
 
@@ -247,3 +248,100 @@ confirmed to fail, and checked again with the guard restored.
 
 The one-sentence summary is in `.claude/skills/dispatch-lanes/SKILL.md`'s
 step 4.
+
+### 447.6 447.3's bars, read again with the kept Sonnet slot
+
+Q1932 (5b9241d75, 2026-10-13T23:11:05+02:00, 21:11:05 UTC) built the kept
+Sonnet slot. `queue_slots` was 3 at that moment (Q1931 had set it 19:22:14
+UTC the same day); it went back to 4 only at Q1946 (072686e8d,
+2026-10-13T23:35:11+02:00, 21:35:11 UTC). So "four slots with the kept Sonnet
+slot" has held continuously only since 21:35:11 UTC on 10-13, and both bars
+below are read from that moment to now, 2026-10-27.
+
+**The test-step bar.** Every fresh gate's main test step since 21:35:11 UTC
+on 10-13 (a gate summary line `tests: Summary [ Ns] M tests run` with M over
+3000 and no `served from`, found in the transcripts under
+`~/.claude/projects/*rcad*/**/*.jsonl`, deduplicated on its exact duration and
+count, read from each record's own `timestamp` field):
+
+| | since 10-13 21:35 UTC (four slots, kept Sonnet slot) | 10-05 to 10-13 (447.3) |
+|---|---|---|
+| fresh main test steps | 737 | 1 021 |
+| median | 530.0 s | 266 s |
+| share past 600 s | 303 of 737, 41.1% | 2.8% |
+
+Both halves of 447.3's bar are now passed: 41.1% against the 10% bar, and the
+median has nearly doubled against the 266 s it was watched at. The script is
+`/tmp/.../scratchpad/gate_steps.py` of this row's session, run as `python3
+gate_steps.py`; the scratchpad is not kept, so the method is written out in
+full above rather than cited by path.
+
+**The catch-up bar.** `git log origin/main --merges --since=2026-10-13T21:35:11+00:00`,
+over the same window, counted the way §397.5 counts a catch-up (a merge
+branch merging `origin/main` again after losing the push race, which names
+its branch `merge-q<id>-...`) against every lane merge (`Merge lane-...`
+commits, bundles counted once each as §397.5's own count did):
+
+| catch-ups | lane merges | share |
+|---|---|---|
+| 225 | 487 | 46.2% |
+
+```
+git log origin/main --merges --since=2026-10-13T21:35:11+00:00 --format='%H|%s' | grep -c '^[^|]*|Merge lane-'
+git log origin/main --merges --since=2026-10-13T21:35:11+00:00 --format='%H|%s' | grep -c 'into merge-q[0-9]'
+```
+
+46.2% is well past the 35% bar, and nearly double §397.5's own era (17 of 79,
+21.5%, at three slots before the lock in item 1-9 of §397.5 existed). Both of
+447.3's "back to three" conditions are independently passed: the test-step
+share and the catch-up share. Neither the median nor the catch-up share were
+cross-checked against the busy-machine `sar` reading §447.2 used; whether the
+rise is the fourth slot, the kept Sonnet slot, or the much higher dispatch
+rate visible in the rows-closed figures below (487 lane merges in under 14
+days, against 79 in under 5 days at 447.2's reading) is not decided here.
+
+**Rows closed per day by model.** Every "`Qnnn[, Qnnn...] done`" merge commit
+on `origin/main` (a `Merge lane-...` subject) names which rows it closed and
+when, by its own commit date; `docs/queue.md` keeps a `model` field on every
+row, done or not, so each closed id's model is read off the line that names
+it (`^Qnnn\s+\S+\s+\S+\s+(opus|sonnet)\s`). Dates are the commit's own
+`%cI`, converted to UTC, since the window's own boundary is a UTC instant:
+
+```
+git log origin/main --merges --since=2026-10-13T21:35:11Z --until=2026-10-27T23:59:59Z --format='%H|%cI|%s'
+git log origin/main --merges --since=2026-10-05T00:00:00Z --until=2026-10-13T21:35:11Z --format='%H|%cI|%s'
+```
+
+kept to subjects starting `Merge lane-`, with a `Qnnn[, Qnnn...] done` list
+pulled out of each (about 40 relay-only "into lane-..." merges in each window
+name no row done and are not counted):
+
+| | since 10-13 21:35 UTC (now) | 10-05 00:00 UTC to 10-13 21:35 UTC |
+|---|---|---|
+| lane merges | 487 | 491 |
+| merges with a done list | 447 | 452 |
+| rows closed | 537 (299 Opus, 238 Sonnet) | 558 (374 Opus, 184 Sonnet) |
+
+The two windows are not the same length (13 days plus a sliver on each end
+here, 8 days plus a sliver there), so the rate is read over full UTC days
+only: 10-14 to 10-26 (13 days) against 10-05 to 10-12 (8 days); 10-13 and
+10-27 are partial on both ends of their windows (10-13 by the 21:35:11 UTC
+cutover itself, 10-27 because it is still running) and are left out.
+
+| | since 10-13 21:35 UTC, 13 full days | 10-05 to 10-12, 8 full days | ratio |
+|---|---|---|---|
+| Opus rows closed per day | 22.0 | 43.25 | 0.51 |
+| Sonnet rows closed per day | 17.9 | 21.6 | 0.83 |
+| total rows closed per day | 39.9 | 64.9 | 0.62 |
+
+Rows close more slowly now for both models, not faster: the Opus rate is
+about half the baseline's, the Sonnet rate about five sixths of it, and the
+combined rate about three fifths. This runs the other way from the two bars
+above, which both rose. Nothing here says why: the same caveat as the test-step
+and catch-up bars applies, and more sharply — the queue may hold fewer easy
+rows than it did on 10-05 to 10-12 (nobody has counted them), lanes now spend
+part of each run on the family checks §450.3 added, and some of the rows closed
+since are themselves slower-running (fuzz triage, soaks) than the median row of
+two weeks ago. Any of those would
+lower the rate on their own, without the slot count or the kept Sonnet slot
+costing anything; this reading cannot tell them apart, and does not try to.
