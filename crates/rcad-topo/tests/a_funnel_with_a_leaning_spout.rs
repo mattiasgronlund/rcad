@@ -28,8 +28,10 @@
 //!
 //! A fourth came with row Q2813: the two pointed cones of one slope again, the
 //! second a quarter turn off the first, so that every number is exact and the
-//! two are exactly mirror images and touch. Every fuse of that pair is refused
-//! as a crossing that touches itself. A fifth came with it: the same two side
+//! two are exactly mirror images and touch. Since row Q2868 `intersect` names
+//! their crossing as four arcs of two flat cuts that meet where the two touch,
+//! and every fuse of the pair is refused further on, where two regions of one
+//! face are not told apart. A fifth came with it: the same two side
 //! by side, which are mirror images too but cross in one hyperbola and do not
 //! touch. Since row Q2867 `intersect` names that hyperbola as the flat surface
 //! halfway between the two cuts it out of either, and every fuse of the pair
@@ -57,9 +59,9 @@ const A_CONE_ACROSS_A_CURVED_SURFACE: &str =
 /// two faces cross in.
 const A_CROSSING_NOTHING_CAN_ORDER: &str = "nothing can put points in order along this curve";
 
-/// What `fuse` says where two surfaces touch where they cross.
-const A_CROSSING_THAT_TOUCHES_ITSELF: &str = "geometry: these two surfaces are tangent along \
-     where they cross, so what they cross in is one curve that runs through itself";
+/// What `fuse` says where it cannot tell two regions of one face apart.
+const A_FACE_WHOSE_REGIONS_ARE_NOT_TOLD_APART: &str =
+    "two regions of one face could not be told apart";
 
 /// **A funnel with a leaning spout.** The funnel is a frustum of slope a half
 /// with its apex at the origin, cut two and eight up, so of radius one and
@@ -90,7 +92,7 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 /// `two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points`
 /// in `rcad-geom`
 /// shows the touch on a pair whose numbers are exact, and
-/// [`two_pointed_cones_a_quarter_turn_apart_touch_and_are_refused_by_every_rule`]
+/// [`two_pointed_cones_a_quarter_turn_apart_touch_and_no_fuse_tells_a_faces_regions_apart`]
 /// on the same two cones a quarter turn apart, where every number is exact.
 ///
 /// Every fuse is refused where `intersect` names the crossing.
@@ -110,14 +112,26 @@ fn two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule() {
 /// The second is then exactly the first's mirror image across the flat
 /// surface `y + z = 4` halfway between their apexes, and the two **touch** at
 /// `(±√1.92, 0.8, 3.2)`, inside both faces, where their crossing runs through
-/// itself. `intersect` refuses that as a crossing that touches itself, and so
-/// does every fuse.
+/// itself. Since row Q2868 `intersect` names that crossing as four arcs, from
+/// touch to touch, of the two ellipses `y + z = 4` and `z − y = 2.4` cut out
+/// of either cone, and `walk` marches them. Every fuse is refused further on,
+/// in `fuse/arrange.rs`, where two regions of one face are not told apart.
+///
+/// Eight high, the ellipse in `y + z = 4` reaches up to `(0, −4, 8)`, where
+/// both caps' rims pass. Ten high, neither cap meets the other solid, so the
+/// crossing is the two ellipses alone, and every fuse is refused the same: the
+/// rims are not what stops them.
 #[test]
-fn two_pointed_cones_a_quarter_turn_apart_touch_and_are_refused_by_every_rule() {
-    assert_eq!(
-        every_fuse_of(two_pointed_cones_a_quarter_turn_apart).refusals(),
-        [[Some(A_CROSSING_THAT_TOUCHES_ITSELF); 2]; 3]
-    );
+fn two_pointed_cones_a_quarter_turn_apart_touch_and_no_fuse_tells_a_faces_regions_apart() {
+    for shape in [
+        two_pointed_cones_a_quarter_turn_apart,
+        two_pointed_cones_ten_high_a_quarter_turn_apart,
+    ] {
+        assert_eq!(
+            every_fuse_of(shape).refusals(),
+            [[Some(A_FACE_WHOSE_REGIONS_ARE_NOT_TOLD_APART); 2]; 3]
+        );
+    }
 }
 
 /// **Two pointed cones side by side.** Both have slope a half and height
@@ -182,8 +196,19 @@ fn two_pointed_cones(model: &mut Model) -> (SolidKey, SolidKey) {
 }
 
 fn two_pointed_cones_a_quarter_turn_apart(model: &mut Model) -> (SolidKey, SolidKey) {
-    let upright = a_pointed_cone(model, 0.5, 8.0);
-    let turned = a_pointed_cone(model, 0.5, 8.0);
+    two_pointed_cones_this_high_a_quarter_turn_apart(model, 8.0)
+}
+
+fn two_pointed_cones_ten_high_a_quarter_turn_apart(model: &mut Model) -> (SolidKey, SolidKey) {
+    two_pointed_cones_this_high_a_quarter_turn_apart(model, 10.0)
+}
+
+fn two_pointed_cones_this_high_a_quarter_turn_apart(
+    model: &mut Model,
+    high: f64,
+) -> (SolidKey, SolidKey) {
+    let upright = a_pointed_cone(model, 0.5, high);
+    let turned = a_pointed_cone(model, 0.5, high);
     let through =
         Axis::new(Point::new(0.0, 0.0, 4.0), Vector::new(1.0, 0.0, 0.0)).expect("an axis");
     model
