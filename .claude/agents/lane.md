@@ -109,10 +109,12 @@ names it: `justfile#queue`, not `justfile`, for a row taken on
 `justfile#queue`. A bundle narrows each of its rows. `narrow` writes the claims
 file alone and never `docs/queue.md`, so it is yours to run from your own tree.
 It refuses a widening back, to an entry inside the taken set but outside the
-current one, while another lane's hold meets that entry: you may still change
-it, since your write set is still the one you were sent with, but name the
-entry and the hold it quotes in `remaining`, since the two branches may meet
-at merge.
+current one, while another lane's hold meets that entry.
+
+**A lane edits nothing outside its current hold.** Widen it first, and
+report it as blocked when the widen is refused, naming the entry and the
+hold the refusal quotes, rather than editing the file anyway: the two
+branches would otherwise meet it at merge (§424).
 
 **A test file you add directly under `crates/rcad-topo/tests/`,
 `crates/rcad-geom/tests/` or `crates/rcad-step/tests/` is declared in that
