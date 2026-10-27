@@ -1333,6 +1333,65 @@ fn two_cones_on_one_apex_leaning_apart_answer_every_fuse_under_a_tolerant_policy
     }
 }
 
+/// The pitch cones of a pair of mitre gears: two frustums of slope one from 1
+/// to 2 up their axes, the first about `z` and the second turned a quarter
+/// about `y`, which writes its axis as `x` exactly. On the apex they share at
+/// the origin, the two cones touch along the rulings `(1, 0, ±1)` and cross
+/// nowhere, and the two frustums meet along `t·(1, 0, 1)` for `t` from 1 to 2.
+/// By hand the intersection is empty, each frustum less the other is itself,
+/// `7π/3`, and the union is two solids that share an edge, which is not a
+/// manifold.
+///
+/// Every fuse is refused `Undecidable` on which way a crossing runs, asked at
+/// the apex and a step out along a ruling the two touch along: the two cones
+/// are tangent all along it, so the cross of their gradients there is nothing
+/// (Q2872).
+///
+/// Every fuse was refused `CannotNameWhichPieceOfACrossingThisIs` until Q2870,
+/// because `intersect` could not name the rulings the two touch along. Once it
+/// named them, every fuse panicked, because the arrangement read each of
+/// those rulings leaving the apex twice in the one corner.
+#[test]
+fn the_pitch_cones_of_a_pair_of_mitre_gears_touch_along_a_ruling_and_every_fuse_is_refused_at_the_apex()
+ {
+    for (rule, first_first) in six_fuses() {
+        let mut model = a_model();
+        let said = fuse(
+            &mut model,
+            the_pitch_cones_of_a_pair_of_mitre_gears,
+            rule,
+            first_first,
+        );
+        let what = format!("{rule:?} (first first: {first_first})");
+        let Err(rcad_topo::Error::Undecidable { records }) = &said else {
+            panic!("{what}: should be refused Undecidable, and said {said:?}");
+        };
+        let [refused] = records.records() else {
+            panic!("{what}: should be refused on one question: {records:#?}");
+        };
+        assert_eq!(
+            refused.predicate(),
+            "which way a crossing runs",
+            "{what}: {refused:#?}"
+        );
+        let [apex, a_step_out] = refused.inputs() else {
+            panic!("{what}: should be asked at the apex and a step out: {refused:#?}");
+        };
+        assert_eq!(
+            apex.enclosure().map(|side| (side.lo(), side.hi())),
+            [(0.0, 0.0); 3],
+            "{what}: {refused:#?}"
+        );
+        let [x, y, z] = a_step_out
+            .enclosure()
+            .map(|side| (side.lo() + side.hi()) / 2.0);
+        assert!(
+            z >= 1.0 && y.abs() <= 1e-9 && (x.abs() - z).abs() <= 1e-9,
+            "{what}: a step out should be along (±1, 0, 1): {refused:#?}"
+        );
+    }
+}
+
 fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
     for one in six_fuses() {
         the_fuse_answers(build, one, volumes, faces);
@@ -1928,6 +1987,20 @@ fn two_cones_on_one_apex_turned_apart(model: &mut Model, far: f64) -> [SolidKey;
         )
         .expect("this model made the key");
     [upright, turned]
+}
+
+/// Two frustums of slope one from 1 to 2 up their axes, the first about `z`
+/// and the second turned a quarter about `y`, so about `x`.
+fn the_pitch_cones_of_a_pair_of_mitre_gears(model: &mut Model) -> [SolidKey; 2] {
+    let upright = cones::a_frustum(model, 1.0, 1.0, 2.0);
+    let lying = cones::a_frustum(model, 1.0, 1.0, 2.0);
+    model
+        .place_solid(
+            lying,
+            &Isometry::quarter_turns(&Axis::y(), 1).expect("a quarter turn"),
+        )
+        .expect("this model made the key");
+    [upright, lying]
 }
 
 fn a_block(model: &mut Model, from: [f64; 3], to: [f64; 3]) -> SolidKey {
