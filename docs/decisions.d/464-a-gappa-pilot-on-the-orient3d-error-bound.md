@@ -7742,8 +7742,13 @@ certifies a wrong sign, and a probe shows one at a slope of `2⁵¹¹`. By hand
 arithmetic that shape needs a slope of about `2⁷⁸` or more, so it is class
 `wrong/D` (6). The claim on `value` itself was not tried, and `decide` does
 not need it (4). The branches where a difference or a direction component is
-zero, which `product_is_normal` lets through, are not run. And the comments
-claim more than is proved. The doc comment on the constant writes `66ε` where
+zero, which `product_is_normal` lets through, were not run here. 464.30 has
+since run each zero difference and direction component, and each proves at
+the code's constant but for `up` cancelling with `R2` rounding to zero, the
+wrong sign of 6, which it leaves out; a direction zero in all three
+components, or a zero slope, does not reach `on_floats`, and a point at the
+apex meets a bound of `0`, which `decide` does not compare against. And the
+comments claim more than is proved. The doc comment on the constant writes `66ε` where
 it means `66ε²` and miscounts its own terms, and it says `on_floats` enforces
 the bottom end product by product, which is false: it checks neither `R2` nor
 the axial term `A`, and that is where the wrong sign lives (5). Fixing them,
@@ -7875,7 +7880,9 @@ Against what is proved:
   checks pass, and `R2` and `A` can fall below the normals or round to zero.
   The bound holds in all of those but one: `R2` rounding to zero, where level
   1 certifies a wrong sign (6). The branches where a difference or a direction
-  component is zero are not run (10).
+  component is zero were not run here (10). 464.30 has since run them, and
+  each proves but for that same `R2` rounding to zero; a zero slope does not
+  reach `on_floats`.
 - "One of them in the subnormals and this level certifies a wrong sign" is
   true of `R2` rounding to zero, the probe of 6. It is false of `R2` below the
   normals and not zero, of `A` below the normals or zero, and of the reach
@@ -9515,7 +9522,11 @@ Q2681:
 - Q2780, small: restate `cone.rs:643-663` by 5.
 - Q2781: prove the bound where a difference or a direction component is zero,
   the axis-aligned cone among them, as Q2771 does for the cylinder. Not run,
-  so no class.
+  so no class. Done, in 464.30: each of the 219 cases proves at the code's
+  constant, `up` cancelling with `R2` rounding to zero left to Q2779; a
+  direction with all three components zero, or a zero slope, does not reach
+  `on_floats`, and a point at the apex meets a bound of `0`, which `decide`
+  does not compare against.
 - Q2782: run `conesplit.py` with the checked products below the normals, and
   restate `cone.rs:432-434` by what that shows, as Q2773 does for the
   cylinder. Not run, so no class.
@@ -19845,9 +19856,10 @@ subsection. Comment only: lines that run 0.
 ### 464.30 The side of rcad-geom's cone with a zero factor
 
 Q2781 ran 464.16's `cone.g` where a difference or a direction component is
-zero, in three lanes on 2026-10-27, at `c3c03fd8`. The first committed
-nothing, the second wrote `conezero.py`, and the third ran it and wrote this.
-The bound is proved on `y`, the sum before `value`'s last rounding, at the
+zero, in four lanes on 2026-10-27, at `c3c03fd8`. The first committed
+nothing, the second wrote `conezero.py`, the third ran it and wrote this, and
+the fourth ran `samez.py` and brought 464.16 in line with it. The bound is
+proved on `y`, the sum before `value`'s last rounding, at the
 code's constant in each of the 219 cases, and Coq checks each proof, modulo
 its hints. Each control at `u / 2` fails but the 36 where `y` is `0`, and 24
 of those fail at `u²`; the other 12 have hypotheses that contradict. A
@@ -20901,3 +20913,23 @@ print("written again:", len(written), "same as run:", len(same), "differ:", diff
       "run, not written:", extra)
 shutil.rmtree(fresh)
 ```
+
+It prints:
+
+```text
+cases written: 219 second controls at u^2: 36
+code blocks in 464.30: 7
+conezero.py same
+runz.sh same
+start.sh same
+tallyz.py same
+samez.py same
+one.sh is 464.13 block: True
+one1.sh is 464.15 block: True
+written again: 474 same as run: 474 differ: [] not run: [] run, not written: []
+```
+
+Its first line is `conezero.py`'s own, run again in the fresh directory; the
+parent's lines come after it because its output is buffered when it is not a
+terminal. The seven blocks are the five scripts and the two prints, this one
+among them.
