@@ -57,8 +57,8 @@ pub struct BSplineCurve {
 ///
 /// One Boehm stage replaces two stored points by `(1 − a)·P + a·Q`, with the
 /// same coefficient shape and the same three roundings as one de Boor stage —
-/// they share the code that does it — so [`EVALUATION_ROUNDOFF`]'s count of
-/// nine roundings per stage covers an insertion stage too. A control point of
+/// they share the code that does it — so [`EVALUATION_ROUNDOFF`]'s charge of
+/// `9u` per stage covers an insertion stage too. A control point of
 /// the refined net is at most `degree` stages deep, and `degree` is capped at
 /// [`MAX_DEGREE`], so the refined net sits within `K·M` of the exact refined
 /// net, where `K` is [`EVALUATION_ROUNDOFF`] and `M` is the largest magnitude
