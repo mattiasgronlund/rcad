@@ -5980,10 +5980,10 @@ fn where_a_ring_and_a_surface_on_its_axis_cut(
 /// by flat surfaces through that line. An ellipse's points at zero and π can
 /// be the two touches themselves, as they are for the cut by `z − y = 2.4` of
 /// the upright cone in the funnel, whose `across` runs along `x` through a
-/// centre on that line, and there every picker is zero. On `c + across·cos θ
-/// + and·sin θ` the other flat surface's normal `g` reads most at
-/// `θ = atan2(g·and, g·across)` and least half a turn on, as far either side of
-/// the line as the ellipse goes.
+/// centre on that line, and there every picker is zero. On the ellipse
+/// `c + across·cos θ + and·sin θ` the other flat surface's normal `g` reads
+/// most at `θ = atan2(g·and, g·across)` and least half a turn on, as far
+/// either side of the line as the ellipse goes.
 ///
 /// # Errors
 ///
