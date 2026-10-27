@@ -16,8 +16,10 @@
 //! `walk` marches them, and since row Q2807 the fuse orders the points of each
 //! loop round the spout's axis, so every fuse of the funnel and the spout
 //! answers. **What each fuse gives now is pinned here**, under every rule both
-//! ways round: the two pointed cones are still refused as a cone crossing
-//! another curved surface.
+//! ways round. Since row Q2893 `intersect` names the two pointed cones'
+//! crossing too, as one loop and two branches that pass close by each other,
+//! but every fuse of them is still refused: the fuse cannot settle the order of
+//! two points along a crossing where both caps' rims nearly meet.
 //!
 //! A third shape came with row Q2818: two pointed cones of different slopes,
 //! the narrower leaning off the wider, which cross in a loop and two branches
@@ -53,10 +55,8 @@ mod cones;
 
 use cones::{a_frustum, a_pointed_cone};
 
-/// What `fuse` says where `intersect` cannot name how a cone crosses a second
-/// curved surface.
-const A_CONE_ACROSS_A_CURVED_SURFACE: &str =
-    "geometry: a cone crossing another curved surface is a degree-four space curve";
+/// What `fuse` says where one sign the answer needs could not be settled.
+const ONE_SIGN_NOT_SETTLED: &str = "could not settle 1 decisions the answer depends on";
 
 /// **A funnel with a leaning spout.** The funnel is a frustum of slope a half
 /// with its apex at the origin, cut two and eight up, so of radius one and
@@ -90,12 +90,22 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 /// [`two_pointed_cones_eight_high_a_quarter_turn_apart_answer_every_fuse`]
 /// on the same two cones a quarter turn apart, where every number is exact.
 ///
-/// Every fuse is refused where `intersect` names the crossing.
+/// Since row Q2893 `intersect` names the crossing as one loop and two branches
+/// that pass close by each other near each touch of the exact pair, with a
+/// flat surface it proves runs between the loop and the branch there.
+///
+/// Every fuse is still refused, under every rule both ways round, as
+/// undecided: `fuse/arrange.rs` cannot settle the order of two points along a
+/// crossing at about `(−3.9541, −0.6045, 8)`, where both caps' rims meet or
+/// pass within a rounding of each other. The two are mirror images but for a
+/// rounding, and equally high, so each rim is nearly the other's mirror image,
+/// and the two meet in the flat surface halfway between the apexes, on both
+/// skins. Row Q2910 traces it.
 #[test]
 fn two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule() {
     assert_eq!(
         every_fuse_of(two_pointed_cones).refusals(),
-        [[Some(A_CONE_ACROSS_A_CURVED_SURFACE); 2]; 3]
+        [[Some(ONE_SIGN_NOT_SETTLED); 2]; 3]
     );
 }
 
