@@ -7362,6 +7362,90 @@ mod tests {
         assert_eq!(meet([&turned, &cap, &upright]), Ok(answer), "in any order");
     }
 
+    /// The pitch cones of a pair of mitre gears: two cones of slope one on one
+    /// apex, one up `z` and one turned a quarter about `y` by a rotation that
+    /// leaves its axis `(1, 0, s)` for `s = 2⁻⁵²`, and the first one's cap
+    /// `z = 1`. The turned cone is `(1 + s²)|p|² − 2(x + sz)²`, and on the cap
+    /// and the circle `x² + y² = 1` that is nothing where `(x + s)² = 1 + s²`,
+    /// so the meet above `y = 0` is where `x² + 2sx − 1 = 0` and
+    /// `y⁴ + 4s²y² − 4s² = 0`. The turned cone's own cap, `x + sz = 1`, meets
+    /// the first cap and cone `1.2e−24` further up `y`, where `y² = 2s − s²`,
+    /// and one `f64` lies between the two. The box the meet comes back in is
+    /// `3.65e−8` along `y` and holds both. Narrowed, it must hold the first and
+    /// not the second, or `rcad-topo` cannot put the two in order along the
+    /// crossing and every fuse of the two frustums refuses (Q2906).
+    #[test]
+    fn a_cap_across_the_pitch_cones_of_mitre_gears_narrows_round_its_meet_and_not_the_next() {
+        let s = 2f64.powi(-52);
+        let cap = flat([0.0, 0.0, -1.0], [0.0, 0.0, 1.0]);
+        let upright = a_cone([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0);
+        let lying = upright.transformed(
+            &crate::Isometry::rotation(&Axis::y(), core::f64::consts::FRAC_PI_2).expect("an angle"),
+        );
+        let Surface::Cone(turned) = lying else {
+            panic!("a cone turned is a cone: {lying:?}");
+        };
+        assert_eq!(turned.axis().direction().components(), [1.0, 0.0, s]);
+        assert_eq!(turned.apex().coordinates(), [0.0, 0.0, 0.0]);
+
+        let three = [&cap, &upright, &lying];
+        let wide = meet(three).expect("two bands that cross are answered");
+        let tight = wide.boxed_tight(three);
+        let (MeetOfThree::At(wide_places), MeetOfThree::At(tight_places)) = (&wide, &tight) else {
+            panic!("expected points, got {wide:?} and {tight:?}");
+        };
+        let which = wide_places
+            .iter()
+            .position(|place| place.enclosure()[1].hi() > 1e-8)
+            .unwrap_or_else(|| panic!("no meet above y = 0 in {wide:?}"));
+        let before = wide_places[which].enclosure();
+        assert!(before[1].hi() > 3e-8, "the box it starts from: {before:?}");
+        let after = tight_places[which].enclosure();
+        assert!(
+            (0..3).all(|axis| before[axis].lo() <= after[axis].lo()
+                && after[axis].hi() <= before[axis].hi()),
+            "{after:?} is not inside {before:?}"
+        );
+
+        let sign_of = |terms: &[(f64, &[f64])]| {
+            let mut total = Exact::of(0.0);
+            for (factor, powers) in terms {
+                let mut product = Exact::of(*factor);
+                for &power in *powers {
+                    product = product.times(&Exact::of(power)).expect("in range");
+                }
+                total = total.plus(&product);
+            }
+            total.sign()
+        };
+        let where_x_crosses = |x: f64| sign_of(&[(1.0, &[x, x]), (2.0 * s, &[x]), (-1.0, &[])]);
+        let where_y_crosses =
+            |y: f64| sign_of(&[(1.0, &[y, y, y, y]), (4.0, &[s, s, y, y]), (-4.0, &[s, s])]);
+        let [x, y, z] = after;
+        assert!(
+            matches!(where_x_crosses(x.lo()), Decision::Neg | Decision::Zero),
+            "{x:?}"
+        );
+        assert!(
+            matches!(where_x_crosses(x.hi()), Decision::Pos | Decision::Zero),
+            "{x:?}"
+        );
+        assert!(
+            y.lo() <= 0.0 || matches!(where_y_crosses(y.lo()), Decision::Neg | Decision::Zero),
+            "{y:?}"
+        );
+        assert!(
+            matches!(where_y_crosses(y.hi()), Decision::Pos | Decision::Zero),
+            "{y:?}"
+        );
+        assert!(z.lo() <= 1.0 && 1.0 <= z.hi(), "{z:?}");
+        assert_eq!(
+            sign_of(&[(1.0, &[y.hi(), y.hi()]), (-2.0 * s, &[]), (1.0, &[s, s])]),
+            Decision::Neg,
+            "{y:?} reaches the turned cone's cap"
+        );
+    }
+
     /// `-0.0 == 0.0`, so no pin that compares corners sees which zero a corner
     /// carries, but a corner keyed on its bits does: `(-0.0, 3, 0)` and
     /// `(0, 3, 0)` are one point and two keys. The floor across a bar of
