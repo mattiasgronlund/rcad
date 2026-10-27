@@ -165,7 +165,9 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// cone that shares neither its axis nor its apex** (Q2667): two loops held
 /// apart by a flat surface, where every straight line of one cone is proved to
 /// cross the other twice, once each side of it, or one loop and two branches
-/// that run off for ever, held apart by two flat surfaces (Q2812) — see
+/// that run off for ever, held apart by two flat surfaces (Q2812), or, for two
+/// of one slope side by side, the hyperbola the flat surface halfway between
+/// their apexes cuts out of either (Q2867) — see
 /// [`how_two_cones_off_one_axis_cross`] for which shapes stay refused, and why
 /// two cones of one slope that are mirror images and touch are refused as a
 /// crossing that touches itself (Q2813). Two cones
@@ -196,7 +198,8 @@ const WHERE_A_TORUS_AND_A_CONE_CROSS: &str = "where a torus and a cone cross";
 /// running through itself.
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] for a cone against a
-/// second cone that shares neither its axis nor its apex, for a ball whose skin
+/// second cone that shares neither its axis nor its apex and is not proved to
+/// cross it in any of the shapes named above, for a ball whose skin
 /// runs through the apex, on the axis or off it, and for the shapes off the axis
 /// a pipe or a ball is not proved to cross it in: a pipe along one of the cone's
 /// straight lines, a pipe steeper than the cone whose skin runs through the
@@ -5145,7 +5148,8 @@ fn how_far_along_the_axis_the_two_circles_sit(cone: &Cone, pipe: &Cylinder) -> I
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where the two share
 /// neither an axis nor an apex and [`how_two_cones_off_one_axis_cross`] proves
-/// their crossing neither two loops nor one loop and two branches, and
+/// their crossing neither two loops, nor one loop and two branches, nor the
+/// hyperbola two of one slope side by side cross in, and
 /// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] where it finds
 /// them of one slope, mirror images, and touching.
 ///
@@ -5202,18 +5206,26 @@ fn where_two_cones_cross(
 /// The pieces of [`how_two_cones_off_one_axis_cross`]: two loops, each named
 /// as the part of the crossing one side of the flat surface that holds them
 /// apart, or one loop and two branches that run off for ever, each named by the
-/// flat surfaces it lies beyond.
+/// flat surfaces it lies beyond, or the two branches of the hyperbola halfway
+/// between two side by side, named as the flat surface's cut of the cone that
+/// sorts first, as [`where_a_plane_and_a_cone_cross`] names it.
 ///
 /// # Errors
 ///
-/// What [`how_two_cones_off_one_axis_cross`] refuses.
+/// What [`how_two_cones_off_one_axis_cross`] refuses, and what
+/// [`where_a_plane_and_a_cone_cross`] refuses of the hyperbola.
 fn the_pieces_two_cones_off_one_axis_cross_in(
     one: &Cone,
     other: &Cone,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<SurfaceMeet> {
-    let crossing = how_two_cones_off_one_axis_cross(one, other, policy, log)?;
+    let crossing = match how_two_cones_off_one_axis_cross(one, other, policy, log)? {
+        HowTwoConesOffOneAxisCross::HeldApart(crossing) => crossing,
+        HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { cone, flat } => {
+            return where_a_plane_and_a_cone_cross(&flat, &cone, policy, log);
+        }
+    };
     let Some(apex) = crossing.apex else {
         return two_loops_picked_either_side_of(Picker::from(crossing.across), &crossing.ruled);
     };
@@ -5257,10 +5269,34 @@ pub(crate) struct TwoConesOffOneAxis {
     pub(crate) apex: Option<HalfSpaceThroughAPoint>,
 }
 
+/// What [`how_two_cones_off_one_axis_cross`] proves of two cones off one axis.
+/// Exhaustive on purpose: `intersect`, `walk` and `along_a_crossing` each
+/// match it, and a third shape is one each of them must be taught.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum HowTwoConesOffOneAxisCross {
+    /// Two loops, or one loop and two branches, held apart by flat surfaces.
+    HeldApart(TwoConesOffOneAxis),
+    /// Two cones of one slope side by side, their axes one direction, which are
+    /// mirror images across the flat surface halfway between their apexes and
+    /// whose forms differ by that surface's alone: they cross in the one
+    /// hyperbola that surface cuts out of either cone, and `cone` is the one
+    /// that sorts first.
+    ///
+    /// `flat` is built from the point halfway between the apexes, rounded once,
+    /// and the gap from `cone`'s apex to the other's, which `Plane` scales to
+    /// length one. So it is the exact halfway surface where the gap lies along
+    /// an axis of the coordinates and the halfway point is a number `f64`
+    /// holds, as for two cones side by side one apart along `x`, and a rounding
+    /// off it otherwise. The hyperbola is that rounding's cut of `cone`, which
+    /// is the same cut `intersect` and `walk` both make.
+    InTheFlatSurfaceBetweenThem { cone: Cone, flat: Plane },
+}
+
 /// Whether two cones off one axis, on two apexes, cross in two loops, or in
 /// one loop and two branches that run off for ever, and what holds the pieces
-/// apart. `intersect` names the pieces by it and `walk` marches the loops by
-/// it, so the namer and the walker cannot drift apart.
+/// apart, or in the one hyperbola halfway between two of one slope side by
+/// side. `intersect` names the pieces by it and `walk` marches them by it, so
+/// the namer and the walker cannot drift apart.
 ///
 /// # Read along the straight lines of one cone
 ///
@@ -5323,12 +5359,21 @@ pub(crate) struct TwoConesOffOneAxis {
 /// then tried as `X` and `Y` both ways round, so which cone is ruled is the
 /// same whichever way round the pair came in.
 ///
+/// # Two of one slope side by side
+///
+/// Where none of the four proves the crossing either way round, and the two
+/// are of one slope, exactly mirror images across the flat surface halfway
+/// between their apexes, and the line between their apexes is square to their
+/// axes, as [`how_two_mirror_images_stand`] asks, their two forms differ by
+/// that flat surface's own linear form alone, so they cross in the hyperbola
+/// it cuts out of either cone: [`HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem`].
+///
 /// # Errors
 ///
 /// [`Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`] where none of
 /// the four proves the crossing either way round and the two are of one slope,
 /// exactly mirror images across the flat surface halfway between their apexes,
-/// and touch, as [`two_mirror_images_that_touch`] asks. A turn of one about a
+/// and touch, as [`how_two_mirror_images_stand`] asks. A turn of one about a
 /// line through a point of the other's axis makes such a pair. Their crossing
 /// is two flat cuts of either cone that meet where the two touch, and a touch
 /// is a double root on some line, which none of the four can prove, since each
@@ -5340,12 +5385,15 @@ pub(crate) struct TwoConesOffOneAxis {
 /// signs, where each kind of branch may come in two, and every pair the
 /// enclosures above are too loose for. A **gap** where the crossing is two
 /// loops, or a loop and two branches, and the curve is there whatever its
-/// shape. Among the pairs refused are mirror images that do not touch, whose
-/// two flat cuts stay apart; two of one slope side by side, which cross in one
-/// curve in the flat surface halfway between them; and a cone turned off
-/// another of its slope whose turned axis was rounded when written or stored,
-/// so that the two are not exactly mirror images, do not touch, and pass close
-/// by each other where the exact pair would touch.
+/// shape. Among the pairs refused are mirror images with each apex inside the
+/// other cone, whose two flat cuts stay apart, and a cone turned off another
+/// of its slope whose turned axis was rounded when written or stored, so that
+/// the two are not exactly mirror images, do not touch, and pass close by
+/// each other where the exact pair would touch.
+///
+/// [`Error::NotFinite`] where the gap between two apexes side by side, or how
+/// far the flat surface halfway between them is from the origin, leaves
+/// `f64`'s range.
 ///
 /// [`Error::Undecidable`] where a sign asked exactly could not be settled.
 pub(crate) fn how_two_cones_off_one_axis_cross(
@@ -5353,7 +5401,7 @@ pub(crate) fn how_two_cones_off_one_axis_cross(
     other: &Cone,
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<TwoConesOffOneAxis> {
+) -> Result<HowTwoConesOffOneAxisCross> {
     let (first, second) = match Surface::Cone(*one).how_it_sorts_against(&Surface::Cone(*other)) {
         Ordering::Greater => (other, one),
         Ordering::Less | Ordering::Equal => (one, other),
@@ -5363,13 +5411,27 @@ pub(crate) fn how_two_cones_off_one_axis_cross(
         if let Some(crossing) = what_holds_apart_where_each_line_of_one_cone_crosses_another(
             crossed, ruled, &at, policy, log,
         )? {
-            return Ok(crossing);
+            return Ok(HowTwoConesOffOneAxisCross::HeldApart(crossing));
         }
     }
-    if two_mirror_images_that_touch(first, second, &at, policy, log)? {
-        return Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo);
+    match how_two_mirror_images_stand(first, second, &at, policy, log)? {
+        Some(MirrorImages::SideBySide) => {
+            let [here, there] = [first.apex(), second.apex()].map(|apex| apex.coordinates());
+            let halfway = Point::from(core::array::from_fn(|axis| {
+                0.5 * here[axis] + 0.5 * there[axis]
+            }));
+            Ok(HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem {
+                cone: *first,
+                flat: Plane::from_point_and_normal(halfway, second.apex() - first.apex())?,
+            })
+        }
+        Some(MirrorImages::Touching) => {
+            Err(Error::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
+        }
+        Some(MirrorImages::CutTwiceApart) | None => {
+            Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+        }
     }
-    Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
 }
 
 /// The flat surfaces between the places every straight line of `ruled`
@@ -5641,7 +5703,9 @@ fn where_every_line_crosses_a_flat_inside(
 }
 
 /// Whether `one` and `other` are mirror images of each other across the flat
-/// surface halfway between their apexes, and touch where they cross.
+/// surface halfway between their apexes, and if they are, whether they stand
+/// side by side, touch where they cross, or cross in two flat cuts held apart:
+/// nothing where they are not mirror images.
 ///
 /// # Mirror images
 ///
@@ -5672,27 +5736,29 @@ fn where_every_line_crosses_a_flat_inside(
 /// where `Q(n) > 0`, that is where `b` is outside `one`; all along the straight
 /// line from `a` to `b` where `Q(n) = 0`, `b` on `one`, since the doubled line
 /// is that one and both cones are tangent to the flat surface along it; and
-/// nowhere where `b` is inside `one`.
+/// nowhere where `b` is inside `one`, where the two cuts stay apart.
 ///
 /// **Unless `w·n = 0`**, asked exactly. `u × n` is `−k(w·n)(w × n)`, so with
 /// the axes not on one line the flat surface `y·u = 0` is parallel to `P` just
 /// where `w·n = 0`: two cones side by side, their axes one direction, whose
-/// forms differ by `P`'s alone, so that they cross in one curve in `P` and
-/// touch nowhere. Otherwise at most one of the two lines is parallel to `P`,
-/// since two would both run along `n × u`, so at least one crosses it.
+/// forms differ by `P`'s alone, so that they cross in the one curve `P` cuts
+/// out of `one`, and touch nowhere. `P` runs along the axis and misses `a`, so
+/// that curve is a hyperbola. Otherwise at most one of the two lines is
+/// parallel to `P`, since two would both run along `n × u`, so at least one
+/// crosses it.
 ///
 /// # Errors
 ///
 /// [`Error::Undecidable`] where a sign asked exactly could not be settled.
-fn two_mirror_images_that_touch(
+fn how_two_mirror_images_stand(
     one: &Cone,
     other: &Cone,
     at: &[PredicatePoint; 2],
     policy: &Policy,
     log: &mut ProvenanceLog,
-) -> Result<bool> {
+) -> Result<Option<MirrorImages>> {
     if one.slope() != other.slope() {
-        return Ok(false);
+        return Ok(None);
     }
     match ask(
         &whether_one_cone_is_the_others_mirror_image(one, other),
@@ -5702,7 +5768,7 @@ fn two_mirror_images_that_touch(
         log,
     )? {
         Decision::Zero => (),
-        Decision::Pos => return Ok(false),
+        Decision::Pos => return Ok(None),
         Decision::Neg | Decision::Undecidable { .. } | _ => {
             unreachable!("a sum of squares asked through `ask` is never below zero nor undecided")
         }
@@ -5714,7 +5780,7 @@ fn two_mirror_images_that_touch(
         policy,
         log,
     )? {
-        Decision::Zero => return Ok(false),
+        Decision::Zero => return Ok(Some(MirrorImages::SideBySide)),
         Decision::Pos | Decision::Neg => (),
         Decision::Undecidable { .. } | _ => unreachable!("`ask` hands back a sign or an error"),
     }
@@ -5725,13 +5791,29 @@ fn two_mirror_images_that_touch(
         policy,
         log,
     )? {
-        Decision::Pos | Decision::Zero => Ok(true),
-        Decision::Neg => Ok(false),
+        Decision::Pos | Decision::Zero => Ok(Some(MirrorImages::Touching)),
+        Decision::Neg => Ok(Some(MirrorImages::CutTwiceApart)),
         Decision::Undecidable { .. } | _ => unreachable!("`ask` hands back a sign or an error"),
     }
 }
 
-/// `‖m × v‖²` of [`two_mirror_images_that_touch`]: nothing exactly where the
+/// How two cones that are mirror images across the flat surface halfway
+/// between their apexes stand, as [`how_two_mirror_images_stand`] says.
+/// Exhaustive on purpose: it is the three cases that function proves, and
+/// [`how_two_cones_off_one_axis_cross`] answers each.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MirrorImages {
+    /// Their axes are one direction and the line between their apexes is
+    /// square to them: they cross in one hyperbola on the flat surface halfway.
+    SideBySide,
+    /// Each apex is on or outside the other cone, and the two flat cuts their
+    /// crossing is made of meet where the two touch.
+    Touching,
+    /// Each apex is inside the other cone, and the two flat cuts stay apart.
+    CutTwiceApart,
+}
+
+/// `‖m × v‖²` of [`how_two_mirror_images_stand`]: nothing exactly where the
 /// mirror image of `one`'s axis across the flat surface halfway between the
 /// apexes lies along `other`'s, as a question.
 fn whether_one_cone_is_the_others_mirror_image(one: &Cone, other: &Cone) -> impl Predicate {
@@ -5769,7 +5851,7 @@ fn whether_one_cone_is_the_others_mirror_image(one: &Cone, other: &Cone) -> impl
     }
 }
 
-/// `w·n` of [`two_mirror_images_that_touch`]: nothing exactly where the line
+/// `w·n` of [`how_two_mirror_images_stand`]: nothing exactly where the line
 /// between the apexes is square to `one`'s axis, as a question.
 fn how_far_along_ones_axis_the_other_apex_is(one: &Cone, other: &Cone) -> impl Predicate {
     let [here, there] = [one.apex(), other.apex()].map(|apex| apex.coordinates());

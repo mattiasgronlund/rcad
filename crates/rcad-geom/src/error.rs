@@ -437,9 +437,11 @@ pub enum Error {
     /// numbers stored are exactly mirror images and the two touch, the pair is
     /// refused as
     /// [`ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo`](Self::ACrossingThatTouchesItselfIsNeitherOneCurveNorTwo)
-    /// instead (Q2813). Mirror images that do not touch stay here, two of one
-    /// slope side by side among them, which cross in one curve in the flat
-    /// surface halfway between them; and so do pairs whose turned axis was
+    /// instead (Q2813). Two of one slope side by side are mirror images too,
+    /// and cross in the one hyperbola the flat surface halfway between them
+    /// cuts out of either, which is named as that cut (Q2867). Mirror images
+    /// with each apex inside the other cone stay here, which cross in two flat
+    /// cuts held apart; and so do pairs whose turned axis was
     /// rounded, which are not quite mirror images:
     /// the turn's `sin` and `cos` rounded, as for `rcad-topo`'s funnel with a
     /// leaning spout turned `0.3`, whose branches pass about `3e-8` apart instead

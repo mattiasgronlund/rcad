@@ -1261,8 +1261,9 @@ fn how_much_of_the_bend_is_in_a_ball_by_slices(radius: f64) -> f64 {
 /// piece moved by `1e-13`, is refused `Undecidable` at `side of sphere` or
 /// `side of cone`; with the ring solid named second it is at the piece's
 /// bottom rim (row Q1759). Moved `1e-13` off the axis along `x`, the piece's
-/// ball is one the ring is not crossed with, and its cone one the ring solid's
-/// cone is not crossed with.
+/// ball or cone is one the ring is not crossed with. The piece's cone and the
+/// ring solid's cone are then two of one slope side by side, which cross in a
+/// hyperbola `intersect` has named since Q2867, so the ring is what refuses.
 ///
 /// Until Q1566, every case on the axis but the ones moved `1e-13` with the ring
 /// solid named second was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`:
@@ -1300,7 +1301,7 @@ fn a_ball_or_a_cone_joined_to_a_ring_with_a_piece_of_its_own_kind_on_it_is_refus
             "Undecidable at side of cone",
             &["up 1e-13", "down 1e-13"][..],
             [(1, 1), (3, 3), (3, 1)],
-            "ACrossingBetweenAConeAndAnotherCurvedSurface",
+            "ACrossingBetweenATorusAndAnotherCurvedSurface",
         ),
     ] {
         for (moved, by) in [

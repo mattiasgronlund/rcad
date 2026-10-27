@@ -26,9 +26,13 @@
 //! of the same slope turned about a line through a point of the first's axis is
 //! more than an overlap: the two are mirror images, and can touch at two points.
 //! Where they do, and the numbers stored are exactly mirror images, the pair is
-//! refused as a crossing that touches itself. Where the turned axis was rounded
-//! they are not mirror images, do not touch, and are refused as any other
-//! overlap is.
+//! refused as a crossing that touches itself. Where each apex is inside the
+//! other cone they cross in two flat cuts held apart, and are refused as any
+//! other overlap is. Where the turned axis was rounded they are not mirror
+//! images, do not touch, and are refused as any other overlap is. Two of one
+//! slope side by side are mirror images too, and cross in the one hyperbola
+//! the flat surface halfway between them cuts out of either: `intersect` names
+//! its two branches as that cut, and `walk` marches each whole branch.
 
 use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Error, HalfSpaceThroughAPoint, NamedRun, Picker, Point,
@@ -1119,8 +1123,9 @@ fn two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_t
 /// `(0, 1, −1)`. Of slope two, half-angle `1.11`, the apex is inside it, and
 /// the line along `x` through `(0, 3.2, 0.8)`, the only place they could
 /// touch, stays outside the upright cone, where `x² + y² − 4z²` is
-/// `x² + 7.68`: they cross without touching, and are refused as any other
-/// overlap is.
+/// `x² + 7.68`: they cross without touching, in two flat cuts of either cone
+/// held apart, one in the flat surface halfway between the apexes. Nothing
+/// names two such cuts yet, so the pair is refused as any other overlap is.
 #[test]
 fn two_cones_of_one_slope_a_quarter_turn_apart_touch_unless_each_apex_is_inside_the_other() {
     let upright = |slope| a_cone([0.0; 3], [0.0, 0.0, 1.0], slope);
@@ -1142,8 +1147,12 @@ fn two_cones_of_one_slope_a_quarter_turn_apart_touch_unless_each_apex_is_inside_
 /// flat surface `x = 0` through the first apex, where a mirror pair touches,
 /// never meets `x = 1/2`.
 ///
-/// The pair is refused as any other overlap is, by the namer and by the
-/// walker, and not as a crossing that touches itself.
+/// `intersect` names the hyperbola's two branches, one in each nappe, as the
+/// cut of the flat surface halfway between the apexes through one of the two
+/// cones. `walk` marches each whole branch either way round the pair, every
+/// point on `x = 1/2` and on both cones within the bound it publishes, the
+/// branch above the apexes and the one below. Neither branch, nor a run stated
+/// as the whole of a closed crossing, is closed.
 #[test]
 fn two_cones_of_one_slope_side_by_side_cross_in_one_hyperbola_and_do_not_touch() {
     let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
@@ -1153,14 +1162,64 @@ fn two_cones_of_one_slope_side_by_side_cross_in_one_hyperbola_and_do_not_touch()
         a_cone([1.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0),
         a_cone([1.0, 0.0, 0.0], [0.0, 0.0, -1.0], 1.0),
     ] {
+        let met = named(&one, &other);
+        let Ok(SurfaceMeet::Curves(runs)) = &met else {
+            panic!("the two branches of a hyperbola, and not {met:?}");
+        };
+        assert_eq!(runs.len(), 2, "{runs:?}");
+        let mut sides = Vec::new();
+        for run in runs {
+            for along in [[&one, &other], [&other, &one]] {
+                let walked = walk(
+                    run,
+                    along,
+                    Deflection::of(0.01).expect("a length above zero"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|refused| panic!("{run:?} is walked, not refused {refused:?}"));
+                assert!(
+                    walked.points().len() > 8,
+                    "a branch at a deflection of a hundredth takes more than eight pieces"
+                );
+                let room = walked.deviation().magnitude();
+                for point in walked.points() {
+                    assert!(
+                        (point.x() - 0.5).abs() <= room,
+                        "{point:?} is off x = 1/2 by more than the published {room:e}"
+                    );
+                    for surface in along {
+                        let off = how_far_off(surface, *point);
+                        assert!(
+                            off <= room,
+                            "{point:?} is {off:e} off {surface:?}, past the published {room:e}"
+                        );
+                    }
+                }
+                let above = walked.points().iter().all(|point| point.z() > 0.0);
+                let below = walked.points().iter().all(|point| point.z() < 0.0);
+                assert!(
+                    above != below,
+                    "one branch is in one nappe: {:?}",
+                    walked.points()
+                );
+                sides.push(above);
+                assert_eq!(
+                    where_a_closed_crossing_starts(run, along, &mut ProvenanceLog::new()).err(),
+                    Some(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
+                    "{run:?}"
+                );
+            }
+        }
+        assert_eq!(
+            sides.iter().filter(|above| **above).count(),
+            2,
+            "one branch above the apexes and one below, each walked twice: {sides:?}"
+        );
         for along in [[&one, &other], [&other, &one]] {
             assert_eq!(
-                named(along[0], along[1]),
-                Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
-            );
-            assert_eq!(
                 where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new()).err(),
-                Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+                Some(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed)
             );
         }
     }
