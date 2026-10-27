@@ -1086,6 +1086,13 @@ enum HowItRuns {
     /// plane's normal `n` and the cone's axis direction `w`
     /// ([`along_a_bend`] carries the derivation).
     ///
+    /// Two cones of one slope side by side cross in a hyperbola too, the one
+    /// the flat surface halfway between their apexes cuts out of either, and
+    /// a branch of it is ordered as that flat surface's endless bend across
+    /// the one of the two that sorts first
+    /// ([`Cone::the_flat_surface_halfway_to_a_cone_beside_it`]), with that flat
+    /// surface's normal for `n` and that cone's axis direction for `w`.
+    ///
     /// A half ellipse of two pipes of one width whose axes meet
     /// ([`HalfAnEllipse`]) is ordered this way too, with the two pipes'
     /// directions, each turned by the corner the half is in
@@ -16150,7 +16157,8 @@ fn round_the_axis(cone: &Cone, way: [Interval; 3]) -> [Interval; 3] {
 ///
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] for a pair whose crossing is
 /// none of an endless straight line, one closed curve lying in a plane, a
-/// plane's endless bend across a cone, one of the two loops a fat pipe crosses
+/// plane's endless bend across a cone, a branch of the hyperbola two cones of
+/// one slope side by side cross in, one of the two loops a fat pipe crosses
 /// a thin one in or a ball crosses a pipe in, or the one loop a ball off a
 /// pipe's axis or two pipes cross in. That is a **gap**: the curve is there and
 /// ordering points along it takes the marcher rather than a determinant
@@ -16165,7 +16173,9 @@ fn round_the_axis(cone: &Cone, way: [Interval; 3]) -> [Interval; 3] {
 /// lean cannot be placed, both of which are
 /// [`a_pair_that_crosses_in_straight_lines`]'s own refusal, and a ball whose
 /// centre cannot be shown on a pipe's axis or off it, which is
-/// [`a_pair_that_crosses_in_a_conic`]'s — or when the
+/// [`a_pair_that_crosses_in_a_conic`]'s, and two cones off one axis that
+/// cannot be shown side by side or not, which is
+/// [`Cone::the_flat_surface_halfway_to_a_cone_beside_it`]'s — or when the
 /// direction of a run that *is* straight comes out as a box straddling every
 /// axis, or when nothing can say which way round a bend's own direction runs.
 fn how_a_crossing_runs(
@@ -16207,12 +16217,12 @@ fn how_a_crossing_runs(
             forward_climbs_the_axis,
         });
     }
-    // A plane against a cone is the one pair here whose crossing can run on for
-    // ever *and* bend, and which of the two it is takes no new arithmetic: it is
-    // the same lean `intersect` splits its own table on. Leaning steeper than
-    // the cone's own side cuts an ellipse and falls through to the conic gate;
-    // level with the side cuts a parabola and shallower cuts a hyperbola, and
-    // both of those are endless bends.
+    // A plane against a cone is one of the two pairs here whose crossing can
+    // run on for ever *and* bend, and which of the two it is takes no new
+    // arithmetic: it is the same lean `intersect` splits its own table on.
+    // Leaning steeper than the cone's own side cuts an ellipse and falls
+    // through to the conic gate; level with the side cuts a parabola and
+    // shallower cuts a hyperbola, and both of those are endless bends.
     if let Some((flat, cone)) = a_plane_and_a_cone(surface, partner) {
         match how_a_plane_leans_against_a_cone(flat, cone) {
             Decision::Pos => {}
@@ -18861,6 +18871,19 @@ fn a_plane_and_a_cone<'s>(one: &'s Surface, other: &'s Surface) -> Option<(&'s P
 /// nothing only where the plane is tangent to the cone, which needs the apex on
 /// the plane and is a pair of rulings. So a `Zero` here is arithmetic that ran
 /// out and not a shape, and the honest thing to do with it is give up.
+///
+/// The same holds for two cones of one slope side by side, where `flat` is the
+/// flat surface halfway between their apexes and `surface` and `partner` are
+/// the two cones. `n` is square to `w` there, so `n × w` is not nothing. Each
+/// cone is the other's mirror image across `flat`, and so is its normal at a
+/// point on `flat`, so the two normals are one direction only where one of
+/// them lies in `flat` or runs square to it. Write a cone as `W|y|² − k(y·w)²`
+/// of `y` from its apex, as `intersect` does, with `W = w·w` and `k = 1 + s²`
+/// for slope `s`. Its gradient's part along `n` is `2W(y·n)`, since `w·n = 0`,
+/// and `y·n` is how far the apex is from `flat` times `‖n‖`, never nothing.
+/// Its part along `w` is `−2W·s²·(y·w)`, which a normal square to `flat` would
+/// make nothing, and that needs `y·w = 0`, which on the cone is the apex
+/// alone, and the apex is off `flat`.
 fn how_an_endless_bend_runs(
     surface: &Surface,
     partner: &Surface,
@@ -19128,7 +19151,10 @@ fn a_pair_that_crosses_in_a_conic(
         // a pipe or a ball since Q2788. Only specific shapes of each pair
         // still refuse by name — see the doc on `intersect` in
         // intersect.rs and the error variant in error.rs for which. On one
-        // axis all three pairs cross in circles square to it.
+        // axis all three pairs cross in circles square to it. Two cones of
+        // one slope side by side cross in a hyperbola instead, and never
+        // reach here: `how_a_crossing_runs` orders it one step up as the
+        // endless bend the flat surface halfway between their apexes cuts.
         | (Surface::Cone(_), Surface::Cylinder(_) | Surface::Cone(_) | Surface::Sphere(_))
         | (Surface::Cylinder(_) | Surface::Sphere(_), Surface::Cone(_)) => true,
         // Two planes cross in a straight line and are answered one step up, so
