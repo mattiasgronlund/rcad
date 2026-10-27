@@ -33,7 +33,8 @@ which runs block 1 with two or more of the nine differences at zero, and 464.26
 is Q2748, which runs it with one difference and one minor at zero. 464.27 is
 Q2760, on the side of a flat surface through a point with every product
 anywhere, and 464.28 is Q2771, on the side of rcad-geom's cylinder with a zero
-factor.*
+factor. 464.29 is Q2773, on that cylinder with a checked product below the
+normals.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -63,6 +64,7 @@ factor.*
   464.26  One difference at zero with one minor at zero
   464.27  The side of a flat surface through a point with every product anywhere
   464.28  The side of rcad-geom's cylinder with a zero factor
+  464.29  The side of rcad-geom's cylinder with a checked product below the normals
 
 ### 464.1 The bugs a bound prover is for
 
@@ -6006,7 +6008,9 @@ difference, a direction component or the radius is zero, which
 `product_is_normal` lets through, were not run here. 464.28 has since run each
 zero difference and direction component, and each proves at the code's
 constant; a zero radius, and a direction zero in all three components, do not
-reach `on_floats`. And the comments claim more
+reach `on_floats`. 464.29 shows two of the `product_is_normal` checks needed
+for a right sign with a direction far from length one, which no `Cylinder`
+holds. And the comments claim more
 than is proved. The doc comment on the constant writes `45ε` where it means
 `45ε²` and miscounts its own terms. The comment on the check says that
 checking the components covers the permanent's squares, which is false where a
@@ -6205,7 +6209,9 @@ Against what is proved:
   false for the reach squares: by 6, one, two or three of them below the
   normals or rounding to zero, and the bound still holds. For the products
   `on_floats` checks it was not run, as 464.14's 6 ran the sphere's squares
-  (10).
+  (10). 464.29 has since shown it true of a direction component's square and
+  the radius's square, with a direction far from length one that no
+  `Cylinder` holds; with the direction near length one it is still not run.
 - "Checking the components here covers the permanent's squares too" is true
   where the component does not cancel, and `cyl.g` writes the argument beside
   its `v` hypothesis. It is false where the component cancels: its square is
@@ -7694,7 +7700,11 @@ written:
   checks below the normals, as 464.14's 6 ran the sphere's squares. Then say
   whether `on_floats` needs its `product_is_normal` checks, and restate
   `cylinder.rs:308-310` by what that shows. Not run, so no class. Q2767 waits
-  on it, as well as on Q2684, Q2760 and Q2766.
+  on it, as well as on Q2684, Q2760 and Q2766. Done in part, in 464.29: with
+  a direction far from length one, a direction component's square or the
+  radius's square below the normals gives a wrong sign without its check, and
+  no `Cylinder` holds such a direction. The Gappa run, near length one, is a
+  row.
 
 And what is not a row:
 
@@ -19705,3 +19715,128 @@ written again: 164 same as run: 164 differ: [] not run: [] run, not written: []
 Its first line is `cylzero.py`'s own, run again in the fresh directory; the
 parent's lines come after it because its output is buffered when it is not a
 terminal.
+
+### 464.29 The side of rcad-geom's cylinder with a checked product below the normals
+
+Q2773, in three lanes on 2026-10-27, at `274b8b5f`. The first two read 464.14,
+464.15, 464.27 and 464.28 and worked out, by hand, the two inputs below; they
+committed nothing. The third drove the kernel with them and wrote this.
+
+Two of the fourteen `product_is_normal` checks in `on_floats` carry a right
+sign on numbers it can be handed: a direction component with itself, and the
+radius with itself. With either taken out, level 1 certifies `Pos` for a point
+inside the pipe (2). Both inputs need a direction far from length one, and no
+`Cylinder` holds one (3). With the direction near length one, whether any of
+the fourteen is needed has not been run; a hand argument (4) says none is, and
+running it in Gappa is a row (6). `cylsplit.py` was not run with any product
+below the normals, so this does not do what the row asked in full.
+
+**1. The checks.** At `274b8b5f`, `HowFarFromTheSkin::on_floats` checks the
+six halves of the cross product (`cross_product_halves_if_normal`,
+`cylinder.rs:472-485`), then, in `stays_accurate` (`cylinder.rs:326-333`), each
+component with itself, each direction component with itself, the radius with
+itself, and `rr` with the squared length `D`. `product_is_normal(a, b)` passes a
+zero factor (`cascade.rs:67-69`), and `decide` compares only against a normal
+bound (`cascade.rs:125`).
+
+**2. The probe.** An uncommitted patch to `cylinder.rs` gave
+`HowFarFromTheSkin` two fields: `probe_direction`, read by `on_floats`,
+`on_intervals` and `exactly` in place of the axis's direction, and
+`probe_checks`, which `on_floats` tests before `!stays_accurate` returns
+`None`. The six half checks stay. A test in `mod tests` builds the predicate on
+`Cylinder { axis: Axis::x(), radius }`, so the axis origin is `0`, for three
+inputs, each with and without the checks:
+
+- A, the direction squares: `d = (2⁻⁵⁴⁰, 0, 0)`, `r = 2⁵⁰⁰`, the point `(0,
+  2⁴⁹⁹, 2⁴⁹⁹)`.
+- B, the radius square: `d = (2⁵⁰⁰, 0, 0)`, `r = 2⁻⁵⁴⁰`, the point `(0,
+  2⁻⁵⁴¹, 2⁻⁵⁴¹)`.
+- C, A and B made ordinary: `d = (1, 0, 0)`, `r = 1`, the point `(0, 0.5,
+  0.5)`. A is C with `d` times `2⁻⁵⁴⁰` and the point and radius times `2⁵⁰⁰`,
+  and B is C with `d` times `2⁵⁰⁰` and the point and radius times `2⁻⁵⁴⁰`. The
+  value is of degree two in `d` and of degree two in the point and radius
+  together, so each scaling multiplies it by a power of two and keeps its
+  sign.
+
+`mise exec -- just t -p rcad-geom probe_q2773 --no-capture` printed:
+
+```text
+PROBE direction squares below the normals, checks true: on_floats None, decide (Undecidable { enclosure: 5.293955920339377e-23 }, Interval), exactly None
+PROBE direction squares below the normals, checks false: on_floats Some((4.1359030627651384e-25, 4.591774807899565e-40)), decide (Pos, Float), exactly None
+PROBE radius square below the normals, checks true: on_floats None, decide (Undecidable { enclosure: 5.293955920339377e-23 }, Interval), exactly None
+PROBE radius square below the normals, checks false: on_floats Some((4.1359030627651384e-25, 4.591774807899565e-40)), decide (Pos, Float), exactly None
+PROBE both scaled by powers of two to ordinary numbers, checks true: on_floats Some((-0.5, 1.6653345369377364e-15)), decide (Neg, Float), exactly Some(Neg)
+PROBE both scaled by powers of two to ordinary numbers, checks false: on_floats Some((-0.5, 1.6653345369377364e-15)), decide (Neg, Float), exactly Some(Neg)
+PROBE Cylinder::new(Axis::x(), 1.0) side_of (0, 0.5, 0.5): Neg
+```
+
+So C is inside, by level 1 and by level 3, and so are A and B. Without the
+checks, level 1 says `Pos` for both: a wrong sign. With them, level 1 refuses,
+level 2 cannot decide, and level 3 refuses too, `exactly` returning `None`.
+
+Why, by arithmetic on those numbers. In A, the halves are `hy = fz · dx = 2⁻⁴¹`
+and `kz = fy · dx = 2⁻⁴¹`, the other four having a zero factor, so the
+components are `0`, `2⁻⁴¹` and `−2⁻⁴¹`, and their squares sum to `2⁻⁸¹`, which
+is `value` as printed. But `tx = rnd(2⁻¹⁰⁸⁰) = 0`, so `D = 0`, `skin = 0`, and
+the permanent is `2⁻⁸¹` alone. The true radius term is `2¹⁰⁰⁰ · 2⁻¹⁰⁸⁰ =
+2⁻⁸⁰`, so the true value is `2⁻⁸¹ − 2⁻⁸⁰ < 0`. B is the same with `rr =
+rnd(2⁻¹⁰⁸⁰) = 0` in place of `D`. The check on `rr` with `D` passes both,
+since one factor is zero, and so does every other check but one: in A only the
+direction component `2⁻⁵⁴⁰` with itself fails, and in B only the radius with
+itself. What a square below the normals loses is at most `2⁻¹⁰⁷⁵`, and `skin`
+multiplies it by the other factor: `rr`, which is `2¹⁰⁰⁰` in A, or `D`, which
+is `2¹⁰⁰⁰` in B. That is no fraction of a normal `eb`.
+
+**3. Who can hand `on_floats` such a direction.** Nobody, through the public
+API. `HowFarFromTheSkin` is private, and `Cylinder::side_of` is what builds it,
+from the cylinder's own axis. The doc on `Cylinder::basis`
+(`cylinder.rs:94-117`) names each route an axis gets its direction by:
+`Axis::new` scales it to length one, `Axis::as_written` keeps it only when its
+squared length is within `Plane::NORMAL_LENGTH_ROUNDOFF` of one, `Axis::x`,
+`y` and `z` are unit, and `Axis::transformed` turns it by a unit quaternion.
+So A and B are a probe's inputs. No check is missing, and there is no defect
+to class.
+
+**4. With the direction near length one, by hand, not run.** A `t` below the
+normals loses at most `2⁻¹⁰⁷⁵` against a `D` near one, and `skin` carries
+that times `rr`, a part in about `2¹⁰⁷⁵` of `skin`. An `rr` below the normals
+loses at most `2⁻¹⁰⁷⁵`, and `skin` carries that times `D`, about `2⁻¹⁰⁷⁵`,
+which is `2⁻⁵³` of a normal `eb`. A component square or `skin` below the
+normals loses at most `2⁻¹⁰⁷⁵` itself. A half below the normals loses some
+`η ≤ 2⁻¹⁰⁷⁵`, which enters its component's square as about `2|q|η`; with `eb`
+normal and `B` about `10u`, `P` is at least about `2⁻⁹⁷²`, and `|q|` is about
+`√P` at most, so that is under `2⁻⁵⁸⁷` of `P` at every scale. Each is far inside the room between the `9u + 70u²` that
+464.15 proved for the relative part and the code's `10u + 80u²`. None of this
+has been run, so it is no claim, and `on_floats` keeps its checks either way,
+as plane's and the sphere's keep theirs (464.27's 6).
+
+**5. What `cylinder.rs` said, and says now.** At `274b8b5f` the comment on the
+checks began, `cylinder.rs:308-310`: "The bound below is a fraction of the
+permanent, which only bounds anything while every product keeps its relative
+accuracy. One of them in the subnormals and this level certifies a wrong
+sign." and ended, `cylinder.rs:320-321`: "Whether one follows from a product
+checked here has not been run." By 2 and 3 the first is true of two checks
+and only with a direction no `Cylinder` holds, and not shown of the rest. The
+comment now says which two, gives input A, says no `Cylinder` holds such a
+direction, and says the case of a direction near length one has not been run.
+The doc on `SIDE_OF_CYLINDER_ERROR_BOUND` ends with the same, citing this
+subsection. Comment only: lines that run 0.
+
+**6. What this leaves.**
+
+- A row: run `cylsplit.py` with one, two and three of the fourteen checked
+  products below the normals or rounding to zero, under a hypothesis that `D`
+  is near one, say in `[1/2, 2]`, as 464.27 ran plane's. By 2 the hypothesis
+  is needed for `t` and `rr`. A `t` or `rr` below the normals is an amount
+  times `rr` or `D`, which can be carried against `skin`, a part of `P12`; a
+  component square or `skin` below the normals is an amount against `eb`, as
+  in 464.27; a half below the normals needs a split on its component's reach,
+  since its loss is multiplied by the component. `cylzero.py`'s `make()` (464.28's
+  7) is the nearest generator. Then restate the comment and the doc again by
+  what it shows.
+- Not a row: Q2767 asks whether the doc on `product_is_normal` is right that
+  a product below the normals can make a filter certify a wrong sign. 2 is
+  one, on `on_floats` with its checks taken out and a direction no `Cylinder`
+  holds.
+- Not a row: `just claim-section` handed this lane 468, before it was seen
+  that this goes in 464's file; 468 is a gap.

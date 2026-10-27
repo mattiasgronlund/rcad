@@ -305,9 +305,17 @@ impl Predicate for HowFarFromTheSkin {
         let from_origin = [0, 1, 2].map(|axis| point[axis] - origin[axis]);
         let radius = self.cylinder.radius;
 
-        // The bound below is a fraction of the permanent, which only bounds
-        // anything while every product keeps its relative accuracy. One of them
-        // in the subnormals and this level certifies a wrong sign.
+        // The bound below is a fraction of the permanent. Two of these checks
+        // carry a right sign on numbers this level can be handed: a direction
+        // component's square and the radius's square. With either below the
+        // normals and the direction far from length one, the radius term
+        // rounds to nothing, and so does its share of the permanent, and this
+        // level certifies a wrong sign: the direction `(2⁻⁵⁴⁰, 0, 0)`, the
+        // radius `2⁵⁰⁰` and the point `(0, 2⁴⁹⁹, 2⁴⁹⁹)`, which is inside,
+        // come out `Pos` without them (`docs/decisions.md` §464.29). No
+        // `Cylinder` holds such a direction, by the doc on `Cylinder::basis`.
+        // With the direction near length one, whether a product below the
+        // normals breaks the bound has not been run.
         //
         // The permanent squares `|left| + |right|` where the value squares
         // `left - right`, and the first is never below the second, so where a
@@ -317,8 +325,7 @@ impl Predicate for HowFarFromTheSkin {
         // `4 left²` is checked by nothing and can fall below the normals or
         // round to zero. The bound holds there all the same
         // (`docs/decisions.md` §464.15), so a wrong sign does not follow from
-        // a reach square in the subnormals. Whether one follows from a product
-        // checked here has not been run.
+        // a reach square in the subnormals.
         let halves = cross_product_halves_if_normal(from_origin, direction)?;
         let components = halves.map(|(left, right)| left - right);
         let direction_squared =
@@ -582,6 +589,12 @@ fn cross_component(
 /// squares are not checked one by one, and where a component cancels its reach
 /// square can fall below the normals or round to zero; the bound on the sum
 /// holds there all the same (§464.15).
+///
+/// Two of the checks are not idle. With the direction far from length one, a
+/// direction component's square or the radius's square below the normals
+/// loses the radius term, and level 1 then certifies a wrong sign without its
+/// check (§464.29). Every [`Cylinder`]'s direction is near length one, and
+/// whether any check is needed there has not been run.
 const SIDE_OF_CYLINDER_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (10.0 + 80.0 * epsilon) * epsilon
