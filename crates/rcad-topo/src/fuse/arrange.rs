@@ -14953,12 +14953,16 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
     (0..3).all(|axis| outer[axis].lo() <= inner[axis].lo() && inner[axis].hi() <= outer[axis].hi())
 }
 
-/// Which of two points comes first round the loop a plane cuts a pipe in,
-/// read as how far each is turned about the pipe's axis from the start: `None`
-/// for every other pair, and wherever a sign it reads is not proved.
+/// Which of two points comes first round the loop a plane cuts a pipe or a
+/// cone in, read as how far each is turned about its axis from the start:
+/// `None` for every other pair, and wherever a sign it reads is not proved.
 ///
-/// **Seen down the axis the loop is the pipe's circle**, each point of it over
-/// one point of the circle, since the plane does not lie along the axis. So
+/// **Seen down the axis the loop is the pipe's circle, or the cone's**, each
+/// point of it over one point of that circle, since the plane does not lie
+/// along the axis. A cone's extra term, its slope times how far up the axis a
+/// point is, drops out of every determinant here: each only ever takes the
+/// part of a point across the axis, and `w·(u×v)` does not change when a part
+/// of `u` or `v` along `w` is added to it ([`axis_a_plane_and_its_partner_wind_round`]). So
 /// going round the loop turns about the axis all the way round once, always
 /// the same way, and the points come in the order they are turned from the
 /// start. That way is the sign of `w·((from − c) × run)`, for `w` the axis,
@@ -15021,13 +15025,10 @@ fn round_a_closed_crossing_by_its_angle(
     one: PredicatePoint,
     other: PredicatePoint,
 ) -> Option<Decision> {
-    let ([Surface::Plane(flat), Surface::Cylinder(pipe)]
-    | [Surface::Cylinder(pipe), Surface::Plane(flat)]) = pair
-    else {
-        return None;
-    };
-    let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
-    let along = pipe.axis().direction().components().map(Interval::exactly);
+    let flat = pair.into_iter().find_map(Surface::as_plane)?;
+    let axis = axis_a_plane_and_its_partner_wind_round(&[*pair[0], *pair[1]])?;
+    let origin = axis.origin().coordinates().map(Interval::exactly);
+    let along = axis.direction().components().map(Interval::exactly);
     let off_the_axis = |place: PredicatePoint| {
         let at = place.enclosure();
         [0, 1, 2].map(|axis| at[axis] - origin[axis])
@@ -15106,13 +15107,15 @@ fn turned_as_far_apart_up_the_axis(
     climbs * dot_of(normal, cross_of_intervals(along, both))
 }
 
-/// Which of two points comes first round the loop a plane cuts a pipe in, read
-/// off the way the loop runs at each of them where the start is proved off the
-/// stretch between them: `None` for every other pair, and wherever a sign it
-/// reads is not proved.
+/// Which of two points comes first round the loop a plane cuts a pipe or a
+/// cone in, read off the way the loop runs at each of them where the start is
+/// proved off the stretch between them: `None` for every other pair, and
+/// wherever a sign it reads is not proved.
 ///
-/// **The loop is an ellipse in the plane, run anticlockwise about the normal
+/// **The loop is a conic in the plane, run anticlockwise about the normal
 /// [`which_comes_first_round_a_crossing`] winds it about**, along `∇S × ∇T`.
+/// Nothing here reads the quadric's own shape past that gradient, which
+/// [`gradient_at`] already takes of a cone the same way as a pipe.
 /// Write `d` for the step from `one` to `other`. Where the loop runs with `d`
 /// at both, it turns by less than a half turn going round from `one` to
 /// `other`, and runs with `d` all the way: it must pass the place it runs
@@ -15152,11 +15155,9 @@ fn along_the_stretch_between_the_two(
     one: PredicatePoint,
     other: PredicatePoint,
 ) -> Option<Decision> {
-    let ([Surface::Plane(_), Surface::Cylinder(_)] | [Surface::Cylinder(_), Surface::Plane(_)]) =
-        pair
-    else {
+    if axis_a_plane_and_its_partner_wind_round(&[*pair[0], *pair[1]]).is_none() {
         return None;
-    };
+    }
     let [start, mine, theirs] = [from, one, other].map(|place| place.enclosure());
     let step = [0, 1, 2].map(|axis| theirs[axis] - mine[axis]);
     let runs_with_the_step = |place: PredicatePoint| {
