@@ -34,8 +34,9 @@
 //! face are not told apart. A fifth came with it: the same two side
 //! by side, which are mirror images too but cross in one hyperbola and do not
 //! touch. Since row Q2867 `intersect` names that hyperbola as the flat surface
-//! halfway between the two cuts it out of either, and every fuse of the pair
-//! is refused further on, where nothing puts points in order along it.
+//! halfway between the two cuts it out of either, and since row Q2879 the fuse
+//! orders points along it as along that flat surface's cut of a cone, so every
+//! fuse of the pair answers.
 //!
 //! Each answer that comes back is to be certified, sound, and measure as the
 //! others that came back say it must: the union and the intersection together
@@ -54,10 +55,6 @@ use cones::{a_frustum, a_pointed_cone};
 /// curved surface.
 const A_CONE_ACROSS_A_CURVED_SURFACE: &str =
     "geometry: a cone crossing another curved surface is a degree-four space curve";
-
-/// What `fuse` says where it has no way to put points in order along a curve
-/// two faces cross in.
-const A_CROSSING_NOTHING_CAN_ORDER: &str = "nothing can put points in order along this curve";
 
 /// What `fuse` says where it cannot tell two regions of one face apart.
 const A_FACE_WHOSE_REGIONS_ARE_NOT_TOLD_APART: &str =
@@ -140,15 +137,15 @@ fn two_pointed_cones_a_quarter_turn_apart_touch_and_no_fuse_tells_a_faces_region
 /// They are mirror images across `x = 1.5` too, but do not touch: their skins
 /// cross in one hyperbola in that flat surface, from `(1.5, 0, 3)` up to the
 /// two tops. Since row Q2867 `intersect` names it, as the cut of `x = 1.5`
-/// through the first cone, and `walk` marches it. Every fuse is refused where
-/// the arrangement puts points in order along it: it orders a plane's endless
-/// bend across a cone along the bend, and has no order for the same bend
-/// where two cones cross in it.
+/// through the first cone, and `walk` marches it. Since row Q2879 the fuse
+/// orders the points along it as it orders a plane's endless bend across a
+/// cone, by that flat surface and that cone, and every fuse answers, under
+/// every rule both ways round.
 #[test]
-fn two_pointed_cones_side_by_side_do_not_touch_and_are_refused_by_every_rule() {
+fn two_pointed_cones_side_by_side_do_not_touch_and_answer_every_fuse() {
     assert_eq!(
         every_fuse_of(two_pointed_cones_side_by_side).refusals(),
-        [[Some(A_CROSSING_NOTHING_CAN_ORDER); 2]; 3]
+        [[None; 2]; 3]
     );
 }
 
