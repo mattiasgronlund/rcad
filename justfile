@@ -18010,6 +18010,38 @@ check-queue-api-selftest:
     grep -qF "narrowed to <code>tooling/queue/queue.py</code>" "$page_dir/index.html" \
         || fail "the queue page did not say what the hold was narrowed to"
 
+    # §424.7's gap, closed by Q1840: `take` now asks `just queue meets` too,
+    # as `narrow` and `writes` already do. A hold widened back onto a row's
+    # file after the fill offered that row is caught here, where it used to
+    # let two lanes hold the same file.
+    got=$(q "$narrow_wt" narrow "$wide" tooling/queue/queue.py,tooling/queue/rows.py 2>&1) \
+        || fail "narrow refused widening lane-wide's hold back onto rows.py, which no other hold meets yet"
+    got=$(q "$far" take "$beside" lane-beside 2>&1) \
+        && fail "take dispatched $beside after lane-wide's hold widened back onto its file"
+    grep -qF "nothing written: $beside's write set tooling/queue/rows.py meets a running hold, as the fill says it:" <<<"$got" \
+        || fail "take did not say the widened-back hold is what it meets"
+    grep -qxF "    skip $beside (tier -): its tooling/queue/rows.py meets $wide's tooling/queue/rows.py, held elsewhere by lane:lane-wide" <<<"$got" \
+        || fail "take did not quote the fill's own skip line for the hold it meets"
+    got=$(awk -v id="$beside" '$1 == id { print $3 }' "$far/docs/queue.md")
+    [ "$got" = todo ] || fail "the refused take wrote the file anyway"
+
+    # The exception for a hold on the branch being taken onto: a dispatcher
+    # bundles a row into a running lane's branch in a later, separate apply
+    # (Q2875 onto Q2773's branch, §424.7), and the two rows may share a file.
+    bundle2_wt="$root/rcad-worktrees/bundle2"
+    g "$hub" worktree add -q -b bundle2 "$bundle2_wt" main
+    first_of_two=$(q "$bundle2_wt" add 2 opus docs/a.md "from/- the first row taken onto a later bundle's branch §230") \
+        || fail "add for the first row of the later bundle failed"
+    second_of_two=$(q "$bundle2_wt" add 2 opus docs/a.md "from/- a row a dispatcher bundles onto the same branch later §230") \
+        || fail "add for the second row of the later bundle failed"
+    g "$bundle2_wt" commit -qam "two rows sharing docs/a.md for the later-bundle take"
+    got=$(q "$bundle2_wt" take "$first_of_two" lane-bundle-later 2>&1) \
+        || fail "take refused the first row of the later bundle"
+    got=$(q "$bundle2_wt" take "$second_of_two" lane-bundle-later 2>&1) \
+        || fail "a second, separate take refused a row sharing a file with one lane-bundle-later already holds"
+    grep -qxF "$second_of_two: todo -> lane:lane-bundle-later, held for lane-bundle-later until done, drop or park" <<<"$got" \
+        || fail "the second take onto the branch its own bundle already holds did not report the usual take message"
+
     # Q2640 (was/Q293, §230.3, §263, §424.7): `writes` sets a row's write set
     # in place, on a todo row or a held one, where `narrow` cannot reach it
     # because the new set is not inside the one the row was taken with. The

@@ -412,6 +412,13 @@ def take_step(queue, claims, here, args, batch):
     # taken again for a new branch: that is a failed lane re-dispatched.
     if not row.state.startswith("lane:"):
         refuse_unless_ready(queue, row, branch)
+    entries = entries_of(row.write_set)
+    others = {other: theirs for other, theirs in claims.holds().items()
+              if other != row_id and theirs["branch"] != branch}
+    met = the_hold_it_meets(row_id, entries, others) if entries else ""
+    if met:
+        raise Refused(f"nothing written: {row_id}'s write set {row.write_set} meets a running hold, "
+                      f"as the fill says it:\n    {met}")
     queue.replace(row, row.with_state(f"lane:{branch}"))
     message = f"{row_id}: {row.state} -> lane:{branch}, held for {branch} until done, drop or park"
     return queue, message, ("take", row_id, now(), here.top, branch, row.write_set, row.tier)

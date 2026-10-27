@@ -25,6 +25,7 @@ side by side.
   424.7   What Q1530 built
   424.8   What Q1531 built
   424.9   The two bars of 424.4, counted
+  424.10  What Q1840 built
 
 ### 424.1 What was measured
 
@@ -296,3 +297,42 @@ bar.
 Neither of 424.4's bars — more than half of 20 needing a merger, or more than
 3 lands failing — is passed. Both files stay shared between two lanes
 (§424.4).
+
+### 424.10 What Q1840 built
+
+424.7's own gap, closed: `take` did not check write sets, only whether
+another hold sat on the same row or the same branch. The fill decides which
+rows meet a running hold, and `take` only wrote what the dispatcher had read
+off it a moment before. A hold narrowed, then widened back to a file a fill
+had just offered as free, could land between that read and the take, and the
+two lanes would both hold the file — the same gap §424.7 already named
+between two dispatchers' fills and takes, with widening back as a third way
+in.
+
+- **The check.** `take_step`, in `tooling/queue/queue.py`, now calls the
+  same `the_hold_it_meets` helper `narrow` and `writes` already call, on the
+  row's own write set, against every other hold the claims file carries. It
+  refuses with the fill's own skip line, quoted, the way `writes` already
+  quotes it for its own meets guard, and writes nothing — no claims event, no
+  change to `docs/queue.md` — when it does.
+- **The exception.** Holds already on the branch being taken onto are left
+  out, the same way `narrow` and `writes` leave out holds on the hold's own
+  branch. Without it, a dispatcher could never bundle a second small row into
+  a lane's branch once it was running, in a later, separate `apply`, if the
+  two rows happened to share a file (Q2875 onto Q2773's branch, `56683a73`).
+  A bundle taken within one `apply` needed no such exception to begin with:
+  `apply` only appends its batch's claims events after every step has run, so
+  an earlier step's `take` is invisible to a later step's meets check in the
+  same batch regardless.
+- **What stays as it was.** The claims event `take` appends still records
+  `row.write_set`, the `docs/queue.md` column, not whatever the claims file's
+  own narrowed write set for the row might say at take time: Q2670, still
+  open, is where that changes.
+- **The tests.** `check-queue-api-selftest` gained two cases, continuing the
+  §424.7 narrow fixture: `narrow` widens a taken row's hold back onto a file
+  a fill had just freed for a second row, and a `take` of that second row,
+  from another tree, is now refused, quoting the fill's own skip line, with
+  the file left unchanged; and a row taken onto a branch a separate, earlier
+  `apply` already holds, sharing a file with the row already there, is taken
+  without refusal, since the branch exception excludes that hold from the
+  check.
