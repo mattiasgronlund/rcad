@@ -1178,7 +1178,10 @@ fn what_a_run_between_these_two_lies_on(
         // has no end to march to. Two of one slope side by side cross in the
         // hyperbola the flat surface halfway between them cuts out of one of
         // them, and that cut is walked as a plane's, from the same flat
-        // surface and the same cone `intersect` named it by.
+        // surface and the same cone `intersect` named it by. Two mirror images
+        // that touch cross in two ellipses, two flat surfaces' cuts of one of
+        // them, and each of the four arcs `intersect` names is walked on the
+        // one of those two cuts its pickers hold.
         [Surface::Cone(one), Surface::Cone(other)]
             if whether_two_cones_share_an_axis(&one, &other) == Decision::Pos =>
         {
@@ -1186,6 +1189,16 @@ fn what_a_run_between_these_two_lies_on(
                 HowTwoConesOffOneAxisCross::HeldApart(crossing) => crossing,
                 HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { cone, flat } => {
                     return where_a_plane_cuts_a_cone(&flat, &cone, run, policy, log);
+                }
+                HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch {
+                    cone,
+                    flats,
+                    ..
+                } => {
+                    return which_of_two_flat_cuts_of_a_cone_this_run_is(
+                        &cone, &flats, run, policy, log,
+                    )
+                    .map(WhatARunLiesOn::Conic);
                 }
             };
             let seeds = match crossing.apex {
@@ -5958,6 +5971,47 @@ fn where_a_ring_and_a_surface_on_its_axis_cut(
     which_of_these_circles_this_run_is(candidates, run, policy, log)
 }
 
+/// Which of the two ellipses `flats` cut out of `cone` the run is on, where two
+/// mirror images that touch cross in those two.
+///
+/// **Each is asked where it is furthest either side of the other flat
+/// surface**, not at angles zero and π. The two ellipses meet on the straight
+/// line where the two flat surfaces do, and the four arcs between are picked
+/// by flat surfaces through that line. An ellipse's points at zero and π can
+/// be the two touches themselves, as they are for the cut by `z − y = 2.4` of
+/// the upright cone in the funnel, whose `across` runs along `x` through a
+/// centre on that line, and there every picker is zero. On `c + across·cos θ
+/// + and·sin θ` the other flat surface's normal `g` reads most at
+/// `θ = atan2(g·and, g·across)` and least half a turn on, as far either side of
+/// the line as the ellipse goes.
+///
+/// # Errors
+///
+/// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where either cut does not
+/// come out an ellipse once its flat surface is rounded, and what
+/// [`where_a_plane_cuts_a_cone`] and [`which_of_these_conics_this_run_is`]
+/// refuse.
+fn which_of_two_flat_cuts_of_a_cone_this_run_is(
+    cone: &Cone,
+    flats: &[Plane; 2],
+    run: &NamedRun,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    let mut candidates = Vec::with_capacity(2);
+    for (flat, other) in [(&flats[0], &flats[1]), (&flats[1], &flats[0])] {
+        let WhatARunLiesOn::Conic(ellipse) =
+            where_a_plane_cuts_a_cone(flat, cone, run, policy, log)?
+        else {
+            return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
+        };
+        let towards = other.normal();
+        let most = towards.dot(ellipse.and).atan2(towards.dot(ellipse.across));
+        candidates.push((ellipse, [most, most + core::f64::consts::PI]));
+    }
+    which_of_these_conics_this_run_is(candidates, run, policy, log)
+}
+
 /// Which of a handful of candidate conics the run names, told by its ends and,
 /// where those do not settle it, by the half-spaces on it.
 ///
@@ -6005,6 +6059,8 @@ fn where_a_ring_and_a_surface_on_its_axis_cut(
 /// at angles `±π/2`, where it crosses the other, so one half holds angle zero
 /// and the other angle π, and each of the four corners that pick them holds
 /// one of those two points of one ellipse and neither of the other.
+/// [`which_of_these_conics_this_run_is`] asks at two angles each candidate
+/// names instead, for the two ellipses two mirror cones that touch cross in.
 ///
 /// # Errors
 ///
@@ -6018,7 +6074,30 @@ fn which_of_these_circles_this_run_is(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Conic> {
-    if candidates.iter().any(|circle| {
+    which_of_these_conics_this_run_is(
+        candidates
+            .into_iter()
+            .map(|circle| (circle, [0.0, core::f64::consts::PI]))
+            .collect(),
+        run,
+        policy,
+        log,
+    )
+}
+
+/// [`which_of_these_circles_this_run_is`], with the pickers asked at the two
+/// angles given beside each candidate rather than at zero and π.
+///
+/// # Errors
+///
+/// As [`which_of_these_circles_this_run_is`].
+fn which_of_these_conics_this_run_is(
+    candidates: Vec<(Conic, [f64; 2])>,
+    run: &NamedRun,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Conic> {
+    if candidates.iter().any(|(circle, _)| {
         !(circle.centre.is_finite() && circle.across.is_finite() && circle.and.is_finite())
     }) {
         return Err(Error::CannotWorkOutHowBigACrossingIs);
@@ -6030,8 +6109,8 @@ fn which_of_these_circles_this_run_is(
         .filter(|end| *end != nowhere_in_particular())
         .map(|end| Point::from(end.enclosure().map(middle_of)))
         .collect();
-    let mut on_the_ends: Vec<Conic> = Vec::with_capacity(candidates.len());
-    for circle in candidates {
+    let mut on_the_ends: Vec<(Conic, [f64; 2])> = Vec::with_capacity(candidates.len());
+    for (circle, asked_at) in candidates {
         let how_far_off_an_end_can_be = POINT_ALONG_A_CROSSING_ROUNDOFF
             * (circle.the_size_it_was_worked_out_from() + run.how_far_out_it_was_stored());
         if !how_far_off_an_end_can_be.is_finite() {
@@ -6041,10 +6120,10 @@ fn which_of_these_circles_this_run_is(
             .iter()
             .all(|end| circle.how_far_off_it(*end) <= how_far_off_an_end_can_be)
         {
-            on_the_ends.push(circle);
+            on_the_ends.push((circle, asked_at));
         }
     }
-    if let [only] = on_the_ends.as_slice() {
+    if let [(only, _)] = on_the_ends.as_slice() {
         return Ok(*only);
     }
 
@@ -6055,17 +6134,11 @@ fn which_of_these_circles_this_run_is(
         | EdgeRun::RightRoundWhereItCrosses { .. } => &[],
     };
     let mut held: Vec<Conic> = Vec::new();
-    for circle in on_the_ends {
+    for (circle, [once, again]) in on_the_ends {
         let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * circle.the_size_it_was_worked_out_from();
         if picked_by.is_empty()
-            || every_half_space_holds(picked_by, circle.at(0.0), deviation, policy, log)?
-            || every_half_space_holds(
-                picked_by,
-                circle.at(core::f64::consts::PI),
-                deviation,
-                policy,
-                log,
-            )?
+            || every_half_space_holds(picked_by, circle.at(once), deviation, policy, log)?
+            || every_half_space_holds(picked_by, circle.at(again), deviation, policy, log)?
         {
             held.push(circle);
         }

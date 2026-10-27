@@ -212,7 +212,8 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 /// a figure of eight, a plane cutting a torus in a quartic, every pair with a
 /// torus on it but a plane, a cone against a pipe no steeper than its skin or
 /// a ball off its axis, two cones off one axis whose crossing is not proved two
-/// loops, bar the two side by side below, two cones of one apex, and a ball on
+/// loops, bar the two side by side below, among them two mirror images that
+/// touch, which cross in two ellipses that meet, two cones of one apex, and a ball on
 /// a cone's axis that misses it or
 /// runs through its apex.
 ///
@@ -1156,9 +1157,10 @@ fn the_way_two_cones_on_one_axis_wind(
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the two share an apex,
 /// whose crossing is straight lines through it, where
 /// [`how_two_cones_off_one_axis_cross`] cannot prove the crossing two loops
-/// or a loop and two branches, and where it proves it a loop and two branches:
+/// or a loop and two branches, where it proves it a loop and two branches:
 /// the branches run off for ever, and the loop is not told apart from them
-/// here.
+/// here, and where it proves it two ellipses that meet where the two cones
+/// touch, which is no one closed curve to go round.
 ///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] where it proves the
 /// two of one slope side by side, whose crossing is one hyperbola.
@@ -1185,6 +1187,9 @@ fn the_way_a_loop_two_cones_cross_in_off_one_axis_winds(
         Ok(HowTwoConesOffOneAxisCross::HeldApart(crossing)) => crossing,
         Ok(HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }) => {
             return Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed);
+        }
+        Ok(HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. }) => {
+            return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
         }
         Err(Error::Undecidable { .. }) => return Ok(WhichWayItWinds::CannotTell),
         Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface) => {
@@ -1328,7 +1333,9 @@ impl Cone {
     /// answer is two loops. A loop and two branches is named by flat surfaces
     /// this does not read: each branch has one picker of its own, and is read
     /// as it always was. So is the hyperbola two of one slope side by side
-    /// cross in, whose two branches are picked as a plane's cut of a cone.
+    /// cross in, whose two branches are picked as a plane's cut of a cone, and
+    /// the two ellipses two mirror images that touch cross in, whose four arcs
+    /// are picked by flat surfaces through the straight line the two meet on.
     #[must_use]
     pub fn which_side_past_the_flat_surface_between_two_loops(
         &self,
@@ -1358,7 +1365,11 @@ impl Cone {
         ) {
             Ok(HowTwoConesOffOneAxisCross::HeldApart(crossing)) => crossing,
             Err(Error::Undecidable { .. }) => return Some(NOTHING_IS_KNOWN),
-            Ok(HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }) | Err(_) => {
+            Ok(
+                HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }
+                | HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. },
+            )
+            | Err(_) => {
                 return None;
             }
         };
