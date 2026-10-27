@@ -852,6 +852,10 @@ struct Crossing {
     /// axes crossing, for one of the four half ellipses they cross in, and
     /// `None` for every other crossing.
     half_an_ellipse: Option<HalfAnEllipse>,
+    /// Where the face's cone and a partner cone of one slope are mirror images
+    /// that touch at two points, for one of the four arcs they cross in, and
+    /// `None` for every other crossing.
+    arc_of_two_cones: Option<ArcOfTwoCones>,
     /// Every other surface that cuts the face in this same curve, folded into
     /// it by [`Arrangement::one_curve_two_partners_cut`]. Empty for nearly
     /// every crossing.
@@ -956,11 +960,63 @@ struct HalfAnEllipse {
     forward_runs_with_the_bend: bool,
 }
 
+/// One of the four arcs two cones of one slope cross in where they are mirror
+/// images of each other and touch at two points
+/// ([`Cone::the_pickers_of_a_mirror_image_that_touches_it`]): the ellipse the
+/// flat surface halfway between their apexes cuts out of either, and a second
+/// ellipse, each cut in two at the touches.
+///
+/// **Both ellipses pass through both touches, so each arc runs from one touch
+/// to the other along the straight line the two touches lie on, its chord.**
+/// `intersect` picks the arcs by two flat surfaces `G₁` and `G₂` through that
+/// line, and `G₁ + G₂` and `G₁ − G₂` are the two ellipses' planes. An arc is
+/// convex and runs once from one end of its chord to the other, so seen from
+/// a point strictly between the two ends it turns through a half turn and
+/// never back: how far round it a point is puts the arc in order
+/// ([`round_a_point_on_its_chord`]). Nothing along one direction does, since
+/// the larger arc of `y + z = 4` on the funnel file's cones climbs and falls
+/// along every one.
+///
+/// **`∇S × ∇Q` is nothing at both ends**, because the two cones are tangent
+/// there, so the way an arc leaves a touch is read off its own plane instead
+/// ([`Arrangement::the_way_an_arc_of_two_cones_runs_at_its_end`]).
+#[derive(Clone, Copy)]
+struct ArcOfTwoCones {
+    /// For each picker, whether the arc is in front of it as `intersect`
+    /// stores it rather than of it turned round. The arcs whose two are alike
+    /// are of `G₁ − G₂`, and the other two of `G₁ + G₂`.
+    corner: [bool; 2],
+    /// A point on the chord, strictly between the two touches.
+    centre: [Interval; 3],
+    /// The arc's plane is the points `x` with `plane_normal · x = plane_offset`.
+    plane_normal: [Interval; 3],
+    plane_offset: Interval,
+    /// Along the chord, `±(G₁ × G₂)`.
+    from: [Interval; 3],
+    /// In the arc's plane, square to the chord, towards the arc, and turned
+    /// so that `from × into` points along `plane_normal`.
+    into: [Interval; 3],
+    /// The two touches, the first behind `centre` along `G₁ × G₂` and the
+    /// second ahead of it, the same on both cones' faces.
+    touches: [PredicatePoint; 2],
+    /// Where the line from `centre` along `into` meets the arc.
+    middle: PredicatePoint,
+    /// Whether `∇S × ∇Q` runs from `from` round towards `into`, the way the
+    /// angle about `plane_normal` grows, rather than back.
+    forward_runs_anticlockwise: bool,
+}
+
 impl Crossing {
     /// What picks this curve out of the others the pair names. Empty when the
     /// pair names one curve and there is nothing to pick.
     fn picked_by(&self) -> &[Picker] {
         &self.picked_by
+    }
+
+    /// Whether this is one of four pieces of two ellipses that meet where two
+    /// surfaces touch: a half ellipse of two pipes or an arc of two cones.
+    fn is_a_half(&self) -> bool {
+        self.half_an_ellipse.is_some() || self.arc_of_two_cones.is_some()
     }
 
     /// Each surface, as written, that cuts the face in this curve.
@@ -1107,6 +1163,10 @@ enum HowItRuns {
         /// `forward_climbs_the_axis` does one variant up.
         forward_runs_with_the_bend: bool,
     },
+    /// It neither closes nor runs on for ever: an arc of two cones that touch
+    /// ([`ArcOfTwoCones`]), from one touch to the other. The order is how far
+    /// round a point on its chord a point is ([`round_a_point_on_its_chord`]).
+    RoundAPointOnItsChord { arc: ArcOfTwoCones },
 }
 
 impl HowItRuns {
@@ -1547,11 +1607,13 @@ impl<'f> Arrangement<'f> {
                     let touching =
                         a_line_one_surface_rests_on_another_along(self.face, &partner, &run, log)?;
                     let half_an_ellipse = a_half_of_an_ellipse(&self.surface, &partner, &run);
+                    let arc_of_two_cones = an_arc_of_two_cones(&self.surface, &partner, &run, log)?;
                     self.crossings.push(Crossing {
                         partner,
                         through_an_apex,
                         touching,
                         half_an_ellipse,
+                        arc_of_two_cones,
                         run,
                         picked_by,
                         // Filled in once there is a node to read it at.
@@ -2517,6 +2579,7 @@ impl<'f> Arrangement<'f> {
             }
         }
         self.place_the_middle_of_each_half();
+        self.place_the_middle_of_each_arc_of_two_cones();
         Ok(())
     }
 
@@ -2769,6 +2832,13 @@ impl<'f> Arrangement<'f> {
         second: usize,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
+        if let (Some(arc), Some(_)) = (
+            self.crossings[first].arc_of_two_cones,
+            self.crossings[second].arc_of_two_cones,
+        ) {
+            self.place_where_two_arcs_of_two_cones_meet(first, second, &arc);
+            return Ok(());
+        }
         if self.crossings[first].half_an_ellipse.is_some()
             && self.crossings[second].half_an_ellipse.is_some()
         {
@@ -3080,6 +3150,28 @@ impl<'f> Arrangement<'f> {
         Ok(())
     }
 
+    /// The nodes at the two places two cones that are mirror images touch,
+    /// where the arcs `first` and `second` meet: one at each touch, shared by
+    /// all four arcs, as two pipes' halves share theirs.
+    ///
+    /// **Both touches are worked out the same way on every arc of the pair and
+    /// on both cones' faces**, from the two pickers and the cone
+    /// [`Cone::the_pickers_of_a_mirror_image_that_touches_it`] hands back in
+    /// one order whichever way round it is asked ([`an_arc_of_two_cones`]), so
+    /// `which` counts along one direction for both faces and needs no turning
+    /// when the two cones' names swap.
+    fn place_where_two_arcs_of_two_cones_meet(
+        &mut self,
+        first: usize,
+        second: usize,
+        arc: &ArcOfTwoCones,
+    ) {
+        let named = where_two_halves_meet(&self.surface, &self.crossings[first].partner);
+        for (which, place) in (0..).zip(arc.touches) {
+            self.name_where_two_halves_meet(first, second, place, &arc.touches, (named, which));
+        }
+    }
+
     /// The two nodes where a cap's crossing meets a half ellipse
     /// ([`HalfAnEllipse`]), for a cap square to its own pipe's axis through
     /// where the axis starts, as `bake` carries it and gathering the cuts
@@ -3241,7 +3333,8 @@ impl<'f> Arrangement<'f> {
             return;
         }
         let the_place = the_place_two_halves_meet_at(name).expect(
-            "a place four half ellipses meet at is named [a, b, b] by two pipes, with which 0 or 1",
+            "a place four halves meet at is named [a, b, b] by two pipes or two cones, \
+             with which 0 or 1",
         );
         if let Some(placed) = self.nodes.iter_mut().find(|node| {
             node.vertex.is_none()
@@ -3373,6 +3466,36 @@ impl<'f> Arrangement<'f> {
                 point: place,
                 vertex: None,
                 made_of: Some((named, which)),
+                also: Vec::new(),
+                half_way_round: true,
+                crossings: vec![crossing],
+            });
+        }
+    }
+
+    /// The node half way along each arc of two cones that touch
+    /// ([`ArcOfTwoCones::middle`]), for the reason a half ellipse of two pipes
+    /// has one ([`Arrangement::place_the_middle_of_each_half`]): all four arcs
+    /// run between the same two touches and along the same two cones, and
+    /// would otherwise be one edge with eight faces along it.
+    ///
+    /// **Named `[a, b, b]`, as the two touches are**, with `which` from 2 to
+    /// 5 for the arc's corner, which both cones' faces read off the same two
+    /// pickers.
+    fn place_the_middle_of_each_arc_of_two_cones(&mut self) {
+        for crossing in 0..self.crossings.len() {
+            let Some(arc) = self.crossings[crossing].arc_of_two_cones else {
+                continue;
+            };
+            if !self.crossings[crossing].reaches_the_face {
+                continue;
+            }
+            let [first, second] = arc.corner.map(u8::from);
+            let named = where_two_halves_meet(&self.surface, &self.crossings[crossing].partner);
+            self.nodes.push(Node {
+                point: arc.middle,
+                vertex: None,
+                made_of: Some((named, 2 + 2 * first + second)),
                 also: Vec::new(),
                 half_way_round: true,
                 crossings: vec![crossing],
@@ -4279,6 +4402,10 @@ impl<'f> Arrangement<'f> {
                 };
                 continue;
             }
+            if let Some(arc) = self.crossings[crossing].arc_of_two_cones {
+                self.crossings[crossing].order = HowItRuns::RoundAPointOnItsChord { arc };
+                continue;
+            }
             let partner = self.crossings[crossing].partner;
             let run = self.crossings[crossing].run.clone();
             self.crossings[crossing].order =
@@ -4946,6 +5073,11 @@ impl<'f> Arrangement<'f> {
                     self.order_along(crossing, one, other, policy, log)
                 })?;
             }
+            HowItRuns::RoundAPointOnItsChord { .. } => {
+                prove_the_hinted_order(&mut order, |one, other| {
+                    self.order_along(crossing, one, other, policy, log)
+                })?;
+            }
             HowItRuns::RoundAClosedCurve { .. } => {
                 if self.either_way_round_cuts_the_same_arcs(crossing, on_it)? {
                     return Ok(order);
@@ -5413,7 +5545,9 @@ impl<'f> Arrangement<'f> {
                 one,
                 other,
             )?,
-            HowItRuns::AlongAnAxis { .. } | HowItRuns::AlongABend { .. } => (
+            HowItRuns::AlongAnAxis { .. }
+            | HowItRuns::AlongABend { .. }
+            | HowItRuns::RoundAPointOnItsChord { .. } => (
                 self.how_far_apart_along(crossing, one, other)?,
                 Measures::Length,
             ),
@@ -5510,6 +5644,9 @@ impl<'f> Arrangement<'f> {
                 from, ref wound_as, ..
             } => {
                 which_comes_first_round_a_crossing([&wound_as[0], &wound_as[1]], from, one, other)?
+            }
+            HowItRuns::RoundAPointOnItsChord { ref arc } => {
+                round_a_point_on_its_chord(arc, one, other)
             }
         })
     }
@@ -6051,7 +6188,7 @@ impl<'f> Arrangement<'f> {
                     },
                 )?
             }
-            HowItRuns::AlongABend { .. } => return None,
+            HowItRuns::AlongABend { .. } | HowItRuns::RoundAPointOnItsChord { .. } => return None,
         };
         Some(if (mine == 0) == lower_first {
             Decision::Pos
@@ -7336,7 +7473,7 @@ impl<'f> Arrangement<'f> {
                 }
             }
             if let (Some(&first), Some(&last)) = (order.first(), order.last())
-                && self.crossings[crossing].half_an_ellipse.is_some()
+                && self.crossings[crossing].is_a_half()
                 && first != last
                 && present.iter().all(|&drawn| drawn)
                 && self.is_an_end_of_the_halves(first, crossing)
@@ -7575,9 +7712,7 @@ impl<'f> Arrangement<'f> {
             .iter()
             .filter(|arc| {
                 let crossing = &self.crossings[arc.crossing];
-                arc.boundary.is_some()
-                    || crossing.order.closes()
-                    || crossing.half_an_ellipse.is_some()
+                arc.boundary.is_some() || crossing.order.closes() || crossing.is_a_half()
             })
             .map(|arc| same.leader(arc.ends[0]))
             .collect();
@@ -8496,7 +8631,7 @@ impl<'f> Arrangement<'f> {
         log: &mut ProvenanceLog,
     ) -> bool {
         let [mine, theirs] = [one, other].map(|crossing| &self.crossings[crossing]);
-        if mine.half_an_ellipse.is_none() || theirs.half_an_ellipse.is_none() {
+        if !mine.is_a_half() || !theirs.is_a_half() {
             return false;
         }
         let ([my_first, my_second], [their_first, their_second]) =
@@ -8518,7 +8653,7 @@ impl<'f> Arrangement<'f> {
     fn has_a_way_of_its_own(&self, node: usize, crossing: usize) -> bool {
         self.crossings[crossing].through_an_apex.is_some()
             || self.crossings[crossing].touching.is_some()
-            || (self.crossings[crossing].half_an_ellipse.is_some()
+            || (self.crossings[crossing].is_a_half()
                 && self.is_an_end_of_the_halves(node, crossing))
             || self.is_where_two_loops_meet(node, crossing)
     }
@@ -8863,9 +8998,15 @@ impl<'f> Arrangement<'f> {
         }
         let at = self.nodes[node].point;
         let crossing = &self.crossings[direction.crossing];
-        let at_an_end = crossing.half_an_ellipse.and_then(|half| {
-            self.the_way_a_half_ellipse_runs_at_its_end(node, direction.crossing, half)
-        });
+        let at_an_end = match (crossing.half_an_ellipse, crossing.arc_of_two_cones) {
+            (Some(half), _) => {
+                self.the_way_a_half_ellipse_runs_at_its_end(node, direction.crossing, half)
+            }
+            (None, Some(arc)) => {
+                self.the_way_an_arc_of_two_cones_runs_at_its_end(node, direction.crossing, &arc)
+            }
+            (None, None) => None,
+        };
         let run = match (crossing.through_an_apex, crossing.touching, at_an_end) {
             (Some(line), _, _) => line.along,
             (None, Some(touch), _) => touch.along,
@@ -8933,11 +9074,67 @@ impl<'f> Arrangement<'f> {
         })
     }
 
+    /// The way `∇S × ∇Q` runs along an arc of two cones that touch at `node`,
+    /// where `node` is one of the two touches and the cross product is
+    /// nothing, and `None` at every other node.
+    ///
+    /// The arc leaves a touch along its own tangent there, which is square to
+    /// the arc's plane and to the cone, so along `n × ∇S` for the plane's
+    /// normal `n`, turned to point into the arc: the way `into` does, since
+    /// the arc lies on that side of its chord. The touch behind the chord's
+    /// centre along `from` is where the angle round it starts, and the arc
+    /// runs forward out of it where forward is the way the angle grows
+    /// ([`ArcOfTwoCones::forward_runs_anticlockwise`]), and into the other.
+    ///
+    /// `None` too where either sign cannot be told, and then the way out is
+    /// the cross product, which straddles nothing there and is refused where
+    /// it is asked.
+    fn the_way_an_arc_of_two_cones_runs_at_its_end(
+        &self,
+        node: usize,
+        crossing: usize,
+        arc: &ArcOfTwoCones,
+    ) -> Option<[Interval; 3]> {
+        if !self.is_an_end_of_the_halves(node, crossing) {
+            return None;
+        }
+        let at = self.nodes[node].point;
+        let along =
+            cross_of_intervals(arc.plane_normal, gradient_at(&self.surface, at).enclosure());
+        let into_the_arc = match dot_of(along, arc.into).sign() {
+            Decision::Pos => along,
+            Decision::Neg => along.map(|component| -component),
+            Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+        };
+        let point = at.enclosure();
+        let off_the_centre = [0, 1, 2].map(|axis| point[axis] - arc.centre[axis]);
+        let at_the_start = match dot_of(off_the_centre, arc.from).sign() {
+            Decision::Pos => true,
+            Decision::Neg => false,
+            Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+        };
+        Some(if at_the_start == arc.forward_runs_anticlockwise {
+            into_the_arc
+        } else {
+            into_the_arc.map(|component| -component)
+        })
+    }
+
     /// Whether `node` is one of the two points where the four half ellipses
     /// of the face's pipe and `crossing`'s partner meet
-    /// ([`Arrangement::place_where_two_halves_meet`]).
+    /// ([`Arrangement::place_where_two_halves_meet`]), or the four arcs of
+    /// the face's cone and a partner cone that touches it
+    /// ([`Arrangement::place_where_two_arcs_of_two_cones_meet`]).
+    ///
+    /// **Two cones are asked about only along an arc of two cones that
+    /// touch**, so a node of any other pair of cones is never read by this
+    /// name.
     fn is_an_end_of_the_halves(&self, node: usize, crossing: usize) -> bool {
-        self.is_where_two_pipes_touch(node, &self.surface, &self.crossings[crossing].partner)
+        let crossing = &self.crossings[crossing];
+        if crossing.arc_of_two_cones.is_some() {
+            return self.is_named_where_two_halves_meet(node, &self.surface, &crossing.partner);
+        }
+        self.is_where_two_pipes_touch(node, &self.surface, &crossing.partner)
     }
 
     /// Whether `node` is one of the two places `c ± r·n̂` where the pipes `one`
@@ -8955,6 +9152,12 @@ impl<'f> Arrangement<'f> {
         let (Surface::Cylinder(_), Surface::Cylinder(_)) = (one, other) else {
             return false;
         };
+        self.is_named_where_two_halves_meet(node, one, other)
+    }
+
+    /// Whether `node` carries [`where_two_halves_meet`]'s name for `one` and
+    /// `other` with `which` 0 or 1, the name of a place four halves meet at.
+    fn is_named_where_two_halves_meet(&self, node: usize, one: &Surface, other: &Surface) -> bool {
         let name = where_two_halves_meet(one, other);
         let Node { made_of, also, .. } = &self.nodes[node];
         made_of
@@ -10110,7 +10313,7 @@ impl<'f> Arrangement<'f> {
             let crossing = &self.crossings[arc.crossing];
             let read_by_its_arcs = crossing.partner == *cut
                 && crossing.touching.is_none()
-                && crossing.half_an_ellipse.is_none()
+                && !crossing.is_a_half()
                 && crossing.through_an_apex.is_none()
                 && !arc.against_its_gradients;
             read_by_its_arcs.then_some(if half_edge.is_multiple_of(2) {
@@ -11083,11 +11286,22 @@ impl<'f> Arrangement<'f> {
     /// The other half of the same ellipse is in the opposite corner, so its
     /// sides are this one's turned round. Each half's are read for itself and
     /// compared only with the same half's.
+    ///
+    /// An arc of two cones that touch lies in the plane
+    /// [`ArcOfTwoCones::plane_normal`] and `plane_offset` write, the sum or
+    /// the difference of its two pickers' forms, and a cone's face crosses
+    /// that plane in that ellipse alone too.
     fn side_of_the_plane_a_half_lies_in(
         &self,
         crossing: usize,
         at: PredicatePoint,
     ) -> Option<Decision> {
+        if let Some(arc) = self.crossings[crossing].arc_of_two_cones {
+            return match (dot_of(at.enclosure(), arc.plane_normal) - arc.plane_offset).sign() {
+                side @ (Decision::Pos | Decision::Neg) => Some(side),
+                Decision::Zero | Decision::Undecidable { .. } | _ => None,
+            };
+        }
         let half = self.crossings[crossing]
             .half_an_ellipse
             .expect("only a half of an ellipse is asked about");
@@ -17019,22 +17233,29 @@ pub(crate) fn where_two_halves_meet(one: &Surface, other: &Surface) -> [Surface;
 /// hang on where along its line the origin sits. Swapping the two pipes
 /// turns `d_lesser × d_greater` round, so the side counted from the other
 /// pipe is the other one, and both were proved, not guessed.
+///
+/// **Two cones that touch are let through too, and `which` does not turn
+/// for them**: it counts along `G₁ × G₂` for the two pickers of their arcs,
+/// which both cones' faces get in one order ([`ArcOfTwoCones::touches`]).
 fn the_place_two_halves_meet_at(
     (surfaces, which): ([Surface; 3], u8),
 ) -> Option<([[u64; 9]; 2], u8)> {
     let [lesser, greater, again] = surfaces;
-    let two_pipes = matches!(
-        (lesser, greater),
-        (Surface::Cylinder(_), Surface::Cylinder(_))
-    );
-    if !two_pipes || again != greater || which > 1 {
+    let turns_with_the_names = match (lesser, greater) {
+        (Surface::Cylinder(_), Surface::Cylinder(_)) => true,
+        (Surface::Cone(_), Surface::Cone(_)) => false,
+        _ => return None,
+    };
+    if again != greater || which > 1 {
         return None;
     }
     let [one, other] = [lesser, greater].map(|pipe| name_of_the_surface_either_way_round(&pipe));
     Some(if one <= other {
         ([one, other], which)
-    } else {
+    } else if turns_with_the_names {
         ([other, one], 1 - which)
+    } else {
+        ([other, one], which)
     })
 }
 
