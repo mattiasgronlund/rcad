@@ -1189,12 +1189,24 @@ fn coaxial_circles_come_together_only_where_their_surfaces_touch() {
 /// intersection and the turned cone less the upright one keep the stretch
 /// inside. Two corners that close, beside a corner 8 from the origin, span
 /// more than [`DynamicRange::LARGEST_SUPPORTED_RATIO`], so there is no
-/// certified answer to find. What refuses is the order along a rim, which the
-/// boxes round the two corners cannot tell: where a cap and both cones meet,
-/// the box is `1.3e−14` across, ten times the gap between the two.
+/// certified answer to find.
 ///
-/// Turned 0.25 or 0.4 rather than 0.3, the two are refused the same way where
-/// their rulings reach the rims. The tolerant policy is
+/// **What refuses is the order round where one cone's cap cuts the other
+/// cone**, between the two places the rims cross that cut, `1.35e−15` apart.
+/// With the upright cone first it is the cut of the upright cap through the
+/// turned cone, at `x < 0`; with the turned cone first, the cut of the turned
+/// cap through the upright cone, at `x > 0`. The box where a cap and both
+/// cones meet comes back up to `1.3e−14` across, ten times the gap, but
+/// [`rcad_geom::MeetOfThree::boxed_tight`] narrows it to one ulp along each
+/// axis, and the order along the upright rim is decided. Narrowed, the boxes
+/// of the two places on the cut are clear of each other along `y`, but the
+/// sweep round the cut from where it starts, over those two boxes, is
+/// `1.9e−15` wide, `2.1e−15` at `x > 0`, and holds nought.
+///
+/// Turned 0.25 or 0.4 rather than 0.3, the corners where the rulings reach
+/// the rims lie outside the supported range too, and the two are refused
+/// there: turned 0.4 on the order along a crossing, and turned 0.25 on which
+/// side of a cone a corner lies. The tolerant policy is
 /// [`two_cones_on_one_apex_leaning_apart_answer_every_fuse_under_a_tolerant_policy`]'s.
 #[test]
 fn two_cones_on_one_apex_leaning_apart_meet_both_rims_in_corners_too_close_for_a_certified_answer()
@@ -1231,10 +1243,15 @@ fn two_cones_on_one_apex_leaning_apart_meet_both_rims_in_corners_too_close_for_a
             rule,
             first_first,
         );
+        let x = if first_first {
+            -3.812888843803106
+        } else {
+            3.812888843803106
+        };
         refused_on_one_question_at(
             &said,
             "order along a crossing",
-            [3.812888843803106, -1.2090817444663618, 8.0],
+            [x, -1.2090817444663618, 8.0],
             &format!("{rule:?} (first first: {first_first})"),
         );
     }
