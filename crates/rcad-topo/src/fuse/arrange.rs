@@ -17434,6 +17434,8 @@ fn the_place_two_halves_meet_at(
     let turns_with_the_names = match (lesser, greater) {
         (Surface::Cylinder(_), Surface::Cylinder(_)) => true,
         (Surface::Cone(_), Surface::Cone(_)) => false,
+        (Surface::Cylinder(_) | Surface::Cone(_), _)
+        | (Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_), _) => return None,
         _ => return None,
     };
     if again != greater || which > 1 {
