@@ -883,3 +883,7 @@ move cost included, and not as stored. Both rules then answer under both
 policies as the one-triangle pyramid does, in 7 faces and 28 sides and 4 and
 12, with nothing in the log
 (`a_pyramid_with_a_split_plus_y_face_cut_on_one_side_of_the_x_axis_answers_as_the_true_planes_do`).
+
+`mise exec -- just t -E
+'test(/a_broken_three_surface_corner_read_back_from_bytes::/)'`, at
+`9229f4c7b`: 29 tests run, 29 passed.
