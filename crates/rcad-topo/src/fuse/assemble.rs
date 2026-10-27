@@ -13435,12 +13435,12 @@ mod tests {
     use super::super::Scratch;
     use super::super::select::choose;
     use super::{
-        Assembly, Bulging, Corner, Corners, Dart, Edge, EdgeKey, Error, Face, FaceMeet, JoinedFace,
-        Lump, MeetPoint, Model, Point, PredicatePoint, Side, SmallVec, Vector, VertexKey, WhichArc,
-        WireStep, Written, assemble, is_a_side_with_no_length, name_of_the_closed_crossing_through,
-        names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
-        the_nappe_an_arc_that_does_not_close_is_on, turns_round,
-        vertices_that_only_start_a_closed_edge, winding_round,
+        Assembly, Bulging, Corner, Corners, Dart, Edge, EdgeKey, Error, Face, FaceKey, FaceMeet,
+        JoinedFace, Lump, MeetPoint, Model, Point, PredicatePoint, Side, SmallVec, Vector,
+        VertexKey, WhichArc, WireStep, Written, assemble, is_a_side_with_no_length,
+        name_of_the_closed_crossing_through, names_of_the_three_surfaces,
+        the_crossing_of_these_runs_straight, the_nappe_an_arc_that_does_not_close_is_on,
+        turns_round, vertices_that_only_start_a_closed_edge, winding_round,
     };
 
     /// A corner that settles on a lower rounding leaves the coordinate it came
@@ -15432,6 +15432,75 @@ mod tests {
             before,
             "a refused answer leaves the model exactly as it was"
         );
+    }
+
+    /// A refusal of the answer's mesh names a face the caller can look up: the
+    /// input face the refused face was cut from.
+    ///
+    /// The answer is swept in a model of its own that is dropped straight
+    /// after, so a key into it is a key into nothing. Handed back as it was, it
+    /// gave `KeyFromAnotherModel` to anyone who asked the caller's model for
+    /// the face (Q2288).
+    ///
+    /// A unit cube with a ball of `13 · 2⁻⁴⁸` on its corner is placed, and its
+    /// answer cannot be meshed under any rule
+    /// (`a_ball_smaller_than_the_room_on_a_cube_corner_is_placed_and_its_answer_cannot_be_meshed`
+    /// in `tests/two_meets_reach_one_corner.rs`).
+    #[test]
+    fn a_refusal_of_the_answers_mesh_names_the_input_face_it_was_cut_from() {
+        let s = f64::powi(2.0, -48);
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+            let cube = model
+                .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a unit cube");
+            let ball = model
+                .add_ball(
+                    13.0 * s,
+                    &Isometry::translation(Vector::new(3.0 * s, 4.0 * s, 12.0 * s))
+                        .expect("a finite shift"),
+                )
+                .expect("a positive radius");
+            let faces_of_the_inputs: Vec<FaceKey> = [cube, ball]
+                .into_iter()
+                .flat_map(|solid| {
+                    model
+                        .solid(solid)
+                        .expect("this model made the key")
+                        .faces()
+                        .map(|face| face.key())
+                        .collect::<Vec<FaceKey>>()
+                })
+                .collect();
+
+            let refused = model.fuse(
+                &[cube],
+                &[ball],
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            let face = match refused {
+                Err(
+                    Error::CannotMeshAFace { face, .. }
+                    | Error::AWireWillNotLieFlatOnItsFace { face }
+                    | Error::ACurvedFaceGoesRightRoundWithNoSeam { face },
+                ) => face,
+                Err(other) => panic!("{rule:?}: {other:?}"),
+                Ok(_) => panic!(
+                    "{rule:?}: the fuse answered, so this needs another answer that cannot be \
+                     meshed"
+                ),
+            };
+            assert!(
+                faces_of_the_inputs.contains(&face),
+                "{rule:?}: {face:?} is no face of the cube or the ball"
+            );
+            assert!(
+                model.face(face).is_ok(),
+                "{rule:?}: the caller's model holds the face the refusal names"
+            );
+        }
     }
 
     /// What one write of an answer made, in a form two models can be compared
