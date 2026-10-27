@@ -13447,6 +13447,15 @@ mark-finished +trees:
 #   the lane's tree takes that second worktree's directory with it — on
 #   2026-10-07, `target/q1209-probe` (§205).
 #
+# **One sweep runs at a time.** Two runs whose rows land in one push send their
+# pruners together, and without a lock each walks the same `git worktree list`
+# snapshot: the second to reach a tree the first already removed gets `git
+# worktree remove`'s `fatal: not a git repository`, and the run stops there,
+# its own error line left behind (§315). The lock is a blocking `flock` on a
+# file in the shared git directory, the same idiom as `just gate`'s run lock
+# and the queue claims lock, so a second sweep waits out the first rather than
+# racing it.
+#
 # Until §205 a detached tree was kept whatever it held, and lanes here mostly
 # end detached: on 2026-09-22 this kept 55 trees and removed 7. The rule is
 # rscene's (`eed893f`) with the three rcad cases added.
@@ -13468,6 +13477,8 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
     here=$(git -C "{{dir}}" rev-parse --show-toplevel)
     fuzz_tree=$(sed -n "s|^WorkingDirectory=%h|$HOME|p; s|^WorkingDirectory=/|/|p" "{{fuzz_unit}}")
     [ -n "$fuzz_tree" ] || { echo "{{fuzz_unit}} names no WorkingDirectory, so the overnight fuzz tree cannot be kept"; exit 2; }
+    exec 9>"$(git -C "$here" rev-parse --path-format=absolute --git-common-dir)/rcad-prune-lock"
+    flock 9
     landed=(main)
     git -C "$here" rev-parse --verify -q origin/main >/dev/null && landed+=(origin/main)
     now=$(date +%s)
