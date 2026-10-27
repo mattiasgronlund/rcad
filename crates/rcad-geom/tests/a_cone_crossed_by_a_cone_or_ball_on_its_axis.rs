@@ -1116,21 +1116,29 @@ fn two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_t
 /// **They touch unless each apex is inside the other cone.** Of slope a half,
 /// half-angle `0.46`, the turn is less than `π` less twice that, the apex
 /// `(0, 4, 4)` is outside the upright cone, and the two touch at
-/// `(±√1.92, 0.8, 3.2)`, inside both pointed cones eight high. Of slope one,
-/// half-angle `π/4`, the turn is exactly `π` less twice that, the apex is on
-/// the upright cone, and the two share the straight line through both apexes,
-/// `x = 0, y = z`, and touch all along it, where both normals are along
-/// `(0, 1, −1)`. Of slope two, half-angle `1.11`, the apex is inside it, and
-/// the line along `x` through `(0, 3.2, 0.8)`, the only place they could
-/// touch, stays outside the upright cone, where `x² + y² − 4z²` is
-/// `x² + 7.68`: they cross without touching, in two flat cuts of either cone
-/// held apart, one in the flat surface halfway between the apexes. Nothing
-/// names two such cuts yet, so the pair is refused as any other overlap is.
+/// `(±√1.92, 0.8, 3.2)`, inside both pointed cones eight high. Their crossing
+/// is the two ellipses `y + z = 4` and `z − y = 2.4` cut out of the upright
+/// cone, which meet there, and `intersect` names it in four pieces, each of
+/// the two ellipses either side of where the other crosses it, which `walk`
+/// marches. Of slope one, half-angle `π/4`, the turn is exactly `π` less twice
+/// that, the apex is on the upright cone, and the two share the straight line
+/// through both apexes, `x = 0, y = z`, and touch all along it, where both
+/// normals are along `(0, 1, −1)`: refused as a crossing that touches itself.
+/// Of slope two, half-angle `1.11`, the apex is inside it, and the line along
+/// `x` through `(0, 3.2, 0.8)`, the only place they could touch, stays outside
+/// the upright cone, where `x² + y² − 4z²` is `x² + 7.68`: they cross without
+/// touching, in two flat cuts of either cone held apart, one in the flat
+/// surface halfway between the apexes. Nothing names two such cuts yet, so the
+/// pair is refused as any other overlap is.
 #[test]
 fn two_cones_of_one_slope_a_quarter_turn_apart_touch_unless_each_apex_is_inside_the_other() {
     let upright = |slope| a_cone([0.0; 3], [0.0, 0.0, 1.0], slope);
     let turned = |slope| a_cone([0.0, 4.0, 4.0], [0.0, -1.0, 0.0], slope);
-    assert_refused_as_touching_itself(&upright(0.5), &turned(0.5));
+    assert_named_as_two_flat_cuts_that_meet_where_they_touch(
+        &upright(0.5),
+        &turned(0.5),
+        [([0.0, 1.0, 1.0], 4.0), ([0.0, -1.0, 1.0], 2.4)],
+    );
     assert_refused_as_touching_itself(&upright(1.0), &turned(1.0));
     assert_eq!(
         named(&upright(2.0), &turned(2.0)),
@@ -1275,6 +1283,79 @@ fn two_cones_whose_turned_axis_is_rounded_are_not_mirror_images_and_are_refused_
                 Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
             );
         }
+    }
+}
+
+/// `intersect` names the pair's crossing in four pieces whichever comes first,
+/// and `walk` marches each, either way round the pair, along the whole of one
+/// of the two flat cuts `flats`, each written `(normal, offset)`: every point
+/// on both cones and on that flat surface within the bound it publishes. Two
+/// pieces lie on each cut, one either side of where the other cut crosses it.
+/// A loop stated right round the crossing is neither cut, and is refused.
+fn assert_named_as_two_flat_cuts_that_meet_where_they_touch(
+    one: &Surface,
+    other: &Surface,
+    flats: [([f64; 3], f64); 2],
+) {
+    let met = named(one, other);
+    let Ok(SurfaceMeet::Curves(runs)) = &met else {
+        panic!("four pieces of two flat cuts, and not {met:?}");
+    };
+    assert_eq!(runs.len(), 4, "{runs:?}");
+    let mut walked_on = [0; 2];
+    for run in runs {
+        for along in [[one, other], [other, one]] {
+            let walked = walk(
+                run,
+                along,
+                Deflection::of(0.01).expect("a length above zero"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .unwrap_or_else(|refused| panic!("{run:?} is walked, not refused {refused:?}"));
+            assert!(
+                walked.points().len() > 8,
+                "an ellipse at a deflection of a hundredth takes more than eight pieces"
+            );
+            let room = walked.deviation().magnitude();
+            let off_each = flats.map(|(normal, offset)| {
+                walked
+                    .points()
+                    .iter()
+                    .map(|point| {
+                        let [x, y, z] = point.coordinates();
+                        (normal[0] * x + normal[1] * y + normal[2] * z - offset).abs()
+                            / Vector::from(normal).length()
+                    })
+                    .fold(0.0, f64::max)
+            });
+            let Some(cut) = off_each.iter().position(|off| *off <= room) else {
+                panic!("{run:?} is {off_each:?} off the two cuts, past the published {room:e}");
+            };
+            walked_on[cut] += 1;
+            for point in walked.points() {
+                for surface in along {
+                    let off = how_far_off(surface, *point);
+                    assert!(
+                        off <= room,
+                        "{point:?} is {off:e} off {surface:?}, past the published {room:e}"
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(
+        walked_on,
+        [4, 4],
+        "two pieces on each cut, each walked both ways round"
+    );
+    let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("a whole loop needs nothing picking it");
+    for along in [[one, other], [other, one]] {
+        assert_eq!(
+            where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new()).err(),
+            Some(Error::CannotNameWhichPieceOfACrossingThisIs)
+        );
     }
 }
 
