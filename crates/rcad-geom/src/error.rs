@@ -780,7 +780,10 @@ pub enum Error {
     /// walked without complaint, and what they have no answer for is only the
     /// question this error is asked by. A caller that *states* a run as closed
     /// on one of them gets it from [`walk`](crate::walk) as well, because a
-    /// crossing that does not close is not a piece of what that run named.
+    /// crossing that does not close is not a piece of what that run named. So
+    /// does one stated closed from a point of the hyperbola that two mirror
+    /// cones of one slope that touch cross in, off the ellipse they also cross
+    /// in (Q2887).
     ///
     /// A **limit** and not a gap (§16.10): the vertex this would name does not
     /// exist, because the edge those pairs contribute is cut by corners at both

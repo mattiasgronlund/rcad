@@ -468,7 +468,8 @@ impl PointsAlongACrossing {
 ///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run a caller
 /// states as going right round a crossing that runs on for ever — a plane and a
-/// cone crossing in a parabola or a hyperbola. The two shapes through the apex
+/// cone crossing in a parabola or a hyperbola, or two mirror cones that touch
+/// where the run's end is on the hyperbola they cross in. The two shapes through the apex
 /// are straight lines, and a straight run gets the same empty answer here that a
 /// run between two planes does.
 ///
@@ -6097,9 +6098,14 @@ fn furthest_either_side_of(ellipse: &Conic, flat: &Plane) -> [f64; 2] {
 /// `(d − g·centre)/(g·out)`.
 ///
 /// A run stated right round the crossing has no picker, so every curve is
-/// held, and it is refused.
+/// held, and it is refused. One whose end is on the hyperbola and off the
+/// ellipse can only be on a branch, which does not close.
 ///
 /// # Errors
+///
+/// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] for a run stated right
+/// round whose end is on the hyperbola and not on the ellipse, said before the
+/// branch is named, as `where_a_plane_cuts_a_cone` says it from the cut alone.
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where `flats[0]` does not
 /// cut a hyperbola and `flats[1]` an ellipse once each is rounded, where the
@@ -6171,6 +6177,9 @@ fn which_piece_of_a_hyperbola_and_an_ellipse_this_run_is(
         ));
     }
     if on_the_hyperbola {
+        if !on_the_ellipse && run.run().it_comes_back_to_where_it_started() {
+            return Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed);
+        }
         let opening_of_the_ends = if ends.is_empty() {
             None
         } else {
