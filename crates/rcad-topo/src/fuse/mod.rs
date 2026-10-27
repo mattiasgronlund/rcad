@@ -201,6 +201,12 @@ impl Model {
     /// guard (§87.3). Before §66.3 the check was `debug_assertions`-gated *and*
     /// skipped whenever the model did not already validate, so a release fuse
     /// looked at nothing; §66.3 made it run always, and §87 made it a refusal.
+    /// Whatever else that sweep refuses comes back as it is, except that a
+    /// refusal naming a face, such as [`Error::AWireWillNotLieFlatOnItsFace`]
+    /// from meshing the answer, names the face of `arguments` or `tools` that
+    /// face of the answer was cut from, since the throwaway is gone. The same
+    /// holds of a refusal from meshing the answer's shells earlier, in a model
+    /// of their own, to tell a lump from a hollow.
     ///
     /// # Panics
     ///

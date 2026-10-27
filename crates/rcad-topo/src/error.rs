@@ -460,7 +460,8 @@ pub enum Error {
     /// before. A panic is the wrong answer to a caller's bytes (§4.1).
     #[error("a wire of this face will not lie flat in the face's own two coordinates")]
     AWireWillNotLieFlatOnItsFace {
-        /// Which face.
+        /// Which face. From a fuse, which meshes its answer before writing it,
+        /// the input face the answer's face was cut from.
         face: crate::FaceKey,
     },
 
@@ -1517,6 +1518,89 @@ impl Error {
             | Self::CannotTellWhetherTwoSolidsShareSpace { .. }
             | Self::CannotTellWhichWayAClosedEdgeRuns { .. }
             | Self::Undecidable { .. } => LimitOrGap::NotKnown,
+        }
+    }
+
+    /// The face this refusal names, where it names one, so that a refusal
+    /// raised inside a model of the kernel's own can be made to name a face of
+    /// the caller's model instead (Q2288).
+    ///
+    /// One match and no wildcard, so a new variant does not compile until it
+    /// says whether it names a face.
+    pub(crate) fn the_face_it_names(&mut self) -> Option<&mut crate::FaceKey> {
+        match self {
+            Self::CannotMeshAFace { face, .. }
+            | Self::AWireDoesNotFanIntoALoopToMesh { face, .. }
+            | Self::AWireWillNotLieFlatOnItsFace { face }
+            | Self::CannotTellWhichWayRoundTheRingAFaceGoes { face }
+            | Self::AMeshCoveredTheWrongSideOfALoop { face }
+            | Self::AClosedEdgeOfTheAnswerWouldStartAtAPole { face }
+            | Self::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face, .. }
+            | Self::ACurvedFaceGoesRightRoundWithNoSeam { face }
+            | Self::ACurvedFaceCannotBeCutSmallEnoughToMesh { face }
+            | Self::CurvedFaceWithAHoleGoesTooFarRound { face }
+            | Self::NoSuchFaceInThisSolid { face }
+            | Self::AFaceTrimmedByACurveThisCannotFollow { face }
+            | Self::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { face }
+            | Self::CannotFireARayAtAFacesSurface { face }
+            | Self::AFaceMissesPartOfWhereItsSurfacesCross { face }
+            | Self::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face }
+            | Self::AFaceMeetsItsNeighbourNowhere { face }
+            | Self::AFaceMeetsItsNeighbourOnItsOwnSurface { face }
+            | Self::CannotTellWhichCurveOfACrossingAFaceRunsAlong { face }
+            | Self::TwoCurvesTouchWithoutCrossing { face }
+            | Self::CannotTellTheCellsOfAFaceApart { face }
+            | Self::CannotPlaceTheRingsOfAJoinedFlatFace { face } => Some(face),
+            Self::Geometry(_)
+            | Self::ADraftEdgeHasACrossingThatCannotBeFollowed { .. }
+            | Self::ACrossingAlongThisEdgeCouldNotBeFollowed { .. }
+            | Self::Invalid(_)
+            | Self::KeyFromAnotherModel { .. }
+            | Self::TooFewPoints { .. }
+            | Self::PointNotFinite { .. }
+            | Self::RepeatedPoint { .. }
+            | Self::HeightNotPositive { .. }
+            | Self::ACapOfABarFacesIntoIt { .. }
+            | Self::ADraftHandleCameFromAnotherBuilder { .. }
+            | Self::ADraftPointIsNotFinite { .. }
+            | Self::ADraftEdgeHasNoLength { .. }
+            | Self::ADraftWireIsTooShort { .. }
+            | Self::ADraftWireDoesNotClose { .. }
+            | Self::ADraftFaceHasNoWires
+            | Self::ADraftShellHasNoFaces
+            | Self::ADraftEntityIsUsedTwice { .. }
+            | Self::ADraftEntityIsUsedByNothing { .. }
+            | Self::ADraftEdgeIsNotWalkedByTwoCoedges { .. }
+            | Self::ADraftEdgeIsWalkedTheSameWayTwice { .. }
+            | Self::ADraftSolidHasNoShell
+            | Self::CannotYetMeasureHowLongThisCurveIs { .. }
+            | Self::ProfileCrossesItself
+            | Self::HoleNotInsideOutline { .. }
+            | Self::HoleInsideAnotherHole { .. }
+            | Self::ACapDoesNotCutRightRoundABar { .. }
+            | Self::TheCapsOfABarMeetInsideIt
+            | Self::VolumeTooLargeToMeasure
+            | Self::SurfaceAreaTooLargeToMeasure
+            | Self::LengthTooLargeToMeasure
+            | Self::TheFuseWroteABrokenAnswer { .. }
+            | Self::WrongFormatVersion { .. }
+            | Self::ArgumentIntersectsItself
+            | Self::ResultIsNotManifold { .. }
+            | Self::DeflectionBelowWhatAMeshCanReach { .. }
+            | Self::TwoPatchesOfTheMeshDrewTheSameSide { .. }
+            | Self::PlacingItTookAwayTheSpaceItsMeshEncloses { .. }
+            | Self::CannotTellWhichWayASolidsFacesPoint { .. }
+            | Self::AnEdgeWithoutTwoFacesAlongItCannotBeWalked { .. }
+            | Self::AnEdgeBendsButEveryFaceAlongItIsFlat { .. }
+            | Self::MoreMeshPointsThanASolidWillHold { .. }
+            | Self::ACrossingThisCannotBeOrderedAlong
+            | Self::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed
+            | Self::ADraftFaceCouldNotBeMeshed { .. }
+            | Self::ASolidBuiltFaceByFaceHasOneShell
+            | Self::TwoSolidsShareSpace { .. }
+            | Self::CannotTellWhetherTwoSolidsShareSpace { .. }
+            | Self::CannotTellWhichWayAClosedEdgeRuns { .. }
+            | Self::Undecidable { .. } => None,
         }
     }
 }

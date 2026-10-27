@@ -878,7 +878,10 @@ impl Assembly {
     ///
     /// Whatever else the sweep says, unchanged — [`Error::Undecidable`] where a
     /// predicate gave up on the answer, say. "The kernel wrote something broken"
-    /// is not what those say.
+    /// is not what those say. But a refusal that names a face, such as
+    /// [`Error::AWireWillNotLieFlatOnItsFace`] from meshing the answer, names
+    /// the caller's face that face of the answer was cut from: the throwaway is
+    /// dropped when this returns, so a key into it would name nothing (Q2288).
     ///
     /// # Panics
     ///
@@ -918,7 +921,7 @@ impl Assembly {
         mine.drain_into(log);
         swept.map_err(|refused| {
             let Error::Invalid(broken) = refused else {
-                return refused;
+                return self.naming_the_callers_face(&throwaway, &rehearsal, refused);
             };
             Error::TheFuseWroteABrokenAnswer { broken }
         })?;
@@ -5800,7 +5803,9 @@ impl Assembly {
     /// has no shell around it. [`Error::CannotTellWhichWayASolidsFacesPoint`],
     /// through [`how_much_space_it_encloses`]'s `?`, when a curved shell no
     /// mesh signs whose closest sum is not above zero, and none of whose
-    /// corners tells which way its faces point.
+    /// corners tells which way its faces point. Whatever else meshing a shell
+    /// refuses, such as [`Error::CannotMeshAFace`], naming the input face the
+    /// face it could not mesh was cut from where it names a face.
     /// [`Error::AFaceTrimmedByACurveThisCannotFollow`]
     /// naming the input face, when no point on a shell could be placed and one
     /// met a face of another shell that nobody can follow.
@@ -5826,7 +5831,8 @@ impl Assembly {
 
         let mut volumes = Vec::new();
         for &solid in &written.solids {
-            let volume = how_much_space_it_encloses(apart.solid_at(solid), policy, log)?;
+            let volume = how_much_space_it_encloses(apart.solid_at(solid), policy, log)
+                .map_err(|refused| self.naming_the_callers_face(&apart, &written, refused))?;
             if !volume.is_finite() {
                 return Err(Error::VolumeTooLargeToMeasure);
             }
@@ -6256,6 +6262,26 @@ impl Assembly {
         let out = Vector::new(-1.0, 1.0, 1.0) * (ball.radius() / 3.0_f64.sqrt());
         let point = ball.centre() + out;
         point.is_finite().then_some(point)
+    }
+
+    /// `refused`, raised in `apart`, naming in place of the face of `apart` it
+    /// names the caller's face that one was cut out of. `apart` is thrown away
+    /// when the fuse returns, so a key into it would name nothing (Q2288).
+    ///
+    /// # Panics
+    ///
+    /// As [`Assembly::the_input_face_it_was_cut_from`] does: `apart` holds
+    /// what [`Assembly::write_into`] wrote and nothing else.
+    fn naming_the_callers_face(
+        &self,
+        apart: &Model,
+        written: &Written,
+        mut refused: Error,
+    ) -> Error {
+        if let Some(face) = refused.the_face_it_names() {
+            *face = self.the_input_face_it_was_cut_from(apart, written, *face);
+        }
+        refused
     }
 
     /// The caller's face that `face`, written into `apart`, was cut out of.
@@ -13430,17 +13456,17 @@ mod tests {
 
     use rcad_predicates::{Decision, Interval, Policy, ProvenanceLog};
 
-    use crate::{DraftStep, Invalid, Rule, SolidBuilder};
+    use crate::{DraftStep, Invalid, Rule, SolidBuilder, SolidKey};
 
     use super::super::Scratch;
     use super::super::select::choose;
     use super::{
-        Assembly, Bulging, Corner, Corners, Dart, Edge, EdgeKey, Error, Face, FaceMeet, JoinedFace,
-        Lump, MeetPoint, Model, Point, PredicatePoint, Side, SmallVec, Vector, VertexKey, WhichArc,
-        WireStep, Written, assemble, is_a_side_with_no_length, name_of_the_closed_crossing_through,
-        names_of_the_three_surfaces, the_crossing_of_these_runs_straight,
-        the_nappe_an_arc_that_does_not_close_is_on, turns_round,
-        vertices_that_only_start_a_closed_edge, winding_round,
+        Assembly, Bulging, Corner, Corners, Dart, Edge, EdgeKey, Error, Face, FaceKey, FaceMeet,
+        JoinedFace, Lump, MeetPoint, Model, Point, PredicatePoint, Side, SmallVec, Vector,
+        VertexKey, WhichArc, WireStep, Written, assemble, is_a_side_with_no_length,
+        name_of_the_closed_crossing_through, names_of_the_three_surfaces,
+        the_crossing_of_these_runs_straight, the_nappe_an_arc_that_does_not_close_is_on,
+        turns_round, vertices_that_only_start_a_closed_edge, winding_round,
     };
 
     /// A corner that settles on a lower rounding leaves the coordinate it came
@@ -15431,6 +15457,129 @@ mod tests {
             what_is_in_it(&model),
             before,
             "a refused answer leaves the model exactly as it was"
+        );
+    }
+
+    /// A refusal of the answer's mesh names a face the caller can look up: the
+    /// input face the refused face was cut from.
+    ///
+    /// The fuse writes the answer's shells into a model of its own to read off
+    /// a mesh which way each one faces (`Assembly::nest_the_shells`), and drops
+    /// that model when it returns, so a key into it is a key into nothing.
+    /// Handed back as it was, it gave `KeyFromAnotherModel` to anyone who asked
+    /// the caller's model for the face (Q2288). The answer here is refused
+    /// there, under every rule.
+    #[test]
+    fn a_refusal_of_the_answers_mesh_names_the_input_face_it_was_cut_from() {
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let (mut model, cube, ball) = a_unit_cube_with_a_ball_too_small_to_mesh_on_its_corner();
+            let refused = model.fuse(
+                &[cube],
+                &[ball],
+                rule,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            the_face_named_is_one_of_the_inputs(&model, [cube, ball], rule, refused);
+        }
+    }
+
+    /// The same of the sweep of the answer in `Assembly::commit`, which
+    /// meshes it in a throwaway model of its own.
+    ///
+    /// The answer is the one above, put into one solid per shell by hand,
+    /// since asking which shell is inside which would mesh it and refuse
+    /// before the commit is reached.
+    #[test]
+    fn a_refusal_of_the_sweep_of_the_answer_names_the_input_face_it_was_cut_from() {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
+            let (mut model, cube, ball) = a_unit_cube_with_a_ball_too_small_to_mesh_on_its_corner();
+            let scratch = Scratch::split_both_groups(&model, &[cube], &[ball], &policy, &mut log)
+                .expect("the cube and the ball split each other");
+            let chosen = choose(&model, &scratch, rule, &policy, &mut log).expect("pieces kept");
+            let mut assembly = assemble(
+                &model,
+                &scratch,
+                &chosen,
+                &scratch.names_of_one_point,
+                None,
+                &policy,
+                &mut log,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("an answer to write");
+            assembly.solids = (0..assembly.shells.len())
+                .map(|outer| Lump {
+                    outer,
+                    voids: Vec::new(),
+                })
+                .collect();
+
+            let refused = assembly.commit(&mut model, None, &policy, &mut log);
+            the_face_named_is_one_of_the_inputs(&model, [cube, ball], rule, refused);
+        }
+    }
+
+    /// A unit cube, and a ball of `13 · 2⁻⁴⁸` on its corner whose answer
+    /// under any rule is placed and cannot be meshed
+    /// (`a_ball_smaller_than_the_room_on_a_cube_corner_is_placed_and_its_answer_cannot_be_meshed`
+    /// in `tests/two_meets_reach_one_corner.rs`).
+    fn a_unit_cube_with_a_ball_too_small_to_mesh_on_its_corner() -> (Model, SolidKey, SolidKey) {
+        let s = f64::powi(2.0, -48);
+        let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+        let cube = model
+            .add_cube(1.0, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a unit cube");
+        let ball = model
+            .add_ball(
+                13.0 * s,
+                &Isometry::translation(Vector::new(3.0 * s, 4.0 * s, 12.0 * s))
+                    .expect("a finite shift"),
+            )
+            .expect("a positive radius");
+        (model, cube, ball)
+    }
+
+    /// Asserts that `refused` is a refusal to mesh a face, and that the face it
+    /// names is a face of one of `inputs` in `model`.
+    fn the_face_named_is_one_of_the_inputs<T>(
+        model: &Model,
+        inputs: [SolidKey; 2],
+        rule: Rule,
+        refused: Result<T, Error>,
+    ) {
+        let face = match refused {
+            Err(
+                Error::CannotMeshAFace { face, .. }
+                | Error::AWireWillNotLieFlatOnItsFace { face }
+                | Error::ACurvedFaceGoesRightRoundWithNoSeam { face },
+            ) => face,
+            Err(other) => panic!("{rule:?}: {other:?}"),
+            Ok(_) => panic!(
+                "{rule:?}: the answer was written, so this needs another answer that cannot be \
+                 meshed"
+            ),
+        };
+        let faces_of_the_inputs: Vec<FaceKey> = inputs
+            .into_iter()
+            .flat_map(|solid| {
+                model
+                    .solid(solid)
+                    .expect("this model made the key")
+                    .faces()
+                    .map(|face| face.key())
+                    .collect::<Vec<FaceKey>>()
+            })
+            .collect();
+        assert!(
+            faces_of_the_inputs.contains(&face),
+            "{rule:?}: {face:?} is no face of the cube or the ball"
+        );
+        assert!(
+            model.face(face).is_ok(),
+            "{rule:?}: the caller's model holds the face the refusal names"
         );
     }
 
