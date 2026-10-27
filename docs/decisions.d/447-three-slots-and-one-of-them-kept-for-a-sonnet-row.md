@@ -251,11 +251,6 @@ step 4.
 
 ### 447.6 447.3's bars, read again with the kept Sonnet slot
 
-*Unfinished. Q1947 found the two bars below and ran out of its budget before
-reading rows closed per day by model, 447.4's third thing to add here. A
-later row should finish that reading and fold it into this section instead of
-opening a new one; 447.4 already names this section as the one Q1947 adds.*
-
 Q1932 (5b9241d75, 2026-10-13T23:11:05+02:00, 21:11:05 UTC) built the kept
 Sonnet slot. `queue_slots` was 3 at that moment (Q1931 had set it 19:22:14
 UTC the same day); it went back to 4 only at Q1946 (072686e8d,
@@ -305,16 +300,48 @@ rise is the fourth slot, the kept Sonnet slot, or the much higher dispatch
 rate visible in the rows-closed figures below (487 lane merges in under 14
 days, against 79 in under 5 days at 447.2's reading) is not decided here.
 
-**Rows closed per day by model: not read.** 447.4 asks for this and the
-budget ran out first. `docs/queue.md`'s `done:<sha>` rows keep their model
-field, and every "`Qnnn[, Qnnn...] done`" merge commit on `origin/main` since
-21:35:11 UTC on 10-13 names which rows it closed and when (its own commit
-date); 537 such rows were found this way in the window, across 391 to 447
-distinctly-parsed merge commits depending on how loosely the commit-message
-pattern is read (`Merge lane-...: ... Qnnn[, Qnnn] done` in some form; about
-40 relay-only "into lane-..." merges in the window name no row done and are
-not rows closed). The next row to read this should: walk those merge commits,
-pull each closed id's `model` field from the line in `docs/queue.md` that
-names it (`^Qnnn\s+\S+\s+\S+\s+(opus|sonnet)\s`), bucket by the merge
-commit's own date, and compare the full-day rate (full days in the window are
-10-14 to 10-26, 13 of them) against 10-05 to 10-13's rate, split by model.
+**Rows closed per day by model.** Every "`Qnnn[, Qnnn...] done`" merge commit
+on `origin/main` (a `Merge lane-...` subject) names which rows it closed and
+when, by its own commit date; `docs/queue.md` keeps a `model` field on every
+row, done or not, so each closed id's model is read off the line that names
+it (`^Qnnn\s+\S+\s+\S+\s+(opus|sonnet)\s`). Dates are the commit's own
+`%cI`, converted to UTC, since the window's own boundary is a UTC instant:
+
+```
+git log origin/main --merges --since=2026-10-13T21:35:11Z --until=2026-10-27T23:59:59Z --format='%H|%cI|%s'
+git log origin/main --merges --since=2026-10-05T00:00:00Z --until=2026-10-13T21:35:11Z --format='%H|%cI|%s'
+```
+
+kept to subjects starting `Merge lane-`, with a `Qnnn[, Qnnn...] done` list
+pulled out of each (about 40 relay-only "into lane-..." merges in each window
+name no row done and are not counted):
+
+| | since 10-13 21:35 UTC (now) | 10-05 00:00 UTC to 10-13 21:35 UTC |
+|---|---|---|
+| lane merges | 487 | 491 |
+| merges with a done list | 447 | 452 |
+| rows closed | 537 (299 Opus, 238 Sonnet) | 558 (374 Opus, 184 Sonnet) |
+
+The two windows are not the same length (13 days plus a sliver on each end
+here, 8 days plus a sliver there), so the rate is read over full UTC days
+only: 10-14 to 10-26 (13 days) against 10-05 to 10-12 (8 days); 10-13 and
+10-27 are partial on both ends of their windows (10-13 by the 21:35:11 UTC
+cutover itself, 10-27 because it is still running) and are left out.
+
+| | since 10-13 21:35 UTC, 13 full days | 10-05 to 10-12, 8 full days | ratio |
+|---|---|---|---|
+| Opus rows closed per day | 22.0 | 43.25 | 0.51 |
+| Sonnet rows closed per day | 17.9 | 21.6 | 0.83 |
+| total rows closed per day | 39.9 | 64.9 | 0.62 |
+
+Rows close more slowly now for both models, not faster: the Opus rate is
+about half the baseline's, the Sonnet rate about five sixths of it, and the
+combined rate about three fifths. This runs the other way from the two bars
+above, which both rose. Nothing here says why: the same caveat as the test-step
+and catch-up bars applies, and more sharply — the queue holds fewer easy rows
+than it did on 10-05 to 10-12 (the small-row backlog §446.2 measured has been
+worked down since), lanes now spend part of each run on the family checks
+§450.3 added, and some of the rows closed since are themselves slower-running
+(fuzz triage, soaks) than the median row of two weeks ago. Any of those would
+lower the rate on their own, without the slot count or the kept Sonnet slot
+costing anything; this reading cannot tell them apart, and does not try to.
