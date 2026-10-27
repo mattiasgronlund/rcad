@@ -668,8 +668,12 @@ fn cross_component(
 /// product or the dot product down the axis cancels, but for the one case
 /// below. With nothing cancelling the least constant it proves is
 /// `11·epsilon + 99·epsilon²`. Nobody has tried the claim on `value` itself.
-/// The proof covers no zero difference or direction component, which have not
-/// been run.
+/// Where a difference or a direction component is zero, Gappa proves the bound
+/// on that sum at this constant too, in each of the 219 cases, and Coq checks
+/// each proof (§464.30), again but for the one case below. A direction zero in all three
+/// components and a zero slope never reach this level (the docs on
+/// [`Cone::basis`] and [`Cone::new`]), and a point at the apex has a bound of
+/// `0`, which `decide` does not compare against.
 ///
 /// Every step of that argument is a *relative* one, so as with every bound of
 /// this shape it holds only while nothing overflows or falls into the
