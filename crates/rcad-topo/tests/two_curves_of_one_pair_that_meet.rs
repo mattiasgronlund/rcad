@@ -1357,14 +1357,43 @@ fn two_cones_on_one_apex_leaning_apart_answer_every_fuse_under_a_tolerant_policy
 /// every fuse was refused `Undecidable` on which way a crossing runs, asked at
 /// the apex and a step out along a ruling the two touch along, where the cross
 /// of their gradients is nothing, until Q2872.
+///
+/// Since Q2872 the intersection answers, empty, both ways round. The union and
+/// both differences are still refused `ResultIsNotManifold`, an edge with one
+/// face along it: `which_arc_of_a_circle_walked_this_way` in
+/// `fuse/assemble.rs` signs a side of two cones by the side of the other cone
+/// the material lies on, which along a touching ruling is the same either
+/// side of the line while the two pieces walk it opposite ways, so the two
+/// pieces of one cone that meet there key the line as two edges. The row
+/// Q2872's merge adds is for that.
 #[test]
-fn the_pitch_cones_of_a_pair_of_mitre_gears_touch_along_a_ruling_and_every_fuse_answers() {
+fn the_pitch_cones_of_a_pair_of_mitre_gears_touch_along_a_ruling_and_only_the_intersection_answers()
+{
     let frustum = 7.0 * PI / 3.0;
-    every_fuse_answers(
-        the_pitch_cones_of_a_pair_of_mitre_gears,
-        [frustum, frustum, 0.0],
-        [&[3, 3], &[], &[3], &[3]],
-    );
+    for (rule, first_first) in six_fuses() {
+        if rule == Rule::Intersection {
+            the_fuse_answers(
+                the_pitch_cones_of_a_pair_of_mitre_gears,
+                (rule, first_first),
+                [frustum, frustum, 0.0],
+                [&[3, 3], &[], &[3], &[3]],
+            );
+        } else {
+            let said = fuse(
+                &mut a_model(),
+                the_pitch_cones_of_a_pair_of_mitre_gears,
+                rule,
+                first_first,
+            );
+            assert!(
+                matches!(
+                    said,
+                    Err(rcad_topo::Error::ResultIsNotManifold { count: 1 })
+                ),
+                "{rule:?} (first first: {first_first}): {said:?}"
+            );
+        }
+    }
 }
 
 fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
