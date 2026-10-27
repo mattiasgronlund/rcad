@@ -9776,6 +9776,20 @@ check-fuzz-overnight-selftest:
     # real loss here is a filesystem whose order is not acting as roughly
     # uniform, not a flake.
     #
+    # Q2509: `find "$base"` walks the whole shared build directory, and up
+    # to three gates can be running this same arm at once in this one tree
+    # (§372) — each plants its own `-$tag` pair under that same `$base`
+    # while this one is probing. `head -n1` can then meet another arm's or
+    # another gate's own rlib before it ever meets one of this attempt's
+    # own 26 tries, and no probe letter this attempt plants will ever match
+    # it — failing all 8 real-name retries for a reason that has nothing to
+    # do with this run's own luck, the same "none of 26 ... on 8 different
+    # real names" message a genuine run of bad luck gives. So `find`'s
+    # output is filtered, after the walk and without re-sorting it, down to
+    # just the two paths this attempt itself just made: whichever of those
+    # two `find` met first is what this attempt's own luck says, with
+    # everyone else's rlibs left out of the count.
+    #
     # Named so every directory this makes ends in `-$tag`: the retry's own
     # discriminator goes in front of it, never after, so `clean_up`'s
     # `selftest-*"$tag"` glob still sweeps every attempt, tried or kept, with
@@ -9805,7 +9819,9 @@ check-fuzz-overnight-selftest:
             stale_out="$base/selftest-stale-$probe-$tag/out"
             mkdir -p "$stale_out"
             touch "$stale_out/librcad_fuzz_timing-selftest-stale-$probe-$tag.rlib"
-            first=$(find "$base" -name 'librcad_fuzz_timing-*.rlib' | head -n1)
+            first=$(find "$base" -name 'librcad_fuzz_timing-*.rlib' \
+                | grep -E "/(selftest-$tag|selftest-stale-$probe-$tag)/" \
+                | head -n1 || true)
             case "$first" in
                 *"/selftest-stale-$probe-$tag/"*) stale="$probe"; break ;;
             esac
