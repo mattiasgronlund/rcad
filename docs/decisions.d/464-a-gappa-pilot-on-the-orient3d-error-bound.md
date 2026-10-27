@@ -34,7 +34,7 @@ is Q2748, which runs it with one difference and one minor at zero. 464.27 is
 Q2760, on the side of a flat surface through a point with every product
 anywhere, and 464.28 is Q2771, on the side of rcad-geom's cylinder with a zero
 factor. 464.29 is Q2773, on that cylinder with a checked product below the
-normals.*
+normals. 464.30 is Q2781, on the side of rcad-geom's cone with a zero factor.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -65,6 +65,7 @@ normals.*
   464.27  The side of a flat surface through a point with every product anywhere
   464.28  The side of rcad-geom's cylinder with a zero factor
   464.29  The side of rcad-geom's cylinder with a checked product below the normals
+  464.30  The side of rcad-geom's cone with a zero factor
 
 ### 464.1 The bugs a bound prover is for
 
@@ -19843,10 +19844,193 @@ subsection. Comment only: lines that run 0.
 
 ### 464.30 The side of rcad-geom's cone with a zero factor
 
-DRAFT, by Q2781's second lane, which passed its budget here: `conezero.py`
-below is written, and `python3 conezero.py` prints `cases written: 219 second
-controls at u^2: 36`. None of it has been run in Gappa yet, and the write-up
-is still to do.
+Q2781 ran 464.16's `cone.g` where a difference or a direction component is
+zero, in three lanes on 2026-10-27, at `c3c03fd8`. The first committed
+nothing, the second wrote `conezero.py`, and the third ran it and wrote this.
+The bound is proved on `y`, the sum before `value`'s last rounding, at the
+code's constant in each of the 219 cases, and Coq checks each proof, modulo
+its hints. Each control at `u / 2` fails but the 36 where `y` is `0`, and 24
+of those fail at `u²`; the other 12 have hypotheses that contradict. A
+direction with all three components zero, and a zero slope, do not reach
+`on_floats`, and a point at the apex reaches it with a bound of `0`, which
+`decide` does not compare against. So with 464.16 every pattern of zero and
+nonzero factors that reaches level 1's comparison is run, and the bound holds
+on `y` in each, but for `up` cancelling with `R2` rounding to zero, which is
+464.16's wrong sign and Q2779's row. The doc comment on the constant says
+these branches have not been run, which is a row (6).
+
+**1. Which zeros get through.** `product_is_normal(a, b)` is `a == 0.0 || b
+== 0.0 || (a * b).abs() >= f64::MIN_POSITIVE` (`cascade.rs:67-69` at
+`c3c03fd8`). So `on_floats` lets a zero factor through every check it makes:
+the six halves in `cross_product_halves_if_normal` (`cone.rs:435`), and in
+`stays_accurate` (`cone.rs:439-445`) the components, each difference with its
+direction component, the slope, `up`, and the slope squared with `up` squared.
+A half, or an up half `u = f · d`, whose two factors are not zero is normal,
+which the checks enforce, so it is zero exactly when one of its factors is. Of
+the seven factors:
+
+- A difference `f = rnd(p − o)` is zero exactly when `p` and the apex's `o`
+  are the same double, as 464.11's `diffzero.g` writes it, so its true value
+  is zero too. A half or an up half with it as a factor is exactly zero, and
+  so is its true product.
+- A direction component is zero when the axis is written so, as the
+  axis-aligned cone `d = (0, 0, dz)` is.
+- All three direction components at once do not reach `on_floats`. The doc on
+  `Cone::basis` (`cone.rs:173-178`) names each route a `Cone` gets its axis
+  by, and why none of them gives a direction with no length, pointing at the
+  doc on `Cylinder::basis` for the long form.
+- All three differences at once do reach it: the point is the apex. Then
+  every half and every up half is zero, so the permanent is `0` and so is the
+  bound. `decide` compares against a bound only when it `is_normal()`
+  (`cascade.rs:125`), which `0` is not, so level 1 hands over without a sign,
+  and there is nothing for a proof to cover.
+- The slope does not reach it at zero. `Cone::new` refuses a slope that is not
+  above zero (`cone.rs:91-93`), which `a_cone_with_no_spread_is_not_a_cone`
+  (`cone.rs:733`) checks. `Deserialize` goes through `TryFrom`, which calls
+  `new` (`cone.rs:68`, `707-713`), `transformed` copies the slope
+  (`cone.rs:156-159`), and the field is private.
+
+So of the 63 sets of zero factors, the 8 that hold all three direction
+components and the 8 that hold all three differences, one set being both, are
+left out, which leaves 48.
+
+**2. The cases.** Each zero factor zeroes one half in each of two components
+and one up half: `fx` the right half of `y`, the left half of `z` and `ux`,
+`dx` the left half of `y`, the right half of `z` and `ux`, and so on round.
+Each component is then `h`, `k`, `0`, or one of 464.15's four states with
+both halves live, as 464.28's 2 says. The axial term is one of these, by how
+many up halves are not zero:
+
+- `z`: none. `up`, `w`, `along`, `R`, `R2` and `A` are `0`, and so is the true
+  dot product down the axis, each of whose terms has a zero factor. The axial
+  term drops out of `y`, `P` and the error.
+- `o`: one. `up` is that half exactly, so `w` and `along` are normal, which
+  `stays_accurate` checks, and `R` is its size, so `R2` is the same double as
+  `w` and `A` as `along`.
+- `n`: two, and `up = rnd(u + u')` is not zero. `w` and `along` are normal,
+  and `|up| ≤ R`, so `R2 ≥ w` and `A ≥ along` are normal too.
+- `c`, `a`, `s` or `t`: two, and `up` cancels to zero, in 464.16's states
+  (464.16's 6).
+
+464.16's `e`, the first sum of the up halves below the normals with `up` not,
+has no case here. With an up half zero, the one sum that rounds is the sum of
+the other two, which is `up`, and `stays_accurate` holds its square normal.
+
+A component keeps both halves only when the two other axes keep both their
+factors, and those axes' up halves are then the two that are not zero. So with
+any factor zero at most one component keeps both halves. It does in 9 sets,
+`{fa}`, `{da}` and `{fa, da}` for each axis `a`, and there its four states go
+with the axial `n`, `c`, `a`, `s` and `t`, which makes 180 cases. Of the
+other 39 sets, 27 keep one up half (`o`) and 12 none (`z`), one case each.
+That is 219, written `conez_<zeros>_<state><axial>.g`, the state left out
+where no component keeps both halves, each with a control
+`c_conez_<zeros>_<state><axial>_half.g` at `B = 1b-54;`.
+
+One state is left out besides the sets of 1: `up` cancelling with `R2`
+rounding to zero. That is 464.16's wrong sign (464.16's 6), which Q2779 is to
+make `on_floats` refuse or bound. Q2779's own probe has `fz = dz = 0`, so a
+zero factor reaches it.
+
+Where the component cancels and so does `up`, in the sets `{fa, da}`, both
+other components are `0` and `y` is `0`: its error is the whole true value, a
+few `u²` of the permanent, which `B = u / 2` covers. So those 36 cases have a
+second control, `c_conez_<zeros>_<state><axial>_usq.g` at `B = 1b-106;`,
+`u²`. Those 36, and the 72 like them in the sets `{fa}` and `{da}`, are
+inputs no doubles give, by hand and not run. With `x` the component that
+keeps both halves, its cancelling makes `rnd(fy · dz) = rnd(fz · dy)`, so the
+two products have one sign, and `up` cancelling makes `rnd(fy · dy) =
+−rnd(fz · dz)`, so those two have opposite signs; yet each pair multiplies to
+`fy · fz · dy · dz`. They are run anyway, and nothing below leans on this.
+
+The axis-aligned cone `d = (0, 0, dz)` is `conez_dxdy_o.g`: `x` is `h`, `y`
+is `k`, `z` is `0`, and the axial term is `uz` alone. With the point on the
+axis it is `conez_fxfydxdy_o.g`, and with the point level with the apex
+`conez_fzdxdy_z.g`.
+
+How `conezero.py` (7) writes a zero is how `cylzero.py` does (464.28's 2),
+and a zero up half is its unrounded product too. Its axial block is
+`conesplit.py`'s (464.16), cut down to the up halves that are not zero: one
+piece, `ss u²`, for `o`; three for `n`, with `rU` the rounding of the one sum
+in place of `conesplit.py`'s two; and for `c` to `t`, `conesplit.py`'s
+hypothesis that the up halves sum to zero and its hints on `XA` and `XR`. No
+run printed "not trivially equal".
+
+**3. What they print.** `runz.sh` (7) ran the 219 cases with `gappa -Bcoq`
+and `coqc`, and their 255 controls, 22 at a time. `start.sh` (7) started it,
+and `uptime` read a load average of 58 to 92 over 24 cores during it.
+`tallyz.py` (7) counts them:
+
+- Each of the 219 exits 0 at the code's `B`, in 2.17 s (`conez_fyfzdxdy_z`)
+  to 50.19 s (`conez_dz_nt`).
+- `(y − Ex) / P15` is within `9.99201e-16`, `9u`, in 52 cases: each of the 36
+  `n` and 4 of each of `c`, `a`, `s` and `t`. It is within `8u` in 8, `7u` in
+  39, the 27 `o` among them, `6u` in 78 and `5u` in 6, all `z`. None is above
+  `9u`, below the `11u + 99u²` 464.16 found least where nothing cancels.
+- In the 36 where `y` is `0`, `(0 − Ex) / P15` is within `[−4u², 6u²]` in 24.
+  The other 12 print "remaining results are pointless, anything can be
+  proved": their hypotheses contradict, as 16 of `conesplit.py`'s did
+  (464.16). Each has its component's reach square below the normals or
+  rounding to zero (`s`, `u`) and `A` below the normals or zero (`a`, `t`),
+  so `P` is at most `2⁻¹⁰²¹` and `eb` cannot be normal.
+- `P −/ Phat`, or `P −/ Phatx` where a reach square or `A` is below the
+  normals, is within `6u` in 20 cases, `5u` in 37, `4u` in 69, `3u` in 42,
+  `2u` in 27 and `u` in 12. The other 12 are the pointless ones.
+- `coqc` accepts all 219: 1572 lines with 26 hints (`conez_fxdx_ua`) to 12013
+  lines with 46 hints (`conez_dx_nt`), in 11.53 to 105.49 s each.
+- No `.out`, `.bcoq` or `.coqc` of the 219 has a line other than its results,
+  "pointless" and "assumed to be nonzero" warnings.
+
+Gappa does not write the same proof each run (464.4), so the sizes are this
+run's. Each proof stands on its hints and on what Gappa took to be nonzero, as
+464.15's 8 says of its own.
+
+**4. The controls.** At `B = 1b-54;`, `u / 2`, each of the 183 cases where
+`y` is not `0` must fail, and each exits 1. Gappa's best for a goal it does
+not prove can change from one run to the next (464.26), so these are this
+run's figures, each a bound Gappa found on the size of `(y − Ex) / eb` and not
+an exact value: `[-18, 18]` in 52 controls, `[-16, 16]` in 8, `[-14, 14]` in
+39, `[-12, 12]` in 78 and `[-10, 10]` in 6. Each is its case's own bound on
+`y` over `u / 2`. So none of the 183 proofs came from a contradiction in its
+hypotheses.
+
+The 36 where `y` is `0` exit 0 at `u / 2`, as they should: 24 prove there,
+and the 12 print "pointless" again. At `B = 1b-106;`, `u²`, the 24 exit 1,
+each best with an end at `−4`, `4` or `6`, its case's bound on `y` over `u²`,
+so none of those 24 proofs came from a contradiction either. The 12 exit 0,
+pointless again. They prove nothing, and an input of their shape would meet a
+bound that is not normal, which `decide` does not compare against.
+
+**5. The shapes.** None of these cases was run as Rust input. By hand
+arithmetic, not run: with the apex at 0, the direction `(0, 0, 1)` and the
+slope 1, the point `(3, 4, 5)` has the differences `(3, 4, 5)`, the halves
+`(4, 0)`, `(0, 3)` and `(0, 0)`, and the up halves `(0, 0, 5)`, so that is
+`conez_dxdy_o`. The point `(0, 0, 5)` is `conez_fxfydxdy_o`, and `(3, 4, 0)`
+is `conez_fzdxdy_z`. Each is a shape a designer makes: a cone about `z`, a
+point on its axis, and a point level with its apex. Every case proves, so
+there is no wrong sign to look for.
+
+**6. What this leaves.**
+
+- A row: the doc on `SIDE_OF_CONE_ERROR_BOUND` (`cone.rs:671-672`) says "The
+  proof covers no zero difference or direction component, which have not been
+  run." By 1 to 3 each is run and proves, but the state Q2779 is filed on,
+  and a direction zero in all three components, a zero slope and a point at
+  the apex do not reach level 1's comparison. It is a comment that claims less
+  than is proved, not a wrong answer.
+- Not a row: Q2779 is the wrong sign where `up` cancels and `R2` rounds to
+  zero, with a zero factor or without. Q2782 runs `conesplit.py` with the
+  checked products below the normals, which this section does not. Q2700
+  moves into `proofs/gappa/` each script a row of 464 appended, and this
+  section's are among them.
+
+**7. The scripts.** No change was made to the generator the second lane
+committed. A trial before the run, under `one1.sh` at `T=60`, of seven of the
+cases and then of each of the 39 `z` and `o` cases, 22 at once, found
+nothing: each exited 0 and printed no warning. To run them again, save
+`conezero.py`, `runz.sh` and `start.sh` beside 464.13's `one.sh` and 464.15's
+`one1.sh`, and run `./start.sh`; it writes `runz.txt`, which ends `done`, and
+`python3 tallyz.py` counts it. `samez.py` checks that each block here is the
+file that ran.
 
 `conezero.py`, whole:
 
@@ -20518,4 +20702,202 @@ for mask in itertools.product((False, True), repeat=6):
             write(f"c_{name}_usq.g", make(zero, state, ax, B_USQ))
             usq += 1
 print("cases written:", count, "second controls at u^2:", usq)
+```
+
+`runz.sh`, whole:
+
+```sh
+#!/bin/bash
+# conezero.py's 219 cases, each with gappa -Bcoq and coqc when it proves, and
+# their 219 controls at u/2 and 36 at u^2, 22 at a time: the cases first.
+# Writes runz.txt, which ends "done".
+cd "$(dirname "$0")"
+python3 conezero.py
+{
+  for f in conez_*.g; do
+    echo "./one.sh $f coq"
+  done
+  for f in c_conez_*_half.g c_conez_*_usq.g; do
+    echo "./one1.sh $f"
+  done
+} > runz.jobs
+{
+  wc -l < runz.jobs
+  xargs -P 22 -L 1 env < runz.jobs
+} > runz.txt 2>&1
+echo done >> runz.txt
+```
+
+`start.sh`, whole, which a lane runs in the foreground and then waits on the
+pid it prints:
+
+```sh
+#!/bin/bash
+# Start runz.sh detached in its own process group and print its pid.
+cd "$(dirname "$0")"
+setsid nohup ./runz.sh > runz.nohup 2>&1 &
+echo $!
+```
+
+`tallyz.py`, whole:
+
+```python
+"""Tally runz.txt and the .out files of conezero.py's 219 cases: for each case
+its exit, the relative bound on y and on P that it prints, and its coqc line;
+for each control its exit and best, and which print "pointless". Prints one
+line per case, then counts. Run as: python3 tallyz.py"""
+import collections
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+run = open("runz.txt").read()
+cases = sorted(f[:-2] for f in os.listdir(".") if f.startswith("conez_") and f.endswith(".g"))
+usqs = sorted(f[2:-6] for f in os.listdir(".") if f.startswith("c_conez_") and f.endswith("_usq.g"))
+
+
+def short(out, goal):
+    m = re.search(r"^  " + goal + r" in \[[^{]*\{([^,]*),[^}]*\}, [^{]*\{([^,]*),", out, re.M)
+    return f"[{m.group(1)}, {m.group(2)}]" if m else "-"
+
+
+def control(name):
+    ex = re.search(rf"^{name} exit (\d+) ([\d.]+)s$", run, re.M)
+    out = open(f"{name}.out").read() if os.path.exists(f"{name}.out") else ""
+    best = re.search(r"best: (\[[^\]]*\])", out)
+    return (ex.group(1) if ex else "?", best.group(1) if best else "pointless" if "pointless" in out else "-")
+
+
+ybounds = collections.Counter()
+pbounds = collections.Counter()
+bests = collections.Counter()
+pointless = []
+coq = []
+times = []
+for c in cases:
+    out = open(f"{c}.out").read()
+    ex = re.search(rf"^{c} exit (\d+) ([\d.]+)s$", run, re.M)
+    cq = re.search(rf"^{c} coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$", run, re.M)
+    ctl = control(f"c_{c}_half")
+    y = short(out, r"\([^\n]*? - Ex\) / [^\n]*?")
+    p = short(out, r"[^\n]*? -/ [^\n]*?")
+    if "pointless" in out:
+        pointless.append(c)
+    ybounds[y] += 1
+    pbounds[p] += 1
+    bests[ctl[1]] += 1
+    if ex:
+        times.append((float(ex.group(2)), c))
+    if cq:
+        coq.append((int(cq.group(4)), int(cq.group(5)), c, cq.group(1), cq.group(2), float(cq.group(3))))
+    print(c, "exit", ex.group(1) if ex else "?", ex.group(2) if ex else "", "y", y, "P", p,
+          "coq", cq.groups() if cq else "-", "ctl", *ctl, "pointless" if "pointless" in out else "")
+usq = collections.Counter(control(f"c_{c}_usq") for c in usqs)
+print("y bounds", dict(ybounds))
+print("P bounds", dict(pbounds))
+print("control bests", dict(bests))
+print("cases printing pointless:", len(pointless), pointless)
+print("cases exit 0:", len(re.findall(r"^conez_\w+ exit 0 ", run, re.M)), "of", len(cases))
+print("controls at u/2 exit 1:", len(re.findall(r"^c_conez_\w+_half exit 1 ", run, re.M)), "of", len(cases))
+print("controls at u^2, exit and best:", dict(usq), "of", len(usqs))
+times.sort()
+print("case times", times[0], times[-1])
+print("coq ok:", sum(1 for x in coq if x[3] == "0" and x[4] == "0"), "of", len(coq))
+if coq:
+    coq.sort()
+    print("coq smallest", coq[0][:3], "largest", coq[-1][:3], "times", min(x[5] for x in coq), max(x[5] for x in coq))
+
+
+def other_lines(f):
+    return [line for line in open(f).read().split("\n")
+            if line and "assumed to be nonzero" not in line and "pointless" not in line
+            and not line.startswith(("Results:", "  "))]
+
+
+warn = [f for f in os.listdir(".") if f.startswith("conez_") and f.endswith((".out", ".bcoq", ".coqc"))
+        and other_lines(f)]
+print("files with a line other than results, 'pointless' and 'assumed to be nonzero':", sorted(warn))
+```
+
+After its line for each case, `python3 tallyz.py` prints:
+
+```text
+y bounds {'[-6.66134e-16, 6.66134e-16]': 78, '[-9.99201e-16, 9.99201e-16]': 52, '[-7.77156e-16, 7.77156e-16]': 39, '[-8.88178e-16, 8.88178e-16]': 8, '[-4.93038e-32, 6.56859e-47]': 3, '[-4.93038e-32, 4.93038e-32]': 3, '[-4.93038e-32, 7.39557e-32]': 3, '[-4.93038e-32, 9.85288e-47]': 3, '-': 12, '[-2.62743e-46, 4.93038e-32]': 3, '[-2.62743e-46, 7.39557e-32]': 3, '[-2.50549e-62, 4.93038e-32]': 3, '[-2.50549e-62, 7.39557e-32]': 3, '[-5.55112e-16, 5.55112e-16]': 6}
+P bounds {'[-4.44089e-16, 4.44089e-16]': 69, '[-5.55112e-16, 5.55112e-16]': 37, '[-6.66134e-16, 6.66134e-16]': 20, '[-3.33067e-16, 3.33067e-16]': 42, '[-2.22045e-16, 2.22045e-16]': 27, '-': 12, '[-1.11022e-16, 1.11022e-16]': 12}
+control bests {'[-12, 12]': 78, '[-18, 18]': 52, '[-14, 14]': 39, '[-16, 16]': 8, '-': 24, 'pointless': 12, '[-10, 10]': 6}
+cases printing pointless: 12 ['conez_fxdx_sa', 'conez_fxdx_st', 'conez_fxdx_ua', 'conez_fxdx_ut', 'conez_fydy_sa', 'conez_fydy_st', 'conez_fydy_ua', 'conez_fydy_ut', 'conez_fzdz_sa', 'conez_fzdz_st', 'conez_fzdz_ua', 'conez_fzdz_ut']
+cases exit 0: 219 of 219
+controls at u/2 exit 1: 183 of 219
+controls at u^2, exit and best: {('1', '[-4, 4.93038e-32]'): 3, ('1', '[-4, 4]'): 3, ('1', '[-4, 6]'): 3, ('1', '[-4, 7.39557e-32]'): 3, ('0', 'pointless'): 12, ('1', '[-1.97215e-31, 4]'): 3, ('1', '[-1.97215e-31, 6]'): 3, ('1', '[-1.88062e-47, 4]'): 3, ('1', '[-1.88062e-47, 6]'): 3} of 36
+case times (2.17, 'conez_fyfzdxdy_z') (50.19, 'conez_dz_nt')
+coq ok: 219 of 219
+coq smallest (1572, 26, 'conez_fxdx_ua') largest (12013, 46, 'conez_dx_nt') times 11.53 105.49
+files with a line other than results, 'pointless' and 'assumed to be nonzero': []
+```
+
+The 12 `-` among the `y` and `P` bounds are the 12 that print "pointless"
+(3), and the 24 `-` among the control bests are the controls at `u / 2` of the
+24 cases where `y` is `0` that prove there (4).
+
+`samez.py`, whole:
+
+```python
+"""Check that each script 464.30 appends whole is byte for byte the file that
+was run, in the directory given; that one.sh and one1.sh there are 464.13's
+and 464.15's blocks; and that conezero.py, run again in a fresh directory from
+the appended text, writes what was run.
+Run as: python3 samez.py <doc> <dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, ran = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+sec = text[text.index("### 464.30"):]
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+blocks = FENCED.findall(sec)
+print("code blocks in 464.30:", len(blocks))
+marks = {
+    "conezero.py": '"""Write cone.g\'s cases where a difference or a direction component is zero',
+    "runz.sh": "#!/bin/bash\n# conezero.py's 219 cases",
+    "start.sh": "#!/bin/bash\n# Start runz.sh detached",
+    "tallyz.py": '"""Tally runz.txt',
+    "samez.py": '"""Check that each script 464.30 appends whole',
+}
+found = {}
+for lang, body in blocks:
+    for name, mark in marks.items():
+        if body.startswith(mark):
+            assert name not in found, name
+            found[name] = body
+for name in marks:
+    if name not in found:
+        print(name, "not appended")
+        continue
+    path = os.path.abspath(__file__) if name == "samez.py" else os.path.join(ran, name)
+    print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+for sub, end, name, mark in (("### 464.13", "### 464.14", "one.sh", "#!/bin/bash\n# Run one Gappa script under 464.4's pin"),
+                             ("### 464.15", "### 464.16", "one1.sh", "#!/bin/bash\n# one.sh with the timeout taken from T")):
+    s = text[text.index(sub):text.index(end)]
+    want = [body for lang, body in FENCED.findall(s) if body.startswith(mark)]
+    assert len(want) == 1, (name, len(want))
+    print(name, "is", sub[4:], "block:", open(os.path.join(ran, name)).read() == want[0])
+
+fresh = tempfile.mkdtemp()
+open(os.path.join(fresh, "conezero.py"), "w").write(found["conezero.py"])
+subprocess.run(["python3", "conezero.py"], cwd=fresh, check=True)
+written = sorted(f for f in os.listdir(fresh) if f.endswith(".g"))
+same = [f for f in written if os.path.exists(os.path.join(ran, f))
+        and filecmp.cmp(os.path.join(fresh, f), os.path.join(ran, f), shallow=False)]
+differ = [f for f in written if os.path.exists(os.path.join(ran, f)) and f not in same]
+absent = [f for f in written if not os.path.exists(os.path.join(ran, f))]
+extra = sorted(f for f in os.listdir(ran) if f.endswith(".g") and f not in written)
+print("written again:", len(written), "same as run:", len(same), "differ:", differ, "not run:", absent,
+      "run, not written:", extra)
+shutil.rmtree(fresh)
 ```
