@@ -2477,7 +2477,7 @@ impl Assembly {
     ///
     /// **A ring that closes up is one closed side too**
     /// ([`Assembly::a_ring_that_closes_up`]): it is pieces of one closed curve
-    /// with nothing else at any corner between them, and
+    /// with nothing else of its shell at any corner between them, and
     /// [`Assembly::what_is_left`] gives that curve back whole. A block
     /// wholly inside a frustum cuts the far cap and the wall along its planes,
     /// so the wall's far ring is the far rim in arcs, and the wall itself is a
@@ -2543,45 +2543,58 @@ impl Assembly {
     }
 
     /// Whether `ring` is two or more pieces of one closed curve
-    /// ([`Assembly::are_pieces_of_one_closed_curve`]) with nothing at any
-    /// corner between them but the two pieces either side, so that
+    /// ([`Assembly::are_pieces_of_one_closed_curve`]) with nothing of its shell
+    /// at any corner between them but the two pieces either side, so that
     /// [`Assembly::what_is_left`] closes it up into that one edge again.
     ///
-    /// **The ends are counted over every edge that stays**, and not one lump
-    /// at a time as [`Assembly::what_is_left`] counts them, so this never
-    /// says a ring closes up where that does not close it up. A corner the two
-    /// pieces either side of meet at the apex of a cone is never walked
-    /// straight through ([`Assembly::is_the_apex_of_a_cone_along`]).
+    /// **The ends are counted over every edge that stays in the ring's own
+    /// shell**, the faces joined across every edge, and not one lump at a time
+    /// as [`Assembly::what_is_left`] counts them. A lump is faces joined across
+    /// edges, so it lies inside one shell, every end it counts at a corner this
+    /// counts too, and this never says a ring closes up where that does not
+    /// close it up. A corner the two pieces either side of meet at the apex of
+    /// a cone is never walked straight through
+    /// ([`Assembly::is_the_apex_of_a_cone_along`]).
+    ///
+    /// **Not over every edge of the answer**, since a second shell can end
+    /// edges at a corner it shares. The pitch cones of a pair of mitre gears
+    /// touch along a ruling, and their union keeps both frustums whole as two
+    /// solids. Each side is cut along that ruling, from `(1, 0, 1)` to
+    /// `(2, 0, 2)`, and the other frustum's rims end at those two corners too.
+    /// Counted over the whole answer neither side's rings closed up, and each
+    /// side stayed in the four pieces the arrangement cut it into, two solids of
+    /// six faces where the frustums have three (Q2880,
+    /// `the_pitch_cones_of_a_pair_of_mitre_gears_touch_along_a_ruling_and_every_fuse_answers`
+    /// in `tests/two_curves_of_one_pair_that_meet.rs`).
     fn a_ring_that_closes_up(
         &self,
         ring: &[Dart],
         along: &[[Dart; 2]],
         dissolved: &[bool],
     ) -> bool {
+        let pieces: Vec<usize> = ring.iter().map(|&dart| self.edge_of(dart)).collect();
+        if ring.len() < 2 || !self.are_pieces_of_one_closed_curve(&pieces) {
+            return false;
+        }
         let shells = joined_across(along, &vec![true; along.len()], self.faces.len());
         let its_shell = shells.leader(ring[0].face);
-        let pieces: Vec<usize> = ring.iter().map(|&dart| self.edge_of(dart)).collect();
-        ring.len() > 1
-            && self.are_pieces_of_one_closed_curve(&pieces)
-            && ring.iter().all(|&dart| {
-                let corner = self.starts_at(dart);
-                let ending_here: Vec<usize> = (0..self.edges.len())
-                    .filter(|&edge| {
-                        !dissolved[edge] && shells.leader(along[edge][0].face) == its_shell
-                    })
-                    .flat_map(|edge| {
-                        self.edges[edge]
-                            .ends
-                            .into_iter()
-                            .filter(move |&end| end == corner)
-                            .map(move |_| edge)
-                    })
-                    .collect();
-                matches!(ending_here[..], [one, other]
-                    if one != other
-                        && !self.is_the_apex_of_a_cone_along(corner, one)
-                        && !self.is_the_apex_of_a_cone_along(corner, other))
-            })
+        ring.iter().all(|&dart| {
+            let corner = self.starts_at(dart);
+            let ending_here: Vec<usize> = (0..self.edges.len())
+                .filter(|&edge| !dissolved[edge] && shells.leader(along[edge][0].face) == its_shell)
+                .flat_map(|edge| {
+                    self.edges[edge]
+                        .ends
+                        .into_iter()
+                        .filter(move |&end| end == corner)
+                        .map(move |_| edge)
+                })
+                .collect();
+            matches!(ending_here[..], [one, other]
+                if one != other
+                    && !self.is_the_apex_of_a_cone_along(corner, one)
+                    && !self.is_the_apex_of_a_cone_along(corner, other))
+        })
     }
 
     /// Whether every edge dissolved inside one group, `inside`, is a whole
@@ -12267,10 +12280,25 @@ fn name_of_the_picker(picker: &Picker) -> [u64; 10] {
 /// less the half were refused `ResultIsNotManifold { count: 4 }` (queue row
 /// Q1269, `tests/a_cone_hollowed_along_its_axis.rs`).
 ///
-/// **The sign rule holds as it stands.** `intersect` names a cone against
-/// another curved surface only where the two share an axis, and refuses every
-/// other such pair, so a side carried by one of these pairs is on a circle
-/// square to that axis and centred on it. Both gradients lie in the plane
+/// **Two cones on one apex with axes apart get no sign**, as two pipes on
+/// parallel axes get none: they cross or touch in rulings through the apex
+/// (`where_two_cones_cross` in `rcad-geom`), and a ruling is straight, so two
+/// corners on one leave one piece and there is no second arc to tell it from.
+/// So does a pair [`the_crossing_of_these_runs_straight`] cannot decide. A sign
+/// there was worse than none where the two touch along a ruling: the material
+/// lies on the same side of the other cone either side of the line, while the
+/// two pieces of one cone that meet along it walk it opposite ways, so the two
+/// named it as two edges. The union and both differences of the pitch cones of
+/// a pair of mitre gears were refused `ResultIsNotManifold { count: 1 }` for it
+/// (Q2880,
+/// `the_pitch_cones_of_a_pair_of_mitre_gears_touch_along_a_ruling_and_every_fuse_answers`
+/// in `tests/two_curves_of_one_pair_that_meet.rs`).
+///
+/// **The sign rule holds as it stands on a shared axis**, where a side carried
+/// by one of these pairs is on a circle square to that axis and centred on it.
+/// Two cones off one axis, or a cone and a pipe, can cross in loops as well
+/// (`how_two_cones_off_one_axis_cross` and `where_a_cone_and_a_pipe_cross` in
+/// `rcad-geom`), and what follows does not cover those. Both gradients lie in the plane
 /// through the axis and the point, so `∇S × ∇T` runs along the circle, and the
 /// same turn about the axis carries it from one point to the next, so it never
 /// vanishes on a circle where it does not vanish at one point. It vanishes
