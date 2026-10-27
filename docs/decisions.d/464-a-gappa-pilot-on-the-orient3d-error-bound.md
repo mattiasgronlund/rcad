@@ -7747,8 +7747,12 @@ since run each zero difference and direction component, and each proves at
 the code's constant but for `up` cancelling with `R2` rounding to zero, the
 wrong sign of 6, which it leaves out; a direction zero in all three
 components, or a zero slope, does not reach `on_floats`, and a point at the
-apex meets a bound of `0`, which `decide` does not compare against. And the
-comments claim more than is proved. The doc comment on the constant writes `66ε` where
+apex meets a bound of `0`, which `decide` does not compare against. 464.31 has
+since run the checked products below the normals: the checks on the slope's
+square and on `up`'s carry a right sign, and in `cone.g`'s case, with one to
+three of the components' squares and the axial term below the normals or
+rounding to zero, every other check holding, each case proves at the code's
+constant. And the comments claim more than is proved. The doc comment on the constant writes `66ε` where
 it means `66ε²` and miscounts its own terms, and it says `on_floats` enforces
 the bottom end product by product, which is false: it checks neither `R2` nor
 the axial term `A`, and that is where the wrong sign lives (5). Fixing them,
@@ -7888,7 +7892,10 @@ Against what is proved:
   normals and not zero, of `A` below the normals or zero, and of the reach
   squares below the normals or zero: by 6 each of those proves. For the
   products `on_floats` checks it was not run, as 464.14's 6 ran the sphere's
-  squares (10).
+  squares (10). 464.31 has since run them: the slope's square and `up`'s are
+  needed, and in `cone.g`'s case, with one to three of the components' squares
+  and the axial term below the normals or rounding to zero, the rest holding,
+  each proves; the halves and the up halves have not been run.
 
 So the comments claim more than is proved, which is what the row asks, and the
 claim that the bottom end is enforced is false in a way that gives a wrong
@@ -22022,7 +22029,22 @@ shutil.rmtree(fresh)
 It prints:
 
 ```text
-SAMEL_PRINT_GOES_HERE
+cases written: 579
+code blocks in 464.31: 13
+conelow.py same
+conegdiff.py same
+runl.sh same
+startl.sh same
+tallyl.py same
+truthl.py same
+samel.py same
+one.sh is 464.13 block: True
+one1.sh is 464.15 block: True
+written again: 1159 same as run: 1159 differ: [] not run: [] run, not written: []
 ```
 
-SAMEL_AFTER_GOES_HERE
+Its first line is `conelow.py`'s own, run again in the fresh directory; the
+parent's lines come after it because its output is buffered when it is not a
+terminal. The thirteen blocks are the probe test, its print, `truthl.py`'s
+print, `conegdiff.py`'s print, the seven scripts, `tallyl.py`'s print and this
+one.
