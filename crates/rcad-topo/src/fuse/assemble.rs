@@ -878,7 +878,10 @@ impl Assembly {
     ///
     /// Whatever else the sweep says, unchanged — [`Error::Undecidable`] where a
     /// predicate gave up on the answer, say. "The kernel wrote something broken"
-    /// is not what those say.
+    /// is not what those say. But a refusal that names a face, such as
+    /// [`Error::AWireWillNotLieFlatOnItsFace`] from meshing the answer, names
+    /// the caller's face that face of the answer was cut from: the throwaway is
+    /// dropped when this returns, so a key into it would name nothing (Q2288).
     ///
     /// # Panics
     ///
@@ -918,7 +921,7 @@ impl Assembly {
         mine.drain_into(log);
         swept.map_err(|refused| {
             let Error::Invalid(broken) = refused else {
-                return refused;
+                return self.naming_the_callers_face(&throwaway, &rehearsal, refused);
             };
             Error::TheFuseWroteABrokenAnswer { broken }
         })?;
@@ -5800,7 +5803,9 @@ impl Assembly {
     /// has no shell around it. [`Error::CannotTellWhichWayASolidsFacesPoint`],
     /// through [`how_much_space_it_encloses`]'s `?`, when a curved shell no
     /// mesh signs whose closest sum is not above zero, and none of whose
-    /// corners tells which way its faces point.
+    /// corners tells which way its faces point. Whatever else meshing a shell
+    /// refuses, such as [`Error::CannotMeshAFace`], naming the input face the
+    /// face it could not mesh was cut from where it names a face.
     /// [`Error::AFaceTrimmedByACurveThisCannotFollow`]
     /// naming the input face, when no point on a shell could be placed and one
     /// met a face of another shell that nobody can follow.
@@ -5826,7 +5831,8 @@ impl Assembly {
 
         let mut volumes = Vec::new();
         for &solid in &written.solids {
-            let volume = how_much_space_it_encloses(apart.solid_at(solid), policy, log)?;
+            let volume = how_much_space_it_encloses(apart.solid_at(solid), policy, log)
+                .map_err(|refused| self.naming_the_callers_face(&apart, &written, refused))?;
             if !volume.is_finite() {
                 return Err(Error::VolumeTooLargeToMeasure);
             }
@@ -6256,6 +6262,26 @@ impl Assembly {
         let out = Vector::new(-1.0, 1.0, 1.0) * (ball.radius() / 3.0_f64.sqrt());
         let point = ball.centre() + out;
         point.is_finite().then_some(point)
+    }
+
+    /// `refused`, raised in `apart`, naming in place of the face of `apart` it
+    /// names the caller's face that one was cut out of. `apart` is thrown away
+    /// when the fuse returns, so a key into it would name nothing (Q2288).
+    ///
+    /// # Panics
+    ///
+    /// As [`Assembly::the_input_face_it_was_cut_from`] does: `apart` holds
+    /// what [`Assembly::write_into`] wrote and nothing else.
+    fn naming_the_callers_face(
+        &self,
+        apart: &Model,
+        written: &Written,
+        mut refused: Error,
+    ) -> Error {
+        if let Some(face) = refused.the_face_it_names() {
+            *face = self.the_input_face_it_was_cut_from(apart, written, *face);
+        }
+        refused
     }
 
     /// The caller's face that `face`, written into `apart`, was cut out of.
