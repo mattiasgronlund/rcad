@@ -1238,9 +1238,12 @@ fn a_run_stated_right_round_from_a_vertex_of_the_hyperbola_is_refused_as_not_clo
 /// Of slope two, half-angle `1.11`, the apex is inside it, and the line along
 /// `x` through `(0, 3.2, 0.8)`, the only place they could touch, stays outside
 /// the upright cone, where `x² + y² − 4z²` is `x² + 7.68`: they cross without
-/// touching, in two flat cuts of either cone held apart, one in the flat
-/// surface halfway between the apexes. Nothing names two such cuts yet, so the
-/// pair is refused as any other overlap is.
+/// touching, in two flat cuts of the upright cone held apart, each a
+/// hyperbola. `y + z = 4` halfway between the apexes cuts the one with
+/// vertices `(0, 8/3, 4/3)` and `(0, 8, −4)`, and `z − y = −2.4` the one with
+/// vertices `(0, 4.8, 2.4)` and `(0, 1.6, −0.8)`, so the line where the two
+/// flat surfaces meet runs between the two branches of each. `intersect` names
+/// the four branches, and `walk` marches each.
 #[test]
 fn two_cones_of_one_slope_a_quarter_turn_apart_touch_unless_each_apex_is_inside_the_other() {
     let upright = |slope| a_cone([0.0; 3], [0.0, 0.0, 1.0], slope);
@@ -1251,9 +1254,32 @@ fn two_cones_of_one_slope_a_quarter_turn_apart_touch_unless_each_apex_is_inside_
         [([0.0, 1.0, 1.0], 4.0), ([0.0, -1.0, 1.0], 2.4)],
     );
     assert_refused_as_touching_itself(&upright(1.0), &turned(1.0));
-    assert_eq!(
-        named(&upright(2.0), &turned(2.0)),
-        Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
+    assert_named_as_two_flat_cuts_held_apart(
+        &upright(2.0),
+        &turned(2.0),
+        [([0.0, 1.0, 1.0], 4.0), ([0.0, -1.0, 1.0], -2.4)],
+        [2, 2],
+    );
+}
+
+/// Two cones of slope one facing each other, each apex inside the other: one
+/// on the origin about `(0, 1, 5)` and one on `(0, 0, 10)` about `(0, 1, −5)`,
+/// mirror images across `z = 5` and stored as such, since the two axes scale to
+/// length one alike but for the sign of the last number.
+///
+/// `z = 5` cuts an ellipse out of either, `26x² + 24y² − 100y − 600 = 0`, from
+/// `y = −10/3` to `y = 7.5`. Their crossing is that ellipse and the hyperbola
+/// `y = −12` cuts out of either, `24(z − 5)² − 26x² = 4056`, whose branches
+/// have their vertices at `z = 18` and `z = −8`, either side of `z = 5`, and
+/// the ellipse is all on the side of `y = −12` the apexes are. `intersect`
+/// names the ellipse and the two branches, and `walk` marches each.
+#[test]
+fn two_mirror_cones_facing_each_other_cross_in_an_ellipse_and_a_hyperbola_held_apart() {
+    assert_named_as_two_flat_cuts_held_apart(
+        &a_cone([0.0; 3], [0.0, 1.0, 5.0], 1.0),
+        &a_cone([0.0, 0.0, 10.0], [0.0, 1.0, -5.0], 1.0),
+        [([0.0, 0.0, 1.0], 5.0), ([0.0, 1.0, 0.0], -12.0)],
+        [1, 2],
     );
 }
 
@@ -1425,6 +1451,62 @@ fn assert_named_as_two_flat_cuts_that_meet_where_they_touch(
         "two pieces on each cut, each walked both ways round"
     );
     assert_a_loop_stated_right_round_is_not_named(one, other);
+}
+
+/// `intersect` names the pair's crossing in one piece for each of the
+/// branches or the ellipse the two flat cuts `flats`, each written `(normal,
+/// offset)`, are made of, whichever comes first, `pieces[i]` of them on
+/// `flats[i]`, and `walk` marches each, either way round the pair. A cut in
+/// one piece is an ellipse, and one in two a hyperbola. The two cuts never
+/// meet, so each piece is the whole of a branch or of the ellipse:
+/// a branch is refused as not closed, and an ellipse is not. A loop stated
+/// right round the crossing is no one piece, and is refused: as not closed
+/// where every piece is a branch.
+fn assert_named_as_two_flat_cuts_held_apart(
+    one: &Surface,
+    other: &Surface,
+    flats: [([f64; 3], f64); 2],
+    pieces: [usize; 2],
+) {
+    let met = named(one, other);
+    let Ok(SurfaceMeet::Curves(runs)) = &met else {
+        panic!("the pieces of two flat cuts held apart, and not {met:?}");
+    };
+    assert_eq!(runs.len(), pieces[0] + pieces[1], "{runs:?}");
+    let mut walked_on = [0; 2];
+    let mut closed = 0;
+    for run in runs {
+        for along in [[one, other], [other, one]] {
+            walked_on[the_flat_cut_walked(run, along, flats).0] += 1;
+            match where_a_closed_crossing_starts(run, along, &mut ProvenanceLog::new()) {
+                Ok(_) => closed += 1,
+                Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed) => (),
+                Err(refused) => panic!("{run:?} is refused {refused:?}"),
+            }
+        }
+    }
+    assert_eq!(
+        walked_on,
+        pieces.map(|on_this_cut| 2 * on_this_cut),
+        "each piece walked both ways round"
+    );
+    let ellipses = pieces
+        .iter()
+        .filter(|on_this_cut| **on_this_cut == 1)
+        .count();
+    assert_eq!(closed, 2 * ellipses, "only an ellipse closes");
+    let stated = NamedRun::the_whole_of(EdgeRun::RightRoundWhereItsFacesCross)
+        .expect("a whole loop needs nothing picking it");
+    for along in [[one, other], [other, one]] {
+        assert_eq!(
+            where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new()).err(),
+            Some(if ellipses == 0 {
+                Error::TheCrossingOfTheseTwoSurfacesIsNotClosed
+            } else {
+                Error::CannotNameWhichPieceOfACrossingThisIs
+            })
+        );
+    }
 }
 
 /// `intersect` names the pair's crossing in six pieces whichever comes first,
