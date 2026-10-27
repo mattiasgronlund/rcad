@@ -4430,7 +4430,7 @@ impl Assembly {
             wobble: point.uncertainty(),
             from: None,
             moved_by_the_policy: false,
-            where_pipes_touch: Vec::new(),
+            where_walls_touch: Vec::new(),
         }))
     }
 
@@ -6974,12 +6974,13 @@ struct Corner {
     /// here, so that `wobble` is a move the fuse chose and not only rounding
     /// (`docs/decisions.md` §417.7).
     moved_by_the_policy: bool,
-    /// Each pair of pipes of one width whose walls touch here, as the
-    /// arrangement named the corner ([`mark_where_two_pipes_touch`]),
-    /// written as [`a_pair_of_pipes`] writes it. The two are tangent here, and
+    /// Each pair of pipes of one width, or of mirror-image cones of one slope,
+    /// whose walls touch here, as the arrangement named the corner
+    /// ([`mark_where_two_walls_touch`]), written as
+    /// [`a_pair_of_pipes_or_cones`] writes it. The two are tangent here, and
     /// that is carried from how the corner was built rather than read off its
     /// rounded point (`docs/decisions.md` §448.3).
-    where_pipes_touch: Vec<[[u64; 9]; 2]>,
+    where_walls_touch: Vec<[[u64; 9]; 2]>,
 }
 
 /// One edge of the result.
@@ -7236,13 +7237,15 @@ impl Edge {
     /// **Unless the two surfaces are tangent there**, where `∇S × ∇T` is
     /// nought and says nothing: then it is read at the other end. Two bars of
     /// one radius whose axes meet cross in two ellipses that touch at two such
-    /// points, and every arc of them runs from one (Q1660). That a corner is
-    /// one of them is read off how the arrangement named it and not off its
-    /// rounded point, where the cross is a rounding wherever `f64` does not
-    /// hold the point ([`the_way_the_crossing_runs`], `docs/decisions.md`
+    /// points, and every arc of them runs from one (Q1660), and so do two
+    /// cones of one slope that are mirror images and touch (Q2902). That a
+    /// corner is one of them is read off how the arrangement named it and not
+    /// off its rounded point, where the cross is a rounding wherever `f64` does
+    /// not hold the point ([`the_way_the_crossing_runs`], `docs/decisions.md`
     /// §448.3). Whether the cross is nought does not follow the order of the
     /// fuse's arguments, since swapping them only turns its sign, and the pair
-    /// of pipes a corner is marked with is named alike either way round.
+    /// of pipes or cones a corner is marked with is named alike either way
+    /// round.
     ///
     /// **Unless the crossing's directions at the two ends, squared off, point
     /// the same way, on a curve that closes on a plane.** Such a curve bends one
@@ -8245,7 +8248,7 @@ fn corner_of(
                 wobble: 0.0,
                 from: Some(vertex.key()),
                 moved_by_the_policy: false,
-                where_pipes_touch: Vec::new(),
+                where_walls_touch: Vec::new(),
             });
             made.len() - 1
         })
@@ -10286,7 +10289,7 @@ impl Corners {
             wobble,
             from: was,
             moved_by_the_policy: moved.is_some(),
-            where_pipes_touch: Vec::new(),
+            where_walls_touch: Vec::new(),
         }
     }
 
@@ -11093,7 +11096,7 @@ impl Edges {
                 already
             }
             None => {
-                mark_where_two_pipes_touch(corners, &carried_by, [from, to]);
+                mark_where_two_walls_touch(corners, &carried_by, [from, to]);
                 let arc = if from == to {
                     WhichArc::TheOnlyOne
                 } else {
@@ -11304,7 +11307,8 @@ struct Lid {
 /// **Where the two surfaces are tangent at the first corner** `∇S × ∇T` is
 /// nought there, so the arc is named from the corner it stops at instead,
 /// leaving it backwards along the same signed direction (Q1660: the two points
-/// two bars of one radius whose axes meet touch at). That they touch there is
+/// two bars of one radius whose axes meet touch at; Q2902: the two points two
+/// mirror-image cones of one slope touch at). That they touch there is
 /// read off the corner and not off its rounded point
 /// ([`the_way_the_crossing_runs`]).
 ///
@@ -11357,7 +11361,7 @@ fn which_arc_this_is(
 }
 
 /// Mark each of `ends` that the arrangement named as one of the two places
-/// the walls of the two pipes `carried_by` touch, so that
+/// the walls of the two pipes or two cones `carried_by` touch, so that
 /// [`the_way_the_crossing_runs`] knows them for points the two are tangent at.
 ///
 /// **The arrangement names them and does not find them**: two pipes of one
@@ -11365,16 +11369,23 @@ fn which_arc_this_is(
 /// ellipses at the two places the walls touch
 /// (`four_half_ellipses_where_two_pipes_of_one_width_meet`), and
 /// `Arrangement::place_where_two_halves_meet` names those two `[a, b, b]`,
-/// with `which` 0 or 1 ([`where_two_halves_meet`]). `carried_by` is the pair
-/// the face's arrangement named them with, and both ends were made by
+/// with `which` 0 or 1 ([`where_two_halves_meet`]). Two cones of one slope
+/// that are exact mirror images and touch cross in four arcs of two ellipses
+/// from touch to touch, and `Arrangement::place_where_two_arcs_of_two_cones_meet`
+/// names the two touches the same way (Q2886). `carried_by` is the pair the
+/// face's arrangement named them with, and both ends were made by
 /// [`Corners::of`] just before, so each name that is an end is in
 /// [`Corners::named`] under the name its point goes by.
 ///
 /// The touch is carried from how the corner was built and not read off its
 /// rounded point, where `∇S × ∇T` is a rounding wherever `f64` does not hold
-/// the point (`docs/decisions.md` §448.3).
-fn mark_where_two_pipes_touch(corners: &mut Corners, carried_by: &[Surface; 2], ends: [usize; 2]) {
-    let Some(pair) = a_pair_of_pipes(carried_by) else {
+/// the point (`docs/decisions.md` §448.3). Two cones a quarter turn apart
+/// touch at `(±√1.92, 0.8, 3.2)`, and the cross at either rounded point is
+/// `2.2e−16` in `x` and `z`, a sign either way: an arc from there was named by
+/// that rounding, and the union of the two eight high measured `273.28`, more
+/// than the `268.08` the two cones hold together (Q2902).
+fn mark_where_two_walls_touch(corners: &mut Corners, carried_by: &[Surface; 2], ends: [usize; 2]) {
+    let Some(pair) = a_pair_of_pipes_or_cones(carried_by) else {
         return;
     };
     let named = names_of_the_three_surfaces(&where_two_halves_meet(&carried_by[0], &carried_by[1]));
@@ -11386,7 +11397,7 @@ fn mark_where_two_pipes_touch(corners: &mut Corners, carried_by: &[Surface; 2], 
         if !ends.contains(&corner) {
             continue;
         }
-        let touching = &mut corners.made[corner].where_pipes_touch;
+        let touching = &mut corners.made[corner].where_walls_touch;
         if !touching.contains(&pair) {
             touching.push(pair);
         }
@@ -11395,8 +11406,8 @@ fn mark_where_two_pipes_touch(corners: &mut Corners, carried_by: &[Surface; 2], 
 
 /// `∇S × ∇T` of the two surfaces `carried_by` at `at`, a rounding of `corner`:
 /// the way their crossing runs there. **Exactly nought where `corner` is one of
-/// the places their two walls touch** ([`mark_where_two_pipes_touch`]), since
-/// the two pipes are tangent there and the gradients are parallel.
+/// the places their two walls touch** ([`mark_where_two_walls_touch`]), since
+/// the two pipes or cones are tangent there and the gradients are parallel.
 ///
 /// Read off the rounded point alone, it is nought there only where `f64` holds
 /// the place: two bars of one radius, one turned 120° about `z` onto a
@@ -11404,18 +11415,24 @@ fn mark_where_two_pipes_touch(corners: &mut Corners, carried_by: &[Surface; 2], 
 /// `(1.6e−17, 0, 0)` (Q1660). An arc from such a corner was then named by that
 /// rounding and picked the wrong way round its ellipse (Q1793, Q1953).
 fn the_way_the_crossing_runs(carried_by: &[Surface; 2], corner: &Corner, at: Point) -> Vector {
-    if a_pair_of_pipes(carried_by).is_some_and(|pair| corner.where_pipes_touch.contains(&pair)) {
+    if a_pair_of_pipes_or_cones(carried_by)
+        .is_some_and(|pair| corner.where_walls_touch.contains(&pair))
+    {
         return Vector::zero();
     }
     let [one, other] = carried_by;
     gradient_of(one, at).cross(gradient_of(other, at))
 }
 
-/// The two pipes `carried_by`, each named either way round and the two
-/// sorted, so that the pair is named alike whichever of the two comes first
-/// and whichever way each stores its axis; `None` unless both are pipes.
-fn a_pair_of_pipes(carried_by: &[Surface; 2]) -> Option<[[u64; 9]; 2]> {
-    let [Surface::Cylinder(_), Surface::Cylinder(_)] = carried_by else {
+/// The two pipes or the two cones `carried_by`, each named either way round
+/// and the two sorted, so that the pair is named alike whichever of the two
+/// comes first and whichever way each stores its axis; `None` unless both are
+/// pipes or both are cones, the two pairs whose walls the arrangement names
+/// touching ([`mark_where_two_walls_touch`]).
+fn a_pair_of_pipes_or_cones(carried_by: &[Surface; 2]) -> Option<[[u64; 9]; 2]> {
+    let ([Surface::Cylinder(_), Surface::Cylinder(_)] | [Surface::Cone(_), Surface::Cone(_)]) =
+        carried_by
+    else {
         return None;
     };
     let mut pair = carried_by.map(|surface| name_of_the_surface_either_way_round(&surface));
@@ -14690,7 +14707,7 @@ mod tests {
             wobble: 0.0,
             from: None,
             moved_by_the_policy: false,
-            where_pipes_touch: Vec::new(),
+            where_walls_touch: Vec::new(),
         };
         let wall = Plane::from_point_and_normal(Point::origin(), Vector::new(1.0, 0.0, 0.0))
             .expect("a unit normal");
@@ -15013,7 +15030,7 @@ mod tests {
                 wobble: 0.0,
                 from: None,
                 moved_by_the_policy: false,
-                where_pipes_touch: Vec::new(),
+                where_walls_touch: Vec::new(),
             }],
             edges: vec![Edge {
                 ends: [0, 0],
@@ -15071,7 +15088,7 @@ mod tests {
             wobble: 0.0,
             from: None,
             moved_by_the_policy: false,
-            where_pipes_touch: Vec::new(),
+            where_walls_touch: Vec::new(),
         };
         let backwards = Vector::new(0.0, -1.0, 0.0);
         let arc = |ends: [usize; 2], towards: Vector| Edge {
@@ -15162,7 +15179,7 @@ mod tests {
                 wobble: 0.0,
                 from: None,
                 moved_by_the_policy: false,
-                where_pipes_touch: Vec::new(),
+                where_walls_touch: Vec::new(),
             };
             for (stop, leaving_along_y, half_way) in [
                 (quarter, 1.0, quarter / 2.0),
@@ -15261,7 +15278,7 @@ mod tests {
                     wobble: 0.0,
                     from: None,
                     moved_by_the_policy: false,
-                    where_pipes_touch: Vec::new(),
+                    where_walls_touch: Vec::new(),
                 }],
                 edges: vec![Edge {
                     ends: [0, 0],
@@ -15322,7 +15339,7 @@ mod tests {
             wobble: 0.0,
             from: None,
             moved_by_the_policy: false,
-            where_pipes_touch: Vec::new(),
+            where_walls_touch: Vec::new(),
         };
         let edge = |ends: [usize; 2]| Edge {
             ends,
@@ -15393,7 +15410,7 @@ mod tests {
             wobble: 0.0,
             from: None,
             moved_by_the_policy: false,
-            where_pipes_touch: Vec::new(),
+            where_walls_touch: Vec::new(),
         };
         let assembly = Assembly {
             where_closed_edges_start: Vec::new(),
