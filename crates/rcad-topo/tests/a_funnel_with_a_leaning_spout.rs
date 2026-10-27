@@ -30,11 +30,11 @@
 //! second a quarter turn off the first, so that every number is exact and the
 //! two are exactly mirror images and touch. Since row Q2868 `intersect` names
 //! their crossing as four arcs of two flat cuts that meet where the two touch,
-//! and since row Q2886 the fuse puts a node at each touch and tells each face's
-//! regions apart, but every fuse of the pair is still refused when its answer
-//! is meshed. A fifth came with it: the same two side
-//! by side, which are mirror images too but cross in one hyperbola and do not
-//! touch. Since row Q2867 `intersect` names that hyperbola as the flat surface
+//! since row Q2886 the fuse puts a node at each touch and tells each face's
+//! regions apart, and since row Q2902 it names each edge of the answer from
+//! its end away from a touch, so every fuse of the pair answers and measures
+//! what the two share. A fifth came with it: the same two side by side, which
+//! are mirror images too but cross in one hyperbola and do not touch. Since row Q2867 `intersect` names that hyperbola as the flat surface
 //! halfway between the two cuts it out of either, and since row Q2879 the fuse
 //! orders points along it as along that flat surface's cut of a cone, so every
 //! fuse of the pair answers.
@@ -56,21 +56,6 @@ use cones::{a_frustum, a_pointed_cone};
 /// curved surface.
 const A_CONE_ACROSS_A_CURVED_SURFACE: &str =
     "geometry: a cone crossing another curved surface is a degree-four space curve";
-
-/// What `fuse` says where a face of its answer has a hole and goes too far
-/// round its surface for the mesher to cut it up.
-const A_FACE_GOING_TOO_FAR_ROUND: &str =
-    "a curved face with a hole in it goes too far round its surface to be meshed";
-
-/// What `fuse` says where a face of its answer looks to the mesher like one
-/// curve right round its surface with the material outside it.
-const A_FACE_RIGHT_ROUND_WITH_NO_SEAM: &str =
-    "a curved face is bounded by one curve right round it and has no seam to open at";
-
-/// What `fuse` says where the mesher's walk along an arc of two cones cannot
-/// tell which arc it is.
-const AN_ARC_NOT_TOLD_FROM_ITS_SIBLINGS: &str = "geometry: this crossing comes in two pieces and \
-     no half-space square to both surfaces can be written down in f64 to tell them apart";
 
 /// **A funnel with a leaning spout.** The funnel is a frustum of slope a half
 /// with its apex at the origin, cut two and eight up, so of radius one and
@@ -101,7 +86,7 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 /// `two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points`
 /// in `rcad-geom`
 /// shows the touch on a pair whose numbers are exact, and
-/// [`two_pointed_cones_eight_high_a_quarter_turn_apart_are_refused_where_their_answer_is_meshed`]
+/// [`two_pointed_cones_eight_high_a_quarter_turn_apart_answer_every_fuse`]
 /// on the same two cones a quarter turn apart, where every number is exact.
 ///
 /// Every fuse is refused where `intersect` names the crossing.
@@ -127,54 +112,90 @@ fn two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule() {
 /// node at each touch on both walls and orders each arc round a point of the
 /// straight line through the touches, so it tells each face's regions apart.
 ///
-/// Every fuse is still refused when its answer is meshed. `fuse/assemble.rs`
-/// reads which way an arc from a touch runs off the touch's rounded point,
-/// where the two cones are tangent, so the edge is picked the wrong way round
-/// its ellipse and the mesher sees faces that are not there. Two pipes of one
-/// width get their touches marked against that (§448.3); two cones do not yet.
+/// The two are tangent at a touch, so which way the crossing runs there
+/// cannot be read off the touch's rounded point, where `∇S × ∇T` is a
+/// rounding. Read there, an edge from a touch was picked by that rounding, and
+/// the union with the other solid first measured `273.28`, more than the
+/// `268.08` the two cones hold together. Since row Q2902 `fuse/assemble.rs`
+/// knows each touch from how the arrangement named it, as it knows two pipes'
+/// (`docs/decisions.md` §448.3), and reads the way at an edge's other end.
+/// Every fuse answers, under every rule both ways round, and the intersection
+/// measures what the two share.
 ///
 /// Eight high, the ellipse in `y + z = 4` reaches up to `(0, −4, 8)`, where
 /// both caps' rims pass.
 #[test]
-fn two_pointed_cones_eight_high_a_quarter_turn_apart_are_refused_where_their_answer_is_meshed() {
-    assert_eq!(
-        every_fuse_of(two_pointed_cones_a_quarter_turn_apart).refusals(),
-        [
-            [
-                Some(
-                    "a face of this solid could not be cut into triangles: the boundary \
-                     crosses itself, at the side leaving corner 13"
-                ),
-                Some(AN_ARC_NOT_TOLD_FROM_ITS_SIBLINGS)
-            ],
-            [Some(A_FACE_RIGHT_ROUND_WITH_NO_SEAM); 2],
-            [
-                Some(
-                    "a face of this solid could not be cut into triangles: the boundary \
-                     crosses itself, at the side leaving corner 15"
-                ),
-                Some(A_FACE_RIGHT_ROUND_WITH_NO_SEAM)
-            ]
-        ]
+fn two_pointed_cones_eight_high_a_quarter_turn_apart_answer_every_fuse() {
+    every_fuse_answers_and_the_intersection_is_what_the_two_share(
+        two_pointed_cones_a_quarter_turn_apart,
+        8.0,
     );
 }
 
 /// **The same two pointed cones, ten high.** Neither cap meets the other
-/// solid, so the crossing is the two ellipses alone, and every fuse is refused
-/// when its answer is meshed, as the eight-high pair's is.
+/// solid, so the crossing is the two ellipses alone. Every fuse answers, and
+/// the intersection measures what the two share, which lies below both caps
+/// and so is what the eight-high pair share.
 #[test]
-fn two_pointed_cones_ten_high_a_quarter_turn_apart_are_refused_where_their_answer_is_meshed() {
-    assert_eq!(
-        every_fuse_of(two_pointed_cones_ten_high_a_quarter_turn_apart).refusals(),
-        [
-            [
-                Some(A_FACE_GOING_TOO_FAR_ROUND),
-                Some(AN_ARC_NOT_TOLD_FROM_ITS_SIBLINGS)
-            ],
-            [Some(A_FACE_RIGHT_ROUND_WITH_NO_SEAM); 2],
-            [Some(A_FACE_GOING_TOO_FAR_ROUND); 2]
-        ]
+fn two_pointed_cones_ten_high_a_quarter_turn_apart_answer_every_fuse() {
+    every_fuse_answers_and_the_intersection_is_what_the_two_share(
+        two_pointed_cones_ten_high_a_quarter_turn_apart,
+        10.0,
     );
+}
+
+/// Fails unless every fuse of the two cones `shape` builds `high` high a
+/// quarter turn apart answers, and the intersection measures what
+/// [`what_two_cones_a_quarter_turn_apart_share`] adds up.
+fn every_fuse_answers_and_the_intersection_is_what_the_two_share(
+    shape: fn(&mut Model) -> (SolidKey, SolidKey),
+    high: f64,
+) {
+    let fused = every_fuse_of(shape);
+    assert_eq!(fused.refusals(), [[None; 2]; 3]);
+    let [Ok(intersection), _] = fused.answers[1] else {
+        unreachable!("every fuse answered")
+    };
+    about_the_same(
+        intersection,
+        (what_two_cones_a_quarter_turn_apart_share(high), 0.01),
+        "the intersection against what the two share",
+    );
+}
+
+/// What the two pointed cones [`two_pointed_cones_this_high_a_quarter_turn_apart`]
+/// builds `high` high share, added up a slice at a time.
+///
+/// The first holds `x² + y² ≤ (z/2)²` for `z` from nought to `high`, and the
+/// second is its mirror image across `y + z = 4`, which takes `(x, y, z)` to
+/// `(x, 4 − z, 4 − y)`. So at height `z` and across at `y` the two share the
+/// `x` with `x² ≤ (z/2)² − y²` and `x² ≤ ((4 − y)/2)² − (4 − z)²`, where
+/// `4 − y` is from nought to `high`. Taken at the middle of each of 1000 steps
+/// up and 1000 across, the sum is `46.2231`; it moves by `1.5e−3` from 500
+/// steps and by `4.8e−4` on to 2000, so it is within a hundredth of the
+/// volume.
+fn what_two_cones_a_quarter_turn_apart_share(high: f64) -> f64 {
+    const STEPS: u32 = 1000;
+    let up = high / f64::from(STEPS);
+    (0..STEPS)
+        .map(|step_up| {
+            let z = (f64::from(step_up) + 0.5) * up;
+            let radius = z / 2.0;
+            let across = 2.0 * radius / f64::from(STEPS);
+            (0..STEPS)
+                .map(|step_across| {
+                    let y = -radius + (f64::from(step_across) + 0.5) * across;
+                    let up_the_second = 4.0 - y;
+                    if !(0.0..=high).contains(&up_the_second) {
+                        return 0.0;
+                    }
+                    let in_the_first = radius * radius - y * y;
+                    let in_the_second = (up_the_second / 2.0).powi(2) - (4.0 - z).powi(2);
+                    2.0 * in_the_first.min(in_the_second).max(0.0).sqrt() * across * up
+                })
+                .sum::<f64>()
+        })
+        .sum()
 }
 
 /// **Two pointed cones side by side.** Both have slope a half and height
