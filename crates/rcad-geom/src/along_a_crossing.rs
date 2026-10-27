@@ -1159,8 +1159,9 @@ fn the_way_two_cones_on_one_axis_wind(
 /// [`how_two_cones_off_one_axis_cross`] cannot prove the crossing two loops
 /// or a loop and two branches, where it proves it a loop and two branches:
 /// the branches run off for ever, and the loop is not told apart from them
-/// here, and where it proves it two ellipses that meet where the two cones
-/// touch, which is no one closed curve to go round.
+/// here, and where it proves it two flat cuts that meet where the two cones
+/// touch, two ellipses or a hyperbola and an ellipse, which is no one closed
+/// curve to go round.
 ///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] where it proves the
 /// two of one slope side by side, whose crossing is one hyperbola.
