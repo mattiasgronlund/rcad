@@ -636,7 +636,16 @@ fn bake_one_solid(
     let solid = model.solid_at(slot);
     let validate_allows = model.room_a_corner_of_this_solid_gets(slot);
     if let Some(joined) = joined {
-        return bake_the_joined_faces(model, key, solid, &joined, validate_allows, policy, log);
+        return bake_the_joined_faces(
+            model,
+            key,
+            solid,
+            &joined,
+            validate_allows,
+            planes_in_the_fuse,
+            policy,
+            log,
+        );
     }
 
     let mut surfaces = surface_of_every_face(model, solid);
@@ -838,16 +847,29 @@ fn what_each_edge_left_out_ran_along(
 /// all that is left is to solve each corner that survived the joining from the
 /// planes now round it. Every one of them has three, which is the whole point of
 /// having joined.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the solid, its joined faces, and what placing a corner of it reads"
+)]
 fn bake_the_joined_faces(
     model: &Model,
     key: SolidKey,
     solid: SolidView<'_>,
     joined: &[InputFace],
     validate_allows: CornerRoom,
+    planes_in_the_fuse: &[Plane],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedSolid> {
-    let corners = corner_of_every_vertex_left(model, solid, joined, validate_allows, policy, log)?;
+    let corners = corner_of_every_vertex_left(
+        model,
+        solid,
+        joined,
+        validate_allows,
+        planes_in_the_fuse,
+        policy,
+        log,
+    )?;
 
     let mut faces = Vec::new();
     let mut bounds = Bounds::nothing();
@@ -892,7 +914,13 @@ fn bake_the_joined_faces(
 }
 
 /// Solve every corner the joining left, from the planes of the joined faces
-/// round it.
+/// round it, chosen against `planes_in_the_fuse` when the corner is convex
+/// ([`the_joined_corner_is_convex`]), as [`place_a_corner`] chooses round a
+/// corner of faces that were not joined.
+///
+/// # Errors
+///
+/// What [`where_the_model_puts_a_corner`] and [`derive_a_corner`] refuse.
 ///
 /// # Panics
 ///
@@ -904,24 +932,44 @@ fn corner_of_every_vertex_left(
     solid: SolidView<'_>,
     joined: &[InputFace],
     validate_allows: CornerRoom,
+    planes_in_the_fuse: &[Plane],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BTreeMap<VertexSlot, BakedCorner>> {
     let surfaces = surface_of_every_face(model, solid);
-    let mut around: BTreeMap<VertexSlot, (VertexKey, Vec<Surface>)> = BTreeMap::new();
+    let mut around: BTreeMap<VertexSlot, (VertexKey, Vec<Plane>)> = BTreeMap::new();
+    let mut leaving: BTreeMap<VertexSlot, Vec<ASideLeaving>> = BTreeMap::new();
     for face in joined {
         let mut its_corners: BTreeMap<VertexSlot, VertexKey> = BTreeMap::new();
-        for side in face.wires.iter().flatten() {
-            its_corners.insert(side.start.slot_in(model.id()), side.start);
+        for ring in &face.wires {
+            for (position, side) in ring.iter().enumerate() {
+                let slot = side.start.slot_in(model.id());
+                its_corners.insert(slot, side.start);
+                leaving.entry(slot).or_default().push(ASideLeaving {
+                    far_end: ring[(position + 1) % ring.len()].start.slot_in(model.id()),
+                    between: [face.plane, side.across],
+                });
+            }
         }
         for (slot, vertex) in its_corners {
             around
                 .entry(slot)
                 .or_insert((vertex, Vec::new()))
                 .1
-                .push(Surface::Plane(face.plane));
+                .push(face.plane);
         }
     }
+    let placed = around
+        .keys()
+        .map(|&slot| {
+            let point = where_the_model_puts_a_corner(
+                model,
+                slot,
+                &faces_around_a_vertex(model, slot, &surfaces),
+            )?;
+            Ok((slot, point))
+        })
+        .collect::<Result<BTreeMap<VertexSlot, PredicatePoint>>>()?;
 
     around
         .into_iter()
@@ -931,17 +979,51 @@ fn corner_of_every_vertex_left(
                 "a corner of a closed solid has at least three faces round it, this one has {}",
                 planes.len()
             );
-            let stored = where_the_model_puts_a_corner(
-                model,
-                slot,
-                &faces_around_a_vertex(model, slot, &surfaces),
+            let convex = the_joined_corner_is_convex(&planes, &leaving[&slot], &placed);
+            let corner = derive_a_corner(
+                vertex,
+                placed[&slot],
+                planes.iter().copied().map(Surface::Plane).collect(),
+                validate_allows,
+                convex.then_some(AmongThePlanesOfTheFuse {
+                    outward: &planes,
+                    in_the_fuse: planes_in_the_fuse,
+                }),
+                policy,
+                log,
             )?;
-            Ok((
-                slot,
-                derive_a_corner(vertex, stored, planes, validate_allows, None, policy, log)?,
-            ))
+            Ok((slot, corner))
         })
         .collect()
+}
+
+/// A side of a joined face that leaves a corner: the corner it runs to, and
+/// the planes of the two joined faces it runs between.
+struct ASideLeaving {
+    far_end: VertexSlot,
+    between: [Plane; 2],
+}
+
+/// Whether a corner of the joined faces is convex, by the test
+/// [`the_planes_round_a_convex_corner`] makes of a corner of faces that were
+/// not joined: the far end of every side leaving it lies behind every plane
+/// round it but the two the side runs between. A joined face's plane already
+/// faces out of the solid ([`InputFace::plane`]), and every edge from the
+/// corner leaves it along one side of the face that walks it away from the
+/// corner, so `leaving` holds each once. The joined planes are already placed,
+/// so each far end is asked where the model puts it once placed, the box that
+/// move cost included. A far end not proved behind a plane answers `false`.
+fn the_joined_corner_is_convex(
+    planes: &[Plane],
+    leaving: &[ASideLeaving],
+    placed: &BTreeMap<VertexSlot, PredicatePoint>,
+) -> bool {
+    leaving.iter().all(|side| {
+        planes
+            .iter()
+            .filter(|plane| !side.between.contains(plane))
+            .all(|plane| plane.side_of_point(placed[&side.far_end]) == Decision::Neg)
+    })
 }
 
 /// Every face of the solid with its surface already moved into place, and where
@@ -1360,9 +1442,9 @@ fn where_the_model_puts_a_corner(
 /// says why that is a speck). Then it takes the next triple, by box, whose
 /// reading does not, and the least box when none passes. Each is asked about
 /// every surface round the corner, as the least box is, and one a surface
-/// proves off is passed over. `None` keeps the least box, as before Q2815: the
-/// joined faces of a wholly flat solid, a corner with a surface round it that
-/// is no face's, and a corner not proved convex (§448.8).
+/// proves off is passed over. `None` keeps the least box, as before Q2815: a
+/// corner with a surface round it that is no face's, and a corner not proved
+/// convex (§448.8).
 ///
 /// A surface that comes back [`Decision::Pos`] or [`Decision::Neg`] has *proved*
 /// the corner is somewhere else, which means the input's corners and its
@@ -1483,7 +1565,8 @@ fn derive_a_corner(
 #[derive(Clone, Copy)]
 struct AmongThePlanesOfTheFuse<'a> {
     /// The planes round the corner, in the order it lists them, each turned to
-    /// face out of the solid ([`the_planes_round_a_convex_corner`]).
+    /// face out of the solid ([`the_planes_round_a_convex_corner`], and the
+    /// joined planes themselves round [`the_joined_corner_is_convex`]).
     outward: &'a [Plane],
     /// The plane of every flat face of every solid in the fuse
     /// ([`the_plane_of_every_face`]).
