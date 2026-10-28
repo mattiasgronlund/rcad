@@ -20,8 +20,9 @@
 //! crossing too, as one loop and two branches that pass close by each other,
 //! and since row Q2894 `walk` marches the loop and a run between two corners
 //! on a branch without stepping from one onto the other, but every fuse of
-//! them is still refused: the fuse cannot settle the order of two points along
-//! a crossing where both caps' rims nearly meet.
+//! them is still refused. Where both caps' rims nearly meet, the two caps'
+//! planes and the two cones meet in four points a rounding apart, not one, and
+//! the fuse cannot settle the order of two of them along a crossing.
 //!
 //! A third shape came with row Q2818: two pointed cones of different slopes,
 //! the narrower leaning off the wider, which cross in a loop and two branches
@@ -102,11 +103,33 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 ///
 /// Every fuse is still refused, under every rule both ways round, as
 /// undecided: `fuse/arrange.rs` cannot settle the order of two points along a
-/// crossing at about `(−3.9541, −0.6045, 8)`, where both caps' rims meet or
-/// pass within a rounding of each other. The two are mirror images but for a
-/// rounding, and equally high, so each rim is nearly the other's mirror image,
-/// and the two meet in the flat surface halfway between the apexes, on both
-/// skins. Row Q2910 traces it.
+/// crossing at about `(−3.9541, −0.6045, 8)`, where both caps' rims nearly
+/// meet. The two are mirror images but for a rounding, and equally high, so
+/// each rim is nearly the other's mirror image.
+///
+/// Row Q2910 traced it. There `z = 8`, the leaning cap's plane and the two
+/// cones meet in four points, not one: each three of the four surfaces meet
+/// once, and worked out exactly from the stored numbers the four points are
+/// all within `4.3e-16` of each other. The fuse finds each as a node of its own
+/// on each face it lies on, and orders them along each crossing through them.
+///
+/// - Round the upright cap's rim from `(0, 4, 8)`, anticlockwise about `z`,
+///   the meet with the leaning cone comes `4.15e-16` before the meet with the
+///   leaning cap's plane. Since Q2910 the fuse reads that by how far round the
+///   upright cone's axis each is turned.
+/// - Along the line where the two caps' planes cross, the meet with the
+///   leaning cone lies `1.84e-16` further along `−x` than the meet with the
+///   upright cone. Both lie in one box an `ulp` wide along `x` and along `y`,
+///   and `y` and `z` do not change along that line, so no box parts them.
+///   Every fuse with the upright cone first is refused here.
+/// - Round the leaning cap's rim, every fuse with the leaning cone first is
+///   refused ordering the meet with the upright cone and the meet with `z = 8`,
+///   `4.15e-16` apart.
+///
+/// Every order of the four follows, through which way the four surfaces lean
+/// there, from one sign that no box gives: whether the meet of that line with
+/// the leaning cone is outside the upright cone. Worked out exactly it is, by
+/// `1.46e-15` read as the upright cone's equation `x² + y² − z²/4`.
 #[test]
 fn two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule() {
     assert_eq!(
