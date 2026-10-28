@@ -16,20 +16,21 @@
 //! One kind of corner with three surfaces round it is read out of the model as
 //! well, but only once re-deriving it has refused `Undecidable`: a corner
 //! whose faces fall into two fans or more, each fan with fewer than three
-//! surfaces, where no edge left out adds a surface and fewer than three of
-//! the surfaces are planes. That is where two pieces of skin touch at one
-//! point, as the flange and the body of a KiCad LED do (§471.3): each fan
-//! alone would be read out of the model, and the three surfaces only come
-//! together because both fans are counted, so they touch there rather than
-//! cross and nothing solves them. Fewer than three planes, because readers
-//! further on take three planes round a corner to meet at it, which holds
-//! only where bake solved the corner among them. A corner of one fan whose
-//! three surfaces graze stays refused, as §70.3's does. [`place_a_corner`]
-//! says it in full.
+//! surfaces, where no edge left out adds a surface. That is where two pieces
+//! of skin touch at one point, as the flange and the body of a KiCad LED do
+//! (§471.3): each fan alone would be read out of the model, and the three
+//! surfaces only come together because both fans are counted, so they touch
+//! there rather than cross and nothing solves them. A corner of one fan whose
+//! three surfaces graze stays refused, as §70.3's does. **Such a corner is
+//! asked about as a solved one is**, and the room it was asked with is kept:
+//! the arrangement bounds how far a meet of three planes round a corner may
+//! lie from it by that room, and it can have three planes round it.
+//! [`place_a_corner`] says it in full.
 //!
-//! **Read and moved, and not asked about.** With nothing to solve, the point
-//! handed on is the stored corner whatever its surfaces say, so asking them
-//! could only refuse. And the stored corner is the point `Model::validate` asks
+//! **A corner with fewer than three surfaces is read and moved, and not asked
+//! about.** With nothing to solve, the point handed on is the stored corner
+//! whatever its surfaces say, so asking them could only refuse. And the stored
+//! corner is the point `Model::validate` asks
 //! these same surfaces about, with the room `validate` grants.
 //! [`derive_a_corner`] asks a solved corner with that room too, plus the
 //! corner's own rounding (§368), so asking here the same way would refuse only
@@ -371,14 +372,14 @@ pub(crate) struct BakedCorner {
     /// more round it from one triple and then asks each surface here about it,
     /// grown by the room `Model::validate_solid` grants a corner off that
     /// surface plus [`what_writing_the_corner_down_cost`], and a surface that
-    /// proves it off is a refusal. Fewer than three surfaces, and the corner
-    /// was read out of the model and nothing here asked (§286). So was a corner
-    /// in two fans that touch, with three surfaces or more round it but fewer
-    /// than three of them planes, once solving it refused ([`place_a_corner`],
-    /// §471.3). `a_corner_is_this_place` in the arrangement leans on the first
-    /// half: a meet of three planes from this list is this corner while it
-    /// lies within [`BakedCorner::room_its_planes_were_asked_with`] of it
-    /// (§356, §395.8).
+    /// proves it off is a refusal. A corner in two fans that touch, read out of
+    /// the model once solving it refused, is asked the same way
+    /// ([`place_a_corner`], §471.3). `a_corner_is_this_place` in the
+    /// arrangement leans on that asking: a meet of three planes from this list
+    /// is this corner while it lies within
+    /// [`BakedCorner::room_its_planes_were_asked_with`] of it (§356, §395.8).
+    /// Fewer than three surfaces, and the corner was read out of the model and
+    /// nothing here asked (§286).
     pub(crate) around: Vec<Surface>,
     /// The three surfaces of `around` whose meet [`derive_a_corner`] placed the
     /// corner at, so that `point`'s box holds where exactly those three meet.
@@ -403,8 +404,9 @@ pub(crate) struct BakedCorner {
     /// How far the corner was grown before each plane in `around` was asked
     /// about it: the room `Model::validate_solid` grants a corner off a plane
     /// plus [`what_writing_the_corner_down_cost`], the sum [`derive_a_corner`]
-    /// asks with. `None` for a corner read out of the model, which nothing
-    /// asked.
+    /// asks with, and [`place_a_corner`] asks a corner in two fans with when it
+    /// reads it out of the model. `None` for a corner with fewer than three
+    /// surfaces round it, which nothing asked.
     ///
     /// **Kept so the arrangement reads the room `bake` used, and does not work
     /// it out again.** A meet of three planes from `around` is this corner as
@@ -1178,18 +1180,27 @@ fn faces_around_a_vertex(
 /// - Every surface round it is a face's. An edge left out that adds one ran
 ///   along a curve through the corner that its faces alone do not name, and
 ///   the corner is solved with it or refused.
-/// - Fewer than three of its surfaces are planes. `a_corner_is_this_place` in
-///   the arrangement and the readers after it take three planes round a
-///   corner to meet at it, within [`BakedCorner::room_its_planes_were_asked_with`],
-///   which holds only where this solved the corner among them.
 /// - Its faces fall into two fans or more, and no fan has three surfaces
 ///   ([`each_fan_round_it_has_fewer_than_three_surfaces`]). Then each fan alone
 ///   would be read out of the model, and the three surfaces round the corner
-///   come together only because both fans are counted: the flat and back of a
-///   KiCad LED's flange and the pipe of its body, which touches the flat
-///   there. They touch rather than cross, so no three of them place the
-///   corner. A corner of one fan whose three surfaces graze, as §70.3's do,
-///   stays refused: no test yet builds one with fewer than three planes.
+///   come together only because both fans are counted. A KiCad LED has two
+///   such corners where its flat flange touches its round body. At the back
+///   one, the flange's flat and back meet the body's pipe, which touches the
+///   flat there. At the front one, the flange's flat and front meet the
+///   body's front disc, whose plane is the flange's front written down a
+///   second time a rounding apart. Those three planes share a line in the
+///   file, and solving them gives a box on that line from `0.016` to `0.21`
+///   past the stored corner, which misses it (Q2928). Either way no three of
+///   them place the corner. A corner of one fan, as §70.3's grazing one is, never meets
+///   this, so it stays refused.
+///
+/// **A corner read out this way is still asked about**, by every surface round
+/// it and with the room a solved corner is asked with ([`asked_at`]), and the
+/// room is kept ([`BakedCorner::room_its_planes_were_asked_with`]). The
+/// arrangement's fold expects that room on any corner with three planes round
+/// it, as the LED's front corner has, and bounds by it how far a meet of those
+/// planes may lie from the corner (§395.7). Asking refuses only a corner
+/// `validate` would refuse, as the module header says.
 ///
 /// Every corner that solving places is still placed that way, so a corner this
 /// reads out of the model is one that was refused before. Solving runs on a log
@@ -1243,11 +1254,6 @@ fn place_a_corner(
             in_the_fuse: planes_in_the_fuse,
         });
         let read_out_of_the_model_when_unsolved = distinct.len() == of_its_faces
-            && distinct
-                .iter()
-                .filter(|surface| surface.as_plane().is_some())
-                .count()
-                < 3
             && each_fan_round_it_has_fewer_than_three_surfaces(model, slot, surfaces);
         if !read_out_of_the_model_when_unsolved {
             return derive_a_corner(
@@ -1270,7 +1276,18 @@ fn place_a_corner(
             policy,
             &mut tried,
         ) {
-            Err(Error::Undecidable { .. }) => (),
+            Err(Error::Undecidable { .. }) => {
+                return Ok(BakedCorner {
+                    seam_plane: the_seam_plane_a_corner_is_on(model, slot, &around),
+                    ..asked_at(
+                        vertex,
+                        where_the_model_puts_it,
+                        None,
+                        &distinct,
+                        validate_allows,
+                    )?
+                });
+            }
             answered => {
                 tried.drain_into(log);
                 return answered;
@@ -1670,7 +1687,7 @@ fn derive_a_corner(
             log,
         ));
     };
-    let best = solved_at(vertex, point, solved_from, &around, validate_allows)?;
+    let best = asked_at(vertex, point, Some(solved_from), &around, validate_allows)?;
     let Some(among) = choosing_among else {
         return Ok(best);
     };
@@ -1680,7 +1697,7 @@ fn derive_a_corner(
     Ok(solved[1..]
         .iter()
         .find_map(|&(point, solved_from)| {
-            solved_at(vertex, point, solved_from, &around, validate_allows)
+            asked_at(vertex, point, Some(solved_from), &around, validate_allows)
                 .ok()
                 .filter(|corner| {
                     !its_reading_lets_a_crossing_in_through_a_face_it_does_not_cut(corner, among)
@@ -1704,17 +1721,18 @@ struct AmongThePlanesOfTheFuse<'a> {
     in_the_fuse: &'a [Plane],
 }
 
-/// The corner solved at `point` from the three surfaces `solved_from`, once
-/// every surface round it has been asked about it.
+/// The corner at `point`, once every surface round it has been asked about it:
+/// solved there from the three surfaces `solved_from`, or, with `None`, read
+/// out of the model there ([`place_a_corner`]).
 ///
 /// # Errors
 ///
 /// [`Invalid::VertexOffItsFacePlane`] or [`Invalid::VertexOffItsFaceSurface`]
 /// when a surface round it proves it is somewhere else.
-fn solved_at(
+fn asked_at(
     vertex: VertexKey,
     point: PredicatePoint,
-    solved_from: [Surface; 3],
+    solved_from: Option<[Surface; 3]>,
     around: &[Surface],
     validate_allows: CornerRoom,
 ) -> Result<BakedCorner> {
@@ -1744,7 +1762,7 @@ fn solved_at(
         vertex,
         point,
         around: around.to_vec(),
-        solved_from: Some(solved_from),
+        solved_from,
         seam_plane: None,
         room_its_planes_were_asked_with: Some(writing_it_down + validate_allows.off_a_plane),
     })
