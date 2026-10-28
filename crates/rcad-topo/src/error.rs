@@ -1981,10 +1981,14 @@ pub enum Invalid {
     /// running straight through the line, and `Model::validate` passed it
     /// (`docs/decisions.md` §470.4).
     #[error(
-        "two flat faces on different planes run through each other from a corner they share, \
-         along a line neither has an edge on"
+        "two flat faces on different planes run through each other from the corner at {at:?} \
+         they share, along a line neither has an edge on"
     )]
-    TwoFlatFacesRunThroughEachOtherWhereNeitherHasAnEdge,
+    TwoFlatFacesRunThroughEachOtherWhereNeitherHasAnEdge {
+        /// The corner the two faces share, in the frame their shell is stored
+        /// in.
+        at: rcad_geom::Point,
+    },
 
     /// A solid's faces do not point outwards, so it encloses negative space.
     #[error("a solid encloses {volume} of space; its faces do not all point outwards")]
@@ -2119,7 +2123,7 @@ impl Invalid {
             | Self::FaceHasNoWires
             | Self::OuterWireWindsAgainstTheNormal
             | Self::HoleWindsWithTheOuterWire
-            | Self::TwoFlatFacesRunThroughEachOtherWhereNeitherHasAnEdge
+            | Self::TwoFlatFacesRunThroughEachOtherWhereNeitherHasAnEdge { .. }
             | Self::VolumeIsNotPositive { .. }
             | Self::FacesDoNotAgreeWhichWayTheyFace
             | Self::Orphan { .. }

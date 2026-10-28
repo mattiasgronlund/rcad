@@ -96,14 +96,14 @@ fn three_walls_running_through_each_other_where_no_edge_is_are_refused() {
         ],
     );
 
+    let Err(Error::Invalid(Invalid::TwoFlatFacesRunThroughEachOtherWhereNeitherHasAnEdge { at })) =
+        built
+    else {
+        panic!("expected the sweep to refuse the crossing walls by name, got {built:?}");
+    };
     assert!(
-        matches!(
-            built,
-            Err(Error::Invalid(
-                Invalid::TwoFlatFacesRunThroughEachOtherWhereNeitherHasAnEdge
-            ))
-        ),
-        "expected the sweep to refuse the crossing walls by name, got {built:?}"
+        at.x() == 3.0 && at.y() == 3.0,
+        "the walls cross on the line up through (3, 3), not at {at:?}"
     );
     assert_eq!(
         model.solids().count(),
