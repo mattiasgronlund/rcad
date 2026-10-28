@@ -299,7 +299,8 @@ handoff. A handoff that names places saves that lane the reading you did; one
 that says "see the code" costs it all again. Fill in the rest of the report as
 usual, since the lane after you carries it on. A row that is done when the
 warning comes is reported done, not handed over. A read-only lane has nothing
-to commit, so it reports what it has, as the warning says.
+to hand over, so it is not a stop for one either: it carries on past the
+warning to an upper stop of about 400k context, then reports what it has.
 
 Never restate a number you did not run yourself; every number you report
 carries the command that produced it. Its `value` is text that command prints,
