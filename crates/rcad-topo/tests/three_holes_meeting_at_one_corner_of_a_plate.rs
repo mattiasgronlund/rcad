@@ -19,9 +19,12 @@
 //! The line is now three edges, each between the two walls either side of one
 //! wedge of plate.
 
-use rcad_geom::{Deflection, Isometry, Point, Scale, Vector};
+use rcad_geom::{Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{FaceKey, FaceView, Model, ProfileBuilder, Rule, SolidKey, SolidView};
+use rcad_topo::{
+    DraftEdge, DraftFace, DraftStep, DraftVertex, DraftWire, Error, FaceKey, FaceView, Invalid,
+    Model, ProfileBuilder, Rule, SolidBuilder, SolidKey, SolidView,
+};
 
 #[test]
 fn a_plate_less_three_holes_meeting_at_one_corner_keeps_the_line_as_three_edges() {
@@ -75,6 +78,199 @@ fn the_plate_less_three_holes_less_a_far_corner_keeps_the_line_as_three_edges() 
     );
     let answer = one_solid(&mut model, perforated, &[corner], Rule::Difference);
     is_the_plate_less_the_holes(&model, answer, 33.5, 9);
+}
+
+/// The answer the fuse used to write, described by hand: each two opposite
+/// walls one face running straight through the line, and `Model::validate`
+/// passed it (§470.4).
+#[test]
+fn three_walls_running_through_each_other_where_no_edge_is_are_refused() {
+    let mut model = a_model();
+
+    let built = the_plate_less_the_holes_drawn_by_hand(
+        &mut model,
+        &[
+            &[[2.0, 3.0], [3.0, 3.0], [4.0, 3.0]],
+            &[[3.0, 2.0], [3.0, 3.0], [3.0, 4.0]],
+            &[[4.0, 4.0], [3.0, 3.0], [2.0, 2.0]],
+        ],
+    );
+
+    assert!(
+        matches!(
+            built,
+            Err(Error::Invalid(
+                Invalid::TwoFlatFacesRunThroughEachOtherWhereNeitherHasAnEdge
+            ))
+        ),
+        "expected the sweep to refuse the crossing walls by name, got {built:?}"
+    );
+    assert_eq!(
+        model.solids().count(),
+        0,
+        "a refusal leaves the model as it was"
+    );
+}
+
+/// The same plate with the line written as three edges, each between the walls
+/// either side of one wedge of plate, as the fuse writes it now. Every wall
+/// meets the line in an edge, so nothing runs through anything.
+#[test]
+fn the_same_walls_split_at_the_line_with_an_edge_between_each_two_build() {
+    let mut model = a_model();
+
+    let built = the_plate_less_the_holes_drawn_by_hand(
+        &mut model,
+        &[
+            &[[3.0, 3.0], [4.0, 3.0]],
+            &[[4.0, 4.0], [3.0, 3.0]],
+            &[[3.0, 3.0], [3.0, 4.0]],
+            &[[2.0, 3.0], [3.0, 3.0]],
+            &[[3.0, 3.0], [2.0, 2.0]],
+            &[[3.0, 2.0], [3.0, 3.0]],
+        ],
+    )
+    .unwrap_or_else(|why| panic!("the plate with the line as three edges is refused: {why}"));
+
+    is_the_plate_less_the_holes(&model, built, 34.0, 6);
+}
+
+/// The plate less its three holes, faces listed by their corners, with the
+/// walls along the line up through `(3, 3)` walked along `walls_on_the_line`.
+///
+/// Each wall is walked with the plate on its left, so it faces right. Two walls
+/// walking one stretch of the line back to back, one after the other, share an
+/// edge there.
+fn the_plate_less_the_holes_drawn_by_hand(
+    model: &mut Model,
+    walls_on_the_line: &[&[[f64; 2]]],
+) -> rcad_topo::Result<SolidKey> {
+    let mut drawing = Drawing::default();
+    let outline = [[0.0, 0.0], [6.0, 0.0], [6.0, 6.0], [0.0, 6.0]];
+    let holes_walked_against_the_outline: [&[[f64; 2]]; 3] = [
+        &[[3.0, 3.0], [3.0, 4.0], [4.0, 4.0]],
+        &[[3.0, 3.0], [2.0, 2.0], [2.0, 3.0]],
+        &[[3.0, 3.0], [4.0, 3.0], [4.0, 2.0], [3.0, 2.0]],
+    ];
+    let mut top = vec![outline.to_vec()];
+    top.extend(holes_walked_against_the_outline.map(<[[f64; 2]]>::to_vec));
+    drawing.flat(&top, 1.0, Vector::new(0.0, 0.0, 1.0));
+    let bottom: Vec<Vec<[f64; 2]>> = top
+        .iter()
+        .map(|walk| walk.iter().rev().copied().collect())
+        .collect();
+    drawing.flat(&bottom, 0.0, Vector::new(0.0, 0.0, -1.0));
+    for side in 0..4 {
+        drawing.wall(&[outline[side], outline[(side + 1) % 4]]);
+    }
+    for wall in [
+        &[[3.0, 4.0], [4.0, 4.0]][..],
+        &[[2.0, 2.0], [2.0, 3.0]],
+        &[[4.0, 3.0], [4.0, 2.0]],
+        &[[4.0, 2.0], [3.0, 2.0]],
+    ]
+    .into_iter()
+    .chain(walls_on_the_line.iter().copied())
+    {
+        drawing.wall(wall);
+    }
+    drawing.build(model)
+}
+
+/// Flat faces written into a [`SolidBuilder`] by their corners.
+///
+/// Each corner is made once. An edge is made by the first face to walk it and
+/// taken by the next one to walk it the other way, and then by nothing else,
+/// so a stretch walked by four faces is two edges.
+#[derive(Default)]
+struct Drawing {
+    builder: SolidBuilder,
+    corners: Vec<(Point, DraftVertex)>,
+    edges: Vec<([Point; 2], DraftEdge)>,
+    faces: Vec<(DraftFace, Orientation)>,
+}
+
+impl Drawing {
+    /// A face on the plane at `height` facing `out`, its first walk the
+    /// outside and the rest holes.
+    fn flat(&mut self, walks: &[Vec<[f64; 2]>], height: f64, out: Vector) {
+        let walks: Vec<Vec<Point>> = walks
+            .iter()
+            .map(|walk| {
+                walk.iter()
+                    .map(|&[x, y]| Point::new(x, y, height))
+                    .collect()
+            })
+            .collect();
+        let plane =
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, height), out).expect("a direction");
+        self.face(plane, &walks);
+    }
+
+    /// An upright wall from `z = 0` to `z = 1` along `path`, facing to the
+    /// right of the way the path runs.
+    fn wall(&mut self, path: &[[f64; 2]]) {
+        let [x, y] = path[0];
+        let [next_x, next_y] = path[1];
+        let out = Vector::new(next_y - y, x - next_x, 0.0);
+        let plane = Plane::from_point_and_normal(Point::new(x, y, 0.0), out).expect("a direction");
+        let along = path.iter().map(|&[x, y]| Point::new(x, y, 0.0));
+        let back = path.iter().rev().map(|&[x, y]| Point::new(x, y, 1.0));
+        self.face(plane, &[along.chain(back).collect()]);
+    }
+
+    fn face(&mut self, plane: Plane, walks: &[Vec<Point>]) {
+        let wires: Vec<DraftWire> = walks.iter().map(|walk| self.wire(walk)).collect();
+        let face = self
+            .builder
+            .add_face(Surface::Plane(plane), &wires)
+            .expect("wires of this builder");
+        self.faces.push((face, Orientation::Forward));
+    }
+
+    fn wire(&mut self, walk: &[Point]) -> DraftWire {
+        let steps: Vec<DraftStep> = (0..walk.len())
+            .map(|at| {
+                let [from, to] = [walk[at], walk[(at + 1) % walk.len()]];
+                let (edge, orientation) = self.edge(from, to);
+                DraftStep::Along(
+                    self.builder
+                        .add_coedge(edge, orientation)
+                        .expect("an edge of this builder"),
+                )
+            })
+            .collect();
+        self.builder.add_wire(&steps).expect("a closed walk")
+    }
+
+    fn edge(&mut self, from: Point, to: Point) -> (DraftEdge, Orientation) {
+        if let Some(at) = self.edges.iter().position(|(ends, _)| *ends == [to, from]) {
+            let (_, edge) = self.edges.swap_remove(at);
+            return (edge, Orientation::Reversed);
+        }
+        let ends = [self.corner(from), self.corner(to)];
+        let edge = self
+            .builder
+            .add_edge(ends[0], ends[1], EdgeRun::Straight)
+            .expect("two corners apart");
+        self.edges.push(([from, to], edge));
+        (edge, Orientation::Forward)
+    }
+
+    fn corner(&mut self, at: Point) -> DraftVertex {
+        if let Some(&(_, corner)) = self.corners.iter().find(|(point, _)| *point == at) {
+            return corner;
+        }
+        let corner = self.builder.add_vertex(at).expect("a finite point");
+        self.corners.push((at, corner));
+        corner
+    }
+
+    fn build(mut self, model: &mut Model) -> rcad_topo::Result<SolidKey> {
+        self.builder.add_shell(&self.faces)?;
+        self.builder
+            .build(model, &Policy::certified(), &mut ProvenanceLog::new())
+    }
 }
 
 /// Whether `solid` is the plate less its three holes, the line up through

@@ -1970,6 +1970,22 @@ pub enum Invalid {
     #[error("a hole in a face winds the same way as the outer wire")]
     HoleWindsWithTheOuterWire,
 
+    /// Two flat faces on different planes leave one corner they share along
+    /// the same line, each with that line inside it, and neither has an edge
+    /// there.
+    ///
+    /// Two faces of a solid may only meet along their edges. These meet
+    /// inside both, so the skin runs through itself there. A plate less three
+    /// prisms whose corners meet on one line came back from the fuse that way
+    /// until Q2918: the two walls on each of three planes joined into one face
+    /// running straight through the line, and `Model::validate` passed it
+    /// (`docs/decisions.md` §470.4).
+    #[error(
+        "two flat faces on different planes run through each other from a corner they share, \
+         along a line neither has an edge on"
+    )]
+    TwoFlatFacesRunThroughEachOtherWhereNeitherHasAnEdge,
+
     /// A solid's faces do not point outwards, so it encloses negative space.
     #[error("a solid encloses {volume} of space; its faces do not all point outwards")]
     VolumeIsNotPositive {
@@ -2103,6 +2119,7 @@ impl Invalid {
             | Self::FaceHasNoWires
             | Self::OuterWireWindsAgainstTheNormal
             | Self::HoleWindsWithTheOuterWire
+            | Self::TwoFlatFacesRunThroughEachOtherWhereNeitherHasAnEdge
             | Self::VolumeIsNotPositive { .. }
             | Self::FacesDoNotAgreeWhichWayTheyFace
             | Self::Orphan { .. }
