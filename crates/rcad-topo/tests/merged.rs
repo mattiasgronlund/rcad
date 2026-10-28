@@ -559,6 +559,8 @@ pub mod the_way_into_an_ellipse_arc_in_a_fuse;
 pub mod three_cut_lines_through_one_corner_of_a_skew_pair;
 #[path = "three_flat_seeds_that_fuse_one_way_round.rs"]
 pub mod three_flat_seeds_that_fuse_one_way_round;
+#[path = "three_holes_meeting_at_one_corner_of_a_plate.rs"]
+pub mod three_holes_meeting_at_one_corner_of_a_plate;
 #[path = "turning_a_fuse.rs"]
 pub mod turning_a_fuse;
 #[path = "two_arcs_where_two_curved_surfaces_cross.rs"]
