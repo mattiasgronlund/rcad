@@ -5885,161 +5885,76 @@ impl<'f> Arrangement<'f> {
     /// Only a node that stands for one meet is read: one a tolerant policy
     /// folded several meets into keeps one of their boxes, and the others need
     /// not be in it.
-    ///
-    /// **Where the crossing closes instead of running straight, the same
-    /// reading is tried axis by axis**
-    /// ([`Arrangement::as_the_quadric_says_round_a_closed_curve`]): a loop has
-    /// no one stored axis to read the shared end off, and climbing it is only
-    /// a local fact, true at the two nodes and nowhere promised past them.
     fn as_the_quadric_says(
         &self,
         crossing: usize,
         first: usize,
         second: usize,
     ) -> Option<Decision> {
-        match self.crossings[crossing].order {
-            HowItRuns::AlongAnAxis {
-                axis,
-                forward_climbs_the_axis,
-            } => {
-                let partner = self.crossings[crossing].partner;
-                let (Some(flat), Some(across)) = (self.surface.as_plane(), partner.as_plane())
-                else {
-                    return None;
-                };
-                let [one, other] =
-                    [first, second].map(|node| self.nodes[node].point.enclosure()[axis]);
-                let (shared, first_is_short) = the_shared_end(one, other)?;
-                let off_at_the_shared_end = |node: usize| {
-                    let Node { made_of, also, .. } = &self.nodes[node];
-                    let Some((surfaces, _)) = made_of else {
-                        return false;
-                    };
-                    if !also.is_empty()
-                        || !surfaces.contains(&self.surface)
-                        || !surfaces.contains(&partner)
-                    {
-                        return false;
-                    }
-                    surfaces
-                        .iter()
-                        .filter(|surface| **surface != self.surface && **surface != partner)
-                        .any(|quadric| {
-                            MeetOfThree::the_line_is_off_the_quadric_at(
-                                [flat, across],
-                                quadric,
-                                axis,
-                                shared,
-                            )
-                        })
-                };
-                if !(off_at_the_shared_end(first) || off_at_the_shared_end(second)) {
-                    return None;
-                }
-                Some(if first_is_short == forward_climbs_the_axis {
-                    Decision::Pos
-                } else {
-                    Decision::Neg
-                })
-            }
-            HowItRuns::RoundAClosedCurve { ref wound_as, .. } => {
-                self.as_the_quadric_says_round_a_closed_curve(crossing, wound_as, first, second)
-            }
-            _ => None,
-        }
-    }
-
-    /// The same reading as [`Arrangement::as_the_quadric_says`]'s
-    /// `AlongAnAxis` arm, tried on each coordinate axis in turn: a loop
-    /// stores no one axis of its own, so the shared end is looked for on `x`,
-    /// then `y`, then `z`, stopping at the first the two nodes'
-    /// [narrowed boxes](Arrangement::narrowed_box_of) share.
-    ///
-    /// **A node's own three surfaces, not `self.surface`, `partner` or
-    /// `wound_as`, say which one is the quadric.** The straight case in
-    /// [`Arrangement::as_the_quadric_says`] can read `flat` and `across`
-    /// straight off `self.surface` and `partner`, because a straight
-    /// crossing's two surfaces are both planes by construction; a loop's are
-    /// not — the near-cap circle a frustum's own cap cuts its own cone in is
-    /// a crossing of a plane and a cone, and the *other* plane the node's
-    /// line needs is a third surface the node is made of, not the crossing's
-    /// partner. So each node's own two planes and one quadric are read fresh,
-    /// the same way the [`MeetOfThree::the_line_is_off_the_quadric_at`] probe
-    /// that first confirmed this shape did.
-    ///
-    /// **`forward_climbs_the_axis` has no global twin here.** A straight
-    /// crossing's `∇S × ∇Q` points one way along its axis everywhere; a loop's
-    /// does not, so it is read fresh at the shared end itself,
-    /// `(∇wound_as[0] × ∇wound_as[1])[axis]` — the same cross product
-    /// [`HowItRuns::RoundAClosedCurve`]'s own doc comment says `wound_as` is
-    /// ordered by.
-    fn as_the_quadric_says_round_a_closed_curve(
-        &self,
-        crossing: usize,
-        wound_as: &[Surface; 2],
-        first: usize,
-        second: usize,
-    ) -> Option<Decision> {
-        let partner = self.crossings[crossing].partner;
-        let [one_box, other_box] =
-            [first, second].map(|node| self.narrowed_box_of(node).enclosure());
-        eprintln!("PROBE2 one_box={one_box:?} other_box={other_box:?}");
-        for axis in 0..3 {
-            let Some((shared, first_is_short)) = the_shared_end(one_box[axis], other_box[axis])
-            else {
-                eprintln!("PROBE2 axis {axis}: no shared end");
-                continue;
-            };
-            eprintln!("PROBE2 axis {axis}: shared={shared} first_is_short={first_is_short}");
-            let off_at_the_shared_end = |node: usize| {
-                let Node { made_of, also, .. } = &self.nodes[node];
-                let Some((surfaces, _)) = made_of else {
-                    eprintln!("PROBE2   node {node}: no made_of");
-                    return false;
-                };
-                if !also.is_empty()
-                    || !surfaces.contains(&self.surface)
-                    || !surfaces.contains(&partner)
-                {
-                    eprintln!(
-                        "PROBE2   node {node}: also.is_empty={} contains self.surface={} contains partner={}",
-                        also.is_empty(),
-                        surfaces.contains(&self.surface),
-                        surfaces.contains(&partner)
-                    );
-                    return false;
-                }
+        if let HowItRuns::RoundAClosedCurve { ref wound_as, .. } = self.crossings[crossing].order {
+            eprintln!("PROBE round crossing wound_as={wound_as:?}");
+            eprintln!("PROBE first narrowed={:?}", self.narrowed_box_of(first).enclosure());
+            eprintln!("PROBE second narrowed={:?}", self.narrowed_box_of(second).enclosure());
+            if let Some((surfaces, _)) = self.nodes[second].made_of {
                 let planes: Vec<&Plane> = surfaces.iter().filter_map(Surface::as_plane).collect();
-                let quadric = surfaces.iter().find(|surface| surface.as_plane().is_none());
-                eprintln!(
-                    "PROBE2   node {node}: surfaces={surfaces:?} planes.len={} quadric={quadric:?}",
-                    planes.len()
-                );
-                let ([a, b], Some(quadric)) = (planes.as_slice(), quadric) else {
-                    return false;
-                };
-                let off = MeetOfThree::the_line_is_off_the_quadric_at([a, b], quadric, axis, shared);
-                eprintln!("PROBE2   node {node}: off_the_quadric_at = {off}");
-                off
-            };
-            if !(off_at_the_shared_end(first) || off_at_the_shared_end(second)) {
-                continue;
+                let quadric = surfaces.iter().find(|s| s.as_plane().is_none());
+                if let ([a, b], Some(q)) = (planes.as_slice(), quadric) {
+                    let off = MeetOfThree::the_line_is_off_the_quadric_at(
+                        [a, b],
+                        q,
+                        1,
+                        2.1073424255447014e-8,
+                    );
+                    eprintln!("PROBE second: off_the_quadric_at N = {off}");
+                }
             }
-            let place = self.narrowed_box_of(if first_is_short { first } else { second });
-            let runs =
-                cross_of(gradient_at(&wound_as[0], place), gradient_at(&wound_as[1], place));
-            let forward_climbs_the_axis = match runs[axis].sign() {
-                Decision::Pos => true,
-                Decision::Neg => false,
-                _ => continue,
-            };
-            return Some(if first_is_short == forward_climbs_the_axis {
-                Decision::Pos
-            } else {
-                Decision::Neg
-            });
         }
-        None
+        let HowItRuns::AlongAnAxis {
+            axis,
+            forward_climbs_the_axis,
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let partner = self.crossings[crossing].partner;
+        let (Some(flat), Some(across)) = (self.surface.as_plane(), partner.as_plane()) else {
+            return None;
+        };
+        let [one, other] = [first, second].map(|node| self.nodes[node].point.enclosure()[axis]);
+        let (shared, first_is_short) = match (one.hi() == other.lo(), other.hi() == one.lo()) {
+            (true, false) => (one.hi(), true),
+            (false, true) => (other.hi(), false),
+            (true, true) | (false, false) => return None,
+        };
+        let off_at_the_shared_end = |node: usize| {
+            let Node { made_of, also, .. } = &self.nodes[node];
+            let Some((surfaces, _)) = made_of else {
+                return false;
+            };
+            if !also.is_empty() || !surfaces.contains(&self.surface) || !surfaces.contains(&partner)
+            {
+                return false;
+            }
+            surfaces
+                .iter()
+                .filter(|surface| **surface != self.surface && **surface != partner)
+                .any(|quadric| {
+                    MeetOfThree::the_line_is_off_the_quadric_at(
+                        [flat, across],
+                        quadric,
+                        axis,
+                        shared,
+                    )
+                })
+        };
+        if !(off_at_the_shared_end(first) || off_at_the_shared_end(second)) {
+            return None;
+        }
+        Some(if first_is_short == forward_climbs_the_axis {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        })
     }
 
     /// Which of two nodes round the loop a plane cuts a pipe in comes first,
@@ -13532,20 +13447,6 @@ impl<'f> Arrangement<'f> {
 
     fn to(&self, half_edge: usize) -> usize {
         self.arcs[half_edge / 2].ends[1 - half_edge % 2]
-    }
-}
-
-/// Where two boxes along one axis share only one end: the shared coordinate,
-/// and whether `one` is the box that ends there, with `other` starting there,
-/// rather than the other way round. `None` where they share both ends or
-/// neither, which [`Arrangement::as_the_quadric_says`] and
-/// [`Arrangement::as_the_quadric_says_round_a_closed_curve`] both leave to
-/// the policy.
-fn the_shared_end(one: Interval, other: Interval) -> Option<(f64, bool)> {
-    match (one.hi() == other.lo(), other.hi() == one.lo()) {
-        (true, false) => Some((one.hi(), true)),
-        (false, true) => Some((other.hi(), false)),
-        (true, true) | (false, false) => None,
     }
 }
 
