@@ -533,7 +533,7 @@ pub fn walk(
             beyond,
         } => {
             return follow_a_branch_between_two_corners(
-                run, pair, pieces, middle, beyond, deflection, policy, log,
+                run, pair, *pieces, middle, beyond, deflection, policy, log,
             );
         }
         WhatARunLiesOn::Parabola(bend) => {
@@ -820,7 +820,7 @@ enum WhatARunLiesOn {
     /// line of it through the middle of the branch leans, and `beyond` is the
     /// flat surface the whole branch is in front of.
     ABranchBetweenTwoCorners {
-        pieces: ALoopAndTwoBranches,
+        pieces: Box<ALoopAndTwoBranches>,
         middle: Vector,
         beyond: Picker,
     },
@@ -3178,7 +3178,7 @@ fn the_branch_both_corners_are_on(
     })
     .map(
         |(_, beyond, middle)| WhatARunLiesOn::ABranchBetweenTwoCorners {
-            pieces: *pieces,
+            pieces: Box::new(*pieces),
             middle,
             beyond,
         },
