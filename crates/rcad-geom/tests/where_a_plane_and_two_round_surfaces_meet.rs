@@ -1877,10 +1877,13 @@ fn a_ball_resting_on_a_rod_cut_leaning_through_where_they_touch_meets_both_there
 /// the circle where `x² + 0.5x = 1.1875`, at `x = (√5 − 0.5)/2` inside it.
 /// Both times the wall `y = 0` holds both axes and the cap's normal, so it is
 /// a mirror of all three. Moved `0.125` along `y` instead, the leaning bar's
-/// axis passes the first one's by, no wall through either axis and the normal
-/// holds the other, and the three are refused.
+/// axis passes the first one's by, and no wall through either axis is a mirror
+/// of all three. The ellipse is then `x²/2 + (y − 0.125)² = 1`, and taking
+/// `x²` off the circle leaves `y² − 0.5y = 0.40625`, so the four corners are at
+/// `y = (0.5 ± √1.875)/2` and `x = ±√(1.5625 − y²)`. Before row Q2938 the three
+/// were refused; the road for a plane that cuts both in conics answers them.
 #[test]
-fn a_cap_across_a_leaning_bar_meets_it_where_their_axes_cross_and_is_refused_where_they_pass() {
+fn a_cap_across_a_leaning_bar_meets_it_where_their_axes_cross_and_where_they_pass() {
     let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, 5.0]);
     let upright = pipe([0.0; 3], [0.0, 0.0, 1.0], 1.25);
     let crossing = pipe([0.0, 0.0, 5.0], [1.0, 0.0, 1.0], 1.0);
@@ -1889,6 +1892,9 @@ fn a_cap_across_a_leaning_bar_meets_it_where_their_axes_cross_and_is_refused_whe
     let (x, y) = (1.125_f64.sqrt(), 0.4375_f64.sqrt());
     let moved_x = (5.0_f64.sqrt() - 0.5) / 2.0;
     let moved_y = (1.5625 - moved_x * moved_x).sqrt();
+    let [passing_high, passing_low] = [1.0, -1.0].map(|side| (0.5 + side * 1.875_f64.sqrt()) / 2.0);
+    let [passing_high_x, passing_low_x] =
+        [passing_high, passing_low].map(|y| (1.5625 - y * y).sqrt());
     for order in [[0, 1, 2], [2, 0, 1], [1, 2, 0]] {
         let [crossing, moved_along_x, passing] = [&crossing, &moved_along_x, &passing]
             .map(|leaning| order.map(|at| [&cap, &upright, leaning][at]));
@@ -1900,9 +1906,14 @@ fn a_cap_across_a_leaning_bar_meets_it_where_their_axes_cross_and_is_refused_whe
             moved_along_x,
             &[[moved_x, -moved_y, 5.0], [moved_x, moved_y, 5.0]],
         );
-        assert_eq!(
-            meet(passing),
-            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+        points_near(
+            passing,
+            &[
+                [-passing_high_x, passing_high, 5.0],
+                [passing_high_x, passing_high, 5.0],
+                [-passing_low_x, passing_low, 5.0],
+                [passing_low_x, passing_low, 5.0],
+            ],
         );
     }
 }
