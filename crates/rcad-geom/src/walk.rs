@@ -521,12 +521,12 @@ pub fn walk(
             return follow_the_quartic(run, pair, seeds, held_apart_by, deflection, policy, log);
         }
         WhatARunLiesOn::ABranchBetweenTwoCorners {
-            crossing,
+            pieces,
             middle,
             beyond,
         } => {
             return follow_a_branch_between_two_corners(
-                run, pair, crossing, middle, beyond, deflection, policy, log,
+                run, pair, pieces, middle, beyond, deflection, policy, log,
             );
         }
         WhatARunLiesOn::Parabola(bend) => {
@@ -809,11 +809,11 @@ enum WhatARunLiesOn {
     QuarticPickedUpAt([Point; 2], TwoLoopsHeldApartBy),
     /// A run between two corners on one of the two branches that run off for
     /// ever, where two cones off one axis cross in a loop and two branches.
-    /// `middle` is the way out from `crossing.ruled`'s axis that the straight
+    /// `middle` is the way out from `pieces.ruled`'s axis that the straight
     /// line of it through the middle of the branch leans, and `beyond` is the
     /// flat surface the whole branch is in front of.
     ABranchBetweenTwoCorners {
-        crossing: TwoConesOffOneAxis,
+        pieces: ALoopAndTwoBranches,
         middle: Vector,
         beyond: Picker,
     },
@@ -828,7 +828,8 @@ enum WhatARunLiesOn {
 
 /// The flat surface that holds a degree-four crossing's two loops apart, kept
 /// as the two surfaces it comes from, so that which side of it a point is on is
-/// asked of the numbers they store and of nothing rounded from them.
+/// asked of the numbers they store and of nothing rounded from them, or, for
+/// two cones that nearly meet, as the half-space `intersect` proved it with.
 ///
 /// **Exhaustive on purpose.** These are the five pairs that are marched, and a
 /// sixth would need its own flat surface worked out before it could be.
@@ -860,6 +861,16 @@ enum TwoLoopsHeldApartBy {
     /// two corners on a branch from one corner to the other
     /// ([`WhatARunLiesOn::ABranchBetweenTwoCorners`]).
     TwoConesAcross(TwoConesOffOneAxis),
+    /// The one `intersect`'s `a_loop_and_two_branches_that_nearly_meet` proves
+    /// holds the loop of two cones off one axis apart from the branch beyond
+    /// it, where those are mirror images but for a rounding and the loop and
+    /// that branch pass a hair apart near where the exact pair would touch.
+    /// `across` is the half-space as it proved it, the branch in front.
+    TwoConesNearlyMeeting {
+        ruled: Cone,
+        crossed: Cone,
+        across: HalfSpace,
+    },
 }
 
 impl TwoLoopsHeldApartBy {
@@ -878,9 +889,12 @@ impl TwoLoopsHeldApartBy {
             Self::ConesApex { cone, ball } => {
                 [how_tightly_a_cone_bends_at(&cone, at), ball.radius()]
             }
-            Self::TwoConesAcross(loops) => [
-                how_tightly_a_cone_bends_at(&loops.ruled, at),
-                how_tightly_a_cone_bends_at(&loops.crossed, at),
+            Self::TwoConesAcross(TwoConesOffOneAxis {
+                ruled, crossed, ..
+            })
+            | Self::TwoConesNearlyMeeting { ruled, crossed, .. } => [
+                how_tightly_a_cone_bends_at(&ruled, at),
+                how_tightly_a_cone_bends_at(&crossed, at),
             ],
         }
     }
@@ -897,8 +911,11 @@ impl TwoLoopsHeldApartBy {
             Self::FatPipesAxis { thin, fat } => [thin.side_of(corner), fat.side_of(corner)],
             Self::ConesSlantPlane { cone, pipe } => [cone.side_of(corner), pipe.side_of(corner)],
             Self::ConesApex { cone, ball } => [cone.side_of(corner), ball.side_of(corner)],
-            Self::TwoConesAcross(loops) => {
-                [loops.ruled.side_of(corner), loops.crossed.side_of(corner)]
+            Self::TwoConesAcross(TwoConesOffOneAxis {
+                ruled, crossed, ..
+            })
+            | Self::TwoConesNearlyMeeting { ruled, crossed, .. } => {
+                [ruled.side_of(corner), crossed.side_of(corner)]
             }
         };
         sides.into_iter().all(|side| match side {
@@ -1188,60 +1205,67 @@ fn what_a_run_between_these_two_lies_on(
         // hold. Two mirror images held apart, each apex inside the other,
         // cross in two such cuts that never meet, a hyperbola and an ellipse,
         // a parabola or a hyperbola, and each whole curve is walked the same
-        // way.
+        // way. Two of one slope that are mirror images but for a rounding do
+        // not touch, and cross in a loop and two branches that pass a hair
+        // apart where the exact pair would touch: `intersect` names those with
+        // a flat surface `how_two_cones_off_one_axis_cross` does not try, and
+        // each is walked as the loop and two branches it proves.
         [Surface::Cone(one), Surface::Cone(other)]
             if whether_two_cones_share_an_axis(&one, &other) == Decision::Pos =>
         {
-            let crossing = match how_two_cones_off_one_axis_cross(&one, &other, policy, log)? {
-                HowTwoConesOffOneAxisCross::HeldApart(crossing) => crossing,
-                HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { cone, flat } => {
+            let surfaces = [&Surface::Cone(one), &Surface::Cone(other)];
+            let crossing = match how_two_cones_off_one_axis_cross(&one, &other, policy, log) {
+                Ok(HowTwoConesOffOneAxisCross::HeldApart(crossing)) => crossing,
+                Ok(HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { cone, flat }) => {
                     return where_a_plane_cuts_a_cone(&flat, &cone, run, policy, log);
                 }
-                HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch {
+                Ok(HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch {
                     cone,
                     flats,
                     halfway,
                     ..
-                } => {
+                }) => {
                     return which_of_two_flat_cuts_of_a_cone_this_run_is(
                         &cone, &flats, &halfway, run, policy, log,
                     );
                 }
-                HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart {
+                Ok(HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart {
                     cone,
                     flats,
                     halfway,
                     ..
-                } => {
+                }) => {
                     return which_of_two_flat_cuts_held_apart_this_run_is(
                         &cone, &flats, halfway, run, policy, log,
                     );
                 }
+                Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface) => {
+                    let Some(nearly) = a_loop_and_two_branches_that_nearly_meet(&one, &other)?
+                    else {
+                        return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface);
+                    };
+                    let crossed = if nearly.ruled.apex() == one.apex() {
+                        other
+                    } else {
+                        one
+                    };
+                    let pieces = ALoopAndTwoBranches::nearly_meeting(nearly, crossed);
+                    return which_of_a_loop_and_two_branches_this_run_is(
+                        run, pieces, surfaces, policy, log,
+                    );
+                }
+                Err(refused) => return Err(refused),
             };
-            let seeds = match crossing.apex {
-                None => where_one_cone_reaches_across_another(
+            let Some(apex) = crossing.apex else {
+                let seeds = where_one_cone_reaches_across_another(
                     &crossing.ruled,
                     &crossing.crossed,
                     crossing.ruled.basis().0,
-                ),
-                Some(apex) => {
-                    if let Some(branch) = the_branch_both_corners_are_on(run, &crossing, apex) {
-                        return Ok(branch);
-                    }
-                    let [near, far, back] =
-                        where_a_loop_and_two_branches_are_seeded(&crossing, apex);
-                    refused_unless_the_run_is_on_the_loop(
-                        run,
-                        [&Surface::Cone(one), &Surface::Cone(other)],
-                        [apex, crossing.across],
-                        [far, back],
-                        policy,
-                        log,
-                    )?;
-                    [near, far]
-                }
+                );
+                return a_quartic_picked_up_at(seeds, TwoLoopsHeldApartBy::TwoConesAcross(crossing));
             };
-            a_quartic_picked_up_at(seeds, TwoLoopsHeldApartBy::TwoConesAcross(crossing))
+            let pieces = ALoopAndTwoBranches::held_apart(crossing, apex);
+            which_of_a_loop_and_two_branches_this_run_is(run, pieces, surfaces, policy, log)
         }
         // Two cones on one axis cross in one circle or two, and a ball on a
         // cone's axis in none, one or two; which one this run is, is its ends'
