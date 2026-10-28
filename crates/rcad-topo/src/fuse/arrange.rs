@@ -7848,11 +7848,16 @@ impl<'f> Arrangement<'f> {
         let ends = [from, self.node_of_the_end[wire][position]].map(|node| self.nodes[node].point);
         let partner = self.crossings[crossing].partner;
         let picked_by = &self.face.wires[wire][position].picked_by;
-        let into_the_arc = the_way_into_an_arc(&self.surface, &partner, ends, picked_by).ok_or(
-            Error::AFaceTrimmedByACurveThisCannotFollow {
+        let into_the_arc = the_way_into_an_arc(&self.surface, &partner, ends, picked_by)
+            .or_else(|| {
+                picked_by.is_empty().then(|| {
+                    let [start, end] = ends.map(PredicatePoint::enclosure);
+                    core::array::from_fn(|axis| end[axis] - start[axis])
+                })
+            })
+            .ok_or(Error::AFaceTrimmedByACurveThisCannotFollow {
                 face: self.face.keys[0],
-            },
-        )?;
+            })?;
         let forward = self.way_out_of(
             from,
             Direction {
