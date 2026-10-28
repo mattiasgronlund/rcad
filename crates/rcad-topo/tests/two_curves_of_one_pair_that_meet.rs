@@ -2033,21 +2033,27 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation(model: &mut Model
 
 /// With the second frustum's axis a rounding off `(1, 0, 0)`, `intersect`
 /// still names the pair's crossing as four halves of two rulings, near
-/// `(1, 0, 1)`. But the union is refused ordering two nodes round the
-/// upright frustum's near cap circle: the lying frustum's ruling crosses
-/// that circle at two points `2.1e-8` apart, within the circle's own node
-/// boxes, and no reading [`Arrangement::order_along`] in `fuse/arrange.rs`
-/// asks decides it. §450.
+/// `(1, 0, 1)`. But the union is refused ordering two nodes near there. §450.
 ///
-/// **This is not the apex code
-/// ([`the_way_a_half_ruling_leaves_the_apex`]) itself.** The refusal is
-/// traced to [`Arrangement::order_along`]'s fallback chain having no reading
-/// that decides two nodes this close round a loop a plane cuts a cone in
-/// away from the cone's own axis; `as_the_pipes_axis_says` now reads a
-/// cone's axis the same way as a pipe's (the two gradients agree once
-/// crossed with the plane's normal and dotted with the axis, since the
-/// cone's extra slope term is then along the axis and the dot is nothing),
-/// but the two nodes are too close for even that reading to tell apart.
+/// **This is not the near-cap circle a cap plane cuts in one cone
+/// ([`HowItRuns::RoundAClosedCurve`]), and not the apex code
+/// ([`the_way_a_half_ruling_leaves_the_apex`]) either.** Both were tried.
+/// Reading the near-cap circle of a plane and a cone the way
+/// `as_the_quadric_says` already read a plane-and-plane `AlongAnAxis`
+/// crossing does decide a sign at every node it is asked about in this
+/// fixture — but the crossing that actually blocks this union is a
+/// different one, [`HowItRuns::AlongABend`]: the hyperbola where the two
+/// cones' own lateral surfaces cross each other, which `as_the_quadric_says`
+/// has no arm for at all. Widening `round_a_closed_crossing_by_its_angle` and
+/// `along_the_stretch_between_the_two` to a plane and a cone, the other
+/// thing tried, does not reach `AlongABend` either, and regresses refusal
+/// counts pinned elsewhere (`how_often_a_fuse_with_a_cone_refuses`,
+/// `a_plane_cut_along_a_cones_other_nappe`) without deciding anything here.
+/// Neither change is kept. The `AlongABend` node is a meet of one plane and
+/// *two* quadrics, not the two-planes-and-one-quadric shape
+/// `MeetOfThree::the_line_is_off_the_quadric_at` and
+/// `which_way_a_line_runs_through_a_quadric` both take — deciding it needs a
+/// new predicate, not a wider call to an existing one.
 #[test]
 fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_are_refused_ordering_a_near_cap_circle()
  {
