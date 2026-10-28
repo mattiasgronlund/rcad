@@ -2182,7 +2182,11 @@ fn is_one_circle_cut_in_two(
 /// [`the_way_into_an_arc`], which needs one of the two surfaces flat, or
 /// through [`the_way_into_an_arc_that_does_not_close`], which needs a cone,
 /// and [`is_a_piece_of_a_ruling`] needs a plane and a cone, so such a side is
-/// refused by name. So no face the steps answered is answered differently now.
+/// refused by name. That holds where [`every_reading_of_the_sides_of`] reads
+/// the side against its run's `and` too: both asks take such a side only where
+/// [`which_two_surfaces_a_run_is_between`] names two curved surfaces for it,
+/// and `and` is one of those two. So no face the steps answered is answered
+/// differently now.
 ///
 /// # A pipe face crossed by a pipe of its width is counted along a ruling
 ///
@@ -5292,6 +5296,26 @@ enum Lies {
 /// other. An arc names that plane in its run's `and`, which the fuse writes for
 /// exactly this. A ruling is stored straight and names nothing, so it is read
 /// off a flat face of the solid that holds it ([`the_flat_face_a_ruling_lies_on`]).
+///
+/// **A side between two flat faces, or between two curved ones, is read
+/// against its run's `and` too**, the two cases where
+/// [`which_two_surfaces_a_run_is_between`] takes `and` as well. Two flat faces
+/// along an arc are one plane written twice, a rounding apart, since an arc
+/// lies in one plane: the front of
+/// `kicad/LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step` is the flange's face and
+/// the body's, and the circle between them is three arcs whose runs name the
+/// pipe of radius 2.5. Two planes cross in no arc, so the face across says
+/// nothing about it, and the pipe does. Two curved faces with a plane in `and`
+/// meet along a rim in that plane, as that LED's dome meets the pipe of its own
+/// radius it sits on: the ball and the pipe touch all round the rim and never
+/// cross, and the rim's plane is the cut each of them keeps one side of.
+/// Before, every such side with two ends was refused: [`the_way_into_an_arc`]
+/// needs one of its two surfaces flat, and
+/// [`the_way_into_an_arc_that_does_not_close`] and [`is_a_piece_of_a_ruling`]
+/// a plane and a cone. Read against an `and` of the face's own kind, a plane
+/// beside a flat face or a curved surface beside a curved one, it is still
+/// refused, so no face that was answered is answered differently now (row
+/// Q2923).
 ///
 /// **Where no flat face holds it, the ruling is read against each plane square
 /// to a coordinate axis that does** ([`the_planes_square_to_an_axis_a_ruling_lies_on`]),
