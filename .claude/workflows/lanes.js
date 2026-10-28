@@ -821,7 +821,8 @@ function READING(lane) {
   return `This lane is read-only: you own no files. Your branch: ${branchOf(lane)} (a checkout convenience only).
 
 ${lane.brief}
-${START(lane)}`
+${START(lane)}
+${readOnlyBudget()}`
 }
 
 // The lane before has let go of the branch with `git switch --detach`, as
@@ -877,6 +878,13 @@ function pinsNote(lane) {
 
 function handOver() {
   return 'When "Lane budget passed" comes and your row is not done, hand over (§416), even if this brief says to carry on past it: commit everything by explicit path, run git switch --detach, and report outcome relay, with landed_sha your last commit and a handoff saying what is done by commit, what is next in order, the places as file, function and lines, what you measured with its command, and what you tried that did not work.'
+}
+
+// A read-only lane has nothing to commit and no branch state to hand to a
+// relay, so §416's hand-over has nothing to do here: the lane keeps reading
+// past the first budget warning instead (Q2933).
+function readOnlyBudget() {
+  return 'A read-only lane has nothing to hand over, so "Lane budget passed" is not where it stops: carry on past it to an upper stop of about 400k context, then report what you have (§416).'
 }
 
 // Prep runs in the dispatcher's tree, whose HEAD carries the `take` commit
