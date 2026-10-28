@@ -1918,6 +1918,56 @@ fn a_cap_across_a_leaning_bar_meets_it_where_their_axes_cross_and_where_they_pas
     }
 }
 
+/// **A plane leaning across a pipe, and a ball beside the pipe's axis.** The
+/// plane `x + 16z = 8`, the pipe of radius one along `x` and the ball of radius
+/// three about `(0, ½, 0)`. On the pipe the ball is `y = x² − 7.75`, so a point
+/// is on all three where `y² + ((8 − x)/16)² = 1` with that `y`. That is a
+/// quartic in `x`, below one at `x = ±2.8` and above it at `±2.598` and
+/// `±2.96`, so it has its four roots one in each stretch between, and each
+/// root names one point. The plane leans well off square to the pipe's axis,
+/// and the ball's centre is half a unit off the wall through that axis and the
+/// plane's normal, so no wall mirrors the three (Q2196). Before row Q2938 the
+/// three were refused in every order; the road for a plane that cuts both in
+/// conics answers them.
+#[test]
+fn a_plane_leaning_across_a_pipe_and_a_ball_off_its_axis_meets_them_at_four_corners() {
+    let leaning = flat([1.0, 0.0, 16.0], [8.0, 0.0, 0.0]);
+    let along_x = pipe([0.0; 3], [1.0, 0.0, 0.0], 1.0);
+    let round = ball([0.0, 0.5, 0.0], 3.0);
+    let stretches = [[-2.96, -2.8], [-2.8, -2.598], [2.598, 2.8], [2.8, 2.96]];
+    for order in every_order([&leaning, &along_x, &round]) {
+        let answer = meet(order).expect("these three meet");
+        let MeetOfThree::At(points) = &answer else {
+            panic!("{order:?}: {answer:?}");
+        };
+        assert_eq!(points.len(), stretches.len(), "{order:?}: {answer:?}");
+        let mut points = points.to_vec();
+        points.sort_by(|one, other| {
+            one.enclosure()[0]
+                .lo()
+                .total_cmp(&other.enclosure()[0].lo())
+        });
+        for (point, [low, high]) in points.iter().zip(stretches) {
+            let sides = point.enclosure();
+            assert!(
+                sides.iter().all(|side| side.width() <= 1e-13)
+                    && low < sides[0].lo()
+                    && sides[0].hi() < high,
+                "{order:?}: {point:?} is not a narrow box with x between {low} and {high}"
+            );
+            for surface in order {
+                assert!(
+                    !matches!(
+                        which_side_of(surface, *point),
+                        Decision::Pos | Decision::Neg
+                    ),
+                    "{order:?}: {point:?} is certified off {surface:?}"
+                );
+            }
+        }
+    }
+}
+
 /// A ring about `z` through the origin.
 fn ring(ring_radius: f64, tube_radius: f64) -> Surface {
     Surface::Torus(Torus::new(Axis::z(), ring_radius, tube_radius).expect("a tube inside its ring"))
