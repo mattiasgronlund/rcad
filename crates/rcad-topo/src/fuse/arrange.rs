@@ -5891,6 +5891,24 @@ impl<'f> Arrangement<'f> {
         first: usize,
         second: usize,
     ) -> Option<Decision> {
+        if let HowItRuns::RoundAClosedCurve { ref wound_as, .. } = self.crossings[crossing].order {
+            eprintln!("PROBE round crossing wound_as={wound_as:?}");
+            eprintln!("PROBE first narrowed={:?}", self.narrowed_box_of(first).enclosure());
+            eprintln!("PROBE second narrowed={:?}", self.narrowed_box_of(second).enclosure());
+            if let Some((surfaces, _)) = self.nodes[second].made_of {
+                let planes: Vec<&Plane> = surfaces.iter().filter_map(Surface::as_plane).collect();
+                let quadric = surfaces.iter().find(|s| s.as_plane().is_none());
+                if let ([a, b], Some(q)) = (planes.as_slice(), quadric) {
+                    let off = MeetOfThree::the_line_is_off_the_quadric_at(
+                        [a, b],
+                        q,
+                        1,
+                        2.1073424255447014e-8,
+                    );
+                    eprintln!("PROBE second: off_the_quadric_at N = {off}");
+                }
+            }
+        }
         let HowItRuns::AlongAnAxis {
             axis,
             forward_climbs_the_axis,
