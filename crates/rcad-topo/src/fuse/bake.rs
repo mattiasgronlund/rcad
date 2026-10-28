@@ -311,8 +311,21 @@ pub(crate) struct BakedEdge {
     /// a cap circle starts and ends at the one corner it has.
     pub(crate) end: BakedCorner,
     /// The surface of the face on the other side of this edge. Together with the
-    /// face's own surface it *is* where the edge runs (§17.4, §31.3).
+    /// face's own surface it *is* where the edge runs (§17.4, §31.3), except
+    /// where [`Self::along_a_curved_surface`] says otherwise.
     pub(crate) across: Surface,
+    /// Where this edge runs, when the face and the face across are both flat
+    /// and the edge's run names a curved surface. `None` everywhere else.
+    ///
+    /// Two planes cross in a straight line, so a run between two flat faces
+    /// that names a curved surface is a curve a file imprinted on one plane
+    /// written down twice a rounding apart, and the edge runs where the face's
+    /// own plane crosses that surface ([`which_two_surfaces_a_run_is_between`]).
+    /// `across` is then the other spelling of the plane, and says nothing of
+    /// the curve: a KiCad LED's front disc is bounded by three arcs on its
+    /// body's pipe, with the flange's front, its own plane a rounding off, on
+    /// the other side of each (Q2947).
+    pub(crate) along_a_curved_surface: Option<WhereAPlaneCrossesACurvedSurface>,
     /// What picks this edge out of the rest of the curve it runs along, moved
     /// into place with the face. Empty for an edge whose run carries none.
     ///
@@ -344,6 +357,18 @@ pub(crate) struct BakedEdge {
     /// in `fuse/cuts.rs`. A crossing that ends on this edge splits it on that
     /// side only if it is in here, so it may be left out on this side too.
     pub(crate) its_neighbour_leaves_out: Vec<Surface>,
+}
+
+/// The curve where a plane crosses a curved surface, both moved into place
+/// ([`BakedEdge::along_a_curved_surface`]).
+///
+/// The plane is the face's own, moved into place, and not the spelling its
+/// group is baked on ([`PlacedSurface::baked_as`]): the edge runs on the plane
+/// it was stored with.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct WhereAPlaneCrossesACurvedSurface {
+    pub(crate) plane: Plane,
+    pub(crate) curved: Surface,
 }
 
 /// A corner of an input face, in world coordinates.
@@ -908,6 +933,7 @@ fn bake_the_joined_faces(
                     start,
                     end: corners[&next.slot_in(model.id())].clone(),
                     across: Surface::Plane(side.across),
+                    along_a_curved_surface: None,
                     picked_by: SmallVec::new(),
                     inside_across: None,
                     its_neighbour_leaves_out: Vec::new(),
@@ -2008,6 +2034,10 @@ fn bake_one_face(
                     start: corners[&coedge.start().key().slot_in(model.id())].clone(),
                     end: corners[&coedge.end().key().slot_in(model.id())].clone(),
                     across: surfaces[&across].baked_as,
+                    along_a_curved_surface: where_an_edge_between_two_planes_runs(
+                        coedge.edge().stored_run(),
+                        [surfaces[&mine], surfaces[&across]],
+                    ),
                     picked_by: pickers_moved_into_place(
                         coedge.edge().stored_run(),
                         &face.location(),
@@ -2218,6 +2248,29 @@ fn the_side_a_closed_edge_is_walked_for(
     // The back is the side of `across` as the solid uses it; a face used
     // turned round has its stored surface's negative side in front.
     Ok(Some(keeps_the_back != across.used.is_reversed()))
+}
+
+/// Where an edge between two flat faces runs, moved into place with the face,
+/// as [`BakedEdge::along_a_curved_surface`] carries it; `None` for an edge
+/// whose faces are not both flat, and for one whose run names no curved
+/// surface.
+///
+/// `faces` is this face and the face across, in that order.
+fn where_an_edge_between_two_planes_runs(
+    run: &EdgeRun,
+    [mine, across]: [PlacedSurface; 2],
+) -> Option<WhereAPlaneCrossesACurvedSurface> {
+    let (Surface::Plane(plane), Surface::Plane(_)) = (mine.placed, across.stored) else {
+        return None;
+    };
+    let [_, along] = which_two_surfaces_a_run_is_between(run, [&mine.stored, &across.stored]);
+    along
+        .as_plane()
+        .is_none()
+        .then(|| WhereAPlaneCrossesACurvedSurface {
+            plane,
+            curved: along.transformed(&mine.movement),
+        })
 }
 
 /// An edge's pickers, moved by the placement its face stands at.

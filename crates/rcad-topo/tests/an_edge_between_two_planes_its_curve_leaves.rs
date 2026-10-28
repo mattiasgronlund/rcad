@@ -52,7 +52,7 @@ use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane,
     Point, Scale, Sphere, Surface, Torus, Vector,
 };
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Interval, Policy, ProvenanceLog};
 use rcad_topo::{
     DraftEdge, DraftFace, DraftStep, DraftWire, Error, Invalid, Model, ProfileBuilder, Result,
     Rule, SolidBuilder, SolidKey,
@@ -290,17 +290,35 @@ fn a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it() {
 
 /// The bar from `z = 0` whose disc leans a tenth through its corner, read back
 /// from bytes: the sweep refuses it, and a fuse does not sweep what it is
-/// handed. Fused every way with a cube of side 2 through the bar's floor, or
-/// moved `(10, 10, 0)` clear of the bar, the disc's circle is drawn on the
-/// straight line the lid's plane and the disc's cross in, a closed edge on a
-/// crossing that does not close. The fuse panicked on all 12 (Q1675).
+/// handed. Fused every way with a cube of side 2 the fuse panicked (Q1675), and
+/// it refuses each now.
+///
+/// With the cube moved `(10, 10, 0)` clear of the bar, or `(−1.5, −1, −1)`
+/// through its floor, the refusal is by name: the disc's circle is drawn on the
+/// straight line the lid's plane and the disc's cross in, `x = 1, z = 4`, a
+/// closed edge on a crossing that does not close. With the cube at
+/// `(−1, −1, −1)` its side on `x = 1` holds that line, and the fuse refuses
+/// `Undecidable`: it cannot order two meets at `(1, 2√2, 4)`, where the line
+/// meets the bar's pipe of radius 3.
+///
+/// Until Q2947 all of them were refused by name, by the check that the bar does
+/// not cross itself, which asked where the disc's plane crosses the bar's pipe.
+/// That check skips a flat face a pipe holds strictly inside now, and the disc
+/// is inside the pipe of radius 3 whichever of the two planes its circle is
+/// read on, so the fuse goes on to cut the bar with the cube. A refusal is
+/// still the answer for a bar the sweep refuses; with the cube's side on the
+/// line, it is a refusal with no name.
 #[test]
 fn a_fuse_with_the_tilted_disc_read_back_from_bytes_is_refused_for_the_edge_round_it() {
     let mut not_refused = Vec::new();
     for disc_first in [false, true] {
         let (model, built) = a_bar_with_its_lid_split_by_a_disc(pipe(1.0), the_lid(), disc_first);
         built.expect("the disc on the lid's own plane builds");
-        for at in [Vector::new(-1.0, -1.0, -1.0), Vector::new(10.0, 10.0, 0.0)] {
+        for (at, its_side_holds_the_line) in [
+            (Vector::new(-1.0, -1.0, -1.0), true),
+            (Vector::new(-1.5, -1.0, -1.0), false),
+            (Vector::new(10.0, 10.0, 0.0), false),
+        ] {
             for rule in [Rule::Union, Rule::Difference, Rule::Intersection] {
                 let mut tilted =
                     with_the_inner_plane_swapped(&model, disc_first, tilted_through_the_corner());
@@ -320,10 +338,15 @@ fn a_fuse_with_the_tilted_disc_read_back_from_bytes_is_refused_for_the_edge_roun
                     &mut ProvenanceLog::new(),
                 );
 
-                if !matches!(
-                    fused,
-                    Err(Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { .. })
-                ) {
+                let refused = if its_side_holds_the_line {
+                    could_not_order_two_meets_where_the_line_meets_the_pipe(&fused)
+                } else {
+                    matches!(
+                        fused,
+                        Err(Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { .. })
+                    )
+                };
+                if !refused {
                     not_refused.push(format!(
                         "disc first {disc_first}, the cube at {at:?}, {rule:?}: {fused:?}"
                     ));
@@ -332,6 +355,28 @@ fn a_fuse_with_the_tilted_disc_read_back_from_bytes_is_refused_for_the_edge_roun
         }
     }
     assert!(not_refused.is_empty(), "{not_refused:#?}");
+}
+
+/// Whether `fused` is refused `Undecidable` for one thing alone: the order
+/// along a crossing of two meets that are both at `(1, 2√2, 4)`, to `1e-12`.
+fn could_not_order_two_meets_where_the_line_meets_the_pipe<T>(fused: &Result<T>) -> bool {
+    let Err(Error::Undecidable { records }) = fused else {
+        return false;
+    };
+    let [record] = records.records() else {
+        return false;
+    };
+    let near = |side: Interval, to: f64| {
+        (side.lo() - to).abs() <= 1e-12 && (side.hi() - to).abs() <= 1e-12
+    };
+    record.predicate() == "order along a crossing"
+        && record.inputs().len() == 2
+        && record.inputs().iter().all(|meet| {
+            meet.enclosure()
+                .into_iter()
+                .zip([1.0, 8.0_f64.sqrt(), 4.0])
+                .all(|(side, to)| near(side, to))
+        })
 }
 
 /// Moving a solid and copying one are the two mutations
