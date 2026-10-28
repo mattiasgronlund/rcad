@@ -96,6 +96,15 @@ horizontal files and `LED_D5.0mm-3.step`.
   the model. The fuse stops at the first corner it cannot place, so whether
   `#74` refuses as well is not known, and in the other 20 files which corner
   refuses was not traced. Class A (§471.6).
+  - Since Q2922 (`f037591f2`) bake places these corners, and the 41 boxes are
+    refused further on, in five ways, each a row of its own:
+    `AFaceTrimmedByACurveThisCannotFollow` on the upper half of the flange's
+    rim, 14 corners in 7 `LED_D5.0` files (Q2926); `Undecidable` on *side of
+    plane*, 14 in 7 files (Q2929); `AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve`,
+    6 in 3 `LED_D3.0` files (Q2930); `AFaceTrimmedByACurveThisCannotFollow` on
+    face slot 2, 3 in 2 files (Q2931); and still *where three surfaces meet*,
+    4 in 2 files (Q2928). The probe that ran the sweep is kept outside git, on
+    this machine, in `~/rcad-probes/q2911/`.
 - `classify_point` on the LED answers `CannotFollowAFacesTrimming`, naming face
   slot 2, at every point tried: the body's centre `(1.27, -5, 3)`, points in the
   flange, outside it and far off. So no point near the corner could be checked,
