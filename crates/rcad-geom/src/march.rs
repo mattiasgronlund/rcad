@@ -158,6 +158,11 @@ pub(crate) struct Marched {
 /// the points may stray from the curve, and `most` caps how many points one run
 /// is allowed.
 ///
+/// `inside` is the piece of the crossing the seed is on, for a crossing whose
+/// pieces pass closer to each other than one step may: no trial it does not
+/// hold is kept ([`one_step`]). It has to hold every point of that piece, and
+/// a caller with nothing to fence the walk by passes `&|_| true`.
+///
 /// # The step rule
 ///
 /// Three questions, and the last two are what make this a *marcher* rather than
@@ -172,7 +177,8 @@ pub(crate) struct Marched {
 /// the tangent by more than a quarter turn, because past a half turn a step
 /// cannot be told from one the other way. And a trial the settling pulled back
 /// from far off has to land ahead of where it set out, not behind it, and
-/// where the settling had finished with it ([`one_step`]).
+/// where the settling had finished with it, and every trial where `inside`
+/// holds ([`one_step`]).
 ///
 /// A step whose sagitta is comfortably inside the budget grows for the next one,
 /// so a large gentle loop does not get walked at the step a tight corner needed.
@@ -267,14 +273,19 @@ pub(crate) struct Marched {
 /// [`Error::TooManyPointsAlongOneCrossing`] when the run takes more than `most`
 /// points, and [`Error::CannotWorkOutHowBigACrossingIs`] when a point cannot be
 /// settled onto both surfaces.
+///
+/// [`Error::CannotFollowACrossingBecauseNoStepStaysOnIt`] when no shortening
+/// of a step lands a trial that is kept ([`one_step`] says when a march can
+/// meet it).
 pub(crate) fn march(
     surfaces: [&Surface; 2],
     seed: Point,
     room: f64,
     most: usize,
+    inside: &dyn Fn(Point) -> bool,
 ) -> Result<Marched> {
     let first = room.min(the_smaller_radius(surfaces, seed).max(one_step_of_the_grid_at(seed)));
-    march_with_a_first_ask(surfaces, seed, first, room, most)
+    march_with_a_first_ask(surfaces, seed, first, room, most, inside)
 }
 
 /// The smaller of the two surfaces' own radii near `seed`: a ball's or a
@@ -333,6 +344,7 @@ fn march_with_a_first_ask(
     first: f64,
     room: f64,
     most: usize,
+    inside: &dyn Fn(Point) -> bool,
 ) -> Result<Marched> {
     let start = settled(surfaces, seed)?;
     if the_settling_did_not_land_on_both(surfaces, start) {
@@ -346,7 +358,7 @@ fn march_with_a_first_ask(
 
     loop {
         let tangent = which_way_the_crossing_runs(surfaces, here)?;
-        let (next, taken) = one_step(surfaces, here, tangent, step, room)?;
+        let (next, taken) = one_step(surfaces, here, tangent, step, room, inside)?;
 
         // Coming back past where the walk started closes the loop, and the seed
         // is the point the caller already has.
@@ -378,7 +390,7 @@ fn march_with_a_first_ask(
 /// own direction still goes the way it was asked, and the direction it reads
 /// at every trial is the pair's.
 ///
-/// The step rule and the first ask are [`march`]'s. `from` is settled onto
+/// The step rule, the first ask and `inside` are [`march`]'s. `from` is settled onto
 /// both surfaces and is not among the points, and neither is the first point
 /// the walk reaches at or past `end`: the caller already has the place the run
 /// ends at, and the last straight piece is the one to it. That piece is a part
@@ -410,6 +422,7 @@ pub(crate) fn march_to(
     end: f64,
     room: f64,
     most: usize,
+    inside: &dyn Fn(Point) -> bool,
 ) -> Result<Marched> {
     let start = settled(surfaces, from)?;
     if the_settling_did_not_land_on_both(surfaces, start) {
@@ -428,6 +441,7 @@ pub(crate) fn march_to(
         which_way_the_crossing_runs(surfaces, start)?,
         first,
         room,
+        inside,
     )?;
     if !goes_on(stepped.0, set_out) {
         surfaces = [surfaces[1], surfaces[0]];
@@ -437,6 +451,7 @@ pub(crate) fn march_to(
             which_way_the_crossing_runs(surfaces, start)?,
             first,
             room,
+            inside,
         )?;
         if !goes_on(stepped.0, set_out) {
             return Err(Error::CannotFollowACrossingTowardsTheOtherEndOfItsRun);
@@ -468,6 +483,7 @@ pub(crate) fn march_to(
             which_way_the_crossing_runs(surfaces, next)?,
             step,
             room,
+            inside,
         )?;
     }
 }
@@ -845,9 +861,37 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 /// One step along the crossing, shortened until the straight piece it leaves
 /// behind stays inside `room`, stays straighter than it is long, turns no more
 /// than a quarter turn, and, on a trial that came back short, goes forward and
-/// ends where the settling had finished.
+/// ends where the settling had finished, and until it lands where `inside`
+/// holds.
 ///
 /// Returns where the step landed and how long it turned out to be.
+///
+/// # A trial that lands on another piece of the crossing is not kept
+///
+/// Where two pieces of one crossing pass closer to each other than a step, a
+/// trial can settle onto the other piece, and none of the questions above
+/// notices. Its sagitta is about the gap, well within a quarter of its chord.
+/// And near where two surfaces nearly touch, the way `∇S × ∇T` runs is a
+/// saddle, in along one piece and out along the other, so a trial that lands
+/// on the piece running out still goes forward. Measured, on two pointed cones
+/// of slope a half, the second turned `0.3` about the line along `x` through
+/// `(0, 0, 4)`, whose loop and the branch beyond it pass a hair apart near
+/// `(−1.5954, 0.1209, 3.2)`: a trial of `3.0e-7` from
+/// `(−1.59542496, 0.12090821, 3.19999975)` landed at
+/// `(−1.59542509, 0.12090806, 3.19999998)`, on the branch, and was kept. The
+/// march then went round the branch and out along its end that runs off for
+/// ever, until it had taken the `1 048 576` points a walk may (Q2894).
+///
+/// So `inside` names the piece the march is on, and a trial it does not hold
+/// is shortened as any other trial that is not kept is. `walk.rs` fences the
+/// loop of two cones that cross in a loop and two branches by the two flat
+/// surfaces `intersect` proves it in front of, and a run on a branch by the one
+/// the whole branch is in front of. Fenced, the march goes right round the
+/// loop of that pair, through both places it bends hard to pass the branch
+/// (`two_cones_whose_turned_axis_is_rounded_cross_in_a_loop_and_two_branches_that_nearly_meet`).
+/// Every other march passes `&|_| true`, and a crossing whose pieces meet on
+/// the flat surface between them, as a ball's and a pipe's two loops can, must
+/// not be fenced by it: a step through that surface is a step along the piece.
 ///
 /// # A trial that came back short before the settling had finished is not kept
 ///
@@ -978,10 +1022,14 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 ///
 /// [`Error::CannotFollowACrossingBecauseNoStepStaysOnIt`] when shortening the
 /// step [`SHORTENINGS_BEFORE_GIVING_UP`] times still leaves a piece that strays
-/// too far. This is reachable and carries its own name —
+/// too far, or lands where `inside` does not hold. This is reachable and
+/// carries its own name —
 /// `a_step_asked_the_wrong_way_round_a_circle_is_refused_as_stepping_and_not_tangency`
-/// is the demonstration — but no walk reaches it, because a walk takes its
-/// direction from the point it is standing on.
+/// is the demonstration. A march that passes `&|_| true` does not meet it,
+/// because it takes its direction from the point it is standing on. A fenced
+/// one can, where every shortening still lands where `inside` does not hold,
+/// as on a piece that passes within a rounding of a flat surface fencing it.
+/// No test has shown one doing so.
 ///
 /// Whatever a trial refused with, when every trial refused. Today that is
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] or
@@ -993,6 +1041,7 @@ fn one_step(
     tangent: Vector,
     from: f64,
     room: f64,
+    inside: &dyn Fn(Point) -> bool,
 ) -> Result<(Point, f64)> {
     let mut step = from;
     let mut why_the_last_trial_could_not_be_measured = None;
@@ -1020,6 +1069,7 @@ fn one_step(
             && !settled_back
             && !still_settling
             && !came_back_behind
+            && inside(next)
         {
             return Ok((next, chord));
         }
@@ -1412,8 +1462,14 @@ mod tests {
         let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 3.0);
         let up = f64::sqrt(25.0 - 9.0);
 
-        let walked = march([&ball, &pipe], Point::new(3.0, 0.0, up), 0.01, 1 << 20)
-            .expect("a ball threaded on a pipe crosses it in a circle");
+        let walked = march(
+            [&ball, &pipe],
+            Point::new(3.0, 0.0, up),
+            0.01,
+            1 << 20,
+            &|_| true,
+        )
+        .expect("a ball threaded on a pipe crosses it in a circle");
 
         assert!(walked.points.len() > 20, "got {}", walked.points.len());
         for point in &walked.points {
@@ -1439,8 +1495,16 @@ mod tests {
         for way in [1.0, -1.0] {
             let round = |at: Point| way * at.y().atan2(at.x());
             for along in [[&ball, &pipe], [&pipe, &ball]] {
-                let walked = march_to(along, Point::new(3.0, 0.0, up), round, 1.0, 0.01, 1 << 20)
-                    .expect("a circle runs on from any point on it");
+                let walked = march_to(
+                    along,
+                    Point::new(3.0, 0.0, up),
+                    round,
+                    1.0,
+                    0.01,
+                    1 << 20,
+                    &|_| true,
+                )
+                .expect("a circle runs on from any point on it");
                 assert!(walked.points.len() > 4, "got {}", walked.points.len());
                 let mut behind = 0.0;
                 for point in &walked.points {
@@ -1466,7 +1530,8 @@ mod tests {
                 |_| 0.0,
                 1.0,
                 0.01,
-                1 << 20
+                1 << 20,
+                &|_| true,
             ),
             Err(Error::CannotFollowACrossingTowardsTheOtherEndOfItsRun)
         );
@@ -1480,8 +1545,14 @@ mod tests {
         let other = a_pipe([1.0, 0.0, 0.0], [0.0, 2.0, 0.0], 2.0);
 
         // `x² + y² = 9` and `(y − 2)² + z² = 4` both hold at `(√5, 2, 2)`.
-        let walked = march([&one, &other], Point::new(2.2, 2.0, 2.0), 0.01, 1 << 20)
-            .expect("these two pipes overlap in one closed loop");
+        let walked = march(
+            [&one, &other],
+            Point::new(2.2, 2.0, 2.0),
+            0.01,
+            1 << 20,
+            &|_| true,
+        )
+        .expect("these two pipes overlap in one closed loop");
         assert!(walked.points.len() > 20, "got {}", walked.points.len());
 
         let first = *walked.points.first().expect("more than twenty");
@@ -1517,6 +1588,7 @@ mod tests {
             f64::MAX / 4.0,
             f64::MAX / 4.0,
             1 << 20,
+            &|_| true,
         )
         .expect("a thin pipe through a fat one's axis crosses it in two loops");
 
@@ -1565,9 +1637,15 @@ mod tests {
         let ball = a_ball([0.0, 0.0, 0.0], 2.0);
         let top = Point::new(-0.5, 0.0, 3.75_f64.sqrt());
 
-        let walked =
-            march_with_a_first_ask([&pipe, &ball], top, f64::MAX / 4.0, f64::MAX / 4.0, 1 << 20)
-                .expect("a pipe through a ball off its axis crosses it in two loops");
+        let walked = march_with_a_first_ask(
+            [&pipe, &ball],
+            top,
+            f64::MAX / 4.0,
+            f64::MAX / 4.0,
+            1 << 20,
+            &|_| true,
+        )
+        .expect("a pipe through a ball off its axis crosses it in two loops");
 
         let gaps: Vec<f64> = core::iter::once(top)
             .chain(walked.points.iter().copied())
@@ -1611,7 +1689,7 @@ mod tests {
         let start = Point::new(3.122498999199199, 0.0, 1.0);
         let room = 1.685337313933421e307;
 
-        let walked = march_with_a_first_ask([&thin, &fat], start, room, room, 1 << 20)
+        let walked = march_with_a_first_ask([&thin, &fat], start, room, room, 1 << 20, &|_| true)
             .expect("a thin pipe out of a fat one's side crosses it in one loop");
 
         let round_the_line = |at: Point| f64::atan2(at.z() - 1.0, at.x());
@@ -1665,7 +1743,7 @@ mod tests {
         let start = Point::new(0.0, 1.9999999999999998, 2.1715728752538097);
         let room = 1.685337313933421e307;
 
-        let walked = march_with_a_first_ask([&pipe, &ball], start, room, room, 1 << 20)
+        let walked = march_with_a_first_ask([&pipe, &ball], start, room, room, 1 << 20, &|_| true)
             .expect("a ball off a pipe's axis crosses it in one loop");
 
         let gaps: Vec<f64> = core::iter::once(start)
@@ -1727,7 +1805,13 @@ mod tests {
         let ball = a_ball([0.0, 0.0, 0.0], 3.0);
         let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 3.0);
         assert_eq!(
-            march([&ball, &pipe], Point::new(3.0, 0.0, 0.0), 0.01, 1 << 20),
+            march(
+                [&ball, &pipe],
+                Point::new(3.0, 0.0, 0.0),
+                0.01,
+                1 << 20,
+                &|_| true
+            ),
             Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
                 surfaces: Box::new([ball, pipe]),
                 at: WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
@@ -1753,7 +1837,13 @@ mod tests {
         let ball = a_ball([1.0, 0.0, 0.0], 3.0);
         let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0);
         assert_eq!(
-            march([&ball, &pipe], Point::new(-2.0, 0.0, 0.0), 0.01, 1 << 20),
+            march(
+                [&ball, &pipe],
+                Point::new(-2.0, 0.0, 0.0),
+                0.01,
+                1 << 20,
+                &|_| true
+            ),
             Err(Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
                 surfaces: Box::new([ball, pipe]),
                 at: WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
@@ -1936,7 +2026,7 @@ mod tests {
              {by_multiplying:e} against a true sin² of {truth:e}"
         );
 
-        let chord = one_step(surfaces, start, tangent, 0.01, 0.01)
+        let chord = one_step(surfaces, start, tangent, 0.01, 0.01, &|_| true)
             .expect("so one_step takes its first trial rather than giving up on it")
             .1;
         assert!(
@@ -1944,7 +2034,7 @@ mod tests {
             "and the step it took went somewhere: {chord:e}"
         );
 
-        let walked = march(surfaces, on_the_crossing, 0.01, 1 << 16)
+        let walked = march(surfaces, on_the_crossing, 0.01, 1 << 16, &|_| true)
             .expect("and the whole march goes through at the tightest lean this pair has");
         assert!(
             walked.points.len() > 20,
@@ -1977,7 +2067,7 @@ mod tests {
             (4e-8..5e-8).contains(&lean),
             "four roundings of radius lean 4.2e-8 apart, not {lean:e}"
         );
-        let walked = march(surfaces, on_the_crossing, 0.01, 1 << 16)
+        let walked = march(surfaces, on_the_crossing, 0.01, 1 << 16, &|_| true)
             .expect("two roundings of lean further out, the whole march goes through");
         assert!(
             walked.points.len() > 20,
@@ -2013,7 +2103,7 @@ mod tests {
         let backwards = -which_way_the_crossing_runs(surfaces, start)
             .expect("two balls half a radius apart cross transversally");
         assert_eq!(
-            one_step(surfaces, start, backwards, 0.1, 0.1).map(|(_, chord)| chord),
+            one_step(surfaces, start, backwards, 0.1, 0.1, &|_| true).map(|(_, chord)| chord),
             Err(Error::CannotFollowACrossingBecauseNoStepStaysOnIt {
                 surfaces: Box::new([one, other]),
                 shortenings: SHORTENINGS_BEFORE_GIVING_UP,
@@ -2203,7 +2293,7 @@ mod tests {
             ),
             (
                 "march",
-                march(surfaces, on_the_axis, 0.1, 1 << 10).map(|_| ()),
+                march(surfaces, on_the_axis, 0.1, 1 << 10, &|_| true).map(|_| ()),
                 WhereFollowingACrossingGaveUp::SettlingAPointOntoBothSurfaces,
             ),
         ] {
@@ -2223,7 +2313,9 @@ mod tests {
         let ball = a_ball([0.0, 0.0, 0.0], 5.0);
         let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 3.0);
         assert_eq!(
-            march([&ball, &pipe], Point::new(3.0, 0.0, 4.0), 0.01, 4),
+            march([&ball, &pipe], Point::new(3.0, 0.0, 4.0), 0.01, 4, &|_| {
+                true
+            }),
             Err(Error::TooManyPointsAlongOneCrossing { most: 4 })
         );
     }
@@ -2335,7 +2427,7 @@ mod tests {
         let seed = Point::new(0.0, 1786830731.7039194, 4.3601508761683463e-106);
 
         assert_eq!(
-            march(surfaces, seed, 1.0, 1000).map(|walked| walked.points.len()),
+            march(surfaces, seed, 1.0, 1000, &|_| true).map(|walked| walked.points.len()),
             Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces),
             "the march turns this seed away once it has settled it",
         );

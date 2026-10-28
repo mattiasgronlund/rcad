@@ -105,6 +105,18 @@ horizontal files and `LED_D5.0mm-3.step`.
     face slot 2, 3 in 2 files (Q2931); and still *where three surfaces meet*,
     4 in 2 files (Q2928). The probe that ran the sweep is kept outside git, on
     this machine, in `~/rcad-probes/q2911/`.
+    - The *where three surfaces meet* item stopped at the front corner of
+      two fans in each of its two files: `(-1.23, -1.27, 15)` in
+      `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step`, and
+      `(-0.23, -3.81, 5.999999956464)` in
+      `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step`. There the flange's front
+      plane and the body's front disc plane are one plane written twice, a
+      rounding apart, so the corner has three planes round it and failed
+      only `place_a_corner`'s planes condition. Q2928 dropped that
+      condition: the corner read out of the model is now asked about by
+      every surface round it, with the room kept, and the two files now
+      refuse `AFaceTrimmedByACurveThisCannotFollow` on the body's pipe and
+      `AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve` on the front disc.
 - `classify_point` on the LED answers `CannotFollowAFacesTrimming`, naming face
   slot 2, at every point tried: the body's centre `(1.27, -5, 3)`, points in the
   flange, outside it and far off. So no point near the corner could be checked,

@@ -1404,6 +1404,107 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_touch_along_a_ruling_and_every_fuse_
     );
 }
 
+/// The pitch cones of the test above with the lying frustum turned by
+/// [`Isometry::rotation`], which stores its axis `w = (1, 0, ε)`, `ε` being
+/// [`f64::EPSILON`], rather than `(1, 0, 0)`. Its near cap is then the plane
+/// `x + εz = 1` and its side the cone `2(x + εz)² = (1 + ε²)(x² + y² + z²)`.
+/// **No fuse of the two has a certified answer: each would need an edge whose
+/// two ends are one point in `f64`.**
+///
+/// On the upright frustum's near cap, `z = 1`, three curves come together
+/// near `(1, 0, 1)`: the upright rim `K`, `x² + y² = 1`; the line `M`,
+/// `x = 1 − ε`, where the lying cap crosses `z = 1`; and the curve `H` where
+/// the lying cone crosses it. Each two of them meet at `y > 0` in
+///
+/// - `A`, on `K` and `H`: `x = √(1 + ε²) − ε`, `y² = 2εx`;
+/// - `B`, on `K` and `M`: `x = 1 − ε`, `y² = 2ε − ε²`;
+/// - `C`, on `M` and `H`: `x = 1 − ε`, `y² = 2ε − ε² − 2ε²/(1 + ε²)`.
+///
+/// What the lying frustum holds of that cap is a sliver bounded by `M` from
+/// `C` down to its mirror below `y = 0`, by `H` from `C` to `A`, and by `K`
+/// from `A` round through `(1, 0, 1)`. The union and the upright frustum less
+/// the lying one keep the cap with the sliver cut out, and the intersection
+/// and the lying frustum less the upright one keep the sliver. So every answer
+/// has corners at `A` and `C`, joined by an arc of `H` `1.17e−24` long. `B` is
+/// a corner of none.
+///
+/// All three round to the one point `(1 − ε, y₀, 1)`, `y₀` being
+/// `√(2ε − ε²)` rounded, which is `B`'s `y` rounded correctly since `2ε − ε²`
+/// is exact in `f64`. Every `y²` above lies between `2ε − 3ε²` and `2ε − ε²`,
+/// and the test decides exactly that `y₀` less half a step squares below the
+/// one and `y₀` plus half a step squares above the other. `A`'s `x` is above
+/// `1 − ε` by less than `ε²/2`, far under half a step there. An edge whose two
+/// ends are one point in `f64` is the limit
+/// `Invalid::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` names, and two
+/// places that close are the coincidence §17.4 merges rather than orders.
+///
+/// Three ways out were weighed (§16.10). Ordering the corners exactly, as
+/// `lane-q2925-b-land-the-mitre-gear-cones-branch` did at `730dc4f6`, still
+/// leaves the edge to be made, and that branch failed eight other tests with
+/// faces of no area and edges of one point. Merging the corners is the
+/// tolerant answer, not a certified one. Holding the corners in something
+/// finer than `f64` is not this kernel's `Point`.
+///
+/// With the upright frustum first, each fuse is refused on the order along a
+/// crossing, asked of places within `2.2e−8` of `(1 − ε, y₀, 1)`. With the
+/// lying one first, it is refused before it gets there, on which side of a
+/// cone a place within `1e−9` of `(1, 0, −1)` lies: the seam corner of the
+/// lying frustum's near rim, a point the upright cone's other nappe passes
+/// through.
+#[test]
+fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_cross_in_corners_too_close_for_a_certified_answer()
+ {
+    let e = f64::EPSILON;
+    let mut model = a_model();
+    let frustums = the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation(&mut model);
+    let axes = [Vector::new(0.0, 0.0, 1.0), Vector::new(1.0, 0.0, e)];
+    for (solid, w) in frustums.into_iter().zip(axes) {
+        let (near, _, side) = the_caps_and_the_side(&model, solid);
+        assert_eq!(side.axis().origin(), Point::origin(), "{side:?}");
+        assert_eq!(side.axis().direction(), w, "{side:?}");
+        assert_eq!(side.slope(), 1.0, "{side:?}");
+        assert_eq!(near.normal(), -w, "{near:?}");
+        assert_eq!(near.offset(), -1.0, "{near:?}");
+    }
+    let x = 1.0 - e;
+    let y = (2.0 * e - e * e).sqrt();
+    assert_eq!([x, y], [0.9999999999999998, 2.1073424255447014e-8]);
+    let h = (y.next_up() - y) / 2.0;
+    assert_eq!(y - y.next_down(), 2.0 * h, "a step either side of {y}");
+    assert!(e * e / 2.0 < (x.next_up() - x) / 2.0);
+    assert_eq!(
+        sign_of_a_sum_of_products(&[(2.0, e), (-3.0 * e, e), (-y, y), (2.0 * y, h), (-h, h)]),
+        Decision::Pos,
+        "(y₀ − h)² < 2ε − 3ε²"
+    );
+    assert_eq!(
+        sign_of_a_sum_of_products(&[(y, y), (2.0 * y, h), (h, h), (-2.0, e), (e, e)]),
+        Decision::Pos,
+        "2ε − ε² < (y₀ + h)²"
+    );
+    for (rule, first_first) in six_fuses() {
+        let mut model = a_model();
+        let said = fuse(
+            &mut model,
+            the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation,
+            rule,
+            first_first,
+        );
+        let what = format!("{rule:?} (first first: {first_first})");
+        if first_first {
+            refused_on_one_question_within(
+                &said,
+                "order along a crossing",
+                [x, y, 1.0],
+                2.2e-8,
+                &what,
+            );
+        } else {
+            refused_on_one_question_at(&said, "side of cone", [1.0, 0.0, -1.0], &what);
+        }
+    }
+}
+
 fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
     for one in six_fuses() {
         the_fuse_answers(build, one, volumes, faces);
@@ -1654,6 +1755,18 @@ fn refused_on_one_question_at<'a>(
     place: [f64; 3],
     what: &str,
 ) -> &'a Record {
+    refused_on_one_question_within(said, question, place, 1e-9, what)
+}
+
+/// [`refused_on_one_question_at`], with the points `within` of `place` along
+/// each axis.
+fn refused_on_one_question_within<'a>(
+    said: &'a rcad_topo::Result<Vec<SolidKey>>,
+    question: &str,
+    place: [f64; 3],
+    within: f64,
+    what: &str,
+) -> &'a Record {
     let Err(rcad_topo::Error::Undecidable { records }) = said else {
         panic!("{what}: should be refused Undecidable, and said {said:?}");
     };
@@ -1671,7 +1784,7 @@ fn refused_on_one_question_at<'a>(
             })
             .fold(0.0, f64::max);
         assert!(
-            far <= 1e-9,
+            far <= within,
             "{what}: an input reaches {far} from {place:?}: {refused:#?}"
         );
     }
@@ -1693,6 +1806,26 @@ fn the_cap_and_the_side(model: &Model, solid: SolidKey) -> (Plane, Cone) {
         panic!("a pointed cone has a plane and a cone, and not {surfaces:?}");
     };
     (cap, side)
+}
+
+/// The near cap, the far cap and the cone of a frustum's three faces, as the
+/// model places them.
+fn the_caps_and_the_side(model: &Model, solid: SolidKey) -> (Plane, Plane, Cone) {
+    let surfaces: Vec<Surface> = model
+        .solid(solid)
+        .expect("a solid of this model")
+        .faces()
+        .map(|face| face.surface())
+        .collect();
+    let [
+        Surface::Plane(near),
+        Surface::Plane(far),
+        Surface::Cone(side),
+    ] = surfaces[..]
+    else {
+        panic!("a frustum has its near cap, its far cap and a cone, and not {surfaces:?}");
+    };
+    (near, far, side)
 }
 
 /// The pipe of a bar's wall, as the model places it.
@@ -1718,6 +1851,20 @@ fn squared_length_less_one(w: Vector) -> (Decision, f64) {
         sum = wider;
     }
     (expansion_sign(&sum), sum.iter().sum())
+}
+
+/// The sign of the sum of `a × b` over `products`, decided exactly.
+fn sign_of_a_sum_of_products(products: &[(f64, f64)]) -> Decision {
+    let mut sum = Vec::new();
+    for &(a, b) in products {
+        let mut product = [0.0; 2];
+        let multiplied = scale_expansion(&[a], b, &mut product);
+        let mut wider = vec![0.0; sum.len() + multiplied];
+        let len = expansion_sum(&sum, &product[..multiplied], &mut wider);
+        wider.truncate(len);
+        sum = wider;
+    }
+    expansion_sign(&sum)
 }
 
 /// How many curves `intersect` names where the two cross, `0` for a touch at
@@ -2029,60 +2176,6 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation(model: &mut Model
         )
         .expect("this model made the key");
     [upright, lying]
-}
-
-/// With the second frustum's axis a rounding off `(1, 0, 0)`, `intersect`
-/// still names the pair's crossing as four halves of two rulings, near
-/// `(1, 0, 1)`. But the union is refused ordering two nodes near there. §450.
-///
-/// **This is not the near-cap circle a cap plane cuts in one cone
-/// ([`HowItRuns::RoundAClosedCurve`]), and not the apex code
-/// ([`the_way_a_half_ruling_leaves_the_apex`]) either.** Both were tried.
-/// Reading the near-cap circle of a plane and a cone the way
-/// `as_the_quadric_says` already read a plane-and-plane `AlongAnAxis`
-/// crossing does decide a sign at every node it is asked about in this
-/// fixture — but the crossing that actually blocks this union is a
-/// different one, [`HowItRuns::AlongABend`]: the hyperbola where the two
-/// cones' own lateral surfaces cross each other, which `as_the_quadric_says`
-/// has no arm for at all. Widening `round_a_closed_crossing_by_its_angle` and
-/// `along_the_stretch_between_the_two` to a plane and a cone, the other
-/// thing tried, does not reach `AlongABend` either, and regresses refusal
-/// counts pinned elsewhere (`how_often_a_fuse_with_a_cone_refuses`,
-/// `a_plane_cut_along_a_cones_other_nappe`) without deciding anything here.
-/// Neither change is kept. The `AlongABend` node is a meet of one plane and
-/// *two* quadrics, not the two-planes-and-one-quadric shape
-/// `MeetOfThree::the_line_is_off_the_quadric_at` and
-/// `which_way_a_line_runs_through_a_quadric` both take — deciding it needs a
-/// new predicate, not a wider call to an existing one.
-#[test]
-fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_are_refused_ordering_a_near_cap_circle()
- {
-    let mut model = a_model();
-    let said = fuse(
-        &mut model,
-        the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation,
-        Rule::Union,
-        true,
-    );
-    let Err(rcad_topo::Error::Undecidable { records }) = &said else {
-        panic!("the union: should be refused Undecidable, and said {said:?}");
-    };
-    let [refused] = records.records() else {
-        panic!("the union: should be refused on one question: {records:#?}");
-    };
-    assert_eq!(
-        refused.predicate(),
-        "order along a crossing",
-        "{refused:#?}"
-    );
-    for input in refused.inputs() {
-        let sides = input.enclosure();
-        let near_the_near_cap_rim = (0..3)
-            .map(|i| (sides[i].lo() - [1.0, 0.0, 1.0][i]).abs())
-            .fold(0.0, f64::max)
-            <= 1e-7;
-        assert!(near_the_near_cap_rim, "{refused:#?}");
-    }
 }
 
 fn a_block(model: &mut Model, from: [f64; 3], to: [f64; 3]) -> SolidKey {

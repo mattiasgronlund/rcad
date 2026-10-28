@@ -211,6 +211,7 @@ use super::Sameness;
 use super::arrange::{stretches_of_a_line_inside, the_listed_cuts_it_still_draws};
 use super::bake::{
     ACapThroughTheStartOfItsAxis, ASideOfAPlane, BakedCorner, BakedEdge, BakedFace, BakedSolid,
+    WhereAPlaneCrossesACurvedSurface,
 };
 
 /// Work out every cut line, and hang each on the face it cuts.
@@ -1749,6 +1750,13 @@ fn boundary_of(face: &BakedFace) -> Vec<Surface> {
 /// along that line (queue row Q1902). That is the answer a fuse now writes
 /// (§39.4, the Q1901 note), and this used to refuse every fuse after it.
 ///
+/// **A flat face a pipe provably holds strictly inside is skipped**, because
+/// it shares no point with the pipe's skin ([`a_pipe_holds_a_flat_face`]): a
+/// KiCad LED's front disc stands 0.4 inside the rim round it, and asking where
+/// the disc's plane crosses the rim met the rim's corner on that plane and
+/// could not say which side of the plane it lay, so every fuse of the LED was
+/// refused (Q2947).
+///
 /// Only a *proved* overlap is an error. Two stretches whose enclosures merely
 /// touch have not been shown to run through each other, and refusing them would
 /// refuse a solid whose faces meet at a single corner.
@@ -1766,7 +1774,11 @@ fn check_it_does_not_cross_itself(
 ) -> Result<()> {
     for (position, face) in solid.faces.iter().enumerate() {
         for against in &solid.faces[position + 1..] {
-            if !face.bounds.overlap(against.bounds) || share_a_corner(face, against) {
+            if !face.bounds.overlap(against.bounds)
+                || share_a_corner(face, against)
+                || a_pipe_holds_a_flat_face(&against.surface, face)
+                || a_pipe_holds_a_flat_face(&face.surface, against)
+            {
                 continue;
             }
             if how_two_faces_meet(&face.surface, &against.surface, policy, log)?
@@ -1792,6 +1804,133 @@ fn share_a_corner(face: &BakedFace, against: &BakedFace) -> bool {
             .flatten()
             .any(|theirs| theirs.start.vertex == edge.start.vertex)
     })
+}
+
+/// Whether `surface` is a pipe holding every point of `face`, a flat face,
+/// strictly inside it, so that the pipe's skin shares no point with the face
+/// and the two cannot cross (Q2947).
+///
+/// The solid pipe, every point nearer its axis than its radius, holds the
+/// hull of any points it holds, and a flat face lies in the hull of its
+/// sides. So it is enough that each side lies strictly inside:
+///
+/// - A **straight** side, between two planes and along no curved surface,
+///   lies between its two corners, and each corner's own box is asked.
+/// - A side **along a pipe** ([`BakedEdge::along_a_curved_surface`]) lies
+///   where a plane crosses that pipe: on a circle or an ellipse about the
+///   point where the pipe's axis meets the plane, never farther from it than
+///   `r·|n|·|w|/|n·w|`, with `n` the plane's normal and `w` the axis's
+///   direction. That ball is asked, and the side's corners, which are on it,
+///   are not. They need not be: where the arcs round a KiCad LED's front disc
+///   meet the flat on its body, the corner's box runs 3.3 along the flat and
+///   reaches out of the rim round the disc, while the disc stays 0.4 inside.
+/// - A side on anything else may bulge past what is asked, and a face with
+///   such a side is not asked about.
+///
+/// Worked in interval arithmetic on the numbers the surfaces store (§17.1),
+/// so a sign proved here is a sign of the surfaces themselves.
+fn a_pipe_holds_a_flat_face(surface: &Surface, face: &BakedFace) -> bool {
+    let Surface::Cylinder(pipe) = surface else {
+        return false;
+    };
+    if face.surface.as_plane().is_none() {
+        return false;
+    }
+    let mut sides = face.wires.iter().flatten().peekable();
+    sides.peek().is_some() && sides.all(|side| a_pipe_holds_a_side(pipe, side))
+}
+
+/// Whether `pipe` holds one side of a flat face strictly inside, as
+/// [`a_pipe_holds_a_flat_face`] asks it: a straight side by its two corners'
+/// boxes, a side along a pipe by the ball round where that pipe crosses the
+/// face's plane, and a side along anything else not at all.
+fn a_pipe_holds_a_side(pipe: &rcad_geom::Cylinder, side: &BakedEdge) -> bool {
+    let Some(WhereAPlaneCrossesACurvedSurface { plane, curved }) = &side.along_a_curved_surface
+    else {
+        return side.across.as_plane().is_some()
+            && [&side.start, &side.end]
+                .into_iter()
+                .all(|corner| a_pipe_holds_a_box(pipe, corner.point.enclosure()));
+    };
+    let Surface::Cylinder(round) = curved else {
+        return false;
+    };
+    a_pipe_holds_where_a_plane_crosses_a_pipe(pipe, plane, round)
+}
+
+/// Whether every point of `room` is provably nearer `pipe`'s axis than its
+/// radius: `|(p − origin) × w|² < radius²·|w|²` over the whole box.
+fn a_pipe_holds_a_box(pipe: &rcad_geom::Cylinder, room: [rcad_predicates::Interval; 3]) -> bool {
+    let exactly = rcad_predicates::Interval::exactly;
+    let (origin, along) = axis_numbers(pipe.axis());
+    let along = along.map(exactly);
+    let [x, y, z] = cross(difference(room, origin), along);
+    let out = squared(x) + squared(y) + squared(z);
+    matches!(
+        (squared(exactly(pipe.radius())) * dot(along, along) - out).sign(),
+        rcad_predicates::Decision::Pos
+    )
+}
+
+/// Whether the ball round where `flat` crosses `round`, as
+/// [`a_pipe_holds_a_flat_face`] bounds it, is provably strictly inside `pipe`.
+///
+/// With `s = n·w` and the ball's centre `c = o + t·w`, `t = −(n·o + d)/s`, the
+/// test is that the centre's distance from `pipe`'s axis and the ball's radius
+/// add up to less than `pipe`'s radius `R`:
+///
+/// ```text
+/// |(c − o′) × w′| / |w′| + r·|n|·|w| / |s| < R
+/// ```
+///
+/// Times `|s|·|w′|`, and with `s·(c − o′) = s·(o − o′) − (n·o + d)·w`, nothing is
+/// divided:
+///
+/// ```text
+/// |(s·(o − o′) − (n·o + d)·w) × w′| + r·|n|·|w|·|w′| < R·|s|·|w′|
+/// ```
+///
+/// A plane `s` cannot be proved off nought for, one running along the axis or
+/// near enough, is not asked about.
+fn a_pipe_holds_where_a_plane_crosses_a_pipe(
+    pipe: &rcad_geom::Cylinder,
+    flat: &rcad_geom::Plane,
+    round: &rcad_geom::Cylinder,
+) -> bool {
+    let exactly = rcad_predicates::Interval::exactly;
+    let [a, b, c, d] = flat.coefficients();
+    let normal = [a, b, c].map(exactly);
+    let (origin, along) = axis_numbers(round.axis());
+    let along = along.map(exactly);
+    let (other_origin, other_along) = axis_numbers(pipe.axis());
+    let other_along = other_along.map(exactly);
+    let rising = dot(normal, along);
+    let how_far_across = match rising.sign() {
+        rcad_predicates::Decision::Pos => rising,
+        rcad_predicates::Decision::Neg => -rising,
+        rcad_predicates::Decision::Zero | rcad_predicates::Decision::Undecidable { .. } | _ => {
+            return false;
+        }
+    };
+    let at_the_origin = dot(normal, origin.map(exactly)) + exactly(d);
+    let centre_times_rising: [rcad_predicates::Interval; 3] = core::array::from_fn(|axis| {
+        rising * (exactly(origin[axis]) - exactly(other_origin[axis])) - at_the_origin * along[axis]
+    });
+    let [x, y, z] = cross(centre_times_rising, other_along);
+    let length_of = |vector: [rcad_predicates::Interval; 3]| dot(vector, vector).sqrt();
+    let (Some(off_the_axis), Some(normal_length), Some(along_length), Some(other_length)) = (
+        (squared(x) + squared(y) + squared(z)).sqrt(),
+        length_of(normal),
+        length_of(along),
+        length_of(other_along),
+    ) else {
+        return false;
+    };
+    let ball = exactly(round.radius()) * normal_length * along_length * other_length;
+    matches!(
+        (exactly(pipe.radius()) * how_far_across * other_length - off_the_axis - ball).sign(),
+        rcad_predicates::Decision::Pos
+    )
 }
 
 /// What two faces' surfaces do to each other, in the words the cutting here is

@@ -103,7 +103,9 @@ most lanes.
   "Lane budget passed" comes with the row not done, hand over: commit
   everything, `git switch --detach`, report `relay` with a handoff that names
   places. This holds even when a brief says to carry on past the warning. A
-  read-only lane has nothing to commit and reports what it has, as before.
+  read-only lane has nothing to hand over, so it is not a stop for one
+  either: it carries on past the warning to an upper stop of about 400k
+  context, then reports what it has.
 - **The brief carries the rule too (Q1422).** A `claude` process keeps the
   agent types it started with through a `/clear`. A dispatcher cleared after
   this landed reads the new `dispatch-lanes` and memory, stops telling its

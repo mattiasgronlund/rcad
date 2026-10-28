@@ -182,6 +182,22 @@ def role_of(label):
     return "lane", RETRY.sub("", label)
 
 
+def lane_key_of(lane_field):
+    """§411.5: the name `by_lane` groups an agent under, past a role prefix `role_of` left on it.
+
+    A relayed lander's own label is `relay N:land:<lane>` (§416): `role_of` strips only the
+    relay prefix, by design (§411.10, Q2595) -- a relay keeps the role `lane`, since it is the
+    same lane carrying on, so its lane field still starts with `land:`. Left alone, that keeps
+    `by_lane` from joining it to the very same lane's other agents, and its time falls to
+    `unattributed` instead of the row (Q2605). This strips any such leftover prefix for the
+    grouping key alone; `agent["lane"]` itself, and `agent["role"]` (still `lane`), are unchanged.
+    """
+    for prefix, _ in PREFIXES:
+        if lane_field.startswith(prefix):
+            return lane_field[len(prefix):]
+    return lane_field
+
+
 def read_claims(path):
     """`take` and `release` events from the claims file, oldest first, each with its time in ms."""
     events = []
@@ -265,7 +281,7 @@ def assemble(loaded, options):
             never_started += run["never_started"]
         by_lane = collections.defaultdict(list)
         for agent in run["agents"]:
-            by_lane[agent["lane"]].append(agent)
+            by_lane[lane_key_of(agent["lane"])].append(agent)
         for label, agents in by_lane.items():
             lane = run["lanes"].get(label)
             if lane is None or not lane["rows"]:

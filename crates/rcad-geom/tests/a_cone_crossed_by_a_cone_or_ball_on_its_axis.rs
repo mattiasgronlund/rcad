@@ -38,7 +38,9 @@
 //! each. Where the turned axis was rounded they are not mirror
 //! images and do not touch, but cross in one loop and two branches that pass
 //! close by each other where the exact pair would touch: `intersect` names the
-//! three, and `walk` refuses each. Two of one
+//! three, and `walk` marches the loop and a branch between two corners on it,
+//! past the hard bends where the two pass close, and refuses a whole branch by
+//! name. Two of one
 //! slope side by side are mirror images too, and cross in the one hyperbola
 //! the flat surface halfway between them cuts out of either: `intersect` names
 //! its two branches as that cut, and `walk` marches each whole branch.
@@ -1419,9 +1421,23 @@ fn two_cones_of_one_slope_side_by_side_cross_in_one_hyperbola_and_do_not_touch()
 /// not touch: near each place the exact pair touches, a loop and a branch pass
 /// close by each other. `intersect` names three pieces, the loop and two
 /// branches, and every point of the crossing found along a straight line of
-/// the turned cone out of its apex is picked by exactly one of them. `walk`
-/// does not march them yet, and refuses each, and the whole crossing, as a
-/// degree-four curve and not as a crossing that touches itself.
+/// the turned cone out of its apex is picked by exactly one of them.
+///
+/// `walk` marches the loop right round, through both places where it bends
+/// hard to pass the branch beyond it, and never steps onto that branch: every
+/// point is on both cones and in front of both flat surfaces that pick the
+/// loop, so behind the one the branch is in front of. It marches a run on each
+/// branch between two corners, from either, and the two corners on each are
+/// either side of the straight line of the turned cone whose two crossings
+/// come closest together, so the run on the branch beyond the loop passes one
+/// of those hard bends, and every point of each is in front of its branch's
+/// flat surface. Such a run is not closed. A whole branch has no end to march
+/// to, and is refused by name.
+///
+/// The whole crossing stated right round, with nothing picking it, is not one
+/// loop, but a run nothing picks is read as the piece the first seed is on,
+/// which is the loop, as it is where two cones cross in a loop and two
+/// branches exactly: it starts on the loop.
 #[test]
 fn two_cones_whose_turned_axis_is_rounded_cross_in_a_loop_and_two_branches_that_nearly_meet() {
     let (sin, cos) = 0.3_f64.sin_cos();
@@ -1438,10 +1454,7 @@ fn two_cones_whose_turned_axis_is_rounded_cross_in_a_loop_and_two_branches_that_
             panic!("a loop and two branches, and not {met:?}");
         };
         assert_eq!(runs.len(), 3, "{runs:?}");
-        let mut picked = [0; 3];
-        for point in
-            points_where_the_lines_of_a_cone_meet_an_upright_one(slope, apex, along_the_turned)
-        {
+        let the_piece_picking = |point: PredicatePoint| {
             let picked_by: Vec<usize> = (0..3)
                 .filter(|which| {
                     the_pickers_of(&runs[*which])
@@ -1452,21 +1465,80 @@ fn two_cones_whose_turned_axis_is_rounded_cross_in_a_loop_and_two_branches_that_
             let [which] = picked_by.as_slice() else {
                 panic!("{point:?} is picked by one piece, not by {picked_by:?} of {runs:?}");
             };
-            picked[*which] += 1;
+            *which
+        };
+        let lines =
+            points_where_the_lines_of_a_cone_meet_an_upright_one(slope, apex, along_the_turned);
+        let mut picked = [0; 3];
+        for point in lines.iter().flatten() {
+            picked[the_piece_picking(*point)] += 1;
         }
         assert!(
             picked.iter().all(|count| *count > 0),
             "every piece holds points of the crossing: {picked:?}"
         );
-        for along in [[&upright, &turned], [&turned, &upright]] {
-            assert_eq!(
-                where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new()).err(),
-                Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
-            );
-            for run in runs {
+        let (loops, branches): (Vec<usize>, Vec<usize>) =
+            (0..3).partition(|which| the_pickers_of(&runs[*which]).len() == 2);
+        let [which_is_the_loop] = loops.as_slice() else {
+            panic!("one loop: {runs:?}");
+        };
+        let the_loop = &runs[*which_is_the_loop];
+        for (deflection, more_points_than) in [(0.01, 8), (f64::MAX, 2)] {
+            for along in [[&upright, &turned], [&turned, &upright]] {
+                assert_marched_on_both_and_on_its_side(
+                    the_loop,
+                    along,
+                    deflection,
+                    more_points_than,
+                    the_pickers_of(the_loop),
+                );
+            }
+        }
+        assert_eq!(branches.len(), 2, "{runs:?}");
+        for which in branches {
+            let branch = &runs[which];
+            let on_it: Vec<Option<PredicatePoint>> = lines
+                .iter()
+                .map(|line| {
+                    line.iter()
+                        .copied()
+                        .find(|point| the_piece_picking(*point) == which)
+                })
+                .collect();
+            let nearest = (0..lines.len())
+                .filter(|at| on_it[*at].is_some())
+                .min_by(|one, other| {
+                    let gap = |at: usize| how_far_apart(lines[at]);
+                    gap(*one).total_cmp(&gap(*other))
+                })
+                .expect("a branch holds points of the crossing");
+            let either_side = [lines.len() - 20, 20].map(|by| {
+                on_it[(nearest + by) % lines.len()]
+                    .unwrap_or_else(|| panic!("a corner on {branch:?} either side of {nearest}"))
+            });
+            for ends in [either_side, [either_side[1], either_side[0]]] {
+                let between =
+                    NamedRun::new(branch.run().clone(), ends).expect("two ends that name places");
+                for along in [[&upright, &turned], [&turned, &upright]] {
+                    assert_marched_on_both_and_on_its_side(
+                        &between,
+                        along,
+                        0.01,
+                        4,
+                        the_pickers_of(branch),
+                    );
+                    assert_eq!(
+                        where_a_closed_crossing_starts(&between, along, &mut ProvenanceLog::new())
+                            .err(),
+                        Some(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
+                        "{between:?}"
+                    );
+                }
+            }
+            for along in [[&upright, &turned], [&turned, &upright]] {
                 assert_eq!(
                     walk(
-                        run,
+                        branch,
                         along,
                         Deflection::of(0.01).expect("a length above zero"),
                         &Policy::certified(),
@@ -1474,22 +1546,45 @@ fn two_cones_whose_turned_axis_is_rounded_cross_in_a_loop_and_two_branches_that_
                     )
                     .err(),
                     Some(Error::ACrossingBetweenAConeAndAnotherCurvedSurface),
-                    "{run:?}"
+                    "{branch:?}"
                 );
             }
         }
+        for along in [[&upright, &turned], [&turned, &upright]] {
+            let start = where_a_closed_crossing_starts(&stated, along, &mut ProvenanceLog::new());
+            let start = start.unwrap_or_else(|refused| {
+                panic!("the stated crossing starts on the loop, and is not refused {refused:?}")
+            });
+            assert_eq!(
+                the_piece_picking(PredicatePoint::from(start.coordinates())),
+                *which_is_the_loop,
+                "{start:?}"
+            );
+        }
     }
+}
+
+/// How far apart the two places a straight line meets a cone are.
+fn how_far_apart(places: [PredicatePoint; 2]) -> f64 {
+    let [one, other] = places.map(|place| {
+        Point::from(
+            place
+                .exact_coordinates()
+                .expect("a place worked out in f64"),
+        )
+    });
+    (one - other).length()
 }
 
 /// Where the straight lines out of `apex` along the cone of `slope` about
 /// `along`, at a thousand turns round it, meet the cone of the same slope about
 /// `z` with its apex at the origin, `x² + y² = slope²·z²`: both places on each
-/// line that meets it twice.
+/// line that meets it twice, in the order the lines turn.
 fn points_where_the_lines_of_a_cone_meet_an_upright_one(
     slope: f64,
     apex: [f64; 3],
     along: [f64; 3],
-) -> Vec<PredicatePoint> {
+) -> Vec<[PredicatePoint; 2]> {
     let length = (along[0] * along[0] + along[1] * along[1] + along[2] * along[2]).sqrt();
     let up = along.map(|part| part / length);
     let square = if up[0].abs() < 0.5 {
@@ -1516,11 +1611,11 @@ fn points_where_the_lines_of_a_cone_meet_an_upright_one(
         if spread <= 0.0 || a == 0.0 {
             continue;
         }
-        for t in [(-b - spread.sqrt()) / a, (-b + spread.sqrt()) / a] {
-            points.push(PredicatePoint::from(std::array::from_fn::<f64, 3, _>(
-                |i| apex[i] + t * d[i],
-            )));
-        }
+        points.push(
+            [(-b - spread.sqrt()) / a, (-b + spread.sqrt()) / a].map(|t| {
+                PredicatePoint::from(std::array::from_fn::<f64, 3, _>(|i| apex[i] + t * d[i]))
+            }),
+        );
     }
     points
 }
