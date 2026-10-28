@@ -76,6 +76,8 @@ pub mod a_flat_cap_is_cut_up_the_same_after_its_own_file;
 pub mod a_fuse_read_back_from_rounded_text;
 #[path = "a_led_whose_flat_touches_its_body_at_a_corner.rs"]
 pub mod a_led_whose_flat_touches_its_body_at_a_corner;
+#[path = "a_led_whose_front_is_two_planes_a_rounding_apart.rs"]
+pub mod a_led_whose_front_is_two_planes_a_rounding_apart;
 #[path = "a_mitre_ellipse_between_two_thin_pipes.rs"]
 pub mod a_mitre_ellipse_between_two_thin_pipes;
 #[path = "a_mitre_whose_centre_the_file_writes_off_its_pipe.rs"]
