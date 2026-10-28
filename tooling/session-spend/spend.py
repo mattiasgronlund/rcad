@@ -69,13 +69,27 @@ def tier_of(model):
     return next((t for t in PRICES if t in name), "opus")
 
 
-def cost_of(model, usage):
-    inp, out, read, write_1h, write_5m = PRICES[tier_of(model)]
+def _cache_write(usage):
+    """The tokens of one response's cache write, split into the 1h and 5m
+    ephemeral fields it actually wrote.
+
+    `ephemeral_1h_input_tokens`/`ephemeral_5m_input_tokens` are the precise
+    fields; `cache_creation_input_tokens` is what an older client wrote before
+    the split existed, and counts as a 5-minute write since that was the only
+    rate then. Shared by `cost_of`, `_parts` and `load`'s `write_tokens` field,
+    so a fix to the fallback does not drift between the three.
+    """
     created = usage.get("cache_creation") or {}
     hour = created.get("ephemeral_1h_input_tokens", 0)
     five = created.get("ephemeral_5m_input_tokens", 0)
     if not (hour or five):
         five = usage.get("cache_creation_input_tokens", 0)
+    return hour, five
+
+
+def cost_of(model, usage):
+    inp, out, read, write_1h, write_5m = PRICES[tier_of(model)]
+    hour, five = _cache_write(usage)
     return (
         usage.get("input_tokens", 0) * inp
         + usage.get("output_tokens", 0) * out
@@ -203,6 +217,7 @@ def load(root, repo, since, until, only=None):
                     ),
                     "read_tokens": usage.get("cache_read_input_tokens", 0),
                     "read_rate": PRICES[tier_of(message.get("model"))][2],
+                    "write_tokens": sum(_cache_write(usage)),
                     "output": usage.get("output_tokens", 0),
                     "parts": _parts(message.get("model"), usage),
                     "tools": [b for b in group["content"] if b.get("type") == "tool_use"],
@@ -270,11 +285,7 @@ def _text_of(content):
 
 def _parts(model, usage):
     inp, out, read, write_1h, write_5m = PRICES[tier_of(model)]
-    created = usage.get("cache_creation") or {}
-    hour = created.get("ephemeral_1h_input_tokens", 0)
-    five = created.get("ephemeral_5m_input_tokens", 0)
-    if not (hour or five):
-        five = usage.get("cache_creation_input_tokens", 0)
+    hour, five = _cache_write(usage)
     return {
         "input": usage.get("input_tokens", 0) * inp / 1e6,
         "output": usage.get("output_tokens", 0) * out / 1e6,
@@ -1308,6 +1319,158 @@ def decision_read(response):
     return None
 
 
+def wait_threshold(is_lane):
+    """How long a gap in one session has to be before the response after it
+    pays to write the whole context into the cache again, rather than read it.
+
+    Measured off the usage records themselves (§144.2): a lane's cache lapses
+    after five minutes idle, a main session's after an hour — the two kinds of
+    session the rest of this file already tells apart by `response["lane"]`.
+    """
+    return 300 if is_lane else 3600
+
+
+def rewrote_cache(write_tokens, read_tokens):
+    """A response that paid to rebuild the whole context, not just add a line
+    to it: more than 20k tokens written to the cache, and more written than
+    read.
+
+    Both filters came out of the same measurement (§144.2): the 20k floor
+    drops a response that wrote a short reply after a short gap, and the
+    comparison against what it read drops one that read a huge file and wrote
+    only the small call that followed — neither is the shape a lapsed cache
+    forces.
+    """
+    return write_tokens > 20_000 and write_tokens > read_tokens
+
+
+def cache_write_extra(write_tokens, write_cost, read_rate):
+    """What one response paid beyond what reading the same tokens would have
+    cost, in dollars.
+
+    `write_cost` already prices `write_tokens` at the write rate, which §144.2
+    measured at 12.5x the read rate for a 5-minute write on Sonnet; this is
+    that price minus what the read rate would have charged for the same count.
+    """
+    return write_cost - write_tokens * read_rate / 1e6
+
+
+# The blocking recipes §144.2 named by hand, first match wins. The question a
+# wait's cause answers is which specific recipe was still running, not what
+# kind of work it was — `bash_kind`'s open list is the wrong tool for that.
+WAIT_CAUSES = (
+    ("just pre-gate gate-lane", re.compile(r"just pre-gate\b.*gate-lane")),
+    ("timeout tail --pid on a process", re.compile(r"\btail\b.*--pid")),
+    ("just t", re.compile(r"\bjust t\b")),
+    ("just gate quiet", re.compile(r"\bjust gate quiet\b")),
+)
+
+
+def wait_cause(tools):
+    """Which call in the response before a wait the agent was most likely
+    still waiting on: the last `Bash` call, matched against `WAIT_CAUSES`."""
+    for call in reversed(tools):
+        if call.get("name") != "Bash":
+            continue
+        command = " ".join((call.get("input") or {}).get("command", "").split())
+        for name, pattern in WAIT_CAUSES:
+            if pattern.search(command):
+                return name
+        return "other"
+    return "no call"
+
+
+# Named spans of a wait, open-ended on the last one. A gap is bucketed by its
+# own length, not by the threshold that qualified it as a wait in the first
+# place, so a lane's nine-minute wait and a main session's ninety-minute one
+# land in different rows of the same table.
+WAIT_LENGTHS = ((600, "5-10 min"), (1200, "10-20 min"), (2400, "20-40 min"),
+                (7200, "40 min-2h"), (28800, "2-8h"))
+
+
+def length_bucket(seconds):
+    """Which named span of `WAIT_LENGTHS` one wait falls in."""
+    for upper, label in WAIT_LENGTHS:
+        if seconds < upper:
+            return label
+    return "8h+"
+
+
+def report_waits(responses, total):
+    """What agents pay to write their prompt cache again after a wait.
+
+    A session's cache lapses after `wait_threshold` seconds idle; the response
+    that follows then pays the write rate for the whole context instead of the
+    read rate. `rewrote_cache` says whether that is what happened and
+    `cache_write_extra` says what it cost beyond reading the same tokens.
+    §144.2: over 10-14 to 10-21, 496 of 537 lane-side responses after such a
+    gap did this, against 7 of 32,873 after a shorter one, for about $370 of
+    the week's $3,954 — so a row that cuts the wait rather than the work, such
+    as one that makes the gate or a test run faster, is worth reading back in
+    money as well as in time.
+    """
+    print("=== waiting on a call, then paying to write the cache again ===")
+    by_session = collections.defaultdict(list)
+    for r in responses:
+        by_session[(r["session"], r["lane"])].append(r)
+
+    gap_n, gap_rewrote, gap_extra = (collections.Counter() for _ in range(3))
+    cause_n, cause_extra = collections.Counter(), collections.Counter()
+    length_n, length_extra = collections.Counter(), collections.Counter()
+    lengths = []
+
+    for (_, is_lane), chunk in by_session.items():
+        role = "lane" if is_lane else "main"
+        for i in range(1, len(chunk)):
+            prev, r = chunk[i - 1], chunk[i]
+            gap = (r["when"] - prev["when"]).total_seconds()
+            long = gap >= wait_threshold(is_lane)
+            key = (role, long)
+            gap_n[key] += 1
+            if not rewrote_cache(r["write_tokens"], r["read_tokens"]):
+                continue
+            gap_rewrote[key] += 1
+            extra = cache_write_extra(r["write_tokens"], r["parts"]["cache write"], r["read_rate"])
+            gap_extra[key] += extra
+            if not long:
+                continue
+            cause = wait_cause(prev["tools"])
+            cause_n[cause] += 1
+            cause_extra[cause] += extra
+            bucket = length_bucket(gap)
+            length_n[bucket] += 1
+            length_extra[bucket] += extra
+            lengths.append(gap)
+
+    every = sum(v for (role, long), v in gap_extra.items() if long)
+    print(f"  ${every:,.2f} over what reading the same tokens would have cost"
+          f"  ({100 * every / total:.1f}% of the bill)")
+    print()
+
+    print("=== by role ===")
+    print(f"  {'':5} {'after such a gap':>28}   {'after a shorter one':>28}")
+    for role in ("lane", "main"):
+        n_long, r_long, c_long = gap_n[(role, True)], gap_rewrote[(role, True)], gap_extra[(role, True)]
+        n_short, r_short, c_short = gap_n[(role, False)], gap_rewrote[(role, False)], gap_extra[(role, False)]
+        print(f"  {role:5} {r_long:6,d} of {n_long:6,d} rewrote ${c_long:8,.2f}"
+              f"   {r_short:6,d} of {n_short:6,d} rewrote ${c_short:8,.2f}")
+    print()
+
+    print("=== by the call waited on ===")
+    for name, _ in WAIT_CAUSES + (("other", None), ("no call", None)):
+        share = 100 * cause_extra[name] / every if every else 0.0
+        print(f"  {name:34} {cause_n[name]:6,d} responses ${cause_extra[name]:8,.2f} {share:5.1f}%")
+    print()
+
+    print("=== by the length of the wait ===")
+    for _, label in WAIT_LENGTHS + ((None, "8h+"),):
+        print(f"  {label:10} {length_n[label]:6,d} responses ${length_extra[label]:8,.2f}")
+    if lengths:
+        lengths.sort()
+        print(f"  median wait among these: {lengths[len(lengths) // 2] / 60:.1f} min")
+    print()
+
+
 REPORTS = {
     "summary": lambda rs, res, ws, t: report_summary(rs, t),
     "finding": lambda rs, res, ws, t: report_finding(rs, res, t),
@@ -1319,6 +1482,7 @@ REPORTS = {
     "ceiling": lambda rs, res, ws, t: report_ceiling(rs, t),
     "warnings": lambda rs, res, ws, t: report_warnings(rs, ws, t),
     "pairs": lambda rs, res, ws, t: report_pairs(rs, res, t),
+    "waits": lambda rs, res, ws, t: report_waits(rs, t),
 }
 
 
