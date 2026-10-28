@@ -39,16 +39,22 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from spend import (
     PURPOSES,
     RITUALS,
+    WAIT_CAUSE_PRE_GATE_LANE,
     bucket_of,
+    cache_write_extra,
     decision_read,
     delegation_net,
     finding_runs,
     found_hits,
     is_lookup,
+    length_bucket,
     load,
     purpose_of,
+    rewrote_cache,
     ritual_of,
     targets_of,
+    wait_cause,
+    wait_threshold,
     warning_said,
 )
 
@@ -222,6 +228,142 @@ RUNS = [
      [response("a", READ), response("a", READ)],
      [2]),
 ]
+
+
+# §144.2's own thresholds: a lane's cache lapses after five minutes idle, a
+# main session's after an hour.
+THRESHOLD_CASES = [
+    ("a lane's own cache", True, 300),
+    ("a main session's cache", False, 3600),
+]
+
+# The two filters §144.2 measured together: a floor so a short reply after a
+# short gap does not count, and a comparison against what was read so a big
+# read followed by a small write does not either.
+REWROTE_CASES = [
+    ("a real rewrite", 30_000, 200, True),
+    ("under the 20k floor", 15_000, 0, False),
+    ("wrote less than it read", 25_000, 40_000, False),
+    ("exactly at the floor counts as not over it", 20_000, 0, False),
+]
+
+# write_tokens, write_cost, read_rate, want — the extra is the write's own
+# price minus what the read rate would have charged for the same count.
+EXTRA_CASES = [
+    ("a write priced well above the read rate", 100_000, 0.30, 0.20, 0.28),
+    ("a write priced at the read rate has no extra", 100_000, 0.02, 0.20, 0.0),
+]
+
+WAIT_CAUSE_CASES = [
+    ("the land gate behind mise", [bash("mise exec -- " + WAIT_CAUSE_PRE_GATE_LANE)],
+     WAIT_CAUSE_PRE_GATE_LANE),
+    ("the pid wait a lane uses to watch a background run",
+     [bash("timeout 540 tail --pid=12345 -f /dev/null")], "timeout tail --pid on a process"),
+    ("a named test", [bash("mise exec -- just t how_often_a_fuse_with_a_cone_refuses")],
+     "just t"),
+    ("the whole gate", [bash("mise exec -- just gate quiet")], "just gate quiet"),
+    ("a command naming none of the four", [bash("git status")], "other"),
+    ("no Bash call at all", [read("crates/rcad-geom/src/meet.rs")], "no call"),
+    ("the last Bash call wins over an earlier one",
+     [bash("just gate quiet"), read("x"), bash("just t foo")], "just t"),
+]
+
+LENGTH_BUCKET_CASES = [
+    ("just under ten minutes", 570, "5-10 min"),
+    ("fifteen minutes", 900, "10-20 min"),
+    ("thirty-three minutes", 2000, "20-40 min"),
+    ("an hour and twenty", 5000, "40 min-2h"),
+    ("five and a half hours", 20_000, "2-8h"),
+    ("past the last named span", 40_000, "8h+"),
+]
+
+
+def check_waits():
+    """A lane's cache lapses after five minutes idle, a main session's after
+    an hour — the same six-minute gap must land on opposite sides of that line
+    depending on which kind of session it was in, and `load()` must carry the
+    cache-write tokens a later response needs to tell a rewrite from a read.
+
+    §144.2's whole report rides on both: `write_tokens` is new to `load()`'s
+    response dict, and nothing exercises it end to end except a transcript
+    like this one, the same way `check_load()` is the only thing that
+    exercises `output_tokens` growing across records.
+    """
+    tmp = tempfile.mkdtemp()
+    try:
+        repo_dir = os.path.join(tmp, "rcad")
+        lane_dir = os.path.join(repo_dir, "subagents")
+        os.makedirs(lane_dir)
+
+        def stamp(dt):
+            return dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+        def write_pair(path, gap_minutes):
+            base = datetime.datetime(2026, 10, 15, 12, 0)
+            later = base + datetime.timedelta(minutes=gap_minutes)
+            lines = [
+                json.dumps({
+                    "type": "assistant", "requestId": "r1",
+                    "timestamp": stamp(base), "cwd": "/repo",
+                    "message": {
+                        "id": "m1", "model": "claude-sonnet-5",
+                        "usage": {"input_tokens": 1, "output_tokens": 10,
+                                  "cache_read_input_tokens": 5000},
+                        "content": [{"type": "text", "text": "first"}],
+                    },
+                }),
+                json.dumps({
+                    "type": "assistant", "requestId": "r2",
+                    "timestamp": stamp(later), "cwd": "/repo",
+                    "message": {
+                        "id": "m2", "model": "claude-sonnet-5",
+                        "usage": {"input_tokens": 1, "output_tokens": 50,
+                                  "cache_read_input_tokens": 200,
+                                  "cache_creation": {"ephemeral_5m_input_tokens": 30_000}},
+                        "content": [{"type": "text", "text": "second"}],
+                    },
+                }),
+            ]
+            with open(path, "w") as f:
+                f.write("\n".join(lines) + "\n")
+
+        write_pair(os.path.join(repo_dir, "main_session.jsonl"), 6)
+        write_pair(os.path.join(lane_dir, "lane_session.jsonl"), 6)
+
+        since = datetime.datetime(2026, 10, 15, tzinfo=datetime.timezone.utc)
+        until = datetime.datetime(2026, 10, 16, tzinfo=datetime.timezone.utc)
+        responses, _, _ = load(tmp, "rcad", since, until)
+
+        main_two = sorted((r for r in responses if not r["lane"]), key=lambda r: r["when"])
+        lane_two = sorted((r for r in responses if r["lane"]), key=lambda r: r["when"])
+        if len(main_two) != 2 or len(lane_two) != 2:
+            print("check_waits: wanted 2 main and 2 lane responses, got %d and %d"
+                  % (len(main_two), len(lane_two)))
+            return 1
+
+        failed = 0
+        if main_two[1]["write_tokens"] != 30_000:
+            print("check_waits: load() lost the cache-write tokens on a main-session response")
+            failed += 1
+        if lane_two[1]["write_tokens"] != 30_000:
+            print("check_waits: load() lost the cache-write tokens on a lane response")
+            failed += 1
+
+        lane_gap = (lane_two[1]["when"] - lane_two[0]["when"]).total_seconds()
+        if not (lane_gap >= wait_threshold(True)
+                and rewrote_cache(lane_two[1]["write_tokens"], lane_two[1]["read_tokens"])):
+            print("check_waits: a six-minute gap in a lane did not count as a "
+                  "wait that rewrote the cache")
+            failed += 1
+
+        main_gap = (main_two[1]["when"] - main_two[0]["when"]).total_seconds()
+        if main_gap >= wait_threshold(False):
+            print("check_waits: a six-minute gap in a main session wrongly "
+                  "crossed its one-hour threshold")
+            failed += 1
+        return failed
+    finally:
+        shutil.rmtree(tmp)
 
 
 # What one call searched and read. `pairs` is built on these, and §161 decided
@@ -417,6 +559,38 @@ def main():
     failed += check_pairs()
     failed += check_load()
 
+    for why, is_lane, want in THRESHOLD_CASES:
+        got = wait_threshold(is_lane)
+        if got != want:
+            print("wait_threshold wanted %r, got %r: %s" % (want, got, why))
+            failed += 1
+
+    for why, write_tokens, read_tokens, want in REWROTE_CASES:
+        got = rewrote_cache(write_tokens, read_tokens)
+        if got != want:
+            print("rewrote_cache wanted %r, got %r: %s" % (want, got, why))
+            failed += 1
+
+    for why, write_tokens, write_cost, read_rate, want in EXTRA_CASES:
+        got = cache_write_extra(write_tokens, write_cost, read_rate)
+        if round(got, 6) != want:
+            print("cache_write_extra wanted %r, got %r: %s" % (want, got, why))
+            failed += 1
+
+    for why, tools, want in WAIT_CAUSE_CASES:
+        got = wait_cause(tools)
+        if got != want:
+            print("wait_cause wanted %r, got %r: %s" % (want, got, why))
+            failed += 1
+
+    for why, seconds, want in LENGTH_BUCKET_CASES:
+        got = length_bucket(seconds)
+        if got != want:
+            print("length_bucket wanted %r, got %r: %s" % (want, got, why))
+            failed += 1
+
+    failed += check_waits()
+
     # Every ritual has at least one case. A bucket nobody exercises is a bucket
     # that can quietly stop matching anything, and the report would still print
     # a row of zeroes for it.
@@ -427,7 +601,9 @@ def main():
             failed += 1
 
     every = (len(CASES) + len(PURPOSE_CASES) + len(LOOKUPS) + len(RUNS) + 3 + len(SAYINGS)
-             + len(BUCKETS) + PAIR_CASES + 1)
+             + len(BUCKETS) + PAIR_CASES + 1
+             + len(THRESHOLD_CASES) + len(REWROTE_CASES) + len(EXTRA_CASES)
+             + len(WAIT_CAUSE_CASES) + len(LENGTH_BUCKET_CASES) + 1)
     if failed:
         print("%d of %d classifier cases came out wrong" % (failed, every))
         return 1
