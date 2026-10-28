@@ -5775,21 +5775,26 @@ fn the_conic_stretched_and_lifted(
 /// largest number.
 ///
 /// **The quartic's numbers are sums of products of four of the conics'**, two
-/// from each, so with both conics' largest numbers at `2²⁰⁰` the quartic's sit
-/// near `2⁸⁰⁰`. That leaves [`where_a_polynomial_is_zero`] room to evaluate it
-/// at a place up to `2⁵⁵` under the top of `f64`, and the stretch puts its
-/// roots near one.
+/// from each, so with both conics' largest numbers at `2ᵀ` the quartic's
+/// largest sits near `2⁴ᵀ⁻⁵`: `2⁹²³` here. What runs out at the top is a
+/// product past `2¹⁰²³`, and on the four LED front flats of
+/// `where_a_plane_and_two_round_surfaces_meet.rs` the first `T` that runs off
+/// is 257, 258 or 260, by flat. `2⁹²³` leaves [`where_a_polynomial_is_zero`]
+/// `2¹⁰⁰` of room to evaluate the quartic at places out past its roots, which
+/// the stretch puts near one.
 ///
 /// **What runs out at the bottom is a product below `2⁻⁹⁶⁹`**, which
 /// [`Exact::times`] refuses. A conic whose numbers reach `σ` binades below its
-/// largest one leaves the quartic's reaching about `2(σ₁ + σ₂)` below `2⁸⁰⁰`,
-/// so conics reaching some 880 binades down between them still fit. On an
-/// LED's front flat they reach 311 and 480 binades down, and the quartic's
-/// numbers run from `2⁷⁹²` down to `2⁻⁷⁹⁸`. Replayed over the rationals, ten
-/// of its products fall below `2⁻⁹⁶⁹` with the largest numbers lifted to
-/// `2¹⁰⁰`, and none at `2¹⁵⁰`, `2²⁰⁰` or `2²⁵⁰`. Chosen by that argument and
-/// in the middle of what works there, not tuned by a sweep.
-const HIGHEST_BINADE_A_CONIC_IS_LIFTED_TO: i32 = 200;
+/// largest one leaves the quartic's reaching about `2(σ₁ + σ₂)` below its top,
+/// so the wider the two conics spread, the higher `T` has to be. Measured on
+/// the same four flats: the `Z3.0` flat, whose conics reach 311 and 480
+/// binades down, is answered from a `T` of 145 (not 140), the `Z9.0` and the
+/// thin `Z10.0` flats from 150 (not 145), and `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm`'s
+/// flat, whose conics reach 365 and 582 binades down, from 207 (not 206) to
+/// 256. That is the narrowest of the four, and 232 is its middle, which leaves
+/// it 25 binades of each conic to spare at either end. Before, `T` was 200,
+/// which answered the first three and refused the fourth.
+const HIGHEST_BINADE_A_CONIC_IS_LIFTED_TO: i32 = 232;
 
 /// The form `numbers` as `f₂·z² + f₁·z + f₀` in `z`, the number `order[2]`
 /// names, each `fᵢ` a polynomial in `x`, the number `order[0]` names, lowest
