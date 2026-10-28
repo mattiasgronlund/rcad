@@ -3543,6 +3543,14 @@ test-ignored:
 # each writing form refused, each reading form allowed, each form that runs
 # `pin` or `unpin` asked about, since only Mattias pins (§430), and each kill
 # form refused or allowed.
+#
+# `queue-write-cases.json` cannot hold the two cases below: each needs a pid
+# that is actually running, and a case there is a fixed JSON string with no
+# shell left to run before it reaches the guard (§454.3's note). So this
+# recipe starts one `sleep` in this tree and one in `/tmp`, feeds `kill
+# <pid>` for each straight to `guard.py`, and checks the one in this tree
+# comes out allowed and the one in `/tmp` comes out refused — on the base
+# before this row, both came out allowed, since `guard.py` read no cwd at all.
 [doc("The hooks against their own cases: shell patching, context budget, worktrees.")]
 check-hooks:
     #!/usr/bin/env bash
@@ -3556,6 +3564,30 @@ check-hooks:
     .claude/hooks/check-session-start-hub.sh
     .claude/hooks/check-decisions-zero.sh
     .claude/hooks/check-queue-write-guard.sh
+    tree=$(pwd)
+    sleep 5 &
+    inside_pid=$!
+    cd /tmp
+    sleep 5 &
+    outside_pid=$!
+    cd "$tree"
+    inside_out=$(printf '{"tool_name":"Bash","tool_input":{"command":"kill %s"}}' "$inside_pid" | python3 tooling/queue/guard.py)
+    outside_out=$(printf '{"tool_name":"Bash","tool_input":{"command":"kill %s"}}' "$outside_pid" | python3 tooling/queue/guard.py)
+    kill "$inside_pid" "$outside_pid" 2>/dev/null || true
+    wait 2>/dev/null || true
+    failed=0
+    if [ -n "$inside_out" ]; then
+        echo "a live process in this tree was refused, and should be allowed: $inside_out"
+        failed=1
+    fi
+    if ! jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1 <<<"$outside_out"; then
+        echo "a live process outside this tree was not refused: ${outside_out:-<nothing printed>}"
+        failed=1
+    fi
+    if [ "$failed" -ne 0 ]; then
+        exit 1
+    fi
+    echo "kill <pid>: a live process in this tree is allowed, one outside it is refused"
 
 # Every `just` recipe and every repo path a project skill names still exists.
 #
