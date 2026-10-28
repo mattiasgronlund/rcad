@@ -15,14 +15,20 @@
 //!
 //! Every fuse of the LED tried by Q2911's lane refused `Undecidable` on where
 //! three surfaces meet, at `#123`, handed the flat, the back and the pipe: two
-//! planes and a pipe that touch rather than cross there (§471.3).
+//! planes and a pipe that touch rather than cross there (§471.3). Bake now
+//! reads such a corner out of the model, and every fuse of the LED gets past
+//! it and stops later, in the check that the LED does not cross itself, on the
+//! upper half of the flange's rim: a pipe of radius 2.9 that no box here
+//! touches. These tests pin that. When the rim answers, each turns back into the volume check of
+//! commit `f179ca02a`: what the box and the LED share is the box's part inside
+//! the LED, and the intersection and the difference add up to the LED.
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Deflection, Isometry, Vector};
+use rcad_geom::{Isometry, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
-use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, FaceKey, Model, ProfileBuilder, Rule, SolidKey};
 
 const LED: &str = "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step";
 
@@ -30,61 +36,41 @@ const LED: &str = "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step";
 const HALF: f64 = 0.1;
 
 #[test]
-fn a_box_round_the_back_corner_where_the_body_touches_the_flat_is_cut_out() {
-    let back = [-1.23, -2.27, 3.0];
-    let radius = 2.5_f64;
-    let flange_in_the_box = HALF * HALF * (2.0 * HALF);
-    let body_in_the_box = HALF
-        * (HALF * (radius * radius - HALF * HALF).sqrt()
-            + radius * radius * (HALF / radius).asin()
-            - 2.0 * HALF * (radius - HALF));
-    a_box_round_a_corner_is_cut_out(back, flange_in_the_box + body_in_the_box);
+fn a_box_round_the_back_corner_gets_past_the_corner_and_stops_at_the_rim() {
+    a_box_round_a_corner_stops_at_the_rim([-1.23, -2.27, 3.0]);
 }
 
 #[test]
-fn a_box_round_the_front_corner_where_a_circle_touches_the_flat_is_cut_out() {
-    let front = [-1.23, -1.27, 3.0];
-    a_box_round_a_corner_is_cut_out(front, HALF * HALF * (2.0 * HALF));
+fn a_box_round_the_front_corner_gets_past_the_corner_and_stops_at_the_rim() {
+    a_box_round_a_corner_stops_at_the_rim([-1.23, -1.27, 3.0]);
 }
 
-/// The LED and a box of side `2 * HALF` centred on `corner` are fused under
-/// intersection and under difference. Each answers with a model `validate`
-/// accepts, what they share is `shared` to within what measuring costs, and the
-/// two answers add up to the LED.
-fn a_box_round_a_corner_is_cut_out(corner: [f64; 3], shared: f64) {
+/// The LED and a box of side `2 * HALF` centred on `corner`, fused under
+/// intersection and under difference, each refused as following no trimming
+/// of the upper half of the flange's rim.
+fn a_box_round_a_corner_stops_at_the_rim(corner: [f64; 3]) {
     let (led, solid) = the_led();
-    let (whole, whole_error) = volume_of(&led, &[solid]);
-    let mut volumes = Vec::new();
+    let rim = the_upper_half_of_the_rim(&led, solid);
     for rule in [Rule::Intersection, Rule::Difference] {
         let mut model = led.clone();
         let knife = a_box_round(&mut model, corner);
-        let fused = model
-            .fuse(
-                &[solid],
-                &[knife],
-                rule,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .unwrap_or_else(|why| panic!("{rule:?} with a box round {corner:?} refused: {why:?}"));
-        model
-            .validate(&Policy::certified(), &mut ProvenanceLog::new())
-            .unwrap_or_else(|why| {
-                panic!("{rule:?} round {corner:?} is not a valid model: {why:?}")
-            });
-        volumes.push(volume_of(&model, fused.solids()));
+        match model.fuse(
+            &[solid],
+            &[knife],
+            rule,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) {
+            Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) => assert_eq!(
+                face, rim,
+                "{rule:?} with a box round {corner:?} names a face other than the rim"
+            ),
+            Ok(_) => panic!(
+                "{rule:?} with a box round {corner:?} answers: check its volume as f179ca02a did"
+            ),
+            Err(other) => panic!("{rule:?} with a box round {corner:?} refused: {other:?}"),
+        }
     }
-    let [(common, common_error), (rest, rest_error)] = volumes[..] else {
-        unreachable!("two rules were fused")
-    };
-    assert!(
-        (common - shared).abs() <= common_error + 1e-12,
-        "the LED and the box round {corner:?} share {common} ± {common_error}, and {shared} is right"
-    );
-    assert!(
-        (common + rest - whole).abs() <= common_error + rest_error + whole_error + 1e-12,
-        "round {corner:?}, {common} shared and {rest} left do not add up to the LED's {whole}"
-    );
 }
 
 fn the_led() -> (Model, SolidKey) {
@@ -102,6 +88,32 @@ fn the_led() -> (Model, SolidKey) {
     (import.model().clone(), solid)
 }
 
+/// The upper half of the flange's rim: of the two faces of the LED on a pipe
+/// of radius 2.9, the one that runs from the plane `z = 3` up to where the
+/// rim meets the flat, at `z = 3 + sqrt(2.9² - 2.5²)`.
+fn the_upper_half_of_the_rim(led: &Model, solid: SolidKey) -> FaceKey {
+    let halves: Vec<FaceKey> = led
+        .solid(solid)
+        .expect("a solid of this model")
+        .faces()
+        .filter(|face| {
+            let Surface::Cylinder(pipe) = face.surface() else {
+                return false;
+            };
+            (pipe.radius() - 2.9).abs() < 1e-9
+                && face
+                    .wires()
+                    .flat_map(|wire| wire.coedges())
+                    .any(|coedge| coedge.start().point().z() > 4.0)
+        })
+        .map(|face| face.key())
+        .collect();
+    let [upper] = halves[..] else {
+        panic!("the LED has one upper half of a rim of radius 2.9, not {halves:?}")
+    };
+    upper
+}
+
 fn a_box_round(model: &mut Model, corner: [f64; 3]) -> SolidKey {
     let side = 2.0 * HALF;
     let square = ProfileBuilder::new(vec![[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]])
@@ -115,20 +127,4 @@ fn a_box_round(model: &mut Model, corner: [f64; 3]) -> SolidKey {
             &Isometry::translation(low).expect("a finite shift"),
         )
         .expect("a box")
-}
-
-/// The volume of `solids` together, and how far measuring it may be off.
-fn volume_of(model: &Model, solids: &[SolidKey]) -> (f64, f64) {
-    solids.iter().fold((0.0, 0.0), |(volume, error), &solid| {
-        let measured = model
-            .solid(solid)
-            .expect("a solid of this model")
-            .measure(
-                Deflection::for_scale(model.scale()),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .expect("it measures");
-        (volume + measured.volume(), error + measured.volume_error())
-    })
 }
