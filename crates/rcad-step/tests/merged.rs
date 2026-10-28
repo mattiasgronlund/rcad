@@ -74,6 +74,8 @@ pub mod a_flared_bar_reads_whichever_way_its_pipe_points;
 pub mod a_flat_cap_is_cut_up_the_same_after_its_own_file;
 #[path = "a_fuse_read_back_from_rounded_text.rs"]
 pub mod a_fuse_read_back_from_rounded_text;
+#[path = "a_led_whose_flat_touches_its_body_at_a_corner.rs"]
+pub mod a_led_whose_flat_touches_its_body_at_a_corner;
 #[path = "a_mitre_ellipse_between_two_thin_pipes.rs"]
 pub mod a_mitre_ellipse_between_two_thin_pipes;
 #[path = "a_mitre_whose_centre_the_file_writes_off_its_pipe.rs"]
