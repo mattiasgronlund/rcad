@@ -26,6 +26,7 @@ side by side.
   424.8   What Q1531 built
   424.9   The two bars of 424.4, counted
   424.10  What Q1840 built
+  424.11  What Q2535 built
 
 ### 424.1 What was measured
 
@@ -336,3 +337,34 @@ in.
   `apply` already holds, sharing a file with the row already there, is taken
   without refusal, since the branch exception excludes that hold from the
   check.
+
+### 424.11 What Q2535 built
+
+§424.7's `lane.md` quote above, "it keeps working inside the set it was sent
+with, and names the entry and the hold in `remaining`", was `lane.md`'s own
+rule for a widening back that `narrow` refuses. Carried across a relay, that
+rule is what let Q2406's relays 2 and 3 edit `arrange.rs` entries the fill had
+already handed to Q2270 while Q2406 held a narrower set of its own, so both
+rows had to be re-filed. The frozen `lane.writeSet` `RELAY()` built its "You
+own" line from was itself part of the gap: a lane before a relay may have
+narrowed the hold down from the row's take, and the fill may since have given
+a freed entry to another row, so the taken set a relay's brief quoted was not
+always the set it still held.
+
+- **`lane.md` no longer says a lane may edit on.** It now reads: "A lane
+  edits nothing outside its current hold. Widen it first, and report it as
+  blocked when the widen is refused, naming the entry and the hold the
+  refusal quotes, rather than editing the file anyway: the two branches would
+  otherwise meet it at merge (§424)." A widen refused mid-row is `blocked`,
+  never a reason to touch a file outside the hold.
+- **A relay reads its current hold itself, rather than trusting the brief's
+  taken set.** `lanes.js` has no filesystem or process access of its own, so
+  `RELAY()` now tells the relay to run `mise exec -- just queue show <id>`
+  for each id of the row before it edits anything, and to own whatever that
+  prints: the narrowed set where it prints one ("narrowed to <set>"), the
+  taken set otherwise. The brief still quotes the taken set, but only as what
+  the row started with, not as what the relay owns.
+- **The tests.** `check-lanes-workflow` gained five fixtures in the
+  `relay_*` family's style, pinning both halves: the new `lane.md` prose, and
+  `RELAY()`'s brief telling a relay to read its current hold with `just queue
+  show` rather than handing it `lane.writeSet` as the set it owns.
