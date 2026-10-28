@@ -6369,6 +6369,110 @@ fn into_the_arc_square_to_the_chord_from_the_centre(
     }
 }
 
+/// Which end of an edge on a closed curve says which of the curve's two arcs
+/// between `ends` it is, when only one of them can lie in the box `inside`:
+/// `Some(1)` for the end, `Some(0)` for the start, and `None` when the box
+/// rules neither arc out.
+///
+/// The fuse's arrangement asks this of an edge [`the_way_into_an_arc`] cannot
+/// read (`which_way_an_edge_runs_round` in `fuse/arrange.rs`), with the box
+/// round the face the edge bounds. A STEP file's flat along a round bar is
+/// the case it was written for: the flat's stored normal is a rounding off
+/// square to the bar's axis, so its plane cuts the pipe in an ellipse about
+/// `1.6e32` long rather than in two lines, and the file stores the edge as a
+/// straight line, which carries no picker (row Q2926).
+///
+/// **The argument.** Let `g(p) = (p − start)·chord`, with `chord = end −
+/// start`, so `g` is 0 at the start and `|chord|²` at the end. Along a closed
+/// conic `g` has one highest point `M` and one lowest point `m`, and the two
+/// arcs between them each climb from `m` to `M`. Walking from the end the way
+/// `g` climbs reaches `M` before the start, which is lower, so `M` is on the
+/// arc that leaves the end climbing; and `m` is on the arc that leaves the
+/// start falling, for the same reason.
+///
+/// The conic is its own image through its centre `c`, so `2c − start` is on
+/// it and `M` is at least as high. When `2c − start` is higher than every
+/// point of `inside` and of both end boxes, `M` is outside them all. The edge
+/// lies in `inside`, so it is the other arc, the one that arrives at the end
+/// climbing, and it runs the crossing's forward way exactly when the
+/// crossing's direction at the end reads positive against the chord:
+/// `Some(1)`. When `2c − end` is lower than all of them, `m` is outside, the
+/// edge is the arc that leaves the start climbing, and it is read at the
+/// start against the same chord: `Some(0)`.
+///
+/// **The direction read there is never square to the chord.** That would put
+/// the end it is read at on `M` or `m`. Read at the end, `M` is higher than
+/// every end box and `m` is no higher than the start, which is below the end;
+/// read at the start, the same turned round.
+///
+/// **No centre is formed and no division is taken**, as in
+/// [`into_the_arc_away_from_the_centre`]. With `n` and `e` the plane's normal
+/// and offset, `k = n·along` is positive and `c = from + ((e − n·from)/k)·along`,
+/// so `g(2c − p) − g(q)`, multiplied through by `k`, is
+///
+/// ```text
+/// k·(2·from − p − q)·chord + 2·(e − n·from)·along·chord
+/// ```
+///
+/// That is read in interval arithmetic with `q` the whole box round `inside`
+/// and both end boxes, and `p` and the chord over the whole of each end's box,
+/// so a sign that comes back certified holds at the true ends wherever in
+/// their boxes they are. A chord that could be zero leaves the sign open.
+///
+/// **As sure as the box is.** The arrangement already leaves out a cut whose
+/// nodes all miss the same box, and `Bounds` in `fuse/bake.rs` says what it
+/// allows for.
+pub(crate) fn which_end_tells_the_arc_a_box_holds(
+    surface: &Surface,
+    across: &Surface,
+    ends: [PredicatePoint; 2],
+    inside: [Interval; 3],
+) -> Option<usize> {
+    let flat = surface.as_plane().or_else(|| across.as_plane())?;
+    let round = if surface.as_plane().is_some() {
+        across
+    } else {
+        surface
+    };
+    let centred = where_a_closed_crossing_is_centred(round, flat)?;
+    let normal = exactly(flat.normal().components());
+    let from = exactly(centred.from.coordinates());
+    let k = dot(normal, centred.along);
+    if k.sign() != Decision::Pos {
+        return None;
+    }
+    let up = Interval::exactly(flat.offset()) - dot(normal, from);
+    let [start, end] = ends.map(PredicatePoint::enclosure);
+    let chord: [Interval; 3] = core::array::from_fn(|axis| end[axis] - start[axis]);
+    let everywhere: [Interval; 3] = core::array::from_fn(|axis| {
+        let sides = [inside[axis], start[axis], end[axis]];
+        Interval::new(
+            sides
+                .iter()
+                .map(|side| side.lo())
+                .fold(f64::INFINITY, f64::min),
+            sides
+                .iter()
+                .map(|side| side.hi())
+                .fold(f64::NEG_INFINITY, f64::max),
+        )
+        .unwrap_or(Interval::ENTIRE)
+    });
+    let past_the_box = |reflected: [Interval; 3]| {
+        let far: [Interval; 3] = core::array::from_fn(|axis| {
+            Interval::exactly(2.0) * from[axis] - reflected[axis] - everywhere[axis]
+        });
+        (dot(far, chord) * k + Interval::exactly(2.0) * up * dot(centred.along, chord)).sign()
+    };
+    if past_the_box(start) == Decision::Pos {
+        Some(1)
+    } else if past_the_box(end) == Decision::Neg {
+        Some(0)
+    } else {
+        None
+    }
+}
+
 /// Where the closed curve `flat` cuts a round surface in is centred: walk
 /// `along` from `from` until the plane is reached.
 ///
@@ -14403,6 +14507,117 @@ mod tests {
                 start,
                 square_to_the_chord
             ),
+            None
+        );
+    }
+
+    /// **An edge on the ellipse where a flat a rounding off square to a round
+    /// bar's axis cuts the bar's rim is read off the box round the rim's face**
+    /// (row Q2926): at its end, and walked the other way at its start.
+    ///
+    /// The numbers are `LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step`'s, to the
+    /// digits the trace printed. The rim is a pipe of radius 2.9 about
+    /// `x = 1.27, z = 3` whose axis leans `1.1e-15` off `y`, and the flat
+    /// `x = −1.23` has a normal `3.6e-32` off `x`, so the two cut in an ellipse
+    /// about `1.6e32` long, centred near `y = −6.9e31`. The edge the file
+    /// stores as a straight line runs along it from `y = −1.27` to `y = −2.27`
+    /// at `z = 3 + √2.16`, with no picker, and the box is about the rim's face.
+    /// The far side of the ellipse, through its centre from the start, is near
+    /// `y = −1.4e32`, well past the box along the chord.
+    #[test]
+    fn an_edge_along_a_flat_a_rounding_off_a_bars_axis_is_read_off_the_rims_box() {
+        let rim = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(
+                    Point::new(1.27, -1.27, 3.0),
+                    Vector::new(0.0, 1.0, -1.110223024625e-15),
+                )
+                .expect("a direction"),
+                2.9,
+            )
+            .expect("a positive radius"),
+        );
+        let flat = Surface::Plane(
+            Plane::from_point_and_normal_as_written(
+                Point::new(-1.23, 0.0, 0.0),
+                Vector::new(-1.0, -3.610376979647e-32, 4.6139316296e-47),
+            )
+            .expect("a unit normal"),
+        );
+        let near = |y: f64| {
+            PredicatePoint::Constructed(
+                [-1.23, y, 3.0 + 2.16_f64.sqrt()]
+                    .map(|at| Interval::around(at, 1e-12).expect("a box")),
+            )
+        };
+        let interval = |lo: f64, hi: f64| Interval::new(lo, hi).expect("an interval");
+        let round_the_rim = [
+            interval(-1.7, 4.2),
+            interval(-2.3, -1.2),
+            interval(0.0, 6.0),
+        ];
+        for (surface, across) in [(&rim, &flat), (&flat, &rim)] {
+            assert_eq!(
+                which_end_tells_the_arc_a_box_holds(
+                    surface,
+                    across,
+                    [near(-1.27), near(-2.27)],
+                    round_the_rim
+                ),
+                Some(1)
+            );
+            assert_eq!(
+                which_end_tells_the_arc_a_box_holds(
+                    surface,
+                    across,
+                    [near(-2.27), near(-1.27)],
+                    round_the_rim
+                ),
+                Some(0)
+            );
+        }
+    }
+
+    /// **The box reads an arc only where it rules the other one out.** The
+    /// plane `−0.96x + 0.28z = 0` cuts a pipe of radius one up the `z` axis in
+    /// an ellipse, and the arc from `t = 0.1` to `t = 1` of
+    /// `(cos t, sin t, 24/7·cos t)` fits in a box round itself: the point
+    /// through the centre from its start is past that box along the chord, so
+    /// it is read at its end. A box round the whole ellipse holds both arcs,
+    /// and nothing is read.
+    #[test]
+    fn a_box_round_a_whole_ellipse_reads_no_arc_of_it() {
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::new(Point::origin(), Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
+                1.0,
+            )
+            .expect("a positive radius"),
+        );
+        let tilted = Surface::Plane(
+            Plane::from_point_and_normal(Point::origin(), Vector::new(-0.96, 0.0, 0.28))
+                .expect("a unit normal"),
+        );
+        let on_the_ellipse = |t: f64| {
+            PredicatePoint::Constructed(
+                [t.cos(), t.sin(), t.cos() * 24.0 / 7.0]
+                    .map(|at| Interval::around(at, 1e-12).expect("a box")),
+            )
+        };
+        let ends = [0.1, 1.0].map(on_the_ellipse);
+        let interval = |lo: f64, hi: f64| Interval::new(lo, hi).expect("an interval");
+        let round_the_arc = [interval(0.5, 1.0), interval(0.05, 0.9), interval(1.8, 3.5)];
+        let round_the_ellipse = [
+            interval(-1.1, 1.1),
+            interval(-1.1, 1.1),
+            interval(-3.5, 3.5),
+        ];
+        assert_eq!(
+            which_end_tells_the_arc_a_box_holds(&pipe, &tilted, ends, round_the_arc),
+            Some(1)
+        );
+        assert_eq!(
+            which_end_tells_the_arc_a_box_holds(&pipe, &tilted, ends, round_the_ellipse),
             None
         );
     }
