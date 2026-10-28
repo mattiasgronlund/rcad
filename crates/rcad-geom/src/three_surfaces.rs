@@ -5593,11 +5593,12 @@ fn what_a_plane_that_cuts_both_in_conics_leaves(
     let off = (0..3)
         .max_by(|i, j| normal[*i].abs().total_cmp(&normal[*j].abs()))
         .expect("three numbers");
-    let [first, second] = match off {
+    let on_the_plane = match off {
         0 => [1, 2],
         1 => [0, 2],
         _ => [0, 1],
     };
+    let [first, second] = on_the_plane;
     let [mine, theirs] = [
         the_conic_a_plane_cuts(flat, &written[0], [off, first, second])?,
         the_conic_a_plane_cuts(flat, &written[1], [off, first, second])?,
@@ -5610,6 +5611,16 @@ fn what_a_plane_that_cuts_both_in_conics_leaves(
     } else {
         [0, 1]
     };
+    let stretch = if squared_by(kept) == 0.0 {
+        0
+    } else {
+        (binary_exponent(squared_by(gone)) - binary_exponent(squared_by(kept))) / 2
+    };
+    let widened = slid_exactly(1.0, stretch)?;
+    let [mine, theirs] = [
+        the_conic_stretched_and_lifted(&mine, kept, stretch)?,
+        the_conic_stretched_and_lifted(&theirs, kept, stretch)?,
+    ];
     let [a, b] = [&mine, &theirs].map(|form| as_a_quadratic_in_one_number(form, [kept, 2, gone]));
     if ![&a[2][0], &b[2][0]]
         .iter()
@@ -5655,8 +5666,8 @@ fn what_a_plane_that_cuts_both_in_conics_leaves(
         }
         let other_root = quotient_or_everything(-the_value_over(&ends, root), pull);
         let mut boxed = [Interval::exactly(0.0); 3];
-        boxed[kept] = root;
-        boxed[gone] = other_root;
+        boxed[on_the_plane[kept]] = root * Interval::exactly(widened);
+        boxed[on_the_plane[gone]] = other_root;
         boxed[off] = quotient_or_everything(
             Interval::exactly(flat.offset())
                 - Interval::exactly(normal[first]) * boxed[first]
@@ -5726,6 +5737,59 @@ fn the_conic_a_plane_cuts(
     );
     Some(form)
 }
+
+/// `form` written in `t`, where the unknown `kept` is `2^stretch·t`, and
+/// multiplied by the power of two that puts its largest number's binade at
+/// [`HIGHEST_BINADE_A_CONIC_IS_LIFTED_TO`]; or `None` where a number leaves
+/// the range on the way.
+///
+/// Both are exact, since a power of two moves every entry of an expansion
+/// together, and neither moves a point the two conics share: the stretch only
+/// renames the unknown, and the lift multiplies the whole conic by a number
+/// that is not nothing.
+fn the_conic_stretched_and_lifted(
+    form: &[[Exact; 3]; 3],
+    kept: usize,
+    stretch: i32,
+) -> Option<[[Exact; 3]; 3]> {
+    let stretched_by =
+        |row: usize, column: usize| stretch * (i32::from(row == kept) + i32::from(column == kept));
+    let highest = (0..3)
+        .flat_map(|row| (0..3).map(move |column| (row, column)))
+        .filter_map(|(row, column)| {
+            let near = form[row][column].nearest_f64();
+            (near != 0.0).then(|| binary_exponent(near) + stretched_by(row, column))
+        })
+        .max()?;
+    let lift = HIGHEST_BINADE_A_CONIC_IS_LIFTED_TO - highest;
+    let mut slid = nothing_squared();
+    for (row, entries) in slid.iter_mut().enumerate() {
+        for (column, entry) in entries.iter_mut().enumerate() {
+            *entry = form[row][column].slid_by(stretched_by(row, column) + lift)?;
+        }
+    }
+    Some(slid)
+}
+
+/// Where [`the_conic_stretched_and_lifted`] puts the binade of a conic's
+/// largest number.
+///
+/// **The quartic's numbers are sums of products of four of the conics'**, two
+/// from each, so with both conics' largest numbers at `2²⁰⁰` the quartic's sit
+/// near `2⁸⁰⁰`. That leaves [`where_a_polynomial_is_zero`] room to evaluate it
+/// at a place up to `2⁵⁵` under the top of `f64`, and the stretch puts its
+/// roots near one.
+///
+/// **What runs out at the bottom is a product below `2⁻⁹⁶⁹`**, which
+/// [`Exact::times`] refuses. A conic whose numbers reach `σ` binades below its
+/// largest one leaves the quartic's reaching about `2(σ₁ + σ₂)` below `2⁸⁰⁰`,
+/// so conics reaching some 880 binades down between them still fit. On an
+/// LED's front flat they reach 311 and 480 binades down, and the quartic's
+/// numbers run from `2⁷⁹²` down to `2⁻⁷⁹⁸`. Replayed over the rationals, ten
+/// of its products fall below `2⁻⁹⁶⁹` with the largest numbers lifted to
+/// `2¹⁰⁰`, and none at `2¹⁵⁰`, `2²⁰⁰` or `2²⁵⁰`. Chosen by that argument and
+/// in the middle of what works there, not tuned by a sweep.
+const HIGHEST_BINADE_A_CONIC_IS_LIFTED_TO: i32 = 200;
 
 /// The form `numbers` as `f₂·z² + f₁·z + f₀` in `z`, the number `order[2]`
 /// names, each `fᵢ` a polynomial in `x`, the number `order[0]` names, lowest
