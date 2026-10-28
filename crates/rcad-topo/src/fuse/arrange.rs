@@ -3910,15 +3910,18 @@ impl<'f> Arrangement<'f> {
     }
 
     /// Whether the face's surface and the partners of `first` and `second` are
-    /// three planes that `bake` solved `corner` among and asked about it.
+    /// three planes that `bake` asked about `corner`, whether `corner` was
+    /// solved from them or read out of the model.
     ///
     /// A corner with three or more surfaces round it is solved from three of
-    /// them (`derive_a_corner`), and every surface round it is then asked about
-    /// the corner grown by the room writing it down cost plus the room
-    /// `validate` allows a corner of its solid off that surface
-    /// (`Model::room_a_corner_of_this_solid_gets`, §368); one that proves it
-    /// off is a refusal ([`BakedCorner::around`](super::bake::BakedCorner)).
-    /// So each of the three passes through the corner's box grown by that room.
+    /// them when that succeeds (`derive_a_corner`), and read out of the model
+    /// and still asked when it does not (§471.3). Either way every surface
+    /// round it is asked about the corner grown by the room writing it down
+    /// cost plus the room `validate` allows a corner of its solid off that
+    /// surface (`Model::room_a_corner_of_this_solid_gets`, §368); one that
+    /// proves it off is a refusal
+    /// ([`BakedCorner::around`](super::bake::BakedCorner)). So each of the
+    /// three passes through the corner's box grown by that room.
     /// **That is a room across each plane**, which is where the room is a room
     /// at all: it is how far a plane through one corner of a face may miss the
     /// next, by rounding and by the modelling tolerance `validate` grants.
