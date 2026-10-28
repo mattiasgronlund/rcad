@@ -106,6 +106,8 @@ pub mod a_z2_led_corner_off_its_face;
 pub mod an_led_dome_seam_is_cut_once;
 #[path = "an_led_dome_wire_lies_flat.rs"]
 pub mod an_led_dome_wire_lies_flat;
+#[path = "an_led_whose_dome_meets_its_pipe_in_two_arcs.rs"]
+pub mod an_led_whose_dome_meets_its_pipe_in_two_arcs;
 #[path = "every_file_in_the_corpus_reads.rs"]
 pub mod every_file_in_the_corpus_reads;
 #[path = "every_file_the_reader_fuzzer_kept_is_read_again.rs"]
