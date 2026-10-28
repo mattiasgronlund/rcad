@@ -23,6 +23,9 @@ every case of §411.9's list:
   label rather than by `role_of`'s own lane field (§411.5, §416, Q1935);
 - a shared gate whose holder's own run is gone from the retained transcripts,
   named rather than crashing the whole read (§411.5, Q1935);
+- a lander that relayed mid-`just land` in its own row's own run, grouped with
+  the lane and the pre-relay lander it continues rather than left unattributed
+  (§411.5, §416, Q2605);
 - a response priced from its usage, a streamed group keeping only the record
   with the largest `output_tokens` (§411.1);
 - and a fixture whose parts do not add up, which must make `row-time` fail
@@ -357,11 +360,14 @@ def a_relayed_holder_lands_another_run(world):
     """Q10 and Q11: Q10's lander relays mid-`just land` (§416); its relay lands Q11's lane under its gate.
 
     The relay's own label is `relay 1:land:q10-relayed-holder`: `role_of` keeps
-    its role `lane` and keeps the `land:` prefix in the lane field it computes,
-    so it is grouped under neither Q10's own lane (a separate, known gap: its
-    time falls to `unattributed` rather than Q10's row) nor found as a lander
-    by `agent["lane"]`. `land_lane_of` reads the raw label instead, which is
-    what lets Q11's lander still find it as the holder (Q1935).
+    its role `lane` and keeps the `land:` prefix in the lane field it computes.
+    `lane_key_of` strips that leftover prefix for `by_lane`'s grouping key, so
+    the relay still joins Q10's own attempt, as role `lane`, beside the lane,
+    the verifier and the pre-relay lander it continues (Q2605); it is not
+    found as a lander by `agent["lane"]`, which `link_shared_gates` never asks
+    of it since its role stays `lane`. `land_lane_of` reads the raw label
+    instead, which is what lets Q11's lander still find it as the holder
+    (Q1935).
     """
     lane = Talk("/trees/r20-1")
     lane.prompt(1_000_000)
@@ -646,12 +652,16 @@ def check_a_relayed_holder_lands_another_run(assembled):
         "before the first record": 0, "model: writing commands": 900, "land lock": 9_000,
         "after the last record": 1_000})
     row = rows["Q10"]
-    same("Q10: its own row holds only the lane, verifier and the lander's pre-relay segment",
+    same("Q10: its own row holds the lane, the verifier, the pre-relay lander and the relay that "
+         "continues it, the relay keeping role lane (Q2605)",
          [agent["role"] for attempt in row["attempts"] for agent in attempt["agents"]],
-         ["lane", "verifier", "lander"])
-    same("Q10: the relay's own time is unattributed, a separate gap from the one this row fixes",
-         [item for item in assembled["unattributed"] if item["lane"] == "land:q10-relayed-holder"],
-         [{"run": "wf_r20", "lane": "land:q10-relayed-holder", "agents": 1, "time": 40_000}])
+         ["lane", "verifier", "lander", "lane"])
+    same("Q10: no time is left unattributed under the relay's own doubly-prefixed label",
+         [item for item in assembled["unattributed"] if item["lane"] == "land:q10-relayed-holder"], [])
+    same("Q10: the relay's 40s now falls into the row's own elapsed time and agents part",
+         (row["elapsed"], row["parts"]), (92_000, {
+             "waiting to start": 1_000, "agents": 88_900, "handoff": 1_600,
+             "earlier merge in the same run": 500, "between attempts": 0, "after the run": 0}))
 
 
 def check_a_missing_holder_lands_another_run(assembled):
