@@ -1837,20 +1837,25 @@ fn a_pipe_holds_a_flat_face(surface: &Surface, face: &BakedFace) -> bool {
         return false;
     }
     let mut sides = face.wires.iter().flatten().peekable();
-    sides.peek().is_some()
-        && sides.all(|side| match (&side.across, &side.along_a_curved_surface) {
-            (Surface::Plane(_), None) => [&side.start, &side.end]
+    sides.peek().is_some() && sides.all(|side| a_pipe_holds_a_side(pipe, side))
+}
+
+/// Whether `pipe` holds one side of a flat face strictly inside, as
+/// [`a_pipe_holds_a_flat_face`] asks it: a straight side by its two corners'
+/// boxes, a side along a pipe by the ball round where that pipe crosses the
+/// face's plane, and a side along anything else not at all.
+fn a_pipe_holds_a_side(pipe: &rcad_geom::Cylinder, side: &BakedEdge) -> bool {
+    let Some(WhereAPlaneCrossesACurvedSurface { plane, curved }) = &side.along_a_curved_surface
+    else {
+        return side.across.as_plane().is_some()
+            && [&side.start, &side.end]
                 .into_iter()
-                .all(|corner| a_pipe_holds_a_box(pipe, corner.point.enclosure())),
-            (
-                _,
-                Some(WhereAPlaneCrossesACurvedSurface {
-                    plane,
-                    curved: Surface::Cylinder(round),
-                }),
-            ) => a_pipe_holds_where_a_plane_crosses_a_pipe(pipe, plane, round),
-            _ => false,
-        })
+                .all(|corner| a_pipe_holds_a_box(pipe, corner.point.enclosure()));
+    };
+    let Surface::Cylinder(round) = curved else {
+        return false;
+    };
+    a_pipe_holds_where_a_plane_crosses_a_pipe(pipe, plane, round)
 }
 
 /// Whether every point of `room` is provably nearer `pipe`'s axis than its
