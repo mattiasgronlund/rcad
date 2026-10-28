@@ -197,7 +197,8 @@ const results = await pipeline(
   (report, item) => notPrepared(item) || verified(report, laneOf(item)),
   (prior, item) => {
     const lane = laneOf(item)
-    if (prior.stop) return handedBack(lane, prior)
+    const verifierSaidMerge = !!prior.check && (prior.check.verdict === 'merge' || prior.check.verdict === 'fix_first')
+    if (prior.stop && !verifierSaidMerge) return handedBack(lane, prior)
     if (!writes(lane) || prior.committedNothing) return { lane: lane.label, answer: prior.report }
     return mergeAfterTheLast(lane, prior).then((merge) => {
       const row = merged(lane, prior, merge)
@@ -617,6 +618,7 @@ function mergeAfterTheLast(lane, prior) {
 // then check `origin/main` for the lane's tip, before it merges anything.
 function merging(lane, prior) {
   if (prior.kind === 'does_not_reproduce') return closedAtBase(lane, prior)
+  if (prior.stop) return byMerger(lane, prior, null)
   if (!landable(prior)) return byMerger(lane, prior, null)
   return agent(LAND(lane, prior), LANDER(lane)).then(
     (land) => land && land.merged === true ? landedBy(land) : byMerger(lane, prior, landStop(land)),
@@ -1212,10 +1214,13 @@ Then run these two:
   git merge-base --is-ancestor ${branchOf(lane)} origin/main
 Exit 0 from the second means the lander's run pushed before it stopped or died: merge nothing, and finish by merger.md's paragraph on just land.`
     : 'The lander did not run: the verifier asked for fixes, the lane wrote no rows just land takes, or the gate the verifier ran did not read gate: PASS.'
+  const dispatcherStop = prior.stop
+    ? `The dispatcher itself stopped this row, despite the verifier's verdict of ${prior.check.verdict}, before any lander ran: ${prior.stop}\n`
+    : ''
   return `Merge queue ${rowsOf(lane)}, lane ${lane.label}, onto main, or say why not.
 Lane branch: ${branchOf(lane)}, which it reports ending at ${r.landed_sha}.
 The lane's write set: ${lane.writeSet.join(', ')}
-Trees to unlock: the lane's, ${r.worktree_path}; ${relayedFrom(prior)}${verifier}
+${dispatcherStop}Trees to unlock: the lane's, ${r.worktree_path}; ${relayedFrom(prior)}${verifier}
 Only if your push went through, after unlocking your own tree: mise exec -- just mark-finished ${treesOf(prior).join(' ')} <your own tree>
 Your first commands, in this order:
   git log --oneline -1
