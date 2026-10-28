@@ -2074,6 +2074,12 @@ fn every_order<'a>([one, two, three]: [&'a Surface; 3]) -> [[&'a Surface; 3]; 6]
 /// it, and not certified off any of the three. The second flat is the same
 /// LED's at a height of nine, leaning the other way; the third is a thinner
 /// LED's, of radii 1.5 and 1.9.
+///
+/// **The fourth is `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step`'s**, whose flat
+/// leans `2·10⁻³²` along `y` where the others lean `10⁻¹⁶`. The two conics'
+/// own numbers then reach 365 and 582 binades below their largest, and with
+/// the largest of each lifted to `2²⁰⁰` a product the quartic needs fell
+/// below `2⁻⁹⁶⁹`, so the three were refused until the lift moved up.
 #[test]
 fn the_front_flat_of_an_led_meets_its_body_and_rim_twice_far_out_along_them() {
     for (normal, offset, on_both_axes, [body_radius, rim_radius], corners) in [
@@ -2105,6 +2111,16 @@ fn the_front_flat_of_an_led_meets_its_body_and_rim_twice_far_out_along_them() {
             [
                 [-0.1130199095964989, 750734875460068.2, 10.469304608987658],
                 [0.0838406976263085, 2014113309658867.0, 9.248144477552888],
+            ],
+        ),
+        (
+            [-1.0, -2.102719556706e-32, 2.575941704354e-47],
+            0.23,
+            [1.27, -3.81, 2.0],
+            [1.5, 1.9],
+            [
+                [-0.22999999999999998, -1493341088686801.8, 2.491751281309587],
+                [-0.22999999999999998, -737012837785723.6, 1.6520582429848565],
             ],
         ),
     ] {
