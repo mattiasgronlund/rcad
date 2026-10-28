@@ -15286,13 +15286,19 @@ fn round_a_closed_crossing_by_its_angle(
     one: PredicatePoint,
     other: PredicatePoint,
 ) -> Option<Decision> {
-    let ([Surface::Plane(flat), Surface::Cylinder(pipe)]
-    | [Surface::Cylinder(pipe), Surface::Plane(flat)]) = pair
-    else {
+    let (flat, axis, round_a_pipe) = if let [Surface::Plane(flat), Surface::Cylinder(pipe)]
+    | [Surface::Cylinder(pipe), Surface::Plane(flat)] = pair
+    {
+        (flat, pipe.axis(), true)
+    } else if let [Surface::Plane(flat), Surface::Cone(cone)]
+    | [Surface::Cone(cone), Surface::Plane(flat)] = pair
+    {
+        (flat, cone.axis(), false)
+    } else {
         return None;
     };
-    let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
-    let along = pipe.axis().direction().components().map(Interval::exactly);
+    let origin = axis.origin().coordinates().map(Interval::exactly);
+    let along = axis.direction().components().map(Interval::exactly);
     let off_the_axis = |place: PredicatePoint| {
         let at = place.enclosure();
         [0, 1, 2].map(|axis| at[axis] - origin[axis])
@@ -15324,6 +15330,9 @@ fn round_a_closed_crossing_by_its_angle(
     let stepped_past_one = (the_way_it_turns * turned(first, step)).sign();
     if proved(stepped_past_one) {
         return Some(stepped_past_one);
+    }
+    if !round_a_pipe {
+        return None;
     }
     let other_up_past_one =
         (the_way_it_turns * turned_as_far_apart_up_the_axis(flat, along, first, second)).sign();
