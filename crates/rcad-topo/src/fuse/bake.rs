@@ -1243,11 +1243,6 @@ fn place_a_corner(
             in_the_fuse: planes_in_the_fuse,
         });
         let read_out_of_the_model_when_unsolved = distinct.len() == of_its_faces
-            && distinct
-                .iter()
-                .filter(|surface| surface.as_plane().is_some())
-                .count()
-                < 3
             && each_fan_round_it_has_fewer_than_three_surfaces(model, slot, surfaces);
         if !read_out_of_the_model_when_unsolved {
             return derive_a_corner(
@@ -1270,7 +1265,18 @@ fn place_a_corner(
             policy,
             &mut tried,
         ) {
-            Err(Error::Undecidable { .. }) => (),
+            Err(Error::Undecidable { .. }) => {
+                return Ok(BakedCorner {
+                    seam_plane: the_seam_plane_a_corner_is_on(model, slot, &around),
+                    ..asked_at(
+                        vertex,
+                        where_the_model_puts_it,
+                        None,
+                        &distinct,
+                        validate_allows,
+                    )?
+                });
+            }
             answered => {
                 tried.drain_into(log);
                 return answered;
@@ -1670,7 +1676,7 @@ fn derive_a_corner(
             log,
         ));
     };
-    let best = solved_at(vertex, point, solved_from, &around, validate_allows)?;
+    let best = asked_at(vertex, point, Some(solved_from), &around, validate_allows)?;
     let Some(among) = choosing_among else {
         return Ok(best);
     };
@@ -1680,7 +1686,7 @@ fn derive_a_corner(
     Ok(solved[1..]
         .iter()
         .find_map(|&(point, solved_from)| {
-            solved_at(vertex, point, solved_from, &around, validate_allows)
+            asked_at(vertex, point, Some(solved_from), &around, validate_allows)
                 .ok()
                 .filter(|corner| {
                     !its_reading_lets_a_crossing_in_through_a_face_it_does_not_cut(corner, among)
@@ -1704,17 +1710,18 @@ struct AmongThePlanesOfTheFuse<'a> {
     in_the_fuse: &'a [Plane],
 }
 
-/// The corner solved at `point` from the three surfaces `solved_from`, once
-/// every surface round it has been asked about it.
+/// The corner at `point`, once every surface round it has been asked about it:
+/// solved there from the three surfaces `solved_from`, or, with `None`, read
+/// out of the model there ([`place_a_corner`]).
 ///
 /// # Errors
 ///
 /// [`Invalid::VertexOffItsFacePlane`] or [`Invalid::VertexOffItsFaceSurface`]
 /// when a surface round it proves it is somewhere else.
-fn solved_at(
+fn asked_at(
     vertex: VertexKey,
     point: PredicatePoint,
-    solved_from: [Surface; 3],
+    solved_from: Option<[Surface; 3]>,
     around: &[Surface],
     validate_allows: CornerRoom,
 ) -> Result<BakedCorner> {
@@ -1744,7 +1751,7 @@ fn solved_at(
         vertex,
         point,
         around: around.to_vec(),
-        solved_from: Some(solved_from),
+        solved_from,
         seam_plane: None,
         room_its_planes_were_asked_with: Some(writing_it_down + validate_allows.off_a_plane),
     })
