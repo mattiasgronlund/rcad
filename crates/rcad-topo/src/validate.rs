@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use rcad_geom::{
     Cone, Deflection, DynamicRange, EdgeRun, HalfSpace, Isometry, NEAREST_F64_POINT_ROUNDOFF,
@@ -65,6 +65,9 @@ impl Model {
     ///   turned round does not tear the skin,
     /// - no shell places a face anywhere but where that face is stored, which is
     ///   what says the two faces along an edge agree where that edge is,
+    /// - no two flat faces of a shell run through each other from a corner they
+    ///   share, along a line neither has an edge on
+    ///   ([`Model::check_no_two_flat_faces_run_through_each_other_at_a_corner`]),
     /// - every solid encloses a positive amount of space, which is what says
     ///   its faces point outwards — over its own fan when it is a polyhedron,
     ///   and over a coarse mesh when it is not,
@@ -182,7 +185,7 @@ impl Model {
         self.check_dynamic_range(&reached, policy, log)
     }
 
-    /// Twelve of the sweep's thirteen checks: every one that is about an entity,
+    /// Thirteen of the sweep's fourteen checks: every one that is about an entity,
     /// or about two entities that touch, rather than about the model as a whole.
     ///
     /// **The one left out is the coordinate range**, which is the only check
@@ -217,7 +220,7 @@ impl Model {
         )
     }
 
-    /// The twelve checks, asked of what `scope` holds.
+    /// The thirteen checks, asked of what `scope` holds.
     ///
     /// Each check walks the scope's arenas in slot order, the order `validate`
     /// has always walked the model's, so when the one solid a scope holds is the
@@ -239,6 +242,7 @@ impl Model {
         self.check_closed_edges_are_walked_the_way_their_surfaces_wind(scope, policy, log)?;
         self.check_no_flat_face_is_used_reversed(scope)?;
         self.check_no_face_use_carries_a_placement(scope)?;
+        self.check_no_two_flat_faces_run_through_each_other_at_a_corner(scope)?;
         self.check_shells_and_solids(scope, policy, log)?;
         self.check_approximation_ordering(scope)
     }
@@ -1402,6 +1406,136 @@ impl Model {
         for used in &self.data().shells[slot].faces {
             if used.loc != Isometry::identity() {
                 return Err(Invalid::AFaceUseCarriesAPlacement.into());
+            }
+        }
+        Ok(())
+    }
+
+    /// No two flat faces of one shell run through each other from a corner they
+    /// share, along a line neither has an edge on.
+    ///
+    /// **Two faces of a solid meet only along their edges, and nothing above
+    /// asks it.** A plate less three prisms whose corners meet on one line came
+    /// back from the fuse with each two opposite walls joined into one face
+    /// running straight through that line. Every face sat on its plane and
+    /// wound the right way, and the solid held the right volume, so the sweep
+    /// passed three faces crossing each other where no edge runs
+    /// (`docs/decisions.md` §470.4).
+    ///
+    /// # How it is asked
+    ///
+    /// Two faces on different planes that share a corner both hold the line
+    /// where their planes cross, through that corner. Near the corner a face
+    /// is the wedge between the two sides it leaves the corner by, and where
+    /// its wires pass through the corner more than once, as a plate's top does
+    /// where holes touch, whatever lies in every one of those wedges is face.
+    /// So each face is asked which ways along the line all its wedges there
+    /// reach into, with no side lying along the line. When the two faces reach
+    /// the same way, a piece of the line lies inside both, and the skin runs
+    /// through itself there.
+    ///
+    /// A side is told from the line by the other face's normal, in intervals,
+    /// with room of twice the wobble a corner may sit off its plane, as that
+    /// wobble is read in `f64`. A side along the line from the corner to
+    /// another corner both faces have sits within that wobble of the other
+    /// face's plane at both ends, so it always reads as along. A side too
+    /// short to tell, a turn that cannot be told from straight, and a face
+    /// with a curved side at the corner all say nothing, so what is refused
+    /// certainly crosses.
+    ///
+    /// # What it does not see
+    ///
+    /// Two faces crossing along a line through no corner they share: the
+    /// corners each face has are all this looks at. Finding those means
+    /// asking every pair of faces, which `docs/decisions.md` §17.4 keeps out
+    /// of this sweep for its cost, and the fuse refuses such a solid as
+    /// [`Error::ArgumentIntersectsItself`]. A box whose top is pushed
+    /// down to a point through its floor, drawn through `SolidBuilder`, builds,
+    /// and five fuses of it with a box, far off or across its floor, were each
+    /// refused that way (queue row Q2919's probe, not kept).
+    ///
+    /// # What it costs
+    ///
+    /// At each corner, every pair of flat faces meeting there, each pair
+    /// costing the times their wires pass through that corner: the sum, over
+    /// the corners, of the square of how many faces meet at each. A corner of a
+    /// box has three and the apex of a pyramid as many as its sides, so for
+    /// corners where a bounded number of faces meet it is one pass over the
+    /// corners, and no pass over every pair of faces. It is still more than the
+    /// faces a mutation touched, so like the rest of this sweep it runs at a
+    /// test or an import and not after every operation (`docs/decisions.md`
+    /// §4.3).
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::TwoFlatFacesRunThroughEachOtherWhereNeitherHasAnEdge`],
+    /// naming the first corner in slot order where two faces cross.
+    fn check_no_two_flat_faces_run_through_each_other_at_a_corner(
+        &self,
+        scope: &Scope,
+    ) -> Result<()> {
+        let largest_coordinate = self.largest_coordinate_in(scope);
+        let room = 2.0
+            * (self.allowed_wobble(largest_coordinate)
+                + self.what_writing_a_plane_down_costs(largest_coordinate));
+        for slot in scope.solids.keys() {
+            for used in &self.data().solids[slot].shells {
+                self.check_no_two_flat_faces_of_this_shell_run_through_each_other(
+                    used.shell, room,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// One shell's faces, read where the shell stores them, which is the frame
+    /// [`Model::check_faces`] measured each corner's wobble in. Two shells of
+    /// one solid can each carry a placement of their own, so their faces are
+    /// not compared.
+    fn check_no_two_flat_faces_of_this_shell_run_through_each_other(
+        &self,
+        shell: ShellSlot,
+        room: f64,
+    ) -> Result<()> {
+        let mut visits: BTreeMap<VertexSlot, Vec<Visit>> = BTreeMap::new();
+        for used in &self.data().shells[shell].faces {
+            let Surface::Plane(plane) = &self.data().faces[used.face].surface else {
+                continue;
+            };
+            let face = FaceView::new(self, used.face, Isometry::identity(), Orientation::Forward);
+            for wire in face.wires() {
+                let sides: Vec<CoedgeView<'_>> = wire.coedges().collect();
+                for (position, &into) in sides.iter().enumerate() {
+                    let out = sides[(position + 1) % sides.len()];
+                    visits
+                        .entry(into.end().key().slot_in(self.id()))
+                        .or_default()
+                        .push(Visit {
+                            face: used.face,
+                            normal: plane.normal(),
+                            came_from: into.start().point(),
+                            goes_to: out.end().point(),
+                            both_sides_straight: *into.edge().stored_run() == EdgeRun::Straight
+                                && *out.edge().stored_run() == EdgeRun::Straight,
+                        });
+                }
+            }
+        }
+        for (&corner, visits) in &mut visits {
+            visits.sort_by_key(|visit| visit.face);
+            let at = self.data().vertices[corner].point;
+            let faces: Vec<&[Visit]> = visits
+                .chunk_by(|one, other| one.face == other.face)
+                .collect();
+            for (position, one) in faces.iter().enumerate() {
+                for other in &faces[position + 1..] {
+                    if run_through_each_other(at, one, other, room) {
+                        return Err(
+                            Invalid::TwoFlatFacesRunThroughEachOtherWhereNeitherHasAnEdge { at }
+                                .into(),
+                        );
+                    }
+                }
             }
         }
         Ok(())
@@ -2619,6 +2753,172 @@ fn how_wide_a_plane_crosses_a_cone(on: &Plane, cone: &Cone) -> Option<f64> {
             * dot(along, along).hi()
             / leaning.lo(),
     )
+}
+
+/// One time a flat face's wire passes through a corner: where the side it comes
+/// in by starts, and where the side it leaves by ends.
+struct Visit {
+    face: FaceSlot,
+    normal: Vector,
+    came_from: Point,
+    goes_to: Point,
+    both_sides_straight: bool,
+}
+
+/// Whether two flat faces meeting at the corner `at` both hold one piece of
+/// the line where their planes cross, inside them and on no side of either.
+///
+/// `one` and `other` are every visit each face's wires make to the corner.
+/// Ahead along the line is `one`'s normal crossed with `other`'s, so ahead of
+/// `other` is back for `one`.
+fn run_through_each_other(at: Point, one: &[Visit], other: &[Visit], room: f64) -> bool {
+    let one_reaches = which_ways_a_face_reaches_along_the_line(at, one, other[0].normal, room);
+    let other_reaches = which_ways_a_face_reaches_along_the_line(at, other, one[0].normal, room);
+    one_reaches.and(other_reaches.turned_round()).anywhere()
+}
+
+/// Which ways along the line where this face's plane crosses one facing
+/// `other`, from the corner `at`, every one of this face's wedges at that
+/// corner reaches into.
+///
+/// Where the wires pass through the corner more than once, the face there is
+/// what lies in all the wedges: a hole touching the outline at the corner
+/// takes its own wedge out of the outline's. So only a way every wedge
+/// reaches is certainly inside the face.
+fn which_ways_a_face_reaches_along_the_line(
+    at: Point,
+    visits: &[Visit],
+    other: Vector,
+    room: f64,
+) -> WaysAlong {
+    visits
+        .iter()
+        .map(|visit| which_ways_a_wedge_reaches_along_the_line(at, visit, other, room))
+        .fold(WaysAlong::BOTH, WaysAlong::and)
+}
+
+/// Which ways along the line one wedge reaches into, with neither of its two
+/// sides along the line.
+///
+/// The material lies on the left of the walk, about the face's normal, so the
+/// wedge turns about the normal from the side it leaves by round to the side
+/// it came in by. Turned a quarter about the normal, ahead points behind the
+/// other face's plane: `n × (n × m)` is `n (n·m) − m`, whose part along `m` is
+/// `(n·m)² − 1` and below zero for two planes that are not one. So a wedge
+/// leaving in front of that plane and coming in behind it turns through
+/// ahead, the other way round it turns through back, and one with both sides
+/// on one side of the plane turns through both or neither, as it turns more
+/// or less than half way.
+fn which_ways_a_wedge_reaches_along_the_line(
+    at: Point,
+    visit: &Visit,
+    other: Vector,
+    room: f64,
+) -> WaysAlong {
+    if !visit.both_sides_straight {
+        return WaysAlong::NEITHER;
+    }
+    let leaving = from_to(at, visit.goes_to);
+    let coming_back = from_to(at, visit.came_from);
+    let other = other.components().map(Interval::exactly);
+    match (
+        which_side_of_the_plane(leaving, other, room),
+        which_side_of_the_plane(coming_back, other, room),
+    ) {
+        (SideOfThePlane::InFront, SideOfThePlane::Behind) => WaysAlong::AHEAD,
+        (SideOfThePlane::Behind, SideOfThePlane::InFront) => WaysAlong::BACK,
+        (SideOfThePlane::InFront, SideOfThePlane::InFront)
+        | (SideOfThePlane::Behind, SideOfThePlane::Behind) => {
+            let normal = visit.normal.components().map(Interval::exactly);
+            match dot(normal, cross(leaving, coming_back)).sign() {
+                Decision::Neg => WaysAlong::BOTH,
+                Decision::Pos | Decision::Zero | Decision::Undecidable { .. } => WaysAlong::NEITHER,
+                unknown => {
+                    panic!("an interval came back with a sign nothing here knows: {unknown:?}")
+                }
+            }
+        }
+        (SideOfThePlane::Along, _) | (_, SideOfThePlane::Along) => WaysAlong::NEITHER,
+    }
+}
+
+/// Where `side`, running from a corner on a plane facing `other`, goes: in
+/// front of the plane, behind it, or too near it to tell from along it.
+fn which_side_of_the_plane(side: [Interval; 3], other: [Interval; 3], room: f64) -> SideOfThePlane {
+    let off = dot(other, side);
+    if off.lo() > room {
+        SideOfThePlane::InFront
+    } else if off.hi() < -room {
+        SideOfThePlane::Behind
+    } else {
+        SideOfThePlane::Along
+    }
+}
+
+#[derive(Clone, Copy)]
+enum SideOfThePlane {
+    InFront,
+    Behind,
+    Along,
+}
+
+/// Which ways along a line, from a corner on it, a face reaches into.
+#[derive(Clone, Copy)]
+struct WaysAlong {
+    ahead: bool,
+    back: bool,
+}
+
+impl WaysAlong {
+    const NEITHER: Self = Self {
+        ahead: false,
+        back: false,
+    };
+    const AHEAD: Self = Self {
+        ahead: true,
+        back: false,
+    };
+    const BACK: Self = Self {
+        ahead: false,
+        back: true,
+    };
+    const BOTH: Self = Self {
+        ahead: true,
+        back: true,
+    };
+
+    fn and(self, other: Self) -> Self {
+        Self {
+            ahead: self.ahead && other.ahead,
+            back: self.back && other.back,
+        }
+    }
+
+    fn turned_round(self) -> Self {
+        Self {
+            ahead: self.back,
+            back: self.ahead,
+        }
+    }
+
+    fn anywhere(self) -> bool {
+        self.ahead || self.back
+    }
+}
+
+/// `to − at`, with every rounding on the way taken outward.
+fn from_to(at: Point, to: Point) -> [Interval; 3] {
+    let (at, to) = (at.coordinates(), to.coordinates());
+    core::array::from_fn(|axis| Interval::exactly(to[axis]) - Interval::exactly(at[axis]))
+}
+
+/// `one × other`, with every rounding on the way taken outward.
+fn cross(one: [Interval; 3], other: [Interval; 3]) -> [Interval; 3] {
+    [
+        one[1] * other[2] - one[2] * other[1],
+        one[2] * other[0] - one[0] * other[2],
+        one[0] * other[1] - one[1] * other[0],
+    ]
 }
 
 /// `one·other`, with every rounding on the way taken outward.
