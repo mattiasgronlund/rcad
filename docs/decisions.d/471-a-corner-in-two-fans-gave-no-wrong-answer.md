@@ -109,6 +109,16 @@ horizontal files and `LED_D5.0mm-3.step`.
   slot 2, at every point tried: the body's centre `(1.27, -5, 3)`, points in the
   flange, outside it and far off. So no point near the corner could be checked,
   and the refusal is the whole solid's. Class A (§471.6).
+  - Since Q2923 (`a93fcfbda`) it answers. Two curved sides were read against
+    the wrong surface. The front `y = -1.27` is two faces, the flange's (slot
+    2) and the body's (slot 7), stored a rounding apart, and the three arcs of
+    the circle between them were read against slot 7's plane, not the pipe of
+    radius 2.5 their runs name: two planes cross in no arc. Past that, the rim
+    where the dome meets the body's pipe (slot 8) was read against the ball,
+    not the rim's plane its runs name. `every_reading_of_the_sides_of`
+    (`holds.rs`) now reads such a side against its run's `and` between two
+    flat faces or two curved ones, and `where_a_point_is_in_a_led.rs` pins
+    five points and 2879 of a grid behind the front.
 - There is no LED with `#74` written as two vertices to hold up against it: the
   reader refuses that file, *what #15 describes is not a solid this kernel can
   hold*.

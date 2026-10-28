@@ -136,6 +136,8 @@ pub mod what_the_depth_probe_finds_behind_the_first_refusal;
 pub mod what_the_mapping_refuses_and_by_what_name;
 #[path = "what_the_reader_refuses_and_by_what_name.rs"]
 pub mod what_the_reader_refuses_and_by_what_name;
+#[path = "where_a_point_is_in_a_led.rs"]
+pub mod where_a_point_is_in_a_led;
 #[path = "whether_a_tolerant_policy_buys_anything_a_certified_one_does_not.rs"]
 pub mod whether_a_tolerant_policy_buys_anything_a_certified_one_does_not;
 #[path = "which_way_a_cap_circle_is_walked.rs"]
