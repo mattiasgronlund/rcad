@@ -5342,9 +5342,11 @@ fn every_reading_of_the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Re
             continue;
         }
         let one_surface = across.stored_surface() == face.stored_surface();
+        let flat = [face, across].map(|either| either.stored_surface().as_plane().is_some());
+        let named_by_and = one_surface || flat == [true, true] || flat == [false, false];
         let as_it_is = || vec![(across.stored_surface(), across.surface())];
         let read_against = match edge.stored_run() {
-            EdgeRun::PartOfWhereItCrosses { and, .. } if one_surface => {
+            EdgeRun::PartOfWhereItCrosses { and, .. } if named_by_and => {
                 vec![(*and, and.transformed(&face.location()))]
             }
             EdgeRun::Straight if one_surface => {
