@@ -1750,6 +1750,13 @@ fn boundary_of(face: &BakedFace) -> Vec<Surface> {
 /// along that line (queue row Q1902). That is the answer a fuse now writes
 /// (§39.4, the Q1901 note), and this used to refuse every fuse after it.
 ///
+/// **A flat face a pipe provably holds strictly inside is skipped**, because
+/// it shares no point with the pipe's skin ([`a_pipe_holds_a_flat_face`]): a
+/// KiCad LED's front disc stands 0.4 inside the rim round it, and asking where
+/// the disc's plane crosses the rim met the rim's corner on that plane and
+/// could not say which side of the plane it lay, so every fuse of the LED was
+/// refused (Q2947).
+///
 /// Only a *proved* overlap is an error. Two stretches whose enclosures merely
 /// touch have not been shown to run through each other, and refusing them would
 /// refuse a solid whose faces meet at a single corner.
