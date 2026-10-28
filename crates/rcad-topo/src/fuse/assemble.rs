@@ -4418,6 +4418,11 @@ impl Assembly {
     /// a real corner of the other. A corner stops being a corner for the lump it
     /// runs straight through and stays one for the lump it does not.
     ///
+    /// **More than one line of a lump can run straight through one corner**
+    /// ([`Assembly::lines_walked_straight_through`]), and the corner goes for
+    /// each of them, so `leaving` lists its edges there in pairs, one pair a
+    /// line.
+    ///
     /// # Errors
     ///
     /// Whatever [`Assembly::closed_up_runs_that_start_where_their_curve_does`]
@@ -4457,7 +4462,7 @@ impl Assembly {
 
         let mut straight_through: BTreeSet<(usize, usize)> = BTreeSet::new();
         let mut still_a_corner = vec![false; self.corners.len()];
-        for (&(lump, corner), by) in &leaving {
+        for (&(lump, corner), by) in &mut leaving {
             // **Two different edges**, and the word "different" is what a closed
             // edge changes. A circle starts and ends at its one corner, so it
             // leaves that corner twice and this list is one edge written down
@@ -4472,6 +4477,16 @@ impl Assembly {
                             .any(|&edge| self.is_the_apex_of_a_cone_along(corner, edge)) =>
                 {
                     straight_through.insert((lump, corner));
+                }
+                [_, _, _, ..] => {
+                    if let Some(in_pairs) =
+                        self.lines_walked_straight_through(corner, by, along, dissolved)
+                    {
+                        *by = in_pairs;
+                        straight_through.insert((lump, corner));
+                    } else {
+                        still_a_corner[corner] = true;
+                    }
                 }
                 _ => still_a_corner[corner] = true,
             }
@@ -4524,6 +4539,78 @@ impl Assembly {
             closed_a_curve_up,
             starts_where_its_curve_does,
         })
+    }
+
+    /// `by`, more than two edges of one lump leaving `corner`, put in pairs
+    /// that each run as one straight line through it, or `None` where they do
+    /// not all.
+    ///
+    /// **Several lines of one lump can run straight through one corner**
+    /// where wedges of one solid meet along one line. A plate perforated in a
+    /// checkerboard of triangles has three wedges of plate round the line up
+    /// through `(3, 3)`, and each wedge's two walls meet along that line in an
+    /// edge of its own. Fused with a box far from the line, the plane of the
+    /// box's floor cuts every wall of the plate at `z = 0.5`, as the
+    /// arrangement cuts every face of a solid within reach, and the joining
+    /// takes those cuts back out. That leaves six edges of the one lump
+    /// leaving `(3, 3, 0.5)`, two for each wedge, one below and one above.
+    /// Kept a corner because more than two edges leave it, the line came back
+    /// as six edges where it is three (Q2918, `docs/decisions.md` §470.4,
+    /// `three_holes_meeting_at_one_corner_of_a_plate.rs`).
+    ///
+    /// **A pair is two edges such that every face either side of one passes on
+    /// to the other at `corner`**, read across the edges the joining dissolved
+    /// as the face's ring walks ([`Assembly::onwards`]), and both straight
+    /// between two planes with different far ends. Both then lie where the
+    /// planes of those same two faces cross, which is one line, and they leave
+    /// `corner` along it the two ways. Every ring through `corner` then walks
+    /// on along the line it came in on, which [`Assembly::sides_of`] needs of a
+    /// corner it skips. A corner of a solid where three or more faces meet
+    /// fails it, since some face there passes from one edge to an edge on
+    /// another line. Edges along curves are left to the rules for two edges.
+    fn lines_walked_straight_through(
+        &self,
+        corner: usize,
+        by: &[usize],
+        along: &[[Dart; 2]],
+        dissolved: &[bool],
+    ) -> Option<Vec<usize>> {
+        let mut partner_of: BTreeMap<usize, usize> = BTreeMap::new();
+        for &edge in by {
+            for dart in along[edge] {
+                if self.stops_at(self.side_of(dart)) != corner {
+                    continue;
+                }
+                let onwards = self.edge_of(self.onwards(dart, along, dissolved));
+                for (one, other) in [(edge, onwards), (onwards, edge)] {
+                    if *partner_of.entry(one).or_insert(other) != other {
+                        return None;
+                    }
+                }
+            }
+        }
+        let is_a_line =
+            |edge: usize| self.edges[edge].lies_on_two_planes() && self.edges[edge].runs_straight();
+        let far_end = |edge: usize| {
+            let [start, end] = self.edges[edge].ends;
+            if start == corner { end } else { start }
+        };
+        let mut in_pairs = Vec::with_capacity(by.len());
+        for &edge in by {
+            let partner = *partner_of.get(&edge)?;
+            if partner == edge
+                || !by.contains(&partner)
+                || !is_a_line(edge)
+                || !is_a_line(partner)
+                || far_end(edge) == far_end(partner)
+            {
+                return None;
+            }
+            if edge < partner {
+                in_pairs.extend([edge, partner]);
+            }
+        }
+        Some(in_pairs)
     }
 
     /// Each corner in `closed_up` that [`Assembly::rebuild_from`] puts the
@@ -4802,7 +4889,10 @@ impl Assembly {
     /// plane cuts round the same pipe, and the answer's own check refused it
     /// `VertexOffItsFaceSurface`
     /// (`two_bars_on_one_pipe_and_a_box_united_in_one_call.rs`, the box turned
-    /// an eighth of a turn, Q2250).
+    /// an eighth of a turn, Q2250). A corner more than one line runs straight
+    /// through ([`Assembly::lines_walked_straight_through`]) has nothing but
+    /// straight edges leaving it, so it is never one of these, and the run
+    /// read off its first pair alone is all that is asked of it.
     fn where_curved_pieces_met_off_a_run_that_closes_up(
         &self,
         leaving: &BTreeMap<(usize, usize), Vec<usize>>,
@@ -4987,10 +5077,12 @@ impl Assembly {
         let mut edges_of: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
         for (&(lump, corner), by) in leaving {
             if straight_through.contains(&(lump, corner)) {
-                corners_of_run
-                    .entry(runs.leader(by[0]))
-                    .or_default()
-                    .push((lump, corner));
+                for &[one, _] in in_pairs(by) {
+                    corners_of_run
+                        .entry(runs.leader(one))
+                        .or_default()
+                        .push((lump, corner));
+                }
             } else {
                 run_keeps_a_corner.extend(by.iter().map(|&edge| runs.leader(edge)));
             }
@@ -5007,12 +5099,16 @@ impl Assembly {
                 continue;
             }
             if self.are_pieces_of_one_closed_curve(&edges_of[&run]) {
-                kept.closed_up.push(
-                    corners
-                        .into_iter()
-                        .min_by(|&(_, one), &(_, other)| self.which_to_keep_first(one, other))
-                        .expect("a run is listed with the corners it walks through"),
+                let at = corners
+                    .into_iter()
+                    .min_by(|&(_, one), &(_, other)| self.which_to_keep_first(one, other))
+                    .expect("a run is listed with the corners it walks through");
+                assert!(
+                    leaving[&at].len() == 2,
+                    "a corner more than one run walks straight through has only straight lines \
+                     through it, and a line does not close up"
                 );
+                kept.closed_up.push(at);
             } else {
                 kept.left_in_pieces.extend(corners);
             }
@@ -5144,10 +5240,12 @@ impl Assembly {
         for (&(lump, corner), by) in leaving {
             *lumps_at.entry(corner).or_default() += 1;
             if straight_through.contains(&(lump, corner)) {
-                corners_of_run
-                    .entry(runs.leader(by[0]))
-                    .or_default()
-                    .push((lump, corner));
+                for &[one, _] in in_pairs(by) {
+                    corners_of_run
+                        .entry(runs.leader(one))
+                        .or_default()
+                        .push((lump, corner));
+                }
             } else {
                 for &edge in by {
                     ends_of_run
@@ -8015,7 +8113,9 @@ struct Renumbered {
     /// walks back, and is gone.
     lump_of_edge: Vec<Option<usize>>,
     /// The corners a lump walks straight through, as lump and corner. Straight
-    /// through means two edges of that lump meet there and nothing else does.
+    /// through means two edges of that lump meet there and nothing else does,
+    /// or that the edges of that lump there are in pairs, each pair one
+    /// straight line through it ([`Assembly::lines_walked_straight_through`]).
     straight_through: BTreeSet<(usize, usize)>,
     /// Which run of edges each edge is part of. A run becomes one edge.
     runs: Sameness,
@@ -8515,8 +8615,8 @@ fn the_closed_input_edges_cut_into(edges: &[Edge], model: &Model) -> Vec<EdgeKey
     closed
 }
 
-/// Which run of edges each edge is part of, when the edges either side of every
-/// corner walked straight through are one run.
+/// Which run of edges each edge is part of, when each pair of edges through a
+/// corner walked straight through is one run.
 fn runs_through(
     edges: usize,
     leaving: &BTreeMap<(usize, usize), Vec<usize>>,
@@ -8525,10 +8625,25 @@ fn runs_through(
     let mut runs = Sameness::of(edges);
     for (at, by) in leaving {
         if straight_through.contains(at) {
-            runs.join(by[0], by[1]);
+            for &[one, other] in in_pairs(by) {
+                runs.join(one, other);
+            }
         }
     }
     runs
+}
+
+/// The edges leaving a corner walked straight through, each pair one run
+/// through it ([`Assembly::what_is_left`]).
+///
+/// # Panics
+///
+/// If there is an edge left over, which no corner walked straight through has.
+fn in_pairs(by: &[usize]) -> &[[usize; 2]] {
+    let (pairs, []) = by.as_chunks::<2>() else {
+        panic!("a corner walked straight through has its edges in pairs, one pair a run");
+    };
+    pairs
 }
 
 /// Every input vertex the wires through it read past as though it were not
