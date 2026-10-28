@@ -2105,7 +2105,7 @@ fn an_leds_body_and_rim(on_both_axes: [f64; 3], body_radius: f64, rim_radius: f6
 }
 
 /// The six orders three surfaces can be asked in.
-fn every_order<'a>([one, two, three]: [&'a Surface; 3]) -> [[&'a Surface; 3]; 6] {
+fn every_order([one, two, three]: [&Surface; 3]) -> [[&Surface; 3]; 6] {
     [
         [one, two, three],
         [one, three, two],
