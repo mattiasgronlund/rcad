@@ -29,7 +29,7 @@ fn a_plate_less_three_holes_meeting_at_one_corner_keeps_the_line_as_three_edges(
     let plate = a_plate(&mut model);
     let holes = three_holes(&mut model);
     let answer = one_solid(&mut model, plate, &holes, Rule::Difference);
-    is_the_plate_less_the_holes(&model, answer, 34.0);
+    is_the_plate_less_the_holes(&model, answer, 34.0, 6);
 }
 
 #[test]
@@ -48,12 +48,19 @@ fn a_plate_less_three_holes_one_at_a_time_in_any_order_keeps_the_line_as_three_e
         for hole in order {
             plate = one_solid(&mut model, plate, &[holes[hole]], Rule::Difference);
         }
-        is_the_plate_less_the_holes(&model, plate, 34.0);
+        is_the_plate_less_the_holes(&model, plate, 34.0, 6);
     }
 }
 
 /// The answer's line is an edge of the solid it is fused with next, six faces
 /// round one edge of an input, and a box far from it leaves it as it was.
+///
+/// The box notches the plate's far corner from `z = 0.5` up, so the plate has
+/// nine faces: its six, the notch's floor and the notch's two walls. The
+/// plane of that floor cuts every wall of the plate, those along the line
+/// included, and the joining takes the cuts back out. Where it kept the
+/// corner the cuts leave on the line at `(3, 3, 0.5)`, at which six edges
+/// meet, the line came back as six edges (Q2918).
 #[test]
 fn the_plate_less_three_holes_less_a_far_corner_keeps_the_line_as_three_edges() {
     let mut model = a_model();
@@ -67,13 +74,18 @@ fn the_plate_less_three_holes_less_a_far_corner_keeps_the_line_as_three_edges() 
         1.0,
     );
     let answer = one_solid(&mut model, perforated, &[corner], Rule::Difference);
-    is_the_plate_less_the_holes(&model, answer, 33.5);
+    is_the_plate_less_the_holes(&model, answer, 33.5, 9);
 }
 
 /// Whether `solid` is the plate less its three holes, the line up through
 /// `(3, 3)` three edges, each between the walls either side of one wedge of
 /// plate, and no wall reaching across the line.
-fn is_the_plate_less_the_holes(model: &Model, solid: SolidKey, volume: f64) {
+fn is_the_plate_less_the_holes(
+    model: &Model,
+    solid: SolidKey,
+    volume: f64,
+    faces_of_the_plate: usize,
+) {
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("the answer is a valid solid");
@@ -125,8 +137,8 @@ fn is_the_plate_less_the_holes(model: &Model, solid: SolidKey, volume: f64) {
     );
     assert_eq!(
         view.faces().count(),
-        16,
-        "six faces of the plate and ten walls"
+        faces_of_the_plate + 10,
+        "{faces_of_the_plate} faces of the plate and ten walls"
     );
 }
 
