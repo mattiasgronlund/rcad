@@ -16,11 +16,17 @@
 //! was dropped. Bake now carries that pipe, and the check skips a flat face a
 //! pipe provably holds strictly inside (Q2947).
 //!
-//! Every fuse here now gets past that pair and stops where the flange's flat,
-//! `x = -1.23`, meets the body's pipe and the rim's: two pipes about one axis,
-//! a rounding apart in direction, which never meet. That is refused
-//! `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` (Q2938), and these tests pin it,
-//! in this LED and in the six others Q2929 found refusing as this one did.
+//! Every fuse here then stopped where the flange's flat, `x = -1.23`, meets
+//! the body's pipe and the rim's: two pipes about one axis, a rounding apart
+//! in direction, which never meet. That was refused
+//! `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, and is answered now (Q2938).
+//!
+//! Every fuse here now gets past that too, and stops on the body's pipe (face
+//! slot 8): arranging it in the check that it does not cross itself,
+//! `which_way_an_edge_runs_round` (fuse/arrange.rs) cannot tell which way one
+//! of its edges runs round, and it is refused
+//! `AFaceTrimmedByACurveThisCannotFollow`. These tests pin it, in this LED and
+//! in the six others Q2929 found refusing as this one did.
 
 use std::{env, fs, path::PathBuf};
 
@@ -42,24 +48,24 @@ const THE_OTHER_SIX: [&str; 6] = [
 ];
 
 #[test]
-fn an_led_whose_front_disc_sits_inside_its_rim_gets_past_it_to_where_its_flat_meets_two_pipes() {
-    every_fuse_stops_where_the_flat_meets_two_pipes(
+fn an_led_whose_front_disc_sits_inside_its_rim_gets_past_where_its_flat_meets_two_pipes() {
+    every_fuse_stops_on_an_edge_of_the_bodys_pipe(
         "LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step",
         &[FAR_OFF, [-1.23, -6.35, 3.0]],
     );
 }
 
 #[test]
-fn six_more_leds_get_past_the_pair_and_stop_where_their_flat_meets_two_pipes() {
+fn six_more_leds_get_past_where_their_flat_meets_two_pipes() {
     for file in THE_OTHER_SIX {
-        every_fuse_stops_where_the_flat_meets_two_pipes(file, &[FAR_OFF]);
+        every_fuse_stops_on_an_edge_of_the_bodys_pipe(file, &[FAR_OFF]);
     }
 }
 
 /// The LED in `file` and a box of side 0.2 centred on each of `centres`, fused
-/// under intersection and under difference, each refused as two pipes about
-/// one axis and a plane.
-fn every_fuse_stops_where_the_flat_meets_two_pipes(file: &str, centres: &[[f64; 3]]) {
+/// under intersection and under difference, each refused as a face trimmed by a
+/// curve the arrangement cannot follow.
+fn every_fuse_stops_on_an_edge_of_the_bodys_pipe(file: &str, centres: &[[f64; 3]]) {
     let (led, solid) = the_led(file);
     for &centre in centres {
         for rule in [Rule::Intersection, Rule::Difference] {
@@ -75,12 +81,10 @@ fn every_fuse_stops_where_the_flat_meets_two_pipes(file: &str, centres: &[[f64; 
             assert!(
                 matches!(
                     said,
-                    Err(Error::Geometry(
-                        rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
-                    ))
+                    Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
                 ),
-                "{file}: {rule:?} with a box round {centre:?} said {:?}, not the refusal where \
-                 the flat meets two pipes this pins",
+                "{file}: {rule:?} with a box round {centre:?} said {:?}, not the refusal on an \
+                 edge of the body's pipe this pins",
                 said.map(|fused| fused.solids().len())
             );
         }

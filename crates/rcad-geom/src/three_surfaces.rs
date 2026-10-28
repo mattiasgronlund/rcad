@@ -1944,6 +1944,9 @@ fn where_one_plane_and_two_curved_surfaces_meet(
     {
         return Ok(answer);
     }
+    if let Some(answer) = what_a_plane_that_cuts_both_in_conics_leaves(flat, one, other) {
+        return Ok(answer);
+    }
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
 }
 
@@ -4794,8 +4797,9 @@ impl TheLinesAlongAPipe {
 /// `G = k₁k₂(o₁ − o₂) + k₂m₁w₁ − k₁m₂w₂`, exactly, so each comes out to a few
 /// roundings of itself. `sin² t` is `|n × w|²/(N(w·w))` with the top exact,
 /// and `1 − cos t` is `sin² t / (1 + cos t)`. No number here is past degree
-/// twelve in the stored numbers, which [`Exact::times`] multiplies without
-/// falling off the bottom of the range.
+/// twelve in the stored numbers. `|G|²` is summed from the enclosures of `G`'s
+/// entries rather than squared exactly, since squaring `G` can fall off the
+/// bottom of the range ([`how_far_apart_the_centres_of_two_bands_are`]).
 ///
 /// **What it leaves** is two bands that overlap, where the curves may cross,
 /// to [`what_a_plane_that_cuts_them_in_bands_that_cross_leaves`]. It leaves
@@ -4952,6 +4956,14 @@ fn the_band_a_plane_cuts(flat: &Plane, surface: &Surface) -> Option<ABand> {
 /// `|c₁ − c₂|`, the distance between where the two bands' axes cross the
 /// plane, as `|G| / |k₁k₂|` with `G` worked out exactly, or `None` where a
 /// product falls out of range.
+///
+/// **`|G|²` is summed from each entry's enclosure, not squared exactly.** Each
+/// entry of `G` is exact and its enclosure is a few roundings of itself, so the
+/// sum of their squares is too. Squaring `G` exactly instead doubles how far
+/// apart its largest and smallest parts are: on an LED's cap a rounding off
+/// square to its body and its rim, sharing one stored point, `G` reaches from
+/// `1e−31` down to `1e−163`, and its exact square falls off the bottom of the
+/// range where the sum of enclosures does not.
 fn how_far_apart_the_centres_of_two_bands_are(mine: &ABand, theirs: &ABand) -> Option<Interval> {
     let both = mine.leaning.times(&theirs.leaning)?;
     let from_theirs = Exact::gap_between(theirs.on_the_axis, mine.on_the_axis);
@@ -4969,8 +4981,9 @@ fn how_far_apart_the_centres_of_two_bands_are(mine: &ABand, theirs: &ABand) -> O
     } else {
         both.enclosure()
     };
+    let apart = apart.map(|entry| entry.enclosure());
     Some(quotient_or_everything(
-        root_enclosing(Exact::squared_length_of(&apart)?.enclosure()),
+        root_enclosing(dot_enclosing(apart, apart)),
         size,
     ))
 }
@@ -5522,6 +5535,319 @@ fn the_plane_reaches_the_pipe_only_off_the_other(
     let held = least(&bend) * room * room;
     let pushed = two * sway * room * tilt + spread * tilt * tilt;
     Some(held.lo() > pushed.hi())
+}
+
+/// What a plane leaves of two balls, pipes or cones it cuts in conics, from the
+/// quartic those two conics meet where, or `None` where this road cannot say.
+///
+/// **The two conics, exactly.** Take off the plane the coordinate its normal
+/// leans along most, `x` say, and call the other two `u` and `v`. On the plane
+/// `n_x·p = α + uβ + vγ` for three triples of stored numbers: `α` is the
+/// offset along `x`, and `β` and `γ` are `n_x` along `u` or `v` with the
+/// normal's own entry for it taken off along `x`. So `n_x²·Q(p)` for a quadric
+/// `Q(p) = p·(Mp) + 2b·p + c` is a conic in `(u, v)` whose six numbers are
+/// `P·(MP′)`, `n_x·b·P` and `n_x²c` for `P` and `P′` among `α`, `β` and `γ`,
+/// every one worked out exactly.
+///
+/// **The quartic, exactly.** Each conic is a quadratic `a·v² + b(u)·v + c(u)`
+/// in `v`, `a` a number, `b` linear in `u` and `c` quadratic. Two of them share
+/// a root `v` just where
+/// `R(u) = (a₁c₂ − a₂c₁)² − (a₁b₂ − a₂b₁)(b₁c₂ − b₂c₁)` is nothing, so long as
+/// `a₁` and `a₂` are not both nothing. That is a polynomial in `u` of degree
+/// four at most with exact numbers, and [`where_a_polynomial_is_zero`] boxes
+/// its real roots on signs it works out exactly. The unknown kept is the one
+/// the two conics square by less, so the one taken out is squared by numbers
+/// that are not small: on an LED's front flat below, `v` is the height, which
+/// each conic squares by one, and `u` runs along both pipes and is squared by
+/// `10⁻³²`.
+///
+/// **Each root is one point.** `a₁q₂ − a₂q₁` is `Y(u)·v + X(u)` with
+/// `Y = a₁b₂ − a₂b₁` and `X = a₁c₂ − a₂c₁`, so where `Y` is not nothing the
+/// shared root is `v = −X/Y`, and it is real. Two shared roots at one `u` make
+/// the two quadratics in `v` one quadratic scaled, and `Y` nothing there, so a
+/// root whose `Y` cannot be told from nothing is handed on, and every other
+/// root is one point, boxed in intervals from its `u`'s box and narrowed by
+/// [`narrowed_onto_two_quadrics_by_checked_steps`]. The points come in the
+/// order of their `u`, which the triple fixes (§31.3).
+///
+/// **The front flat of an LED is it**, a rounding off parallel to the body
+/// and rim pipes, of radii 2.5 and 2.9, whose stored axes share one point and
+/// are `1.1·10⁻¹⁵` apart in direction. The flat meets both twice, near
+/// `3·10¹⁵` and `7.5·10¹⁴` along them, and no road above reaches those points.
+///
+/// **It hands on** a torus, a product out of range, two conics both linear in
+/// the unknown taken out, an `R` that is nothing everywhere — two conics that
+/// share a curve — a touch [`where_a_polynomial_is_zero`] cannot tell from
+/// nothing, and a root whose `Y` it cannot tell from nothing. It is asked
+/// last, so every triple a road above answers keeps its answer.
+fn what_a_plane_that_cuts_both_in_conics_leaves(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+) -> Option<MeetOfThree> {
+    let written = [
+        how_a_surface_is_written(one)?,
+        how_a_surface_is_written(other)?,
+    ];
+    let normal = flat.normal().components();
+    let off = (0..3)
+        .max_by(|i, j| normal[*i].abs().total_cmp(&normal[*j].abs()))
+        .expect("three numbers");
+    let on_the_plane = match off {
+        0 => [1, 2],
+        1 => [0, 2],
+        _ => [0, 1],
+    };
+    let [first, second] = on_the_plane;
+    let [mine, theirs] = [
+        the_conic_a_plane_cuts(flat, &written[0], [off, first, second])?,
+        the_conic_a_plane_cuts(flat, &written[1], [off, first, second])?,
+    ];
+    let squared_by = |which: usize| {
+        mine[which][which].nearest_f64().abs() + theirs[which][which].nearest_f64().abs()
+    };
+    let [kept, gone] = if squared_by(0) > squared_by(1) {
+        [1, 0]
+    } else {
+        [0, 1]
+    };
+    let stretch = if squared_by(kept) == 0.0 {
+        0
+    } else {
+        (binary_exponent(squared_by(gone)) - binary_exponent(squared_by(kept))) / 2
+    };
+    let widened = slid_exactly(1.0, stretch)?;
+    let [mine, theirs] = [
+        the_conic_stretched_and_lifted(&mine, kept, stretch)?,
+        the_conic_stretched_and_lifted(&theirs, kept, stretch)?,
+    ];
+    let [a, b] = [&mine, &theirs].map(|form| as_a_quadratic_in_one_number(form, [kept, 2, gone]));
+    if ![&a[2][0], &b[2][0]]
+        .iter()
+        .any(|squared| matches!(squared.sign(), Decision::Pos | Decision::Neg))
+    {
+        return None;
+    }
+
+    let crossed = |one: &[Exact], two: &[Exact], three: &[Exact], four: &[Exact]| {
+        Some(polynomial_minus(
+            &polynomial_times(one, two)?,
+            &polynomial_times(three, four)?,
+        ))
+    };
+    let ends = crossed(&a[2], &b[0], &a[0], &b[2])?;
+    let tops = crossed(&a[2], &b[1], &a[1], &b[2])?;
+    let bottoms = crossed(&a[1], &b[0], &a[0], &b[1])?;
+    let mut shared = crossed(&ends, &ends, &tops, &bottoms)?;
+    while shared
+        .last()
+        .is_some_and(|top| matches!(top.sign(), Decision::Zero))
+    {
+        shared.pop();
+    }
+    if shared.is_empty()
+        || shared
+            .iter()
+            .any(|number| matches!(number.sign(), Decision::Undecidable { .. }))
+    {
+        return None;
+    }
+    let highest_first: Vec<Exact> = shared.iter().rev().cloned().collect();
+    let found = where_a_polynomial_is_zero(&highest_first)?;
+    if !found.or_maybe_at.is_empty() {
+        return None;
+    }
+
+    let mut places = SmallVec::new();
+    for root in found.at {
+        let pull = the_value_over(&tops, root);
+        if pull.contains_zero() {
+            return None;
+        }
+        let other_root = quotient_or_everything(-the_value_over(&ends, root), pull);
+        let mut boxed = [Interval::exactly(0.0); 3];
+        boxed[on_the_plane[kept]] = root * Interval::exactly(widened);
+        boxed[on_the_plane[gone]] = other_root;
+        boxed[off] = quotient_or_everything(
+            Interval::exactly(flat.offset())
+                - Interval::exactly(normal[first]) * boxed[first]
+                - Interval::exactly(normal[second]) * boxed[second],
+            Interval::exactly(normal[off]),
+        );
+        let PredicatePoint::Constructed(narrowed) = narrowed_onto_two_quadrics_by_checked_steps(
+            flat,
+            [&written[0], &written[1]],
+            PredicatePoint::Constructed(boxed),
+        ) else {
+            unreachable!("a box narrowed is a box");
+        };
+        places.push(the_point_a_box_names(narrowed));
+    }
+    if places.is_empty() {
+        return Some(MeetOfThree::Nowhere);
+    }
+    Some(with_no_negative_zero(MeetOfThree::At(places)))
+}
+
+/// `n_x²` times `quadric` on `flat`, as the form of a conic in the two
+/// coordinates `first` and `second` and one: `(u, v, 1)·F·(u, v, 1)`, exactly,
+/// in [`what_a_plane_that_cuts_both_in_conics_leaves`]'s names, with `off` the
+/// coordinate taken off the plane.
+fn the_conic_a_plane_cuts(
+    flat: &Plane,
+    quadric: &HowASurfaceIsWritten,
+    [off, first, second]: [usize; 3],
+) -> Option<[[Exact; 3]; 3]> {
+    let normal = flat.normal().components();
+    let leaning = normal[off];
+    let mut on_the_plane = [[0.0; 3]; 3];
+    on_the_plane[0][first] = leaning;
+    on_the_plane[0][off] = -normal[first];
+    on_the_plane[1][second] = leaning;
+    on_the_plane[1][off] = -normal[second];
+    on_the_plane[2][off] = flat.offset();
+    let on_the_plane = on_the_plane.map(Exact::of_each);
+    let pulled = [
+        rows_times(&quadric.squared, &on_the_plane[0])?,
+        rows_times(&quadric.squared, &on_the_plane[1])?,
+        rows_times(&quadric.squared, &on_the_plane[2])?,
+    ];
+    let mut linear = [Exact::of(0.0), Exact::of(0.0), Exact::of(0.0)];
+    for (entry, along) in linear.iter_mut().zip(&on_the_plane) {
+        *entry =
+            Exact::dot_of_two_exact(&quadric.half_linear, along)?.times(&Exact::of(leaning))?;
+    }
+
+    let mut form = nothing_squared();
+    for (row, entries) in form.iter_mut().enumerate() {
+        for (column, entry) in entries.iter_mut().enumerate() {
+            *entry = Exact::dot_of_two_exact(&on_the_plane[row], &pulled[column])?;
+            if column == 2 {
+                *entry = entry.plus(&linear[row]);
+            }
+            if row == 2 {
+                *entry = entry.plus(&linear[column]);
+            }
+        }
+    }
+    form[2][2] = form[2][2].plus(
+        &quadric
+            .constant
+            .times(&Exact::product_of(leaning, leaning)?)?,
+    );
+    Some(form)
+}
+
+/// `form` written in `t`, where the unknown `kept` is `2^stretch·t`, and
+/// multiplied by the power of two that puts its largest number's binade at
+/// [`HIGHEST_BINADE_A_CONIC_IS_LIFTED_TO`]; or `None` where a number leaves
+/// the range on the way.
+///
+/// Both are exact, since a power of two moves every entry of an expansion
+/// together, and neither moves a point the two conics share: the stretch only
+/// renames the unknown, and the lift multiplies the whole conic by a number
+/// that is not nothing.
+fn the_conic_stretched_and_lifted(
+    form: &[[Exact; 3]; 3],
+    kept: usize,
+    stretch: i32,
+) -> Option<[[Exact; 3]; 3]> {
+    let stretched_by =
+        |row: usize, column: usize| stretch * (i32::from(row == kept) + i32::from(column == kept));
+    let highest = (0..3)
+        .flat_map(|row| (0..3).map(move |column| (row, column)))
+        .filter_map(|(row, column)| {
+            let near = form[row][column].nearest_f64();
+            (near != 0.0).then(|| binary_exponent(near) + stretched_by(row, column))
+        })
+        .max()?;
+    let lift = HIGHEST_BINADE_A_CONIC_IS_LIFTED_TO - highest;
+    let mut slid = nothing_squared();
+    for (row, entries) in slid.iter_mut().enumerate() {
+        for (column, entry) in entries.iter_mut().enumerate() {
+            *entry = form[row][column].slid_by(stretched_by(row, column) + lift)?;
+        }
+    }
+    Some(slid)
+}
+
+/// Where [`the_conic_stretched_and_lifted`] puts the binade of a conic's
+/// largest number.
+///
+/// **The quartic's numbers are sums of products of four of the conics'**, two
+/// from each, so with both conics' largest numbers at `2ᵀ` the quartic's
+/// largest sits near `2⁴ᵀ⁻⁵`: `2⁹²³` here. What runs out at the top is a
+/// product past `2¹⁰²³`, and on the four LED front flats of
+/// `where_a_plane_and_two_round_surfaces_meet.rs` the first `T` that runs off
+/// is 257, 258 or 260, by flat. `2⁹²³` leaves [`where_a_polynomial_is_zero`]
+/// `2¹⁰⁰` of room to evaluate the quartic at places out past its roots, which
+/// the stretch puts near one.
+///
+/// **What runs out at the bottom is a product below `2⁻⁹⁶⁹`**, which
+/// [`Exact::times`] refuses. A conic whose numbers reach `σ` binades below its
+/// largest one leaves the quartic's reaching about `2(σ₁ + σ₂)` below its top,
+/// so the wider the two conics spread, the higher `T` has to be. Measured on
+/// the same four flats: the `Z3.0` flat, whose conics reach 311 and 480
+/// binades down, is answered from a `T` of 145 (not 140), the `Z9.0` and the
+/// thin `Z10.0` flats from 150 (not 145), and `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm`'s
+/// flat, whose conics reach 365 and 582 binades down, from 207 (not 206) to
+/// 256. That is the narrowest of the four, and 232 is its middle, which leaves
+/// it 25 binades of each conic to spare at either end. Before, `T` was 200,
+/// which answered the first three and refused the fourth.
+const HIGHEST_BINADE_A_CONIC_IS_LIFTED_TO: i32 = 232;
+
+/// The form `numbers` as `f₂·z² + f₁·z + f₀` in `z`, the number `order[2]`
+/// names, each `fᵢ` a polynomial in `x`, the number `order[0]` names, lowest
+/// power first, with the number `order[1]` names set to one: `f₀` of degree
+/// two, `f₁` of one and `f₂` of nought. The same as `intersect.rs`'s own.
+fn as_a_quadratic_in_one_number(
+    numbers: &[[Exact; 3]; 3],
+    [x, y, z]: [usize; 3],
+) -> [Vec<Exact>; 3] {
+    let twice = |value: &Exact| value.plus(value);
+    [
+        vec![
+            numbers[y][y].clone(),
+            twice(&numbers[x][y]),
+            numbers[x][x].clone(),
+        ],
+        vec![twice(&numbers[y][z]), twice(&numbers[x][z])],
+        vec![numbers[z][z].clone()],
+    ]
+}
+
+/// The product of two polynomials, lowest power first.
+fn polynomial_times(one: &[Exact], other: &[Exact]) -> Option<Vec<Exact>> {
+    let mut product = vec![Exact::of(0.0); one.len() + other.len() - 1];
+    for (i, left) in one.iter().enumerate() {
+        for (j, right) in other.iter().enumerate() {
+            product[i + j] = product[i + j].plus(&left.times(right)?);
+        }
+    }
+    Some(product)
+}
+
+/// The difference of two polynomials, lowest power first.
+fn polynomial_minus(one: &[Exact], other: &[Exact]) -> Vec<Exact> {
+    let zero = Exact::of(0.0);
+    (0..one.len().max(other.len()))
+        .map(|power| {
+            one.get(power)
+                .unwrap_or(&zero)
+                .minus(other.get(power).unwrap_or(&zero))
+        })
+        .collect()
+}
+
+/// A polynomial, lowest power first, over `over`, by Horner's rule in
+/// intervals.
+fn the_value_over(coefficients: &[Exact], over: Interval) -> Interval {
+    coefficients
+        .iter()
+        .rev()
+        .fold(Interval::exactly(0.0), |so_far, number| {
+            so_far * over + number.enclosure()
+        })
 }
 
 /// A line, written as `(through + s · direction) / divided_by`.
