@@ -4794,8 +4794,9 @@ impl TheLinesAlongAPipe {
 /// `G = k₁k₂(o₁ − o₂) + k₂m₁w₁ − k₁m₂w₂`, exactly, so each comes out to a few
 /// roundings of itself. `sin² t` is `|n × w|²/(N(w·w))` with the top exact,
 /// and `1 − cos t` is `sin² t / (1 + cos t)`. No number here is past degree
-/// twelve in the stored numbers, which [`Exact::times`] multiplies without
-/// falling off the bottom of the range.
+/// twelve in the stored numbers. `|G|²` is summed from the enclosures of `G`'s
+/// entries rather than squared exactly, since squaring `G` can fall off the
+/// bottom of the range ([`how_far_apart_the_centres_of_two_bands_are`]).
 ///
 /// **What it leaves** is two bands that overlap, where the curves may cross,
 /// to [`what_a_plane_that_cuts_them_in_bands_that_cross_leaves`]. It leaves
@@ -4952,6 +4953,14 @@ fn the_band_a_plane_cuts(flat: &Plane, surface: &Surface) -> Option<ABand> {
 /// `|c₁ − c₂|`, the distance between where the two bands' axes cross the
 /// plane, as `|G| / |k₁k₂|` with `G` worked out exactly, or `None` where a
 /// product falls out of range.
+///
+/// **`|G|²` is summed from each entry's enclosure, not squared exactly.** Each
+/// entry of `G` is exact and its enclosure is a few roundings of itself, so the
+/// sum of their squares is too. Squaring `G` exactly instead doubles how far
+/// apart its largest and smallest parts are: on an LED's cap a rounding off
+/// square to its body and its rim, sharing one stored point, `G` reaches from
+/// `1e−31` down to `1e−163`, and its exact square falls off the bottom of the
+/// range where the sum of enclosures does not.
 fn how_far_apart_the_centres_of_two_bands_are(mine: &ABand, theirs: &ABand) -> Option<Interval> {
     let both = mine.leaning.times(&theirs.leaning)?;
     let from_theirs = Exact::gap_between(theirs.on_the_axis, mine.on_the_axis);
@@ -4969,8 +4978,9 @@ fn how_far_apart_the_centres_of_two_bands_are(mine: &ABand, theirs: &ABand) -> O
     } else {
         both.enclosure()
     };
+    let apart = apart.map(|entry| entry.enclosure());
     Some(quotient_or_everything(
-        root_enclosing(Exact::squared_length_of(&apart)?.enclosure()),
+        root_enclosing(dot_enclosing(apart, apart)),
         size,
     ))
 }
