@@ -33,12 +33,17 @@
 //! baked said they ran along the body's pipe. The check now skips a flat face
 //! a pipe holds strictly inside, and the disc is 0.4 inside the rim (Q2947).
 //!
-//! It stops now where the flange's flat meets the body's pipe and the rim's,
-//! two pipes about one axis a rounding apart in direction that never meet,
-//! refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` (Q2938). These tests pin
-//! that. When it answers, each turns back into the volume check of commit
-//! `f179ca02a`: what the box and the LED share is the box's part inside the
-//! LED, and the intersection and the difference add up to the LED.
+//! It stopped next where the flange's flat meets the body's pipe and the
+//! rim's, two pipes about one axis a rounding apart in direction that never
+//! meet, refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. Q2938's road
+//! answers that triple.
+//!
+//! It stops now on the flange's front, the plane `y = -1.27`, refused
+//! `AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve` by `cut_the_crossings_into_arcs`
+//! (fuse/arrange.rs) in the check that the LED does not cross itself. These
+//! tests pin that. When it answers, each turns back into the volume check of
+//! commit `f179ca02a`: what the box and the LED share is the box's part inside
+//! the LED, and the intersection and the difference add up to the LED.
 //!
 //! `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step` is the same LED with its axis
 //! at `z = 15`, and `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step` a smaller one,
@@ -65,9 +70,12 @@
 //! surfaces meet, refused `Undecidable` on the flange's flat and two curved
 //! surfaces about one point: `x = -1.23` and two about `(1.27, -1.27, 15)` in
 //! the `Z15.0` LED, its flat and two about `(1.27, -3.81, 6)` in the `D3.0`
-//! one. That is the triple Q2938 names in
-//! `LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step`, and Q2938 is the row whose
-//! road it waits on. These tests pin that too.
+//! one. These tests pin that too. The two curved surfaces are the body's pipe
+//! and the rim's, about one axis a rounding apart in direction, the pair
+//! Q2938 names. Q2938's road answers that pair beside a flat whose normal
+//! leans off `x` by a rounding, as the `Z3.0` LED's does, but in these two
+//! LEDs the flat's normal is exactly `(-1, 0, 0)`, and an exact step of
+//! `meet_of_three_surfaces` runs out before that road is reached.
 
 use std::{env, fs, path::PathBuf};
 
@@ -87,28 +95,28 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
-fn a_box_round_the_back_corner_gets_past_the_front_disc_and_stops_where_the_flat_meets_two_pipes() {
+fn a_box_round_the_back_corner_gets_past_where_the_flat_meets_two_pipes_and_stops_on_the_front() {
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -2.27, 3.0]]),
-        where_the_flat_meets_two_pipes,
+        an_edge_of_the_front_is_not_drawn_along_it,
     );
 }
 
 #[test]
-fn a_box_round_the_front_corner_gets_past_the_front_disc_and_stops_where_the_flat_meets_two_pipes()
-{
+fn a_box_round_the_front_corner_gets_past_where_the_flat_meets_two_pipes_and_stops_on_the_front() {
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -1.27, 3.0]]),
-        where_the_flat_meets_two_pipes,
+        an_edge_of_the_front_is_not_drawn_along_it,
     );
 }
 
 /// The `Z15.0` LED gets past its body's pipe since Q2940 and stops where its
 /// flange's flat `x = -1.23` meets two curved surfaces about
-/// `(1.27, -1.27, 15)`, the far box included. Q2938 is the row whose road this
-/// triple waits on.
+/// `(1.27, -1.27, 15)`, the far box included. The flat's normal is exactly
+/// `(-1, 0, 0)`, and Q2938's road, which answers the same pair beside a flat
+/// that leans by a rounding, is not reached.
 #[test]
 fn a_z15_led_gets_past_its_body_and_stops_where_three_surfaces_meet() {
     every_fuse_refuses(
@@ -165,11 +173,8 @@ fn every_fuse_refuses(
     }
 }
 
-fn where_the_flat_meets_two_pipes(error: &Error) -> bool {
-    matches!(
-        error,
-        Error::Geometry(rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
-    )
+fn an_edge_of_the_front_is_not_drawn_along_it(error: &Error) -> bool {
+    matches!(error, Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { .. })
 }
 
 fn where_three_surfaces_meet_is_undecidable(error: &Error) -> bool {
