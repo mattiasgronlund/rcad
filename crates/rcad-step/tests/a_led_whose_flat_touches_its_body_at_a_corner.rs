@@ -27,11 +27,18 @@
 //! arrangement now tells which of the ellipse's two arcs the edge is by the
 //! rim's box, which the other arc leaves (Q2926).
 //!
-//! It stops now at the disc of radius 2.5 on the flange's front, refused
-//! `AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve`. These tests pin that. When the
-//! disc answers, each turns back into the volume check of commit `f179ca02a`:
-//! what the box and the LED share is the box's part inside the LED, and the
-//! intersection and the difference add up to the LED.
+//! It stopped next at the disc of radius 2.5 on the flange's front, refused
+//! `AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve`, from the rim against the disc:
+//! the disc's arcs are drawn between two planes a rounding apart, and nothing
+//! baked said they ran along the body's pipe. The check now skips a flat face
+//! a pipe holds strictly inside, and the disc is 0.4 inside the rim (Q2947).
+//!
+//! It stops now where the flange's flat meets the body's pipe and the rim's,
+//! two pipes about one axis a rounding apart in direction that never meet,
+//! refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` (Q2938). These tests pin
+//! that. When it answers, each turns back into the volume check of commit
+//! `f179ca02a`: what the box and the LED share is the box's part inside the
+//! LED, and the intersection and the difference add up to the LED.
 //!
 //! `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step` is the same LED with its axis
 //! at `z = 15`, and `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step` a smaller one,
@@ -47,13 +54,16 @@
 //! that misses the stored corner, and bake would not read a corner with three
 //! planes round it out of the model. It now does, and asks every plane about
 //! it as it asks a solved corner. Past that corner, the `Z15.0` LED stops at
-//! its body's pipe, refused `AFaceTrimmedByACurveThisCannotFollow`, and the
-//! `D3.0` LED stops at its front disc as the `Z3.0` one does. These tests pin
-//! that too.
+//! its body's pipe, refused `AFaceTrimmedByACurveThisCannotFollow`. The `D3.0`
+//! LED stopped at its front disc as the `Z3.0` one did, and gets past it as
+//! that one does. It stops where three surfaces meet, refused `Undecidable` on
+//! its flat and two curved surfaces about `(1.27, -3.81, 6)`: the triple Q2938
+//! names in `LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step`. These tests pin that
+//! too.
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, Point, Surface, Vector};
+use rcad_geom::{Isometry, Point, Surface, Vector, WHERE_THREE_SURFACES_MEET};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, FaceKey, Model, ProfileBuilder, Rule, SolidKey};
@@ -69,22 +79,21 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
-fn a_box_round_the_back_corner_gets_past_the_rim_and_stops_at_the_front_disc() {
-    every_fuse_refuses_naming(
+fn a_box_round_the_back_corner_gets_past_the_front_disc_and_stops_where_the_flat_meets_two_pipes() {
+    every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -2.27, 3.0]]),
-        |led, solid| the_disc_on_the_front(led, solid, -1.27, [1.27, 3.0], 2.5),
-        an_edge_not_drawn_along_its_own_curve,
+        |_, _, error| where_the_flat_meets_two_pipes(error),
     );
 }
 
 #[test]
-fn a_box_round_the_front_corner_gets_past_the_rim_and_stops_at_the_front_disc() {
-    every_fuse_refuses_naming(
+fn a_box_round_the_front_corner_gets_past_the_front_disc_and_stops_where_the_flat_meets_two_pipes()
+{
+    every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -1.27, 3.0]]),
-        |led, solid| the_disc_on_the_front(led, solid, -1.27, [1.27, 3.0], 2.5),
-        an_edge_not_drawn_along_its_own_curve,
+        |_, _, error| where_the_flat_meets_two_pipes(error),
     );
 }
 
@@ -92,24 +101,25 @@ fn a_box_round_the_front_corner_gets_past_the_rim_and_stops_at_the_front_disc() 
 fn a_z15_led_gets_past_the_corner_where_its_front_is_written_twice_and_stops_at_its_body() {
     let mut fuses = a_box_round_each_of(&[[-1.23, -1.27, 15.0], [-1.23, -2.27, 15.0]]);
     fuses.push((FAR_OFF, Rule::Intersection));
-    every_fuse_refuses_naming(
-        Z15,
-        &fuses,
-        |led, solid| the_pipe_of_the_body(led, solid, [1.27, 15.0], 2.5, [-7.37, -2.27]),
-        a_face_trimmed_by_a_curve_this_cannot_follow,
-    );
+    every_fuse_refuses(Z15, &fuses, |led, solid, error| {
+        a_face_trimmed_by_a_curve_this_cannot_follow(error)
+            == Some(the_pipe_of_the_body(
+                led,
+                solid,
+                [1.27, 15.0],
+                2.5,
+                [-7.37, -2.27],
+            ))
+    });
 }
 
 #[test]
-fn a_d3_led_gets_past_the_corner_where_its_front_is_written_twice_and_stops_at_the_front_disc() {
+fn a_d3_led_gets_past_its_front_disc_and_stops_where_three_surfaces_meet() {
     let mut fuses = a_box_round_each_of(&[[-0.23, -3.81, 5.999999956464], [-0.23, -4.81, 6.0]]);
     fuses.push((FAR_OFF, Rule::Intersection));
-    every_fuse_refuses_naming(
-        D3,
-        &fuses,
-        |led, solid| the_disc_on_the_front(led, solid, -3.81, [1.27, 6.0], 1.5),
-        an_edge_not_drawn_along_its_own_curve,
-    );
+    every_fuse_refuses(D3, &fuses, |_, _, error| {
+        where_three_surfaces_meet_is_undecidable(error)
+    });
 }
 
 /// A box round each corner, to be fused with the LED under intersection and
@@ -122,16 +132,14 @@ fn a_box_round_each_of(corners: &[[f64; 3]]) -> Vec<([f64; 3], Rule)> {
 }
 
 /// The LED in `file` and a box of side `2 * HALF` centred on each corner of
-/// `fuses`, fused under its rule, each refused as `the_face_named` reads it,
-/// naming the face `the_face` picks.
-fn every_fuse_refuses_naming(
+/// `fuses`, fused under its rule, each refused as `the_refusal` takes, handed
+/// the LED, its solid and the refusal.
+fn every_fuse_refuses(
     file: &str,
     fuses: &[([f64; 3], Rule)],
-    the_face: impl Fn(&Model, SolidKey) -> FaceKey,
-    the_face_named: fn(&Error) -> Option<FaceKey>,
+    the_refusal: impl Fn(&Model, SolidKey, &Error) -> bool,
 ) {
     let (led, solid) = the_led(file);
-    let face = the_face(&led, solid);
     for &(corner, rule) in fuses {
         let mut model = led.clone();
         let knife = a_box_round(&mut model, corner);
@@ -142,11 +150,10 @@ fn every_fuse_refuses_naming(
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         ) {
-            Err(error) => assert_eq!(
-                the_face_named(&error),
-                Some(face),
+            Err(error) => assert!(
+                the_refusal(&led, solid, &error),
                 "{file}: {rule:?} with a box round {corner:?} refused {error:?}, which is not \
-                 the refusal naming {face:?} this pins"
+                 the refusal this pins"
             ),
             Ok(_) => panic!(
                 "{file}: {rule:?} with a box round {corner:?} answers: check its volume as \
@@ -156,11 +163,22 @@ fn every_fuse_refuses_naming(
     }
 }
 
-fn an_edge_not_drawn_along_its_own_curve(error: &Error) -> Option<FaceKey> {
-    let Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { face } = error else {
-        return None;
+fn where_the_flat_meets_two_pipes(error: &Error) -> bool {
+    matches!(
+        error,
+        Error::Geometry(rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+    )
+}
+
+fn where_three_surfaces_meet_is_undecidable(error: &Error) -> bool {
+    let Error::Undecidable { records } = error else {
+        return false;
     };
-    Some(*face)
+    records
+        .records()
+        .iter()
+        .map(|record| record.predicate())
+        .eq([WHERE_THREE_SURFACES_MEET])
 }
 
 fn a_face_trimmed_by_a_curve_this_cannot_follow(error: &Error) -> Option<FaceKey> {
@@ -183,30 +201,6 @@ fn the_led(file: &str) -> (Model, SolidKey) {
         panic!("{file} is one solid, not {}", import.solids().len())
     };
     (import.model().clone(), solid)
-}
-
-/// The disc on the front of the body: the flat face of the LED in the plane
-/// `y = front` whose every corner is within `radius` of the axis
-/// `x = axis[0], z = axis[1]`, the holes the leads come out of included. The
-/// rest of the flange's front reaches out to the rim, further from it.
-fn the_disc_on_the_front(
-    led: &Model,
-    solid: SolidKey,
-    front: f64,
-    axis: [f64; 2],
-    radius: f64,
-) -> FaceKey {
-    the_one_face(
-        led,
-        solid,
-        |surface| {
-            let Surface::Plane(_) = surface else {
-                return false;
-            };
-            true
-        },
-        |corner| (corner.y() - front).abs() < 1e-9 && from_the_axis(corner, axis) < radius + 1e-9,
-    )
 }
 
 /// The pipe of the body: the face of the LED on a cylinder of `radius` whose
