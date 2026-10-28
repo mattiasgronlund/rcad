@@ -79,6 +79,21 @@ A misread pid can still kill the wrong process, and no hook can catch that.
 What the rule takes away is the kill that hits another tree without anyone
 reading a list.
 
+> **2026-10-29 note (Q2656): corrects the paragraph above.** "No hook can
+> catch that" was too wide. At 21:15:10Z on 2026-10-22 Q297's lane ran `kill
+> 3319951 3510325 3518793`; `3319951` was Q2629's land gate running
+> `check-queue-api-selftest` in `wf_59661110-5c2-7`, 217 s old, read off `ps
+> -ef` piped to `grep check-queue-api` rather than off `pgrep -af` on the
+> lane's own tree, which five seconds earlier had not listed it. The land
+> stopped at gate exit 143 and an Opus merger had to gate again. Both trees'
+> runs shared the one command line, so no pattern told them apart — but
+> `/proc/<pid>/cwd` does: it named `wf_59661110-5c2-7`, not the lane's own
+> tree. `guard.py` now reads that cwd for every `kill <pid>` and `kill --
+> -<pgid>` and refuses the ones that resolve outside the calling session's
+> own tree, letting a pid that no longer exists pass. What the hook still
+> cannot catch is a misread pid that happens to name a process *inside* your
+> own tree — a hook has no way to know that pid was not the one you meant.
+
 ### 454.4 What the row builds
 
 - **The Bash hook refuses those forms.** The judgement goes in
