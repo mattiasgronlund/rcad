@@ -4289,8 +4289,12 @@ check-lanes-workflow:
     printf '%s\n' 'pub fn kept() -> u32 {' '    1' '}' '' > "$cfgtest/removed.rs"
     printf '%s\n' '#[cfg(test)]' 'pub fn helper() -> u32 {' '    5' '}' > "$cfgtest/toggled.rs"
     commit "$cfgtest" branch
+    diff_cache_1_set=''
+    diff_cache_2_set=''
+    diff_cache_3_set=''
+    diff_cache_4_set=''
     scan() {
-        local n t at prev line types prog got
+        local n t at prev line types prog got same
         n=$(grep -cxF -- "$create" "$1" || true)
         if [ "$n" != 1 ]; then
             echo "$1 has the line '$create' $n times, expected once"
@@ -4479,7 +4483,14 @@ check-lanes-workflow:
         line=$(grep -E -- "$runs_awk" "$4" || true)
         prog=${line#*"| awk '"}
         prog=${prog%"'"}
-        got=$(git -C "$fixture" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+        same=0
+        cmp -s "$4" "$recipes" && same=1
+        if [ "$same" = 1 ] && [ -n "$diff_cache_1_set" ]; then
+            got="$diff_cache_1"
+        else
+            got=$(git -C "$fixture" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+            if [ "$same" = 1 ]; then diff_cache_1="$got"; diff_cache_1_set=1; fi
+        fi
         if [ "$got" != "$runs_want" ]; then
             echo "the lines-that-run recipe in $4 printed, on the fixture repo:"
             printf '%s\n' "$got"
@@ -4488,19 +4499,34 @@ check-lanes-workflow:
             echo "a line it skips that runs lets a behaviour change merge with no failing test (§375)"
             return 16
         fi
-        got=$(git -C "$fixture" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD HEAD | awk "$prog" 2>&1 || true)
+        if [ "$same" = 1 ] && [ -n "$diff_cache_2_set" ]; then
+            got="$diff_cache_2"
+        else
+            got=$(git -C "$fixture" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD HEAD | awk "$prog" 2>&1 || true)
+            if [ "$same" = 1 ]; then diff_cache_2="$got"; diff_cache_2_set=1; fi
+        fi
         if [ "$got" != "$runs_empty" ]; then
             echo "the lines-that-run recipe in $4 printed '$got' for an empty diff, not '$runs_empty'; a git diff that failed would read as nothing that runs changed (§375)"
             return 16
         fi
-        got=$(git -C "$many" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+        if [ "$same" = 1 ] && [ -n "$diff_cache_3_set" ]; then
+            got="$diff_cache_3"
+        else
+            got=$(git -C "$many" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+            if [ "$same" = 1 ]; then diff_cache_3="$got"; diff_cache_3_set=1; fi
+        fi
         if [ "$got" != "$many_want" ]; then
             echo "the lines-that-run recipe in $4 printed, on a commit that adds fifteen functions:"
             printf '%s\n' "$got"
             echo "and should have printed the first ten, then 'lines that run: 15'; a verifier copies the whole print into its report (§382)"
             return 17
         fi
-        got=$(git -C "$cfgtest" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+        if [ "$same" = 1 ] && [ -n "$diff_cache_4_set" ]; then
+            got="$diff_cache_4"
+        else
+            got=$(git -C "$cfgtest" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+            if [ "$same" = 1 ]; then diff_cache_4="$got"; diff_cache_4_set=1; fi
+        fi
         if [ "$got" != "$cfg_want" ]; then
             echo "the lines-that-run recipe in $4 printed, on a commit that removes a whole #[cfg(test)] module and separately gates an existing function behind one:"
             printf '%s\n' "$got"
