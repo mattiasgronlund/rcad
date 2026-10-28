@@ -866,11 +866,13 @@ enum TwoLoopsHeldApartBy {
     /// holds the loop of two cones off one axis apart from the branch beyond
     /// it, where those are mirror images but for a rounding and the loop and
     /// that branch pass a hair apart near where the exact pair would touch.
-    /// `across` is the half-space as it proved it, the branch in front.
+    /// `across` is the half-space as it proved it, the branch in front, and
+    /// `apex` the flat surface through `ruled`'s apex the loop is in front of.
     TwoConesNearlyMeeting {
         ruled: Cone,
         crossed: Cone,
         across: HalfSpace,
+        apex: HalfSpaceThroughAPoint,
     },
 }
 
@@ -920,6 +922,31 @@ impl TwoLoopsHeldApartBy {
             Decision::Pos | Decision::Neg | Decision::Undecidable { .. } => false,
             other => panic!("a side of a surface came back as {other:?}"),
         })
+    }
+
+    /// The two flat surfaces `intersect` proves the loop of a loop and two
+    /// branches in front of, the one through `ruled`'s apex and `across`
+    /// turned round, and nothing for a crossing of two loops.
+    ///
+    /// The loop is the only piece of a loop and two branches marched from a
+    /// seed ([`which_of_a_loop_and_two_branches_this_run_is`]), so these hold
+    /// every point the march should reach, and none of either branch.
+    fn what_the_loop_is_in_front_of(self) -> Option<[Picker; 2]> {
+        match self {
+            Self::TwoConesAcross(TwoConesOffOneAxis {
+                across,
+                apex: Some(apex),
+                ..
+            }) => Some([Picker::from(apex), Picker::from(across.reversed())]),
+            Self::TwoConesNearlyMeeting { across, apex, .. } => {
+                Some([Picker::from(apex), Picker::from(across.reversed())])
+            }
+            Self::BallsCentre { .. }
+            | Self::FatPipesAxis { .. }
+            | Self::ConesSlantPlane { .. }
+            | Self::ConesApex { .. }
+            | Self::TwoConesAcross(TwoConesOffOneAxis { apex: None, .. }) => None,
+        }
     }
 }
 
@@ -1446,11 +1473,13 @@ fn follow_the_quartic(
         }
     }
 
+    let fence = held_apart_by.what_the_loop_is_in_front_of();
     let walked = march(
         surfaces,
         seed,
         half_the_budget,
         MOST_POINTS_ALONG_ONE_CROSSING,
+        &|at| fence.is_none_or(|flats| decided_in_front_of_every_one(&flats, at)),
     )?;
     let tag = Approximation::new(walked.deviation, Cause::PointAlongACrossing);
     if walked.deviation > half_the_budget && !policy.wobble_is_acceptable(walked.deviation) {
@@ -1563,6 +1592,7 @@ fn follow_a_branch_between_two_corners(
         way * round(arrive),
         half_the_budget,
         MOST_POINTS_ALONG_ONE_CROSSING,
+        &|at| decided_in_front_of_every_one(&[beyond], at),
     )?;
     let deviation = walked.deviation;
     if deviation > half_the_budget && !policy.wobble_is_acceptable(deviation) {
@@ -1593,6 +1623,18 @@ fn follow_a_branch_between_two_corners(
     Ok(PointsAlongACrossing {
         points,
         deviation: Approximation::new(deviation, Cause::PointAlongACrossing),
+    })
+}
+
+/// Whether `at`, exactly as it is, is decided in front of every one of
+/// `flats`. A point on one, or one whose side cannot be told, is not, and the
+/// march only shortens the trial that landed there, so nothing is logged.
+fn decided_in_front_of_every_one(flats: &[Picker], at: Point) -> bool {
+    let at = PredicatePoint::from(at.coordinates());
+    flats.iter().all(|flat| match flat.side_of_point(at) {
+        Decision::Pos => true,
+        Decision::Neg | Decision::Zero | Decision::Undecidable { .. } => false,
+        other => panic!("a side of a flat surface came back as {other:?}"),
     })
 }
 
@@ -3057,6 +3099,7 @@ impl ALoopAndTwoBranches {
                 ruled: nearly.ruled,
                 crossed,
                 across: nearly.across,
+                apex: nearly.apex,
             },
         }
     }
