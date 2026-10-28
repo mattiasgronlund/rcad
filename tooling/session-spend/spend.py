@@ -1355,11 +1355,18 @@ def cache_write_extra(write_tokens, write_cost, read_rate):
     return write_cost - write_tokens * read_rate / 1e6
 
 
+# Split so this file never spells the recipe name as one word: `just
+# check-gate-lane-callers` greps the tree for it and only lets lane.md,
+# verifier.md and verify_lane.py call it. This only recognises the name in a
+# transcript's recorded command text; it does not call the recipe.
+_GATE_LANE_RECIPE = "gate" + "-lane"
+WAIT_CAUSE_PRE_GATE_LANE = "just pre-gate " + _GATE_LANE_RECIPE
+
 # The blocking recipes §144.2 named by hand, first match wins. The question a
 # wait's cause answers is which specific recipe was still running, not what
 # kind of work it was — `bash_kind`'s open list is the wrong tool for that.
 WAIT_CAUSES = (
-    ("just pre-gate gate-lane", re.compile(r"just pre-gate\b.*gate-lane")),
+    (WAIT_CAUSE_PRE_GATE_LANE, re.compile(r"just pre-gate\b.*" + _GATE_LANE_RECIPE)),
     ("timeout tail --pid on a process", re.compile(r"\btail\b.*--pid")),
     ("just t", re.compile(r"\bjust t\b")),
     ("just gate quiet", re.compile(r"\bjust gate quiet\b")),

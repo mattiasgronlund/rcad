@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from spend import (
     PURPOSES,
     RITUALS,
+    WAIT_CAUSE_PRE_GATE_LANE,
     bucket_of,
     cache_write_extra,
     decision_read,
@@ -254,8 +255,8 @@ EXTRA_CASES = [
 ]
 
 WAIT_CAUSE_CASES = [
-    ("the land gate behind mise", [bash("mise exec -- just pre-gate gate-lane")],
-     "just pre-gate gate-lane"),
+    ("the land gate behind mise", [bash("mise exec -- " + WAIT_CAUSE_PRE_GATE_LANE)],
+     WAIT_CAUSE_PRE_GATE_LANE),
     ("the pid wait a lane uses to watch a background run",
      [bash("timeout 540 tail --pid=12345 -f /dev/null")], "timeout tail --pid on a process"),
     ("a named test", [bash("mise exec -- just t how_often_a_fuse_with_a_cone_refuses")],
