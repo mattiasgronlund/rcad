@@ -1446,7 +1446,13 @@ impl Model {
     /// # What it does not see
     ///
     /// Two faces crossing along a line through no corner they share: the
-    /// corners each face has are all this looks at.
+    /// corners each face has are all this looks at. Finding those means
+    /// asking every pair of faces, which `docs/decisions.md` §17.4 keeps out
+    /// of this sweep for its cost, and the fuse refuses such a solid as
+    /// [`Error::ArgumentIntersectsItself`]. A box whose top is pushed
+    /// down to a point through its floor, drawn through `SolidBuilder`, builds,
+    /// and five fuses of it with a box, far off or across its floor, were each
+    /// refused that way (queue row Q2919's probe, not kept).
     ///
     /// # What it costs
     ///
