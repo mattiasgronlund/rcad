@@ -3773,8 +3773,10 @@ impl<'f> Arrangement<'f> {
     /// allowance, and the 224 into corners proved off a surface lie within
     /// under one percent of it (§253.2).
     ///
-    /// **For a meet of three planes, or of two planes and a ball, a pipe or a
-    /// cone, `boxed_tight` is `place` narrowed by one checked step**
+    /// **For a meet of three planes, or of two planes and a quadric,
+    /// `boxed_tight` is `place` narrowed by one checked step; for a meet of a
+    /// plane and two quadrics it is `place` narrowed by that step again and
+    /// again, until a step narrows no side**
     /// ([`MeetOfThree::boxed_tight`]); for anything else it is `place`. The
     /// node a meet becomes when it does not fold keeps `place` as its own box,
     /// and every other question here reads `place`, the reach below included:
@@ -5581,7 +5583,7 @@ impl<'f> Arrangement<'f> {
     }
 
     /// The node's own box narrowed, where the node is a meet of three planes,
-    /// or of two planes and a ball, a pipe or a cone
+    /// of two planes and a quadric, or of a plane and two quadrics
     /// ([`MeetOfThree::boxed_tight`]), and its own box for every other node.
     ///
     /// **Worked out when the order asks, and not kept on the node.** Kept on
