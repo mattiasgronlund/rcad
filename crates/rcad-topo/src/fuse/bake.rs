@@ -13,6 +13,20 @@
 //! surfaces round it is re-derived, and a corner with fewer is read out of the
 //! model and moved.**
 //!
+//! One kind of corner with three surfaces round it is read out of the model as
+//! well, but only once re-deriving it has refused `Undecidable`: a corner
+//! whose faces fall into two fans or more, each fan with fewer than three
+//! surfaces, where no edge left out adds a surface and fewer than three of
+//! the surfaces are planes. That is where two pieces of skin touch at one
+//! point, as the flange and the body of a KiCad LED do (§471.3): each fan
+//! alone would be read out of the model, and the three surfaces only come
+//! together because both fans are counted, so they touch there rather than
+//! cross and nothing solves them. Fewer than three planes, because readers
+//! further on take three planes round a corner to meet at it, which holds
+//! only where bake solved the corner among them. A corner of one fan whose
+//! three surfaces graze stays refused, as §70.3's does. [`place_a_corner`]
+//! says it in full.
+//!
 //! **Read and moved, and not asked about.** With nothing to solve, the point
 //! handed on is the stored corner whatever its surfaces say, so asking them
 //! could only refuse. And the stored corner is the point `Model::validate` asks
@@ -64,13 +78,15 @@ use rcad_predicates::{
 use smallvec::SmallVec;
 
 use crate::holds::lie_along_one_line;
-use crate::key::{FaceSlot, VertexSlot};
+use crate::key::{EdgeSlot, FaceSlot, VertexSlot};
 use crate::validate::{
     CornerRoom, MEASURING_SLACK, a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of,
     side_of_surface,
 };
 use crate::view::CoedgeView;
-use crate::{EdgeKey, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey};
+use crate::{
+    EdgeKey, Error, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey,
+};
 
 use super::arrange::ACornerReadAsOnePoint;
 use super::assemble::{InputFace, joined_faces_of_an_input, one_surface};
@@ -350,16 +366,19 @@ pub(crate) struct BakedCorner {
     /// which is what keeps the arrangement from having to prove a corner is on
     /// a curve it is on by construction.
     ///
-    /// **Three or more, and every one of them was asked about the corner.**
-    /// [`derive_a_corner`] solves such a corner from one triple and then asks
-    /// each surface here about it, grown by the room `Model::validate_solid`
-    /// grants a corner off that surface plus [`what_writing_the_corner_down_cost`],
-    /// and a surface that proves it off is a refusal. Fewer than three, and the
-    /// corner was read out of the model and nothing here asked (§286).
-    /// `a_corner_is_this_place` in the arrangement leans on the first half:
-    /// a meet of three planes from this list is this corner while it lies
-    /// within [`BakedCorner::room_its_planes_were_asked_with`] of it (§356,
-    /// §395.8).
+    /// **Three or more planes here, and every surface here was asked about the
+    /// corner.** [`derive_a_corner`] solves a corner with three surfaces or
+    /// more round it from one triple and then asks each surface here about it,
+    /// grown by the room `Model::validate_solid` grants a corner off that
+    /// surface plus [`what_writing_the_corner_down_cost`], and a surface that
+    /// proves it off is a refusal. Fewer than three surfaces, and the corner
+    /// was read out of the model and nothing here asked (§286). So was a corner
+    /// in two fans that touch, with three surfaces or more round it but fewer
+    /// than three of them planes, once solving it refused ([`place_a_corner`],
+    /// §471.3). `a_corner_is_this_place` in the arrangement leans on the first
+    /// half: a meet of three planes from this list is this corner while it
+    /// lies within [`BakedCorner::room_its_planes_were_asked_with`] of it
+    /// (§356, §395.8).
     pub(crate) around: Vec<Surface>,
     /// The three surfaces of `around` whose meet [`derive_a_corner`] placed the
     /// corner at, so that `point`'s box holds where exactly those three meet.
@@ -1103,7 +1122,6 @@ fn corner_of_every_vertex(
                     if corners.contains_key(&slot) {
                         continue;
                     }
-                    let around = faces_around_a_vertex(model, slot, surfaces);
                     let also_on = left_out.get(&slot).map_or(&[][..], Vec::as_slice);
                     corners.insert(
                         slot,
@@ -1111,7 +1129,7 @@ fn corner_of_every_vertex(
                             model,
                             vertex,
                             slot,
-                            &around,
+                            surfaces,
                             also_on,
                             validate_allows,
                             planes_in_the_fuse,
@@ -1137,20 +1155,10 @@ fn faces_around_a_vertex(
     vertex: VertexSlot,
     surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
 ) -> Vec<PlacedSurface> {
-    let mut faces = BTreeSet::new();
-    for edge in model.vertex_at(vertex).edges().collect::<Vec<_>>() {
-        for face in model.edge_at(edge.slot_in(model.id())).neighbouring_faces() {
-            let slot = face.slot_in(model.id());
-            if surfaces.contains_key(&slot) {
-                faces.insert(slot);
-            }
-        }
-    }
-    assert!(
-        !faces.is_empty(),
-        "a corner of a solid is a corner of at least one of its faces"
-    );
-    faces.iter().map(|slot| surfaces[slot]).collect()
+    the_faces_at_a_vertex(model, vertex, surfaces)
+        .iter()
+        .map(|slot| surfaces[slot])
+        .collect()
 }
 
 /// Where a corner of an input is, by whichever of §31.3's two routes its own
@@ -1163,6 +1171,30 @@ fn faces_around_a_vertex(
 /// share passes through it, so there is nothing to solve and it is read out of
 /// the model and moved. **Its surfaces are not asked about it**, and this
 /// module's header says why (§286).
+///
+/// **A corner where two fans touch is read out of the model too, when solving
+/// it refuses `Undecidable`** (§471.3). Each of these is needed for that:
+///
+/// - Every surface round it is a face's. An edge left out that adds one ran
+///   along a curve through the corner that its faces alone do not name, and
+///   the corner is solved with it or refused.
+/// - Fewer than three of its surfaces are planes. `a_corner_is_this_place` in
+///   the arrangement and the readers after it take three planes round a
+///   corner to meet at it, within [`BakedCorner::room_its_planes_were_asked_with`],
+///   which holds only where this solved the corner among them.
+/// - Its faces fall into two fans or more, and no fan has three surfaces
+///   ([`each_fan_round_it_has_fewer_than_three_surfaces`]). Then each fan alone
+///   would be read out of the model, and the three surfaces round the corner
+///   come together only because both fans are counted: the flat and back of a
+///   KiCad LED's flange and the pipe of its body, which touches the flat
+///   there. They touch rather than cross, so no three of them place the
+///   corner. A corner of one fan whose three surfaces graze, as §70.3's do,
+///   stays refused: no test yet builds one with fewer than three planes.
+///
+/// Every corner that solving places is still placed that way, so a corner this
+/// reads out of the model is one that was refused before. Solving runs on a log
+/// of its own, kept only when it answers, so a corner read out leaves no record
+/// of the refusal behind.
 ///
 /// The surfaces round it are its faces', and then `also_on`: what an edge left
 /// out at it ran along, unless that is one of its faces' surfaces however
@@ -1180,17 +1212,18 @@ fn place_a_corner(
     model: &Model,
     vertex: VertexKey,
     slot: VertexSlot,
-    around: &[PlacedSurface],
+    surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
     also_on: &[Surface],
     validate_allows: CornerRoom,
     planes_in_the_fuse: &[Plane],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedCorner> {
-    let where_the_model_puts_it = where_the_model_puts_a_corner(model, slot, around)?;
+    let around = faces_around_a_vertex(model, slot, surfaces);
+    let where_the_model_puts_it = where_the_model_puts_a_corner(model, slot, &around)?;
 
     let mut distinct: Vec<Surface> = Vec::with_capacity(around.len() + also_on.len());
-    for face in around {
+    for face in &around {
         if !distinct.contains(&face.baked_as) {
             distinct.push(face.baked_as);
         }
@@ -1203,29 +1236,126 @@ fn place_a_corner(
     }
     if distinct.len() >= 3 {
         let outward = (distinct.len() == of_its_faces)
-            .then(|| the_planes_round_a_convex_corner(model, slot, around, &distinct))
+            .then(|| the_planes_round_a_convex_corner(model, slot, &around, &distinct))
             .flatten();
-        return derive_a_corner(
+        let among = outward.as_deref().map(|outward| AmongThePlanesOfTheFuse {
+            outward,
+            in_the_fuse: planes_in_the_fuse,
+        });
+        let read_out_of_the_model_when_unsolved = distinct.len() == of_its_faces
+            && distinct
+                .iter()
+                .filter(|surface| surface.as_plane().is_some())
+                .count()
+                < 3
+            && each_fan_round_it_has_fewer_than_three_surfaces(model, slot, surfaces);
+        if !read_out_of_the_model_when_unsolved {
+            return derive_a_corner(
+                vertex,
+                where_the_model_puts_it,
+                distinct,
+                validate_allows,
+                among,
+                policy,
+                log,
+            );
+        }
+        let mut tried = ProvenanceLog::new();
+        match derive_a_corner(
             vertex,
             where_the_model_puts_it,
-            distinct,
+            distinct.clone(),
             validate_allows,
-            outward.as_deref().map(|outward| AmongThePlanesOfTheFuse {
-                outward,
-                in_the_fuse: planes_in_the_fuse,
-            }),
+            among,
             policy,
-            log,
-        );
+            &mut tried,
+        ) {
+            Err(Error::Undecidable { .. }) => (),
+            answered => {
+                tried.drain_into(log);
+                return answered;
+            }
+        }
     }
     Ok(BakedCorner {
         vertex,
         point: where_the_model_puts_it,
         around: distinct,
         solved_from: None,
-        seam_plane: the_seam_plane_a_corner_is_on(model, slot, around),
+        seam_plane: the_seam_plane_a_corner_is_on(model, slot, &around),
         room_its_planes_were_asked_with: None,
     })
+}
+
+/// Whether the faces round a corner fall into two fans or more, and no fan has
+/// three surfaces or more, so that each fan alone would be read out of the
+/// model ([`place_a_corner`]).
+///
+/// A fan is §469.6's: the corners of faces at the vertex, one where each
+/// coedge of a wire ends there and the next begins, joined wherever two of
+/// them share an edge. Its surfaces are what its faces are baked on.
+fn each_fan_round_it_has_fewer_than_three_surfaces(
+    model: &Model,
+    vertex: VertexSlot,
+    surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
+) -> bool {
+    let mut number_of: BTreeMap<EdgeSlot, usize> = BTreeMap::new();
+    let mut corners: Vec<([usize; 2], Surface)> = Vec::new();
+    for face in the_faces_at_a_vertex(model, vertex, surfaces) {
+        for wire in model.face_at(face).wires() {
+            let coedges: Vec<CoedgeView<'_>> = wire.coedges().collect();
+            for (at, coedge) in coedges.iter().enumerate() {
+                if coedge.end().key().slot_in(model.id()) != vertex {
+                    continue;
+                }
+                let next = coedges[(at + 1) % coedges.len()];
+                let mut numbered = |edge: EdgeKey| {
+                    let count = number_of.len();
+                    *number_of.entry(edge.slot_in(model.id())).or_insert(count)
+                };
+                let edges = [numbered(coedge.edge().key()), numbered(next.edge().key())];
+                corners.push((edges, surfaces[&face].baked_as));
+            }
+        }
+    }
+    let mut one_fan = Sameness::of(number_of.len());
+    for ([into, out_of], _) in &corners {
+        one_fan.join(*into, *out_of);
+    }
+    let mut fans: BTreeMap<usize, Vec<Surface>> = BTreeMap::new();
+    for ([into, _], surface) in corners {
+        let fan = fans.entry(one_fan.leader(into)).or_default();
+        if !fan.contains(&surface) {
+            fan.push(surface);
+        }
+    }
+    fans.len() >= 2 && fans.values().all(|fan| fan.len() < 3)
+}
+
+/// Every face of this solid that meets at this vertex.
+///
+/// # Panics
+///
+/// If none does, as [`faces_around_a_vertex`] says.
+fn the_faces_at_a_vertex(
+    model: &Model,
+    vertex: VertexSlot,
+    surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
+) -> BTreeSet<FaceSlot> {
+    let mut faces = BTreeSet::new();
+    for edge in model.vertex_at(vertex).edges().collect::<Vec<_>>() {
+        for face in model.edge_at(edge.slot_in(model.id())).neighbouring_faces() {
+            let slot = face.slot_in(model.id());
+            if surfaces.contains_key(&slot) {
+                faces.insert(slot);
+            }
+        }
+    }
+    assert!(
+        !faces.is_empty(),
+        "a corner of a solid is a corner of at least one of its faces"
+    );
+    faces
 }
 
 /// The planes of the faces round a corner, each turned to face out of the
@@ -1359,8 +1489,9 @@ fn the_seam_plane_a_corner_is_on(
 /// This is a **cached sample** of where the surfaces round it meet (§17.1) and
 /// never the answer: [`place_a_corner`] returns it only for a corner with fewer
 /// than three surfaces round it, where the whole of a shared curve satisfies
-/// them and there is nothing to solve, and [`derive_a_corner`] reads it only to
-/// tell two meeting points apart.
+/// them and there is nothing to solve, and for a corner where two fans touch
+/// that solving refused, where each fan alone is such a corner (§471.3).
+/// [`derive_a_corner`] reads it only to tell two meeting points apart.
 ///
 /// # Errors
 ///
