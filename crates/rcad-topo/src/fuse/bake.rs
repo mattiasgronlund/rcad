@@ -23,8 +23,9 @@
 //! together because both fans are counted, so they touch there rather than
 //! cross and nothing solves them. Fewer than three planes, because readers
 //! further on take three planes round a corner to meet at it, which holds
-//! only where bake solved the corner among them. One fan, §70.3's corner of
-//! three planes that graze, stays refused. [`place_a_corner`] says it in full.
+//! only where bake solved the corner among them. A corner of one fan whose
+//! three surfaces graze stays refused, as §70.3's does. [`place_a_corner`]
+//! says it in full.
 //!
 //! **Read and moved, and not asked about.** With nothing to solve, the point
 //! handed on is the stored corner whatever its surfaces say, so asking them
@@ -1187,8 +1188,8 @@ fn faces_around_a_vertex(
 ///   come together only because both fans are counted: the flat and back of a
 ///   KiCad LED's flange and the pipe of its body, which touches the flat
 ///   there. They touch rather than cross, so no three of them place the
-///   corner. One fan of three surfaces that graze, as §70.3's planes do, stays
-///   refused.
+///   corner. A corner of one fan whose three surfaces graze, as §70.3's do,
+///   stays refused: no test yet builds one with fewer than three planes.
 ///
 /// Every corner that solving places is still placed that way, so a corner this
 /// reads out of the model is one that was refused before. Solving runs on a log
