@@ -92,7 +92,10 @@ use rcad_predicates::{
 use smallvec::SmallVec;
 
 use crate::classify::stretched_to_the_plane;
-use crate::holds::{how_the_axis_lies_on, lie_along_one_line, the_way_into_an_arc};
+use crate::holds::{
+    how_the_axis_lies_on, lie_along_one_line, the_way_into_an_arc,
+    which_end_tells_the_arc_a_box_holds,
+};
 use crate::mesh::the_surface_pinches_at;
 use crate::validate::{name_of_surface, side_of_surface};
 use crate::{Error, FaceKey, Invalid, Result, VertexKey};
@@ -7820,6 +7823,19 @@ impl<'f> Arrangement<'f> {
     /// circle as it stands, and `holds.rs` reads the same arcs by the same
     /// spelling (§23.8).
     ///
+    /// **An edge no picker tells apart is read off the face's box**, where only
+    /// one of the two arcs between its ends can lie in it
+    /// ([`which_end_tells_the_arc_a_box_holds`] has the argument). That arc is
+    /// read at the end the box names, the start or the end, with the chord in
+    /// place of the way into the arc: there the edge's own direction reads
+    /// positive against the chord, so the crossing's forward direction does
+    /// exactly when the edge runs forward. A STEP file's flat along a round
+    /// bar is the case: its plane's normal is a rounding off square to the
+    /// bar's axis, so it cuts the bar's rim in an ellipse about `1.6e32` long,
+    /// and the file stores the edge where the two meet as a straight line, with
+    /// no picker. Every fuse of `LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step`'s
+    /// solid was refused on that edge (row Q2926).
+    ///
     /// # Errors
     ///
     /// [`Error::Undecidable`] naming [`WHICH_WAY_AN_EDGE_RUNS_ROUND`] when the
@@ -7830,13 +7846,19 @@ impl<'f> Arrangement<'f> {
     /// circle, a cone's or a pipe's circle or ellipse, or a ring's circle —
     /// with a picker that tells its two arcs apart by one of the five ways
     /// [`the_way_into_an_arc`] sets out, the reading of a picker this and
-    /// [`holds`](crate::holds) share — on a ring's circle by the first of them.
-    /// A gap and not a limit: the edge is one arc or the other.
+    /// [`holds`](crate::holds) share — on a ring's circle by the first of them —
+    /// nor an arc of a ball's, a cone's or a pipe's curve whose other arc the
+    /// face's box rules out. A gap and not a limit: the edge is one arc or the
+    /// other.
     ///
     /// # Panics
     ///
-    /// If the tangent lies along the chord. On a circle that means the two ends
-    /// are one point, and an edge with one corner at both ends never gets here.
+    /// If the direction read gives no sign against the way into the arc. Read
+    /// at the start against a picker's way, that is a tangent along the chord,
+    /// which on a closed conic means the two ends are one point, and an edge
+    /// with one corner at both ends never gets here. Read against the chord at
+    /// the end the box names, it puts that end where the curve goes farthest
+    /// along the chord, which the box has ruled out.
     fn which_way_an_edge_runs_round(
         &self,
         crossing: usize,
@@ -7845,23 +7867,41 @@ impl<'f> Arrangement<'f> {
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
         let from = self.node_of_corner[wire][position];
-        let ends = [from, self.node_of_the_end[wire][position]].map(|node| self.nodes[node].point);
+        let to = self.node_of_the_end[wire][position];
+        let ends = [from, to].map(|node| self.nodes[node].point);
         let partner = self.crossings[crossing].partner;
         let picked_by = &self.face.wires[wire][position].picked_by;
-        let into_the_arc = the_way_into_an_arc(&self.surface, &partner, ends, picked_by).ok_or(
-            Error::AFaceTrimmedByACurveThisCannotFollow {
-                face: self.face.keys[0],
-            },
-        )?;
+        let cannot_follow = || Error::AFaceTrimmedByACurveThisCannotFollow {
+            face: self.face.keys[0],
+        };
+        let (at, against) = match the_way_into_an_arc(&self.surface, &partner, ends, picked_by) {
+            Some(into_the_arc) => (from, into_the_arc),
+            None => {
+                let inside = self
+                    .face
+                    .bounds
+                    .as_a_point_anywhere_inside()
+                    .ok_or_else(cannot_follow)?
+                    .enclosure();
+                let read_at =
+                    which_end_tells_the_arc_a_box_holds(&self.surface, &partner, ends, inside)
+                        .ok_or_else(cannot_follow)?;
+                let [start, end] = ends.map(PredicatePoint::enclosure);
+                (
+                    [from, to][read_at],
+                    core::array::from_fn(|axis| end[axis] - start[axis]),
+                )
+            }
+        };
         let forward = self.way_out_of(
-            from,
+            at,
             Direction {
                 crossing,
                 forward: true,
             },
         );
         let decided = must_decide(
-            dot_of(forward, into_the_arc).sign(),
+            dot_of(forward, against).sign(),
             WHICH_WAY_AN_EDGE_RUNS_ROUND,
             &ends,
             Measures::Area,
@@ -7874,7 +7914,10 @@ impl<'f> Arrangement<'f> {
         assert_ne!(
             decided,
             Decision::Zero,
-            "an edge's tangent at its start lies along its chord, so its two ends are one"
+            "an edge's tangent gives no sign against the way into its arc: along the \
+             chord at a start a picker read, which makes its two ends one, or square to \
+             the chord at an end the box read, which makes that end the farthest the \
+             curve goes along its chord, as the box ruled out"
         );
         assert!(
             decided == Decision::Pos || decided == Decision::Neg,
