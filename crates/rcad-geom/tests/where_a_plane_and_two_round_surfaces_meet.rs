@@ -1,9 +1,10 @@
-//! One plane and two curved surfaces, where that is not a quartic.
+//! One plane and two curved surfaces, where that is not a quartic, and where it
+//! is.
 //!
 //! `three_surfaces.rs` works out where three surfaces meet by crossing two
 //! planes into a line and cutting that line with the third surface. One plane
 //! and two quadrics has no second plane to cross, and in general it is a quartic
-//! — two conics in one plane — which nothing in this milestone solves.
+//! — two conics in one plane — which only its last road solves.
 //!
 //! **These families of it are not a quartic**, and all of them are ordinary
 //! mechanical CAD:
@@ -43,15 +44,24 @@
 //!   circle on a plane known exactly, and that plane answers it instead: a
 //!   slanted cut through where a rod's round end meets it.
 //!
-//! Every corner below is worked out by hand first and written in the test, and
-//! every one of them lands on a whole number — so a box round it has no width
-//! and the answer is checked against the arithmetic-free number and not against
-//! a second run of the same code.
+//! **The rest is the quartic, solved exactly** from the two conics the plane
+//! cuts (Q2938). A plane leaning well off square to a pipe against a ball off
+//! its axis is it, and so is a cap across a bar leaning past the cap's own
+//! bar. So is an LED's front flat with its body's pipe and its rim's, whether
+//! the flat leans off parallel to them by a rounding or is stored as exactly
+//! `x = −1.23` along the rim's stored axis: it meets both twice, `10¹⁵` or so
+//! along them.
 //!
-//! What is still refused is written with the corner it refuses in whole
-//! numbers beside it. That is what makes it a **gap** rather than a limit
-//! (§16.10): the points are there, and no discriminant this file has reaches
-//! them.
+//! Every corner below is worked out apart from this code first and written in
+//! the test. Most land on whole numbers, so a box round it has no width and
+//! the answer is checked against the arithmetic-free number and not against a
+//! second run of the same code. A quartic's corners are written as roots of
+//! it found by hand, or as the stretch between two numbers it changes sign
+//! across; an LED's are worked out over the rationals its stored numbers name.
+//!
+//! What is still refused is written with the corner it refuses beside it.
+//! That is what makes it a **gap** rather than a limit (§16.10): the points
+//! are there, and no road this file has reaches them.
 
 #![forbid(unsafe_code)]
 

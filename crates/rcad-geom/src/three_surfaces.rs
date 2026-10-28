@@ -4,7 +4,7 @@
 //! names the **points** a third surface cuts out of that curve, which is what a
 //! corner of an arrangement is (`docs/decisions.md` §31.2 rows 4 and 5).
 //!
-//! # Two planes and a quadric is the road, and twelve ways round it
+//! # Two planes and a quadric is the road, and thirteen ways round it
 //!
 //! Two planes cross in a line, and a line cut by a quadric is a quadratic in one
 //! unknown whose discriminant is a polynomial in the stored numbers. That is the
@@ -122,31 +122,38 @@
 //! off it, and a ball resting on a rod cut leaning through where they touch.
 //! [`what_a_plane_one_wall_mirrors_with_both_leaves`].
 //!
+//! **A thirteenth is the quartic itself, solved exactly.** Take off the plane
+//! the coordinate its normal leans along most, and each curved surface is a
+//! conic in the other two, every number of it worked out exactly. Two conics
+//! share a point just where a polynomial of degree four in one of the two is
+//! nothing, and [`where_a_polynomial_is_zero`] boxes its real roots on signs
+//! it works out exactly; each root names one point. An LED's front flat is
+//! it, a rounding off parallel to the body's pipe and the rim's, which it
+//! meets twice, `7·10¹⁴` to `3·10¹⁵` along them; so is a plane leaning well off
+//! square to a pipe's axis against a ball whose centre is off the wall
+//! through that axis and the plane's normal, and the cap of one bar across a
+//! second bar leaning to it whose axis passes the first one's by. It is asked
+//! after every other road, so no answer one of them gives moves.
+//! [`what_a_plane_that_cuts_both_in_conics_leaves`].
+//!
 //! **Three curved surfaces, two of which bend the same way, are one plane and
 //! two curved surfaces** by the first family's own argument: every point the
 //! two share is on the plane they differ by, and every point on that plane and
 //! one of them is on the other. So the plane takes the place of one of the
-//! two, and the twelve roads answer the triple — two cones of one slope about one
-//! axis and a ball, or two bars running the same way and a third.
+//! two, and the thirteen roads answer the triple — two cones of one slope about
+//! one axis and a ball, or two bars running the same way and a third.
 //! [`where_three_curved_surfaces_meet`].
 //!
 //! What is left over is refused by name (§16.10, §31.2): one plane and two
-//! quadrics that bend differently, cross the plane in curves, share no axis
-//! the plane is square to, parallel to or no nearer square to than parallel,
-//! are not both cut by it in circles,
-//! neither of which is a pipe it runs along, whose bands overlap, and whose
-//! curves the plane leans too far for one to be a line bent by little across
-//! the other, or which touch rather than cross, which the plane does not
-//! reach only far along a pipe, and which no wall through a pipe's or a
-//! cone's axis and the plane's normal mirrors both — a plane leaning well off
-//! square to a pipe's axis, which cuts it in a long ellipse, against a ball
-//! whose centre is off the wall through that axis and the plane's normal, or a
-//! cap of one bar across a second bar leaning to it whose axis passes the
-//! first one's by rather than crossing it —
-//! a plane along a pipe and a cone one of whose rulings runs along the
-//! pipe, three curved surfaces no two of which differ by a plane a stored
-//! [`Plane`] is exactly, and any triple with a torus and fewer than two planes
-//! but the eighth family.
+//! quadrics that no road above answers and that the thirteenth hands on —
+//! two conics whose numbers it cannot multiply out within `f64`'s range, two
+//! that are both linear in the unknown it takes out, two that share a whole
+//! curve, a place where the quartic may touch nothing and it cannot tell, and
+//! a root at which it cannot tell what names the second unknown from nothing —
+//! three curved
+//! surfaces no two of which differ by a plane a stored [`Plane`] is exactly,
+//! and any triple with a torus and fewer than two planes but the eighth
+//! family.
 //! [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] says which of the two
 //! kinds of refusal it is in its own doc.
 //!
@@ -496,9 +503,9 @@ impl MeetOfThree {
 /// # Errors
 ///
 /// [`Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat`] when fewer than two of
-/// the three are planes and none of the twelve ways round that the module doc
-/// names runs — for three curved surfaces, after the plane two of them differ
-/// by has taken one's place, or where no two of them differ by one.
+/// the three are planes and none of the thirteen ways round that the module
+/// doc names runs — for three curved surfaces, after the plane two of them
+/// differ by has taken one's place, or where no two of them differ by one.
 ///
 /// [`Error::Undecidable`] when a sign the answer depends on could not be
 /// settled, or when a product the exact arithmetic needs falls out of `f64`'s
@@ -1835,8 +1842,8 @@ fn where_three_curved_surfaces_meet(
 ///
 /// **Nothing here guesses.** Each road either reaches an answer it has earned or
 /// hands the question on, and what nothing reaches is the refusal that was here
-/// before any road was: the quartic is real, its roots are real, and reaching
-/// them takes a solver this file does not have.
+/// before any road was: the quartic is real, its roots are real, and the last
+/// road, which solves it exactly, could not reach them.
 ///
 /// The road for a plane square to two surfaces' one axis comes before the one
 /// for a plane that grazes, because a plane through a cone's apex square to its
@@ -1861,9 +1868,13 @@ fn where_three_curved_surfaces_meet(
 /// next, takes what every road before it hands on, and also only ever answers
 /// that the three share nothing. Then the road beside the axis is asked again
 /// for a plane that leans to the axis, no nearer square to it than to
-/// parallel, and takes only what every road before it handed on. Last of all
-/// the road for a plane one wall mirrors with both is asked, and takes only
-/// what every other road handed on, so no answer one of them gives moves.
+/// parallel, and takes only what every road before it handed on. Then the
+/// road for a plane one wall mirrors with both is asked, and takes only what
+/// every road before it handed on. Last of all the road for a plane that cuts
+/// both in conics solves the quartic itself, and takes only what every other
+/// road handed on, so no answer one of them gives moves. The road along a
+/// pipe hands it what it cannot multiply out within range, an LED's front
+/// flat stored as exactly `x = −1.23` among it.
 fn where_one_plane_and_two_curved_surfaces_meet(
     flat: &Plane,
     one: &Surface,
@@ -5579,10 +5590,27 @@ fn the_plane_reaches_the_pipe_only_off_the_other(
 /// [`narrowed_onto_two_quadrics_by_checked_steps`]. The points come in the
 /// order of their `u`, which the triple fixes (§31.3).
 ///
+/// **Both conics are stretched and lifted first.** The unknown kept is
+/// written `2ˢ·t`, `s` half the binades between what the two conics square
+/// the unknown taken out by and what they square the kept one by, so the
+/// quartic's roots in `t` come out near one rather than near `10¹⁵`. Then
+/// each conic is multiplied by the power of two that puts its largest number
+/// at `2^T`, `T` being [`HIGHEST_BINADE_A_CONIC_IS_LIFTED_TO`], so that no product
+/// the quartic needs leaves `f64`'s range at either end. Both are exact and
+/// move no point the two share: the stretch only renames the unknown, and the
+/// lift multiplies a whole conic by a number that is not nothing
+/// ([`the_conic_stretched_and_lifted`]).
+///
 /// **The front flat of an LED is it**, a rounding off parallel to the body
-/// and rim pipes, of radii 2.5 and 2.9, whose stored axes share one point and
-/// are `1.1·10⁻¹⁵` apart in direction. The flat meets both twice, near
-/// `3·10¹⁵` and `7.5·10¹⁴` along them, and no road above reaches those points.
+/// and rim pipes, of radii 2.5 and 2.9 or 1.5 and 1.9, whose stored axes
+/// share one point and are `1.1·10⁻¹⁵` apart in direction. The flat meets
+/// both twice, `7·10¹⁴` to `3·10¹⁵` along them: near `3·10¹⁵` and `7.5·10¹⁴`
+/// on `LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm`'s flat, and near `1.49·10¹⁵` and
+/// `7.4·10¹⁴` on `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm`'s, which leans
+/// `2·10⁻³²` where the others lean `10⁻¹⁶`. Three LEDs store the flat as
+/// exactly `x = −1.23` or `x = −0.23`, which runs along the rim's stored axis,
+/// and [`what_a_plane_along_a_pipe_leaves`] hands those on here, since it
+/// cannot multiply them out within range. No road above reaches these points.
 ///
 /// **It hands on** a torus, a product out of range, two conics both linear in
 /// the unknown taken out, an `R` that is nothing everywhere — two conics that
@@ -5787,8 +5815,10 @@ fn the_conic_stretched_and_lifted(
 /// from each, so with both conics' largest numbers at `2ᵀ` the quartic's
 /// largest sits near `2⁴ᵀ⁻⁵`: `2⁹²³` here. What runs out at the top is a
 /// product past `2¹⁰²³`, and on the four LED front flats of
-/// `where_a_plane_and_two_round_surfaces_meet.rs` the first `T` that runs off
-/// is 257, 258 or 260, by flat. `2⁹²³` leaves [`where_a_polynomial_is_zero`]
+/// `where_a_plane_and_two_round_surfaces_meet.rs` that lean by a rounding the
+/// first `T` that runs off is 257, 258 or 260, by flat. The three flats there
+/// stored as exactly `x = −1.23` or `x = −0.23` are answered at 232 as well;
+/// where their own ends lie is not measured. `2⁹²³` leaves [`where_a_polynomial_is_zero`]
 /// `2¹⁰⁰` of room to evaluate the quartic at places out past its roots, which
 /// the stretch puts near one.
 ///
