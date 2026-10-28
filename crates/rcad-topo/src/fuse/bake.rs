@@ -64,13 +64,15 @@ use rcad_predicates::{
 use smallvec::SmallVec;
 
 use crate::holds::lie_along_one_line;
-use crate::key::{FaceSlot, VertexSlot};
+use crate::key::{EdgeSlot, FaceSlot, VertexSlot};
 use crate::validate::{
     CornerRoom, MEASURING_SLACK, a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of,
     side_of_surface,
 };
 use crate::view::CoedgeView;
-use crate::{EdgeKey, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey};
+use crate::{
+    EdgeKey, Error, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey,
+};
 
 use super::arrange::ACornerReadAsOnePoint;
 use super::assemble::{InputFace, joined_faces_of_an_input, one_surface};
@@ -1103,7 +1105,6 @@ fn corner_of_every_vertex(
                     if corners.contains_key(&slot) {
                         continue;
                     }
-                    let around = faces_around_a_vertex(model, slot, surfaces);
                     let also_on = left_out.get(&slot).map_or(&[][..], Vec::as_slice);
                     corners.insert(
                         slot,
@@ -1111,7 +1112,7 @@ fn corner_of_every_vertex(
                             model,
                             vertex,
                             slot,
-                            &around,
+                            surfaces,
                             also_on,
                             validate_allows,
                             planes_in_the_fuse,
@@ -1137,20 +1138,10 @@ fn faces_around_a_vertex(
     vertex: VertexSlot,
     surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
 ) -> Vec<PlacedSurface> {
-    let mut faces = BTreeSet::new();
-    for edge in model.vertex_at(vertex).edges().collect::<Vec<_>>() {
-        for face in model.edge_at(edge.slot_in(model.id())).neighbouring_faces() {
-            let slot = face.slot_in(model.id());
-            if surfaces.contains_key(&slot) {
-                faces.insert(slot);
-            }
-        }
-    }
-    assert!(
-        !faces.is_empty(),
-        "a corner of a solid is a corner of at least one of its faces"
-    );
-    faces.iter().map(|slot| surfaces[slot]).collect()
+    the_faces_at_a_vertex(model, vertex, surfaces)
+        .iter()
+        .map(|slot| surfaces[slot])
+        .collect()
 }
 
 /// Where a corner of an input is, by whichever of §31.3's two routes its own
@@ -1180,17 +1171,18 @@ fn place_a_corner(
     model: &Model,
     vertex: VertexKey,
     slot: VertexSlot,
-    around: &[PlacedSurface],
+    surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
     also_on: &[Surface],
     validate_allows: CornerRoom,
     planes_in_the_fuse: &[Plane],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<BakedCorner> {
-    let where_the_model_puts_it = where_the_model_puts_a_corner(model, slot, around)?;
+    let around = faces_around_a_vertex(model, slot, surfaces);
+    let where_the_model_puts_it = where_the_model_puts_a_corner(model, slot, &around)?;
 
     let mut distinct: Vec<Surface> = Vec::with_capacity(around.len() + also_on.len());
-    for face in around {
+    for face in &around {
         if !distinct.contains(&face.baked_as) {
             distinct.push(face.baked_as);
         }
@@ -1203,29 +1195,126 @@ fn place_a_corner(
     }
     if distinct.len() >= 3 {
         let outward = (distinct.len() == of_its_faces)
-            .then(|| the_planes_round_a_convex_corner(model, slot, around, &distinct))
+            .then(|| the_planes_round_a_convex_corner(model, slot, &around, &distinct))
             .flatten();
-        return derive_a_corner(
+        let among = outward.as_deref().map(|outward| AmongThePlanesOfTheFuse {
+            outward,
+            in_the_fuse: planes_in_the_fuse,
+        });
+        let read_out_of_the_model_when_unsolved = distinct.len() == of_its_faces
+            && distinct
+                .iter()
+                .filter(|surface| surface.as_plane().is_some())
+                .count()
+                < 3
+            && each_fan_round_it_has_fewer_than_three_surfaces(model, slot, surfaces);
+        if !read_out_of_the_model_when_unsolved {
+            return derive_a_corner(
+                vertex,
+                where_the_model_puts_it,
+                distinct,
+                validate_allows,
+                among,
+                policy,
+                log,
+            );
+        }
+        let mut tried = ProvenanceLog::new();
+        match derive_a_corner(
             vertex,
             where_the_model_puts_it,
-            distinct,
+            distinct.clone(),
             validate_allows,
-            outward.as_deref().map(|outward| AmongThePlanesOfTheFuse {
-                outward,
-                in_the_fuse: planes_in_the_fuse,
-            }),
+            among,
             policy,
-            log,
-        );
+            &mut tried,
+        ) {
+            Err(Error::Undecidable { .. }) => (),
+            answered => {
+                tried.drain_into(log);
+                return answered;
+            }
+        }
     }
     Ok(BakedCorner {
         vertex,
         point: where_the_model_puts_it,
         around: distinct,
         solved_from: None,
-        seam_plane: the_seam_plane_a_corner_is_on(model, slot, around),
+        seam_plane: the_seam_plane_a_corner_is_on(model, slot, &around),
         room_its_planes_were_asked_with: None,
     })
+}
+
+/// Whether the faces round a corner fall into two fans or more, and no fan has
+/// three surfaces or more, so that each fan alone would be read out of the
+/// model ([`place_a_corner`]).
+///
+/// A fan is §469.6's: the corners of faces at the vertex, one where each
+/// coedge of a wire ends there and the next begins, joined wherever two of
+/// them share an edge. Its surfaces are what its faces are baked on.
+fn each_fan_round_it_has_fewer_than_three_surfaces(
+    model: &Model,
+    vertex: VertexSlot,
+    surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
+) -> bool {
+    let mut number_of: BTreeMap<EdgeSlot, usize> = BTreeMap::new();
+    let mut corners: Vec<([usize; 2], Surface)> = Vec::new();
+    for face in the_faces_at_a_vertex(model, vertex, surfaces) {
+        for wire in model.face_at(face).wires() {
+            let coedges: Vec<CoedgeView<'_>> = wire.coedges().collect();
+            for (at, coedge) in coedges.iter().enumerate() {
+                if coedge.end().key().slot_in(model.id()) != vertex {
+                    continue;
+                }
+                let next = coedges[(at + 1) % coedges.len()];
+                let mut numbered = |edge: EdgeKey| {
+                    let count = number_of.len();
+                    *number_of.entry(edge.slot_in(model.id())).or_insert(count)
+                };
+                let edges = [numbered(coedge.edge().key()), numbered(next.edge().key())];
+                corners.push((edges, surfaces[&face].baked_as));
+            }
+        }
+    }
+    let mut one_fan = Sameness::of(number_of.len());
+    for ([into, out_of], _) in &corners {
+        one_fan.join(*into, *out_of);
+    }
+    let mut fans: BTreeMap<usize, Vec<Surface>> = BTreeMap::new();
+    for ([into, _], surface) in corners {
+        let fan = fans.entry(one_fan.leader(into)).or_default();
+        if !fan.contains(&surface) {
+            fan.push(surface);
+        }
+    }
+    fans.len() >= 2 && fans.values().all(|fan| fan.len() < 3)
+}
+
+/// Every face of this solid that meets at this vertex.
+///
+/// # Panics
+///
+/// If none does, as [`faces_around_a_vertex`] says.
+fn the_faces_at_a_vertex(
+    model: &Model,
+    vertex: VertexSlot,
+    surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
+) -> BTreeSet<FaceSlot> {
+    let mut faces = BTreeSet::new();
+    for edge in model.vertex_at(vertex).edges().collect::<Vec<_>>() {
+        for face in model.edge_at(edge.slot_in(model.id())).neighbouring_faces() {
+            let slot = face.slot_in(model.id());
+            if surfaces.contains_key(&slot) {
+                faces.insert(slot);
+            }
+        }
+    }
+    assert!(
+        !faces.is_empty(),
+        "a corner of a solid is a corner of at least one of its faces"
+    );
+    faces
 }
 
 /// The planes of the faces round a corner, each turned to face out of the
