@@ -18,6 +18,13 @@
 //! faces crossing each other where no edge runs, 13 faces where there are 16.
 //! The line is now three edges, each between the two walls either side of one
 //! wedge of plate.
+//!
+//! **And `Model::validate` passed the 13 faces** (queue row Q2919). Nothing in
+//! the sweep asked whether two faces meet anywhere but along an edge. It asks
+//! now at every corner two flat faces share, and the 13 faces, drawn by hand
+//! through `SolidBuilder`, are refused as
+//! `TwoFlatFacesRunThroughEachOtherWhereNeitherHasAnEdge` at a corner on the
+//! line, where the 16 faces drawn the same way still build.
 
 use rcad_geom::{Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
