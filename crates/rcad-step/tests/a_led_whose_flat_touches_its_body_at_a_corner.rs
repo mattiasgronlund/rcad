@@ -17,11 +17,21 @@
 //! three surfaces meet, at `#123`, handed the flat, the back and the pipe: two
 //! planes and a pipe that touch rather than cross there (§471.3). Bake now
 //! reads such a corner out of the model, and every fuse of the LED gets past
-//! it and stops later, in the check that the LED does not cross itself, on the
-//! upper half of the flange's rim: a pipe of radius 2.9 that no box here
-//! touches. These tests pin that. When the rim answers, each turns back into the volume check of
-//! commit `f179ca02a`: what the box and the LED share is the box's part inside
-//! the LED, and the intersection and the difference add up to the LED.
+//! it and stops later, in the check that the LED does not cross itself.
+//!
+//! It stopped first on the upper half of the flange's rim, a pipe of radius
+//! 2.9 that no box here touches, refused `AFaceTrimmedByACurveThisCannotFollow`.
+//! The rim's edge along the flat is a `LINE` in the file, so nothing picks it,
+//! and the flat's normal is `3.6e-32` off square to the rim's axis, so the two
+//! surfaces cross in an ellipse about `1.6e32` long with that edge on it. The
+//! arrangement now tells which of the ellipse's two arcs the edge is by the
+//! rim's box, which the other arc leaves (Q2926).
+//!
+//! It stops now at the disc of radius 2.5 on the flange's front, refused
+//! `AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve`. These tests pin that. When the
+//! disc answers, each turns back into the volume check of commit `f179ca02a`:
+//! what the box and the LED share is the box's part inside the LED, and the
+//! intersection and the difference add up to the LED.
 
 use std::{env, fs, path::PathBuf};
 
@@ -36,21 +46,21 @@ const LED: &str = "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step";
 const HALF: f64 = 0.1;
 
 #[test]
-fn a_box_round_the_back_corner_gets_past_the_corner_and_stops_at_the_rim() {
-    a_box_round_a_corner_stops_at_the_rim([-1.23, -2.27, 3.0]);
+fn a_box_round_the_back_corner_gets_past_the_rim_and_stops_at_the_front_disc() {
+    a_box_round_a_corner_stops_at_the_front_disc([-1.23, -2.27, 3.0]);
 }
 
 #[test]
-fn a_box_round_the_front_corner_gets_past_the_corner_and_stops_at_the_rim() {
-    a_box_round_a_corner_stops_at_the_rim([-1.23, -1.27, 3.0]);
+fn a_box_round_the_front_corner_gets_past_the_rim_and_stops_at_the_front_disc() {
+    a_box_round_a_corner_stops_at_the_front_disc([-1.23, -1.27, 3.0]);
 }
 
 /// The LED and a box of side `2 * HALF` centred on `corner`, fused under
-/// intersection and under difference, each refused as following no trimming
-/// of the upper half of the flange's rim.
-fn a_box_round_a_corner_stops_at_the_rim(corner: [f64; 3]) {
+/// intersection and under difference, each refused as having an edge of the
+/// disc on the flange's front not drawn along its own curve.
+fn a_box_round_a_corner_stops_at_the_front_disc(corner: [f64; 3]) {
     let (led, solid) = the_led();
-    let rim = the_upper_half_of_the_rim(&led, solid);
+    let disc = the_disc_on_the_front(&led, solid);
     for rule in [Rule::Intersection, Rule::Difference] {
         let mut model = led.clone();
         let knife = a_box_round(&mut model, corner);
@@ -61,9 +71,9 @@ fn a_box_round_a_corner_stops_at_the_rim(corner: [f64; 3]) {
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         ) {
-            Err(Error::AFaceTrimmedByACurveThisCannotFollow { face }) => assert_eq!(
-                face, rim,
-                "{rule:?} with a box round {corner:?} names a face other than the rim"
+            Err(Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { face }) => assert_eq!(
+                face, disc,
+                "{rule:?} with a box round {corner:?} names a face other than the front disc"
             ),
             Ok(_) => panic!(
                 "{rule:?} with a box round {corner:?} answers: check its volume as f179ca02a did"
@@ -88,30 +98,32 @@ fn the_led() -> (Model, SolidKey) {
     (import.model().clone(), solid)
 }
 
-/// The upper half of the flange's rim: of the two faces of the LED on a pipe
-/// of radius 2.9, the one that runs from the plane `z = 3` up to where the
-/// rim meets the flat, at `z = 3 + sqrt(2.9² - 2.5²)`.
-fn the_upper_half_of_the_rim(led: &Model, solid: SolidKey) -> FaceKey {
-    let halves: Vec<FaceKey> = led
+/// The disc on the flange's front: the flat face of the LED in the plane
+/// `y = -1.27` whose every corner is within 2.5 of the axis `x = 1.27, z = 3`.
+/// The rest of the flange's front reaches out to the rim, 2.9 from it.
+fn the_disc_on_the_front(led: &Model, solid: SolidKey) -> FaceKey {
+    let discs: Vec<FaceKey> = led
         .solid(solid)
         .expect("a solid of this model")
         .faces()
         .filter(|face| {
-            let Surface::Cylinder(pipe) = face.surface() else {
+            let Surface::Plane(_) = face.surface() else {
                 return false;
             };
-            (pipe.radius() - 2.9).abs() < 1e-9
-                && face
-                    .wires()
-                    .flat_map(|wire| wire.coedges())
-                    .any(|coedge| coedge.start().point().z() > 4.0)
+            face.wires()
+                .flat_map(|wire| wire.coedges())
+                .map(|coedge| coedge.start().point())
+                .all(|corner| {
+                    (corner.y() + 1.27).abs() < 1e-9
+                        && (corner.x() - 1.27).hypot(corner.z() - 3.0) < 2.5 + 1e-9
+                })
         })
         .map(|face| face.key())
         .collect();
-    let [upper] = halves[..] else {
-        panic!("the LED has one upper half of a rim of radius 2.9, not {halves:?}")
+    let [disc] = discs[..] else {
+        panic!("the LED has one disc of radius 2.5 on its front, not {discs:?}")
     };
-    upper
+    disc
 }
 
 fn a_box_round(model: &mut Model, corner: [f64; 3]) -> SolidKey {
