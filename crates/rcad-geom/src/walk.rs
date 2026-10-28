@@ -41,10 +41,11 @@ use crate::enclosure::{
 };
 use crate::exact::Exact;
 use crate::intersect::{
-    HowTwoConesOffOneAxisCross, Question, TheCutHalfway, TwoConesOffOneAxis,
-    WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_CONE_AND_A_BALL_CROSS, WHERE_A_CONE_AND_A_PIPE_CROSS,
-    WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_CONES_CROSS, WHERE_TWO_PIPES_CROSS, WhichConic,
-    a_cones_slant_against_a_pipe_enclosing, a_cones_slant_against_a_pipe_exactly, ask,
+    ALoopAndTwoBranchesThatNearlyMeet, HowTwoConesOffOneAxisCross, Question, TheCutHalfway,
+    TwoConesOffOneAxis, WHERE_A_BALL_AND_A_PIPE_CROSS, WHERE_A_CONE_AND_A_BALL_CROSS,
+    WHERE_A_CONE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_TWO_CONES_CROSS,
+    WHERE_TWO_PIPES_CROSS, WhichConic, a_cones_slant_against_a_pipe_enclosing,
+    a_cones_slant_against_a_pipe_exactly, a_loop_and_two_branches_that_nearly_meet, ask,
     how_a_ball_on_a_cones_axis_meets_it, how_a_plane_leans_against_a_cone,
     how_two_cones_off_one_axis_cross, one_cone_either_way_round, two_cones_lean_apart_on_one_apex,
     whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
@@ -56,8 +57,8 @@ use crate::march::{
 };
 use crate::meet::nowhere_in_particular;
 use crate::{
-    Cone, Cylinder, Deflection, EdgeRun, Error, HalfSpaceThroughAPoint, NamedRun, Picker, Plane,
-    Point, Result, Sphere, Surface, SurfaceMeet, Torus, Vector,
+    Cone, Cylinder, Deflection, EdgeRun, Error, HalfSpace, HalfSpaceThroughAPoint, NamedRun,
+    Picker, Plane, Point, Result, Sphere, Surface, SurfaceMeet, Torus, Vector,
 };
 
 /// How far a point [`walk`] hands back can sit off the curve it was worked out
@@ -889,9 +890,7 @@ impl TwoLoopsHeldApartBy {
             Self::ConesApex { cone, ball } => {
                 [how_tightly_a_cone_bends_at(&cone, at), ball.radius()]
             }
-            Self::TwoConesAcross(TwoConesOffOneAxis {
-                ruled, crossed, ..
-            })
+            Self::TwoConesAcross(TwoConesOffOneAxis { ruled, crossed, .. })
             | Self::TwoConesNearlyMeeting { ruled, crossed, .. } => [
                 how_tightly_a_cone_bends_at(&ruled, at),
                 how_tightly_a_cone_bends_at(&crossed, at),
@@ -911,9 +910,7 @@ impl TwoLoopsHeldApartBy {
             Self::FatPipesAxis { thin, fat } => [thin.side_of(corner), fat.side_of(corner)],
             Self::ConesSlantPlane { cone, pipe } => [cone.side_of(corner), pipe.side_of(corner)],
             Self::ConesApex { cone, ball } => [cone.side_of(corner), ball.side_of(corner)],
-            Self::TwoConesAcross(TwoConesOffOneAxis {
-                ruled, crossed, ..
-            })
+            Self::TwoConesAcross(TwoConesOffOneAxis { ruled, crossed, .. })
             | Self::TwoConesNearlyMeeting { ruled, crossed, .. } => {
                 [ruled.side_of(corner), crossed.side_of(corner)]
             }
@@ -1244,11 +1241,7 @@ fn what_a_run_between_these_two_lies_on(
                     else {
                         return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface);
                     };
-                    let crossed = if nearly.ruled.apex() == one.apex() {
-                        other
-                    } else {
-                        one
-                    };
+                    let crossed = if nearly.ruled == one { other } else { one };
                     let pieces = ALoopAndTwoBranches::nearly_meeting(nearly, crossed);
                     return which_of_a_loop_and_two_branches_this_run_is(
                         run, pieces, surfaces, policy, log,
@@ -1262,7 +1255,10 @@ fn what_a_run_between_these_two_lies_on(
                     &crossing.crossed,
                     crossing.ruled.basis().0,
                 );
-                return a_quartic_picked_up_at(seeds, TwoLoopsHeldApartBy::TwoConesAcross(crossing));
+                return a_quartic_picked_up_at(
+                    seeds,
+                    TwoLoopsHeldApartBy::TwoConesAcross(crossing),
+                );
             };
             let pieces = ALoopAndTwoBranches::held_apart(crossing, apex);
             which_of_a_loop_and_two_branches_this_run_is(run, pieces, surfaces, policy, log)
@@ -1487,12 +1483,14 @@ fn follow_the_quartic(
 ///
 /// # How far along the branch a point is
 ///
-/// How far round `crossing.ruled`'s axis, from `middle`, the straight line of
+/// How far round `pieces.ruled`'s axis, from `middle`, the straight line of
 /// it through the point leans ([`how_far_round_the_ruled_cone`]). Every
 /// straight line of `ruled` leaning further from `crossed`'s axis than
 /// `crossed`'s own lines do crosses the branch beyond `across` once, and every
 /// one leaning less crosses the branch behind the apex once
-/// (`how_two_cones_off_one_axis_cross`). So each branch is one arc of those
+/// (`how_two_cones_off_one_axis_cross`, and
+/// `a_loop_and_two_branches_that_nearly_meet` where the two nearly meet:
+/// [`where_a_loop_and_two_branches_are_seeded`]). So each branch is one arc of those
 /// lines, centred on the one leaning furthest or least, which is `middle`, and
 /// short of a whole turn, since the lines leaning the other way are not on it:
 /// the angle grows, or falls, the whole way along the branch, and never jumps
@@ -1527,7 +1525,7 @@ fn follow_the_quartic(
 fn follow_a_branch_between_two_corners(
     run: &NamedRun,
     pair: [Surface; 2],
-    crossing: TwoConesOffOneAxis,
+    pieces: ALoopAndTwoBranches,
     middle: Vector,
     beyond: Picker,
     deflection: Deflection,
@@ -1538,11 +1536,7 @@ fn follow_a_branch_between_two_corners(
     let surfaces = [&pair[0], &pair[1]];
     let ends = the_two_corners_of_an_open_run(run)
         .expect("a run is a branch between two corners only where it has two corners");
-    let reach = how_far_off_the_crossing_a_corner_can_be(
-        ends,
-        surfaces,
-        TwoLoopsHeldApartBy::TwoConesAcross(crossing),
-    )?;
+    let reach = how_far_off_the_crossing_a_corner_can_be(ends, surfaces, pieces.held_apart_by)?;
     if reach > half_the_budget && !policy.wobble_is_acceptable(reach) {
         return Err(Error::CannotPlaceAPointThatCloseToACrossing {
             asked: deflection.length(),
@@ -1554,7 +1548,7 @@ fn follow_a_branch_between_two_corners(
         where_on_the_crossing_this_corner_can_be(ends[1], surfaces)?,
     ];
     let [from, to] = corners.map(|corner| Point::from(corner.enclosure().map(middle_of)));
-    let round = |at: Point| how_far_round_the_ruled_cone(&crossing.ruled, middle, at);
+    let round = |at: Point| how_far_round_the_ruled_cone(&pieces.ruled, middle, at);
     let (set_out, _) = settled_with_a_bound(surfaces, from)?;
     let (arrive, _) = settled_with_a_bound(surfaces, to)?;
     let way = match round(arrive).partial_cmp(&round(set_out)) {
@@ -2423,7 +2417,10 @@ fn the_seed_on_the_side_a_corner_is_on(
 /// of `a·(p − o₂)` for two pipes, with `a = w₁(w₂·w₂) − w₂(w₁·w₂)` the thin
 /// pipe's way across the fat one's axis and `o₂` the fat axis's origin. Both
 /// are asked of the numbers the surfaces store, so nothing rounded stands
-/// between the surface and the answer, and exactly where `at` is exact.
+/// between the surface and the answer, and exactly where `at` is exact. For
+/// two cones that nearly meet it is the sign of `g·p − c` for the half-space
+/// `g·x ≥ c` `intersect` proved the crossing with, asked of the four numbers
+/// that half-space holds, since those are what the proof was about.
 fn which_side_of_what_holds_two_loops_apart(
     held_apart_by: TwoLoopsHeldApartBy,
     at: PredicatePoint,
@@ -2549,6 +2546,16 @@ fn which_side_of_what_holds_two_loops_apart_if_it_can_be_told(
                         &Exact::gap_between(through, exact_at?),
                     )
                 },
+            };
+            (question.named, decide(&question))
+        }
+        TwoLoopsHeldApartBy::TwoConesNearlyMeeting { across, .. } => {
+            let normal = across.normal().components();
+            let offset = across.offset();
+            let question = Question {
+                named: WHERE_TWO_CONES_CROSS,
+                enclosing: || dot_enclosing(exactly(normal), near) - Interval::exactly(offset),
+                exactly: || Some(Exact::dot_of(normal, exact_at?)?.minus(&Exact::of(offset))),
             };
             (question.named, decide(&question))
         }
@@ -2988,6 +2995,104 @@ fn where_a_pipe_reaches_across_a_cone(cone: &Cone, pipe: &Cylinder) -> [Point; 2
     ]
 }
 
+/// One loop and two branches that run off for ever, which two cones off one
+/// axis are proved to cross in, kept as what walks them needs: the two cones,
+/// and the flat surfaces that hold the three pieces apart.
+///
+/// Every straight line of `ruled` out of its apex on the loop's side crosses
+/// `crossed` once on the loop, between the apex and the flat surface `across`
+/// stands for, and once more, beyond that flat surface on the branch beyond the
+/// loop or behind the apex on the branch behind it, but for the lines leaning
+/// as `crossed`'s own do. `apex` passes through `ruled`'s apex square to its
+/// axis: the loop and the branch beyond it are in front of it, and the other
+/// branch behind. `across` is the flat surface between the loop and the branch
+/// beyond it, both ways round: `across[0]` holds the loop, and `across[1]` the
+/// branch.
+///
+/// `intersect` proves this two ways, and each gives one of these.
+/// [`ALoopAndTwoBranches::held_apart`] is the one of
+/// `how_two_cones_off_one_axis_cross`, and
+/// [`ALoopAndTwoBranches::nearly_meeting`] the one of
+/// `a_loop_and_two_branches_that_nearly_meet`, for two of one slope that are
+/// mirror images but for a rounding, where the loop and the branch beyond it
+/// pass a hair apart near where the exact pair would touch.
+#[derive(Clone, Copy)]
+struct ALoopAndTwoBranches {
+    ruled: Cone,
+    crossed: Cone,
+    apex: HalfSpaceThroughAPoint,
+    across: [Picker; 2],
+    held_apart_by: TwoLoopsHeldApartBy,
+}
+
+impl ALoopAndTwoBranches {
+    /// The loop and two branches of a crossing
+    /// [`how_two_cones_off_one_axis_cross`] proves with `apex`, which it names
+    /// only where the crossing is one loop and two branches.
+    fn held_apart(crossing: TwoConesOffOneAxis, apex: HalfSpaceThroughAPoint) -> Self {
+        Self {
+            ruled: crossing.ruled,
+            crossed: crossing.crossed,
+            apex,
+            across: [
+                Picker::from(crossing.across.reversed()),
+                Picker::from(crossing.across),
+            ],
+            held_apart_by: TwoLoopsHeldApartBy::TwoConesAcross(crossing),
+        }
+    }
+
+    /// The loop and two branches [`a_loop_and_two_branches_that_nearly_meet`]
+    /// proves, `crossed` being the cone of the pair that is not `nearly.ruled`.
+    fn nearly_meeting(nearly: ALoopAndTwoBranchesThatNearlyMeet, crossed: Cone) -> Self {
+        Self {
+            ruled: nearly.ruled,
+            crossed,
+            apex: nearly.apex,
+            across: [
+                Picker::from(nearly.across.reversed()),
+                Picker::from(nearly.across),
+            ],
+            held_apart_by: TwoLoopsHeldApartBy::TwoConesNearlyMeeting {
+                ruled: nearly.ruled,
+                crossed,
+                across: nearly.across,
+            },
+        }
+    }
+}
+
+/// Which of a loop and two branches `run` lies on: a run between two corners
+/// on one branch, marched from one corner to the other, or else the loop,
+/// marched round from its seed.
+///
+/// # Errors
+///
+/// What [`refused_unless_the_run_is_on_the_loop`] refuses, for a run that is
+/// not between two corners on one branch and is not on the loop.
+/// [`Error::CannotWorkOutHowBigACrossingIs`] when a seed is not a point.
+fn which_of_a_loop_and_two_branches_this_run_is(
+    run: &NamedRun,
+    pieces: ALoopAndTwoBranches,
+    surfaces: [&Surface; 2],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<WhatARunLiesOn> {
+    if let Some(branch) = the_branch_both_corners_are_on(run, &pieces) {
+        return Ok(branch);
+    }
+    let [near, far, back] = where_a_loop_and_two_branches_are_seeded(&pieces);
+    refused_unless_the_run_is_on_the_loop(
+        run,
+        surfaces,
+        [Picker::from(pieces.apex), pieces.across[0]],
+        [far, back],
+        policy,
+        log,
+    )?;
+    a_quartic_picked_up_at([near, far], pieces.held_apart_by)
+}
+
 /// The run between two corners on one of the two branches of a loop and two
 /// branches, when both its corners are decided on the far side of the flat
 /// surface that holds that branch apart from the loop: behind `apex` for the
@@ -2999,43 +3104,54 @@ fn where_a_pipe_reaches_across_a_cone(cone: &Cone, pipe: &Cylinder) -> [Point; 2
 /// logs once what it could not decide.
 fn the_branch_both_corners_are_on(
     run: &NamedRun,
-    crossing: &TwoConesOffOneAxis,
-    apex: HalfSpaceThroughAPoint,
+    pieces: &ALoopAndTwoBranches,
 ) -> Option<WhatARunLiesOn> {
     let corners = the_two_corners_of_an_open_run(run)?;
-    let away = the_way_the_ruled_cone_leans_away(crossing);
-    [(apex, -away), (crossing.across.reversed(), away)]
-        .into_iter()
-        .find(|(flat, _)| {
-            let behind = Picker::from(*flat);
-            corners
-                .iter()
-                .all(|corner| behind.side_of_point(*corner) == Decision::Neg)
-        })
-        .map(|(flat, middle)| WhatARunLiesOn::ABranchBetweenTwoCorners {
-            crossing: *crossing,
+    let away = the_way_the_ruled_cone_leans_away(pieces);
+    [
+        (
+            Picker::from(pieces.apex),
+            Picker::from(pieces.apex.reversed()),
+            -away,
+        ),
+        (pieces.across[0], pieces.across[1], away),
+    ]
+    .into_iter()
+    .find(|(behind, _, _)| {
+        corners
+            .iter()
+            .all(|corner| behind.side_of_point(*corner) == Decision::Neg)
+    })
+    .map(
+        |(_, beyond, middle)| WhatARunLiesOn::ABranchBetweenTwoCorners {
+            pieces: *pieces,
             middle,
-            beyond: Picker::from(flat.reversed()),
-        })
+            beyond,
+        },
+    )
 }
 
 /// The seeds of a loop and two branches: where the straight line of `ruled`
 /// leaning furthest from `crossed`'s axis meets the loop and the branch beyond
 /// `across`, and where the one leaning least meets the branch behind `apex`.
 ///
-/// `Q(d)` is largest on the first and least on the second, since `d·w` is one
-/// sign, which `how_two_cones_off_one_axis_cross` proved, so the first has
-/// `Q(d) > 0` and both its roots ahead of the apex, and the nearer is on the
-/// loop; the second has `Q(d) < 0` and one root each side of the apex.
-fn where_a_loop_and_two_branches_are_seeded(
-    crossing: &TwoConesOffOneAxis,
-    apex: HalfSpaceThroughAPoint,
-) -> [Point; 3] {
-    let away = the_way_the_ruled_cone_leans_away(crossing);
-    let [far, near] =
-        where_one_cone_reaches_across_another(&crossing.ruled, &crossing.crossed, away);
-    let behind = where_one_cone_reaches_across_another(&crossing.ruled, &crossing.crossed, -away);
-    let back = if (behind[0] - crossing.ruled.apex()).dot(apex.facing()) < 0.0 {
+/// Call `Q(d)` the number `crossed`'s equation leads with along the line `d`.
+/// Where `how_two_cones_off_one_axis_cross` proved the crossing, `Q(d)` is
+/// largest on the first and least on the second, since `d·w` is one sign, so
+/// the first has `Q(d) > 0` and both its roots ahead of the apex, and the
+/// nearer is on the loop; the second has `Q(d) < 0` and one root each side of
+/// the apex. Where `a_loop_and_two_branches_that_nearly_meet` proved it,
+/// `Q(d)` changes sign at just two lines, and the lines where it is above zero
+/// are one arc of them centred on the first and away from the second. It
+/// proved that each of those crosses the loop and then the branch beyond
+/// `across`, both on the loop's side of the apex, the loop nearer, and that
+/// each line where `Q(d) < 0` crosses the loop and, the other side of the
+/// apex, the branch behind it.
+fn where_a_loop_and_two_branches_are_seeded(pieces: &ALoopAndTwoBranches) -> [Point; 3] {
+    let away = the_way_the_ruled_cone_leans_away(pieces);
+    let [far, near] = where_one_cone_reaches_across_another(&pieces.ruled, &pieces.crossed, away);
+    let behind = where_one_cone_reaches_across_another(&pieces.ruled, &pieces.crossed, -away);
+    let back = if (behind[0] - pieces.ruled.apex()).dot(pieces.apex.facing()) < 0.0 {
         behind[0]
     } else {
         behind[1]
@@ -3047,9 +3163,9 @@ fn where_a_loop_and_two_branches_are_seeded(
 /// leaning furthest from `crossed`'s axis leans: the middle of the branch
 /// beyond `across`. Its opposite is the line leaning least, the middle of the
 /// branch behind the apex.
-fn the_way_the_ruled_cone_leans_away(crossing: &TwoConesOffOneAxis) -> Vector {
-    let up = crossing.crossed.axis().direction();
-    let along = crossing.ruled.axis().direction();
+fn the_way_the_ruled_cone_leans_away(pieces: &ALoopAndTwoBranches) -> Vector {
+    let up = pieces.crossed.axis().direction();
+    let along = pieces.ruled.axis().direction();
     let leaning = (up - along * (up.dot(along) / along.length_squared())).normalized();
     let leaning = leaning.expect("the two axes are not along one line, so the cones lean apart");
     -leaning * up.dot(along).signum()
@@ -3061,9 +3177,10 @@ fn the_way_the_ruled_cone_leans_away(crossing: &TwoConesOffOneAxis) -> Vector {
 /// ([`the_branch_both_corners_are_on`]).
 ///
 /// A run with corners has each of them in front of both `loop_flats`, the
-/// flat surface through `ruled`'s apex and the one `across` reversed. A run
-/// with none but its half-spaces holds neither `branch_seeds`, the seeds of
-/// the branch beyond `across` and the one behind the apex.
+/// flat surface through `ruled`'s apex and the side of `across` the loop is
+/// on ([`ALoopAndTwoBranches`]). A run with none but its half-spaces holds
+/// neither `branch_seeds`, the seeds of the branch beyond `across` and the one
+/// behind the apex.
 ///
 /// # Errors
 ///
@@ -3076,12 +3193,11 @@ fn the_way_the_ruled_cone_leans_away(crossing: &TwoConesOffOneAxis) -> Vector {
 fn refused_unless_the_run_is_on_the_loop(
     run: &NamedRun,
     surfaces: [&Surface; 2],
-    [apex, across]: [HalfSpaceThroughAPoint; 2],
+    loop_flats: [Picker; 2],
     branch_seeds: [Point; 2],
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<()> {
-    let loop_flats = [Picker::from(apex), Picker::from(across.reversed())];
     let corners: SmallVec<[PredicatePoint; 2]> = match (
         the_two_corners_of_an_open_run(run),
         the_corner_a_closed_run_starts_at(run),
