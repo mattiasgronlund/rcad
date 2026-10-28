@@ -28716,3 +28716,63 @@ mod two_loops_of_two_leaning_pipes {
         [[thin, fat], [fat, thin]]
     }
 }
+
+#[cfg(test)]
+mod two_points_a_rounding_apart_on_a_cone_caps_rim {
+    //! The rim of the upright cone's cap in
+    //! `two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule`
+    //! in `tests/a_funnel_with_a_leaning_spout.rs`: the cone of slope a half
+    //! up `z` from the origin, cut by `z = 8` in a circle of radius 4, walked
+    //! from `(0, 4, 8)`. Two of its nodes are a rounding apart near
+    //! `(−3.9541, −0.6045, 8)`: `R`, where the leaning cone crosses the rim,
+    //! and `P`, where the leaning cone's cap plane does.
+
+    use rcad_geom::{Axis, Cone, Plane, Point, Surface, Vector};
+    use rcad_predicates::{Decision, Interval, Point as PredicatePoint};
+
+    use super::round_a_closed_crossing_by_its_angle;
+
+    /// Worked out exactly from the stored numbers, `R` is at `x =
+    /// −3.9540523939117884914`, `y = −0.6045408722331804570`, and `P` at `x =
+    /// −3.9540523939117884286`, `y = −0.6045408722331808674`. So going
+    /// anticlockwise about `z`, the way the loop runs from `(0, 4, 8)` with the
+    /// cap first, `R` comes first, and `P` is turned `w·(R × P) = 1.66e-15`
+    /// past it. Their tightened boxes, as the fuse reads them, share `x`
+    /// between two neighbouring `f64`, and each is one `ulp` wide in `y`, one
+    /// `ulp` apart. Before this read a cone's loop (Q2910) it answered `None`
+    /// for every plane and cone, and every fuse with the upright cone first was
+    /// refused on these two.
+    #[test]
+    fn two_points_on_a_cone_caps_rim_a_rounding_apart_come_in_the_order_they_turn_round_its_axis() {
+        let cap = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 8.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal"),
+        );
+        let skin = Surface::Cone(Cone::new(Axis::z(), 0.5).expect("a positive slope"));
+        let from = PredicatePoint::Exact([0.0, 4.0, 8.0]);
+        let across = |lo: f64, hi: f64| Interval::new(lo, hi).expect("lo is below hi");
+        let x = across(-3.954_052_393_911_789, -3.954_052_393_911_788_4);
+        let up = Interval::exactly(8.0);
+        let r = PredicatePoint::Constructed([
+            x,
+            across(-0.604_540_872_233_180_5, -0.604_540_872_233_180_4),
+            up,
+        ]);
+        let p = PredicatePoint::Constructed([
+            x,
+            across(-0.604_540_872_233_180_9, -0.604_540_872_233_180_8),
+            up,
+        ]);
+        let read = |pair: [&Surface; 2]| {
+            [[r, p], [p, r]]
+                .map(|[one, other]| round_a_closed_crossing_by_its_angle(pair, from, one, other))
+        };
+        assert_eq!(
+            [read([&cap, &skin]), read([&skin, &cap])],
+            [
+                [Some(Decision::Pos), Some(Decision::Neg)],
+                [Some(Decision::Neg), Some(Decision::Pos)],
+            ]
+        );
+    }
+}
