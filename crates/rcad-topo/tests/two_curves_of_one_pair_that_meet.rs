@@ -2015,6 +2015,76 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears(model: &mut Model) -> [SolidKey; 2] 
     [upright, lying]
 }
 
+/// The pitch cones of a pair of mitre gears ([`the_pitch_cones_of_a_pair_of_mitre_gears`]),
+/// with the second turned by [`Isometry::rotation`] rather than
+/// [`Isometry::quarter_turns`]: not a quarter turn, so its axis is stored
+/// `(1, 0, 2.2e-16)` rather than exactly `(1, 0, 0)`.
+fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation(model: &mut Model) -> [SolidKey; 2] {
+    let upright = cones::a_frustum(model, 1.0, 1.0, 2.0);
+    let lying = cones::a_frustum(model, 1.0, 1.0, 2.0);
+    model
+        .place_solid(
+            lying,
+            &Isometry::rotation(&Axis::y(), std::f64::consts::FRAC_PI_2).expect("a finite turn"),
+        )
+        .expect("this model made the key");
+    [upright, lying]
+}
+
+/// With the second frustum's axis a rounding off `(1, 0, 0)`, `intersect`
+/// still names the pair's crossing as four halves of two rulings, near
+/// `(1, 0, 1)`. But the union is refused ordering two nodes near there. §450.
+///
+/// **This is not the near-cap circle a cap plane cuts in one cone
+/// ([`HowItRuns::RoundAClosedCurve`]), and not the apex code
+/// ([`the_way_a_half_ruling_leaves_the_apex`]) either.** Both were tried.
+/// Reading the near-cap circle of a plane and a cone the way
+/// `as_the_quadric_says` already read a plane-and-plane `AlongAnAxis`
+/// crossing does decide a sign at every node it is asked about in this
+/// fixture — but the crossing that actually blocks this union is a
+/// different one, [`HowItRuns::AlongABend`]: the hyperbola where the two
+/// cones' own lateral surfaces cross each other, which `as_the_quadric_says`
+/// has no arm for at all. Widening `round_a_closed_crossing_by_its_angle` and
+/// `along_the_stretch_between_the_two` to a plane and a cone, the other
+/// thing tried, does not reach `AlongABend` either, and regresses refusal
+/// counts pinned elsewhere (`how_often_a_fuse_with_a_cone_refuses`,
+/// `a_plane_cut_along_a_cones_other_nappe`) without deciding anything here.
+/// Neither change is kept. The `AlongABend` node is a meet of one plane and
+/// *two* quadrics, not the two-planes-and-one-quadric shape
+/// `MeetOfThree::the_line_is_off_the_quadric_at` and
+/// `which_way_a_line_runs_through_a_quadric` both take — deciding it needs a
+/// new predicate, not a wider call to an existing one.
+#[test]
+fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_are_refused_ordering_a_near_cap_circle()
+ {
+    let mut model = a_model();
+    let said = fuse(
+        &mut model,
+        the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation,
+        Rule::Union,
+        true,
+    );
+    let Err(rcad_topo::Error::Undecidable { records }) = &said else {
+        panic!("the union: should be refused Undecidable, and said {said:?}");
+    };
+    let [refused] = records.records() else {
+        panic!("the union: should be refused on one question: {records:#?}");
+    };
+    assert_eq!(
+        refused.predicate(),
+        "order along a crossing",
+        "{refused:#?}"
+    );
+    for input in refused.inputs() {
+        let sides = input.enclosure();
+        let near_the_near_cap_rim = (0..3)
+            .map(|i| (sides[i].lo() - [1.0, 0.0, 1.0][i]).abs())
+            .fold(0.0, f64::max)
+            <= 1e-7;
+        assert!(near_the_near_cap_rim, "{refused:#?}");
+    }
+}
+
 fn a_block(model: &mut Model, from: [f64; 3], to: [f64; 3]) -> SolidKey {
     let rectangle = ProfileBuilder::new(vec![
         [0.0, 0.0],
