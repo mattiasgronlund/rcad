@@ -4519,12 +4519,19 @@ fn the_line_two_circles_differ_by(mine: &ACircle, theirs: &ACircle) -> Option<([
 /// that. One that leans by a rounding and cuts a pipe where it shares circles
 /// with the other surface about one axis — a D-flat on a chamfered shaft,
 /// placed by a turn — is taken by the leaning call of
-/// [`what_a_plane_beside_their_one_axis_leaves`], asked last of all.
+/// [`what_a_plane_beside_their_one_axis_leaves`].
 ///
-/// It is asked after every road but those three and the one for bands that
-/// cross, so every triple an earlier road answers keeps its answer. Arithmetic
-/// that runs out after the family is settled is
-/// [`an_exact_step_could_not_be_taken`], a **gap**: the points are there.
+/// A product that falls out of range while the lines or their discriminant
+/// are written hands the triple on as well. An LED's front flat stored as
+/// exactly `x = −1.23`, along its rim's stored axis, beside its body's pipe a
+/// rounding off that axis, is one, and
+/// [`what_a_plane_that_cuts_both_in_conics_leaves`] answers it.
+///
+/// It is asked after every road but those three, the one for bands that
+/// cross, the one for a plane one wall mirrors with both and the one for two
+/// conics, so every triple an earlier road answers keeps its answer.
+/// Arithmetic that runs out once the lines and their discriminant are written
+/// is [`an_exact_step_could_not_be_taken`], a **gap**: the points are there.
 fn what_a_plane_along_a_pipe_leaves(
     flat: &Plane,
     one: &Surface,
@@ -4562,14 +4569,16 @@ fn what_a_plane_along_a_pipe_leaves(
         return Ok(None);
     }
 
-    // Past here the family is settled, so arithmetic that runs out is a
-    // refusal about *this* triple, which a slide along the range can retry.
+    // The road for two conics slides its numbers by powers of two before it
+    // multiplies them, so a product out of range here is handed to it. Past
+    // the discriminant, arithmetic that runs out is a refusal about *this*
+    // triple.
     let refused = || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at);
     let Some(lines) = the_lines_a_plane_along_a_pipe_cuts(flat, pipe, &written, bend) else {
-        return Err(refused());
+        return Ok(None);
     };
     let Some((plain, lean)) = lines.the_discriminant() else {
-        return Err(refused());
+        return Ok(None);
     };
     let sides: SmallVec<[f64; 2]> = match lines.reach.sign() {
         Decision::Neg => return Ok(Some(MeetOfThree::Nowhere)),
