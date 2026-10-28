@@ -273,6 +273,8 @@ criteria are about answers.
 
 - **Q2911**, tier 1: whether anything rcad computes assumes one fan of faces
   round each corner, run on the 21 importing files' shape and on §469.4's plate
-  paired across the air (§469.6).
+  paired across the air (§469.6). Answered in §471: no wrong answer found.
 - **Q2912**, tier 1: whether a crossing pairing round a line of six faces is a
-  sound solid, and if not, what should refuse it (§469.4).
+  sound solid, and if not, what should refuse it (§469.4). Answered in §470: it
+  answers as the other pairings do, and the fuse was found writing three faces
+  through each other.
