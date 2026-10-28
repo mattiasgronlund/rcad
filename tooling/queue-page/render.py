@@ -1149,8 +1149,9 @@ def provenance_html(row_id, graph, links):
     """The row, the row it came from, and so on up to what nothing led to, as `just lineage main <id>` reads each (§432, §433).
 
     A step whose source is read from the row's text (§433.6) says what it
-    would be without that. A chain that comes back to a row it already passed
-    stops there and says so.
+    would be without that, and one whose word and commit name different
+    parents says both (§472). A chain that comes back to a row it already
+    passed stops there and says so.
     """
     steps = []
     passed = [row_id]
@@ -1217,6 +1218,10 @@ FOUND_BY = {
 
 
 def came_from(info, links):
+    return one_reading(info, links) + other_reading(info, links)
+
+
+def one_reading(info, links):
     if info.label == lineage.UNKNOWN_LABEL:
         return ("not known: the commit that added it closed more than one row, and neither their text "
                 "nor its message says which one led to it")
@@ -1226,6 +1231,16 @@ def came_from(info, links):
         return "nothing led to it: the commit that added it closed no row"
     verb = "a re-file of" if info.relation == lineage.RE_FILE else "came from"
     return f"{verb} {source_html(info.parent, links)}, {FOUND_BY[info.label]}"
+
+
+def other_reading(info, links):
+    """What the commit gives beside a parent its word gives, or the input the
+    word names beside the commit's row it hangs on instead (§472)."""
+    if info.beside is None:
+        return ""
+    if info.label == lineage.WORD_LABEL:
+        return f"; without its word, {one_reading(info.beside, links)}"
+    return f", in the tree of {source_html(info.beside.parent, links)}, which its word names (§472)"
 
 
 def source_html(parent, links):

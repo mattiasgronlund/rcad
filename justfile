@@ -14957,7 +14957,10 @@ queue-page:
 # planted word one step up; then the cache is marked with another shape, and
 # the page must work every summary out again. The second render must also
 # remove a page planted for a row main's copy does not hold, and leave a page
-# that did not change unwritten.
+# that did not change unwritten. A row whose word and commit name different
+# parents gives both on its page, and a sixth commit closes a row whose word
+# names a STEP file and files one that names the same file, which hangs on the
+# row closed (§472).
 #
 # The Families section (§450.3) says there is none at the fourth commit, whose
 # rows name no `tests/*.rs` file. The fifth commit adds three open rows on one
@@ -15462,7 +15465,8 @@ check-queue-page-selftest:
         "Q20 came from Q5, whose lane's merge added it"
     [ "$(chain Q20)" = 'Q20 Q5 Q3 Q1 ' ] \
         || fail "Q20's page should trace it to Q5, whose lane's merge added it, Q5 to Q3 and Q3 to Q1, each closed by the commit that added the one after it: $(chain Q20)"
-    on_page Q21 'came from <code><a href="Q2.html">Q2</a></code>, as its own word says</li>' "its word from/Q2 says where it came from, over the lane merge that added it"
+    on_page Q21 'came from <code><a href="Q2.html">Q2</a></code>, as its own word says; without its word, came from <code><a href="Q5.html">Q5</a></code>, read from the commit that added it</li>' \
+        "its word from/Q2 says where it came from, over the lane merge that added it, which the page says beside it (§472)"
     [ "$(chain Q21)" = 'Q21 Q2 ' ] || fail "Q21's page should trace it to Q2 and stop at a first row: $(chain Q21)"
     on_page Q27 "<li><code>Q97</code>: no commit on main's history added it</li>" "its word names Q97, which no commit added"
     on_page Q28 '<li><code><a href="Q28.html">Q28</a></code> again, so the chain goes round, and stops here</li>' \
@@ -15472,9 +15476,9 @@ check-queue-page-selftest:
         "D1 is a D row, which lineage does not follow"
     on_page Q30 '</q>: came from the fuzz target <code>demo</code>, which its text names (§433.6); without reading its text, came from <code><a href="Q5.html">Q5</a></code>, read from the commit that added it</li></ol>' \
         "its text names a crash file of the demo target, which stands over the lane merge that added it (§433.6), and the chain ends at the target"
-    on_page Q31 '</q>: came from the STEP file <code>demo.stp</code>, as its own word says</li></ol>' \
-        "its word names a STEP file, and the chain ends there"
-    on_page Q2 "<dt>Resulted in</dt><dd><ul><li><code><a href=\"Q21.html\">Q21</a></code>, added in <code>${sha_d:0:8}</code> on 2026-09-04, <q>Merge lane-q5-the-tables: rows waiting, parked, pinned and meeting a running lane</q>: came from <code><a href=\"Q2.html\">Q2</a></code>, as its own word says</li></ul></dd>" \
+    on_page Q31 '</q>: came from the STEP file <code>demo.stp</code>, as its own word says; without its word, came from <code><a href="Q5.html">Q5</a></code>, read from the commit that added it</li></ol>' \
+        "its word names a STEP file, and the chain ends there, and Q5, whose lane's merge added it, is not in that file's tree (§472)"
+    on_page Q2 "<dt>Resulted in</dt><dd><ul><li><code><a href=\"Q21.html\">Q21</a></code>, added in <code>${sha_d:0:8}</code> on 2026-09-04, <q>Merge lane-q5-the-tables: rows waiting, parked, pinned and meeting a running lane</q>: came from <code><a href=\"Q2.html\">Q2</a></code>, as its own word says; without its word, came from <code><a href=\"Q5.html\">Q5</a></code>, read from the commit that added it</li></ul></dd>" \
         "Q21 came from Q2, as its word says, and each row below gets the step its own Came from gives it"
     on_page Q20 '<dt>Resulted in</dt><dd>nothing: no row came from it</dd>' "no row came from Q20"
     [ "$(results Q3)" = '( Q4 Q5 ( Q10 Q11 Q12 Q13 Q14 Q15 Q16 Q18 Q19 Q20 Q22 Q24 Q25 Q26 Q32 Q33 ) Q6 ) ' ] \
@@ -15527,6 +15531,7 @@ check-queue-page-selftest:
 
     sed -i -E 's/  pinned\/[0-9]+ /  /' "$hub/docs/queue.md"
     sed -i '/^Q21  /a Q23  1  todo  opus  docs/n.md  from/Q21 a row filed from Q21 §432' "$hub/docs/queue.md"
+    sed -i '/^Q23  /a Q48  1  todo  opus  -  from/step:demo.stp a second fault demo.stp showed §433' "$hub/docs/queue.md"
     # §450.3 rule 1 (Q2003): three open rows on a_family.rs, one by an item and
     # one in tier 5, and a parked fourth that is no member; three on
     # a_traced_family.rs that a closed trace named, so no family.
@@ -15559,6 +15564,16 @@ check-queue-page-selftest:
     [ "$(chain Q23)" = 'Q23 Q21 Q2 ' ] \
         || fail "a lineage cache kept under another shape should be worked out again from git, which gives Q21's own word, Q2, not the planted Q4: $(chain Q23)"
     [ "$(results Q2)" = '( Q21 ( Q23 ) ) ' ] || fail "the tree below Q2 should hold Q21, and Q23 below Q21, which commit E filed from it: $(results Q2)"
+
+    sed -i -e '/^Q48  /s/todo/done:abcdef9/' \
+        -e '/^Q48  /a Q49  1  todo  opus  -  from/step:demo.stp what fixing Q48 showed in the same file §433' "$hub/docs/queue.md"
+    g add docs/queue.md
+    GIT_COMMITTER_DATE='2026-09-06T10:00:00+00:00' g commit -q -m "commit F: Q48 done, and Q49 filed from what fixing it showed"
+    render || fail "queue-page failed to render commit F"
+    on_page Q49 '</q>: came from <code><a href="Q48.html">Q48</a></code>, read from the commit that added it, in the tree of the STEP file <code>demo.stp</code>, which its word names (§472)</li>' \
+        "Q49's word names demo.stp, and Q48, which commit F closed as it filed Q49, is in that file's tree (§472)"
+    [ "$(chain Q49)" = 'Q49 Q48 ' ] || fail "Q49's page should trace it to Q48 and stop at the STEP file Q48's word names: $(chain Q49)"
+    [ "$(results Q48)" = '( Q49 ) ' ] || fail "Q48's page should hold Q49, which hangs on it: $(results Q48)"
 
     # §308 (Q2469): a `cores:` skip line comes from the justfile's own
     # cores_fit_skip, never from queue.py, in two forms: the night fuzz
@@ -21522,24 +21537,29 @@ check-row-time-selftest:
 # How far each row's work has grown, read back out of git: for each first
 # row (one nothing else led to) its descendants, depth and still-open count;
 # rows added vs. rows closed done, by week; and for each §433 fuzz target or
-# corpus file, the faults it found directly versus its whole tree, by the
-# week they were filed. A row filed since §432 names its parent in a word
-# (`from/<id>`, `was/<id>`, `from/fuzz:<target>`, `from/step:<file>`); an
-# older row's parent is read back out of the commit that added it: the
-# lane's own row on a lane merge, else the row the commit closed, else, where
-# a commit closes more than one row, the one the new row's own text names or
-# whose own text names the new row, else the one the commit message ties it
-# to in the same paragraph (never the subject line, which often names every
-# row a batch touches together). No row filed before Q1703 merged could say
-# `from/fuzz:` or `from/step:`, so where such a row's own text names the
+# corpus file, the faults it shows versus its whole tree, by the week they
+# were filed. A row filed since §432 names its parent in a word (`from/<id>`,
+# `was/<id>`, `from/fuzz:<target>`, `from/step:<file>`); an older row's
+# parent is read back out of the commit that added it: the lane's own row on
+# a lane merge, else the row the commit closed, else, where a commit closes
+# more than one row, the one the new row's own text names or whose own text
+# names the new row, else the one the commit message ties it to in the same
+# paragraph (never the subject line, which often names every row a batch
+# touches together). A word naming a fuzz target or a STEP file loses to the
+# row the commit gives where that row is in the input's own tree: the work on
+# a fault the input showed filed it (§472). The input still counts it among
+# the faults it shows -- the rows hung on it, and the rows hung below it
+# whose word names it, less re-files. No row filed before Q1703 merged could
+# say `from/fuzz:` or `from/step:`, so where such a row's own text names the
 # input that shows its fault -- a crash file, a seed by its hash, or one
 # corpus file -- that input is its parent instead, unless the row it already
 # hangs on is in that input's tree (§433.6, §433.2). The first-row and source
 # tables are printed twice, without those links and with them, and the links
 # are listed last; the weekly table reads no parent and is printed once. With
 # one or more row ids it prints each one's resolved parent instead of the
-# tables, and after a parent read from the row's text, the one it has without.
-# `docs/decisions.md` §432, §433, §348.2.
+# tables; after a parent read from the row's text, the one it has without;
+# and where the word and the commit name different parents, the other one
+# beside it. `docs/decisions.md` §432, §433, §472, §348.2.
 #
 # Like `row-time` this reads git history and not the repository's current
 # state, so it is not a `check-*` and is not in `gate_steps`;
@@ -21573,6 +21593,15 @@ lineage ref *row_ids:
 # name without its directory, two targets beside a lone crash file, a
 # `was/<id>` re-file, a row whose parent is already in the input's tree, and a
 # `from/-` row filed after Q1703 closed.
+#
+# The last six commits file rows whose word names a corpus file as the row
+# the commit closes is worked on (§472). Each hangs on that row where it is in
+# the file's tree: once by a lane merge, once two rows below the file, once
+# as a re-file of a dropped row, which the file does not count as a fault
+# again, and once only with the sources read from text, since the row closed
+# is in the file's tree by its own text alone. A row whose word names another
+# file stays on that file, with the commit's row beside it. Rows read from a
+# word print the commit's row beside them wherever the two differ.
 #
 # The first commit also fences the grammar's own syntax example, `<id> <tier>
 # ...`, the way `9414e41c` first wrote `docs/queue.md`: `rows.py` reads every
@@ -21771,7 +21800,36 @@ check-lineage-selftest:
     printf 'queue: file Q41\n' > "$dir/m7.txt"
     c7=$(commit "$dir/c7.md" "$dir/m7.txt" "$c6") || exit 1
 
-    git -C "$repo" update-ref refs/heads/main "$c7" || fail "could not point main at the last commit"
+    sed '/^Q41 /a Q50  1  todo  opus  -  from/step:Lone_Part.step a fault Lone_Part.step shows §1' "$dir/c7.md" > "$dir/c8.md"
+    printf 'queue: file Q50\n' > "$dir/m8.txt"
+    c8=$(commit "$dir/c8.md" "$dir/m8.txt" "$c7") || exit 1
+
+    sed -e '/^Q50 /s/todo/done:50505050/' -e '/^Q50 /a Q51  1  todo  opus  -  from/step:Lone_Part.step what fixing Q50 showed in the same file §1\
+    Q52  1  todo  opus  -  from/step:Other_Part.step a fault another file showed while Q50 was worked on §1' "$dir/c8.md" > "$dir/c9.md"
+    printf 'Merge lane-q50-demo: Q50 done, leaving Q51 and Q52\n' > "$dir/m9.txt"
+    c9=$(commit "$dir/c9.md" "$dir/m9.txt" "$c8") || exit 1
+
+    sed -e '/^Q52 /s/todo/done:52525252/' -e '/^Q52 /a Q53  1  todo  opus  -  from/step:Other_Part.step what fixing Q52 showed in the same file §1\
+    Q54  1  todo  opus  -  from/step:Lone_Part.step a second fault Lone_Part.step shows, found while Q52 was worked on §1' "$dir/c9.md" > "$dir/c10.md"
+    printf 'queue: Q52 done, Q53 and Q54 follow\n' > "$dir/m10.txt"
+    c10=$(commit "$dir/c10.md" "$dir/m10.txt" "$c9") || exit 1
+
+    sed -e '/^Q51 /s/todo/done:51515151/' -e '/^Q51 /a Q55  1  todo  opus  -  from/step:Lone_Part.step what fixing Q51 showed, two rows below the file §1' \
+        "$dir/c10.md" > "$dir/c11.md"
+    printf 'queue: Q51 done, Q55 follows\n' > "$dir/m11.txt"
+    c11=$(commit "$dir/c11.md" "$dir/m11.txt" "$c10") || exit 1
+
+    sed -e '/^Q33 /s/todo/done:33333333/' -e '/^Q33 /a Q56  1  todo  opus  -  from/step:Lone_Part.step what fixing Q33 showed, in the file tree only once text is read §1' \
+        "$dir/c11.md" > "$dir/c12.md"
+    printf 'queue: Q33 done, Q56 follows\n' > "$dir/m12.txt"
+    c12=$(commit "$dir/c12.md" "$dir/m12.txt" "$c11") || exit 1
+
+    sed -e '/^Q54 /s/todo/dropped:54545454/' -e '/^Q54 /a Q57  1  todo  opus  -  from/step:Lone_Part.step a second fault Lone_Part.step shows, found while Q52 was worked on, filed again §1' \
+        "$dir/c12.md" > "$dir/c13.md"
+    printf 'queue: drop Q54 and file it again as Q57\n' > "$dir/m13.txt"
+    c13=$(commit "$dir/c13.md" "$dir/m13.txt" "$c12") || exit 1
+
+    git -C "$repo" update-ref refs/heads/main "$c13" || fail "could not point main at the last commit"
 
     run() {
         python3 '{{ justfile_directory() }}/tooling/lineage/lineage.py' "$repo" main "$@"
@@ -21797,17 +21855,28 @@ check-lineage-selftest:
     check_row Q21 "Q21: parent Q20, from the commit message, led-to"
 
     check_row Q30 "Q30: parent fuzz:demo_target, from the row's text, led-to (without it: parent Q10, from the commit, led-to)"
-    check_row Q32 "Q32: parent fuzz:demo_target, from the row's text, led-to (without it: parent none, from word, first)"
-    check_row Q33 "Q33: parent step:Lone_Part.step, from the row's text, led-to (without it: parent Q1, from word, led-to)"
+    check_row Q32 "Q32: parent fuzz:demo_target, from the row's text, led-to (without it: parent none, from word, first; the commit gives parent Q10, from the commit, led-to)"
+    check_row Q33 "Q33: parent step:Lone_Part.step, from the row's text, led-to (without it: parent Q1, from word, led-to; the commit gives parent Q10, from the commit, led-to)"
     check_row Q35 "Q35: parent step:AP203_geometry_only/demo.stp, from the row's text, led-to (without it: parent Q10, from the commit, led-to)"
     check_row Q38 "Q38: parent fuzz:other_target, from the row's text, led-to (without it: parent Q10, from the commit, led-to)"
     check_row Q31 "Q31: parent Q10, from the commit, led-to"
     check_row Q34 "Q34: parent Q10, from the commit, led-to"
     check_row Q36 "Q36: parent Q10, from the commit, led-to"
-    check_row Q37 "Q37: parent Q4, from word, re-file"
+    check_row Q37 "Q37: parent Q4, from word, re-file; the commit gives parent Q10, from the commit, led-to"
     check_row Q39 "Q39: parent Q10, from the commit, led-to"
-    check_row Q40 "Q40: parent Q30, from word, led-to"
+    check_row Q40 "Q40: parent Q30, from word, led-to; the commit gives parent Q10, from the commit, led-to"
     check_row Q41 "Q41: parent none, from word, first"
+
+    # §472: a row whose word names a corpus file hangs on the row the commit
+    # gives where that row is in the file's tree, and keeps the file otherwise.
+    check_row Q50 "Q50: parent step:Lone_Part.step, from word, led-to"
+    check_row Q51 "Q51: parent Q50, from the commit, led-to, in the tree of step:Lone_Part.step, which its word names"
+    check_row Q52 "Q52: parent step:Other_Part.step, from word, led-to; the commit gives parent Q50, from the commit, led-to"
+    check_row Q53 "Q53: parent Q52, from the commit, led-to, in the tree of step:Other_Part.step, which its word names"
+    check_row Q54 "Q54: parent step:Lone_Part.step, from word, led-to; the commit gives parent Q52, from the commit, led-to"
+    check_row Q55 "Q55: parent Q51, from the commit, led-to, in the tree of step:Lone_Part.step, which its word names"
+    check_row Q56 "Q56: parent Q33, from the commit, led-to, in the tree of step:Lone_Part.step, which its word names"
+    check_row Q57 "Q57: parent Q54, from the commit, re-file, in the tree of step:Lone_Part.step, which its word names"
 
     got=$(run Q1 Q21) || fail "a two-row lookup call exited non-zero"
     grep -qF "Q1: parent none, from none, first" <<<"$got" || fail "a two-row call lost Q1's line"
@@ -21840,6 +21909,20 @@ check-lineage-selftest:
     grep -qF "| Q30 | fuzz:demo_target | Q10, from the commit |" <<<"$read_from_text" || fail "the table of sources read from the text lost Q30"
     grep -qF "| Q32 | fuzz:demo_target | none, from word |" <<<"$read_from_text" || fail "the table of sources read from the text lost Q32"
     grep -qF "| Q40 |" <<<"$read_from_text" && fail "the table of sources read from the text lists Q40, whose parent is already in the tree"
+    counts_under() {
+        # counts_under <a table> <a source>: the count line under that source's own heading
+        grep -A2 -xF "### $2" <<<"$1" | grep -F 'faults it shows'
+    }
+    [ "$(counts_under "$sources_without" step:Other_Part.step)" = "2 faults it shows, 2 rows in its whole tree." ] \
+        || fail "Other_Part.step shows Q52, and Q53 below it, whose word names it too"
+    [ "$(counts_under "$sources_without" step:Lone_Part.step)" = "5 faults it shows, 6 rows in its whole tree." ] \
+        || fail "without the sources read from text, Lone_Part.step's tree holds Q50, Q51, Q54, Q55, Q56 and Q57, and Q57 is a re-file of Q54 and no fault of its own"
+    [ "$(counts_under "$sources_with" step:Lone_Part.step)" = "6 faults it shows, 7 rows in its whole tree." ] \
+        || fail "with the sources read from text, Lone_Part.step's tree also holds Q33, which its text names, with Q56 below it"
+    grep -qF "| Q1 | 2 | 1 | 1 |" <<<"$first_without" \
+        || fail "without the sources read from text, Q1's tree holds Q11 and Q33 and not Q56: Q33 is in Lone_Part.step's tree only by its text"
+    grep -qF "| Q1 | 1 | 1 | 1 |" <<<"$first_with" \
+        || fail "with the sources read from text, Q1's tree holds only Q11: Q33 and Q56 below it are in Lone_Part.step's tree"
     grep -qF "### fuzz:demo_target" <<<"$got" || fail "the full report dropped fuzz:demo_target's own section"
     grep -qF "### step:CTC_Definitions/demo.stp" <<<"$got" || fail "the full report dropped step:CTC_Definitions/demo.stp's own section"
     grep -qF "<id>" <<<"$got" && fail "the full report listed the fenced syntax example as a row named <id>"

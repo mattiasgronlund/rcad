@@ -18,6 +18,13 @@ own text names, or whose own (now-closed) text names the new row, and failing
 that the one the commit message ties it to in the same paragraph; where
 neither says, the parent is unknown, never a guess at which row closed first.
 
+A word that names a fuzz target or a STEP file says what shows the fault, and
+the lanes write it even when their own row's work turned the fault up
+(§433.2). So where the row the commit gives is in that input's own tree, the
+row hangs on it: the work on a fault the input showed filed it (§472). The
+input still counts it among the faults it shows. Wherever the word and the
+commit name different parents, the parent keeps the other reading beside it.
+
 No row filed before Q1703 merged could say `from/fuzz:` or `from/step:`, so
 a fault a night or a corpus file showed hangs there on whatever row was
 running, or on none. Where such a row's own text names the input that shows
@@ -61,6 +68,7 @@ RECORD_SEP = "\x1e"
 
 CAME_FROM = re.compile(r"^(from|was)/([TDQ][0-9]+|-)$")
 CAME_FROM_AN_INPUT = re.compile(r"^from/(fuzz|step):(\S+)$")
+INPUT_PREFIXES = ("fuzz:", "step:")
 LANE_MERGE_SUBJECT = re.compile(r"^Merge lane-q([0-9]+)-")
 ROW_ID = re.compile(r"^Q[0-9]+$")
 
@@ -245,14 +253,21 @@ def summarize(rows, parents):
 class ParentInfo:
     """One row's resolved source: the parent id (or a `fuzz:<target>`/`step:<file>`
     node, or `None` for a first row), where it was read from, and whether the row
-    is a re-file of its parent or genuinely led to by it."""
+    is a re-file of its parent or genuinely led to by it.
 
-    __slots__ = ("parent", "label", "relation")
+    `beside` is the other reading, where the row's word and the commit that
+    added it name different parents: the commit's under a parent read from the
+    word, and the word's under a parent read from the commit over the input
+    the word names (§472). `None` where they agree, or only one says.
+    """
 
-    def __init__(self, parent, label, relation):
+    __slots__ = ("parent", "label", "relation", "beside")
+
+    def __init__(self, parent, label, relation, beside=None):
         self.parent = parent
         self.label = label
         self.relation = relation
+        self.beside = beside
 
 
 WORD_LABEL = "word"
@@ -340,14 +355,16 @@ class Graph:
         self.closed_at = defaultdict(list)  # commit sha -> [row id]
         self.closed_kind = {}  # row id -> "done" | "dropped"
         self.closed_commit = {}  # row id -> Commit
-        self.parent_of = {}  # row id -> ParentInfo, from its word or the commit that added it
-        self.read_from_text = {}  # row id -> ParentInfo of the input its own text names instead
         self._find_added()
         self._find_closed()
-        self._resolve_parents()
-        self._read_sources_from_text(KnownInputs(top, ref))
+        walk_order = {commit.sha: i for i, commit in enumerate(self.commits)}
+        oldest_first = sorted(self.added_at, key=lambda r: (walk_order[self.added_at[r].sha], row_sort_key(r)))
+        read = self._read_words_and_commits()
+        # row id -> ParentInfo, without the sources read from row text
+        self.parent_of, _ = settle(read, oldest_first, {})
+        with_text, self.read_from_text = settle(read, oldest_first, self._sources_named_by_text(KnownInputs(top, ref)))
         self.without_text = Tree(self.parent_of)
-        self.with_text = Tree({**self.parent_of, **self.read_from_text})
+        self.with_text = Tree(with_text)
 
     def tip_rows(self):
         if self._tip_rows is None:
@@ -396,15 +413,23 @@ class Graph:
         dropped = [row_id for row_id in closed if self.closed_kind[row_id] == "dropped"]
         return closed, dropped
 
-    def _resolve_parents(self):
+    def _read_words_and_commits(self):
+        """Each row's parent as its word gives it, or the commit that added it
+        where it has no word, with the commit's beside the word's where both
+        name a parent and the two differ."""
+        read = {}
         for row_id, commit in self.added_at.items():
             row_text = self.added_text(row_id)
             word = extract_word(row_text)
             from_word = resolve_from_word(word) if word else None
-            if from_word is not None:
-                self.parent_of[row_id] = from_word
-                continue
-            self.parent_of[row_id] = self._resolve_from_commit(row_id, row_text, commit)
+            from_commit = self._resolve_from_commit(row_id, row_text, commit)
+            if from_word is None:
+                read[row_id] = from_commit
+            elif from_commit.parent is None or from_commit.parent == from_word.parent:
+                read[row_id] = from_word
+            else:
+                read[row_id] = ParentInfo(from_word.parent, from_word.label, from_word.relation, beside=from_commit)
+        return read
 
     def _resolve_from_commit(self, row_id, row_text, commit):
         lane_merge = LANE_MERGE_SUBJECT.match(commit.subject)
@@ -439,32 +464,26 @@ class Graph:
         relation = RE_FILE if candidate in dropped and is_a_re_file(row_text, candidate_text) else LED_TO
         return ParentInfo(candidate, label, relation)
 
-    def _read_sources_from_text(self, inputs):
-        """§433.6: give a row filed before Q1703 merged the input its own text names.
+    def _sources_named_by_text(self, inputs):
+        """§433.6: for each row filed before Q1703 merged, the input its own text names.
 
         Only a row with no word, `from/-` or `from/<id>` is read: `was/<id>`
         re-files a row, and `from/fuzz:` or `from/step:` names the input
-        already. The input beats the row that was running (§433.2), but not a
-        row in the input's own tree: a row whose parent is the input, or hangs
-        below it, was filed by the work on a fault that input showed, and
-        §433.2 keeps it there. So rows are read oldest first, each parent's
-        own source settled before its children are looked at.
+        already. Whether the input then stands over the row's parent is
+        `settle`'s to say, since it turns on the tree that parent is in.
         """
         filed_once_a_word_could_say_it = self._commits_from_q1703_on()
-        walk_order = {commit.sha: i for i, commit in enumerate(self.commits)}
-        parent_of = dict(self.parent_of)
-        for row_id in sorted(self.added_at, key=lambda r: (walk_order[self.added_at[r].sha], row_sort_key(r))):
-            commit = self.added_at[row_id]
+        sources = {}
+        for row_id, commit in self.added_at.items():
             if commit.sha in filed_once_a_word_could_say_it:
                 continue
             row_text = self.added_text(row_id)
             if not text_may_name_the_source(extract_word(row_text)):
                 continue
             source = inputs.source_named_by(description(row_text))
-            if source is None or source in parent_and_above(parent_of, parent_of[row_id].parent):
-                continue
-            parent_of[row_id] = ParentInfo(source, TEXT_LABEL, LED_TO)
-            self.read_from_text[row_id] = parent_of[row_id]
+            if source is not None:
+                sources[row_id] = source
+        return sources
 
     def _commits_from_q1703_on(self):
         """The commit that closed Q1703 done and every commit after it on this ref.
@@ -479,6 +498,48 @@ class Graph:
             return set()
         later = git(self.top, "rev-list", "--ancestry-path", f"{commit.sha}..{self.tip_sha}").decode().split()
         return {commit.sha, *later}
+
+
+def settle(read, oldest_first, text_sources):
+    """Each row's parent, and the rows whose parent is the input their text
+    names, from `read` and the inputs `text_sources` gives by row.
+
+    The input a row's text names beats the row that was running (§433.2), but
+    not a row in the input's own tree: a row whose parent is the input, or
+    hangs below it, was filed by the work on a fault that input showed, and
+    §433.2 keeps it there. A row whose word names an input hangs on the row
+    the commit gives, for the same reason, where that row is in the input's
+    tree (§472). Both turn on the tree the parent is in, so rows are settled
+    oldest first, each parent's own source settled before its children are
+    looked at.
+    """
+    parent_of = dict(read)
+    read_from_text = {}
+    for row_id in oldest_first:
+        info = parent_of[row_id]
+        source = text_sources.get(row_id)
+        if source is not None and source not in parent_and_above(parent_of, info.parent):
+            parent_of[row_id] = read_from_text[row_id] = ParentInfo(source, TEXT_LABEL, LED_TO)
+        elif names_an_input_the_commits_row_is_below(info, parent_of):
+            word = ParentInfo(info.parent, info.label, info.relation)
+            parent_of[row_id] = ParentInfo(info.beside.parent, info.beside.label, info.beside.relation, beside=word)
+    return parent_of, read_from_text
+
+
+def names_an_input_the_commits_row_is_below(info, parent_of):
+    """Whether `info` is read from a word naming a fuzz target or a STEP file,
+    with the commit's row beside it, and that row is in the input's tree."""
+    return (
+        info.label == WORD_LABEL
+        and info.beside is not None
+        and is_an_input(info.parent)
+        and info.parent in parent_and_above(parent_of, info.beside.parent)
+    )
+
+
+def is_an_input(parent):
+    """Whether `parent` is a `fuzz:<target>` or `step:<file>` node, not a row or `None`."""
+    return parent is not None and parent.startswith(INPUT_PREFIXES)
 
 
 def text_may_name_the_source(word):
@@ -682,7 +743,12 @@ def print_row_lookup(graph, row_id):
 
 def describe(info):
     parent = info.parent if info.parent is not None else "none"
-    return f"parent {parent}, from {info.label}, {info.relation}"
+    line = f"parent {parent}, from {info.label}, {info.relation}"
+    if info.beside is None:
+        return line
+    if info.label == WORD_LABEL:
+        return f"{line}; the commit gives {describe(info.beside)}"
+    return f"{line}, in the tree of {info.beside.parent}, which its word names"
 
 
 def print_first_row_table(graph, tree, which):
@@ -726,12 +792,11 @@ def print_source_table(graph, tree, which):
         print()
         return
     for root in roots:
-        direct = tree.children.get(root, [])
-        faults = [row_id for row_id in direct if tree.parent_of[row_id].relation != RE_FILE]
         subtree = tree.subtree(root)
+        faults = [row_id for row_id in subtree if shows_its_fault(tree.parent_of[row_id], root)]
         print(f"### {root}")
         print()
-        print(f"{len(faults)} faults found directly, {len(subtree)} rows in its whole tree.")
+        print(f"{len(faults)} faults it shows, {len(subtree)} rows in its whole tree.")
         print()
         by_week = defaultdict(int)
         for row_id in faults:
@@ -741,6 +806,17 @@ def print_source_table(graph, tree, which):
         for week in sorted(by_week):
             print(f"| {week.isoformat()} | {by_week[week]} |")
         print()
+
+
+def shows_its_fault(info, root):
+    """Whether a row in `root`'s tree is a fault `root` shows: hung on it, or
+    hung below it on the row whose work filed it while its word names `root`
+    (§472). A re-file is its old row's fault, counted there already."""
+    if info.relation == RE_FILE:
+        return False
+    if info.parent == root:
+        return True
+    return info.label != WORD_LABEL and info.beside is not None and info.beside.parent == root
 
 
 def print_sources_read_from_text(graph):
