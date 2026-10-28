@@ -11081,4 +11081,65 @@ mod tests {
             }
         }
     }
+
+    fn a_bare_cone(along: [f64; 3], slope: f64) -> Cone {
+        Cone::new(
+            Axis::new(Point::from([0.0; 3]), Vector::from(along)).expect("a direction"),
+            slope,
+        )
+        .expect("a slope above zero")
+    }
+
+    /// Both pairs of
+    /// [`two_cones_on_one_apex_a_rounding_past_touching_cross_along_two_rulings_either_side_of_the_touch`],
+    /// side `-1`, against `R − L` worked out to a hundred digits:
+    /// `2.63312510143252561e-17` and `8.881784197001250351e-16`. The upright
+    /// cone's axis direction has length one, so `W1 = 1` and the enclosure
+    /// this returns is `R − L` itself, with nothing else scaling it.
+    #[test]
+    fn how_far_apart_the_rulings_where_two_cones_cross_spread_matches_a_hundred_digit_r_minus_l() {
+        let upright = a_bare_cone([0.0, 0.0, 1.0], 1.0);
+        for (lying, r_minus_l) in [
+            (
+                a_bare_cone([3.0, 0.0, 1.0], 0.5),
+                2.63312510143252561e-17_f64,
+            ),
+            (
+                a_bare_cone([1.0, 0.0, f64::EPSILON], 1.0),
+                8.881784197001250351e-16_f64,
+            ),
+        ] {
+            let side = -1.0;
+            let spread =
+                how_far_apart_the_rulings_where_two_cones_cross_spread(&upright, &lying, side)
+                    .expect("both pairs here fit in f64's range");
+            let rounding = f64::EPSILON * r_minus_l.abs();
+            assert!(
+                spread.lo() - rounding <= r_minus_l && r_minus_l <= spread.hi() + rounding,
+                "{r_minus_l:e} is not within a rounding of [{}, {}]",
+                spread.lo(),
+                spread.hi()
+            );
+
+            let normal = square_to_where_two_cones_on_one_apex_cross(&upright, &lying, side);
+            let built_from_intervals_throughout =
+                how_far_apart_two_rulings_through_a_cones_apex_spread(normal, &upright);
+            assert!(
+                built_from_intervals_throughout.lo() <= 0.0
+                    && built_from_intervals_throughout.hi() >= 0.0,
+                "the enclosure built out of intervals from the start should hold nothing \
+                 here, the two rulings being this close: {built_from_intervals_throughout:?}"
+            );
+
+            assert!(
+                spread.lo() > 0.0,
+                "{spread:?} should be above nothing, where the coarse enclosure holds nothing"
+            );
+            let width = spread.hi() - spread.lo();
+            assert!(
+                width <= 8.0 * f64::EPSILON * r_minus_l.abs(),
+                "{spread:?} is wider than a few roundings of {r_minus_l:e}"
+            );
+        }
+    }
 }
