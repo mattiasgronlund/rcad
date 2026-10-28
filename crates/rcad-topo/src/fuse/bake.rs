@@ -13,6 +13,19 @@
 //! surfaces round it is re-derived, and a corner with fewer is read out of the
 //! model and moved.**
 //!
+//! One kind of corner with three surfaces round it is read out of the model as
+//! well, but only once re-deriving it has refused `Undecidable`: a corner
+//! whose faces fall into two fans or more, each fan with fewer than three
+//! surfaces, where no edge left out adds a surface and fewer than three of
+//! the surfaces are planes. That is where two pieces of skin touch at one
+//! point, as the flange and the body of a KiCad LED do (§471.3): each fan
+//! alone would be read out of the model, and the three surfaces only come
+//! together because both fans are counted, so they touch there rather than
+//! cross and nothing solves them. Fewer than three planes, because readers
+//! further on take three planes round a corner to meet at it, which holds
+//! only where bake solved the corner among them. One fan, §70.3's corner of
+//! three planes that graze, stays refused. [`place_a_corner`] says it in full.
+//!
 //! **Read and moved, and not asked about.** With nothing to solve, the point
 //! handed on is the stored corner whatever its surfaces say, so asking them
 //! could only refuse. And the stored corner is the point `Model::validate` asks
@@ -352,16 +365,19 @@ pub(crate) struct BakedCorner {
     /// which is what keeps the arrangement from having to prove a corner is on
     /// a curve it is on by construction.
     ///
-    /// **Three or more, and every one of them was asked about the corner.**
-    /// [`derive_a_corner`] solves such a corner from one triple and then asks
-    /// each surface here about it, grown by the room `Model::validate_solid`
-    /// grants a corner off that surface plus [`what_writing_the_corner_down_cost`],
-    /// and a surface that proves it off is a refusal. Fewer than three, and the
-    /// corner was read out of the model and nothing here asked (§286).
-    /// `a_corner_is_this_place` in the arrangement leans on the first half:
-    /// a meet of three planes from this list is this corner while it lies
-    /// within [`BakedCorner::room_its_planes_were_asked_with`] of it (§356,
-    /// §395.8).
+    /// **Three or more planes here, and every surface here was asked about the
+    /// corner.** [`derive_a_corner`] solves a corner with three surfaces or
+    /// more round it from one triple and then asks each surface here about it,
+    /// grown by the room `Model::validate_solid` grants a corner off that
+    /// surface plus [`what_writing_the_corner_down_cost`], and a surface that
+    /// proves it off is a refusal. Fewer than three surfaces, and the corner
+    /// was read out of the model and nothing here asked (§286). So was a corner
+    /// in two fans that touch, with three surfaces or more round it but fewer
+    /// than three of them planes, once solving it refused ([`place_a_corner`],
+    /// §471.3). `a_corner_is_this_place` in the arrangement leans on the first
+    /// half: a meet of three planes from this list is this corner while it
+    /// lies within [`BakedCorner::room_its_planes_were_asked_with`] of it
+    /// (§356, §395.8).
     pub(crate) around: Vec<Surface>,
     /// The three surfaces of `around` whose meet [`derive_a_corner`] placed the
     /// corner at, so that `point`'s box holds where exactly those three meet.
@@ -1155,6 +1171,30 @@ fn faces_around_a_vertex(
 /// the model and moved. **Its surfaces are not asked about it**, and this
 /// module's header says why (§286).
 ///
+/// **A corner where two fans touch is read out of the model too, when solving
+/// it refuses `Undecidable`** (§471.3). Each of these is needed for that:
+///
+/// - Every surface round it is a face's. An edge left out that adds one ran
+///   along a curve through the corner that its faces alone do not name, and
+///   the corner is solved with it or refused.
+/// - Fewer than three of its surfaces are planes. `a_corner_is_this_place` in
+///   the arrangement and the readers after it take three planes round a
+///   corner to meet at it, within [`BakedCorner::room_its_planes_were_asked_with`],
+///   which holds only where this solved the corner among them.
+/// - Its faces fall into two fans or more, and no fan has three surfaces
+///   ([`each_fan_round_it_has_fewer_than_three_surfaces`]). Then each fan alone
+///   would be read out of the model, and the three surfaces round the corner
+///   come together only because both fans are counted: the flat and back of a
+///   KiCad LED's flange and the pipe of its body, which touches the flat
+///   there. They touch rather than cross, so no three of them place the
+///   corner. One fan of three surfaces that graze, as §70.3's planes do, stays
+///   refused.
+///
+/// Every corner that solving places is still placed that way, so a corner this
+/// reads out of the model is one that was refused before. Solving runs on a log
+/// of its own, kept only when it answers, so a corner read out leaves no record
+/// of the refusal behind.
+///
 /// The surfaces round it are its faces', and then `also_on`: what an edge left
 /// out at it ran along, unless that is one of its faces' surfaces however
 /// written ([`what_each_edge_left_out_ran_along`]).
@@ -1448,8 +1488,9 @@ fn the_seam_plane_a_corner_is_on(
 /// This is a **cached sample** of where the surfaces round it meet (§17.1) and
 /// never the answer: [`place_a_corner`] returns it only for a corner with fewer
 /// than three surfaces round it, where the whole of a shared curve satisfies
-/// them and there is nothing to solve, and [`derive_a_corner`] reads it only to
-/// tell two meeting points apart.
+/// them and there is nothing to solve, and for a corner where two fans touch
+/// that solving refused, where each fan alone is such a corner (§471.3).
+/// [`derive_a_corner`] reads it only to tell two meeting points apart.
 ///
 /// # Errors
 ///
