@@ -21395,10 +21395,11 @@ check-hub-align-selftest:
 # (what fills the context every later response pays to re-read), `ceiling`
 # (what handing off at a context cap would have saved), `warnings` (what the
 # budget hook that exists actually caught), `pairs` (a file searched in one
-# response and read in the next — §144.6's two-call shape, priced) and `start`
+# response and read in the next — §144.6's two-call shape, priced), `start`
 # (a dispatcher's context and output before its first lane, and what each
 # response's tool calls were for — §396.1's own counting, run instead of by
-# hand).
+# hand) and `waits` (what agents pay to write their prompt cache again after a
+# wait, by role, by the call waited on and by the length of the wait — §144.2).
 #
 # **`pairs` is what refused a tool change**: making `decisions-find` print the
 # section when it matches one would have reached 4 of a week's 119 pairs on
@@ -21460,6 +21461,12 @@ spend since="" until="" report="all" lane="":
 # and what handing them over would have cost, and those three decide it — the
 # obvious wrong version of each is caught by a case, which was checked rather
 # than assumed.
+#
+# `wait_threshold`, `rewrote_cache`, `cache_write_extra`, `wait_cause` and
+# `length_bucket` are the `waits` report's, held the same way: whether a
+# response rewrote the cache after a wait, what that cost beyond reading the
+# same tokens, and which recipe it was waiting on are all §144.2 reasons from,
+# never the week's own numbers.
 #
 # It needs no transcripts and no Claude Code, so it runs on a runner like any
 # other check. `docs/decisions.md` §152.
