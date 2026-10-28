@@ -2130,6 +2130,15 @@ fn every_order<'a>([one, two, three]: [&'a Surface; 3]) -> [[&'a Surface; 3]; 6]
 /// own numbers then reach 365 and 582 binades below their largest, and with
 /// the largest of each lifted to `2²⁰⁰` a product the quartic needs fell
 /// below `2⁻⁹⁶⁹`, so the three were refused until the lift moved up.
+///
+/// **The last three flats are exactly `x = −1.23` or `x = −0.23`**, as
+/// `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step`,
+/// `LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step` and
+/// `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step` store them. Such a flat runs
+/// exactly along the rim's stored axis, so the road for a plane along a pipe
+/// takes it before the road for two conics is asked. That road's exact steps
+/// fell out of range on these three, and they were refused until it handed
+/// them on. Their corners are worked out over the rationals the same way.
 #[test]
 fn the_front_flat_of_an_led_meets_its_body_and_rim_twice_far_out_along_them() {
     for (normal, offset, on_both_axes, [body_radius, rim_radius], corners) in [
@@ -2171,6 +2180,36 @@ fn the_front_flat_of_an_led_meets_its_body_and_rim_twice_far_out_along_them() {
             [
                 [-0.22999999999999998, -1493341088686801.8, 2.491751281309587],
                 [-0.22999999999999998, -737012837785723.6, 1.6520582429848565],
+            ],
+        ),
+        (
+            [-1.0, 0.0, 0.0],
+            1.23,
+            [1.27, -1.27, 15.0],
+            [2.5, 2.9],
+            [
+                [-1.23, -1984930593544855.8, 15.734021801566158],
+                [-1.23, -880650497379884.1, 14.508024613168697],
+            ],
+        ),
+        (
+            [-1.0, 0.0, 0.0],
+            0.23,
+            [1.27, -1.27, 10.0],
+            [1.5, 1.9],
+            [
+                [-0.23, -1493341088686799.0, 10.491751281309586],
+                [-0.23, -737012837785721.1, 9.652058242984856],
+            ],
+        ),
+        (
+            [-1.0, 0.0, 0.0],
+            0.23,
+            [1.27, -3.81, 6.0],
+            [1.5, 1.9],
+            [
+                [-0.23, -1493341088686801.5, 6.491751281309587],
+                [-0.23, -737012837785723.8, 5.6520582429848565],
             ],
         ),
     ] {
