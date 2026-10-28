@@ -18,8 +18,10 @@
 //! answers. **What each fuse gives now is pinned here**, under every rule both
 //! ways round. Since row Q2893 `intersect` names the two pointed cones'
 //! crossing too, as one loop and two branches that pass close by each other,
-//! but every fuse of them is still refused: the fuse cannot settle the order of
-//! two points along a crossing where both caps' rims nearly meet.
+//! and since row Q2894 `walk` marches the loop and a run between two corners
+//! on a branch without stepping from one onto the other, but every fuse of
+//! them is still refused: the fuse cannot settle the order of two points along
+//! a crossing where both caps' rims nearly meet.
 //!
 //! A third shape came with row Q2818: two pointed cones of different slopes,
 //! the narrower leaning off the wider, which cross in a loop and two branches
@@ -92,7 +94,11 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 ///
 /// Since row Q2893 `intersect` names the crossing as one loop and two branches
 /// that pass close by each other near each touch of the exact pair, with a
-/// flat surface it proves runs between the loop and the branch there.
+/// flat surface it proves runs between the loop and the branch there. Since
+/// row Q2894 `walk` marches the loop right round, and a run between two
+/// corners on a branch, and keeps every step in front of the flat surfaces
+/// that hold the piece it is on apart from the others, so it no longer steps
+/// across the gap onto the branch and runs off along it.
 ///
 /// Every fuse is still refused, under every rule both ways round, as
 /// undecided: `fuse/arrange.rs` cannot settle the order of two points along a

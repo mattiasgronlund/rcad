@@ -419,6 +419,12 @@ impl PointsAlongACrossing {
 /// [`Error::TooManyPointsAlongOneCrossing`] when the deflection asks for more
 /// than [`MOST_POINTS_ALONG_ONE_CROSSING`].
 ///
+/// [`Error::CannotFollowACrossingBecauseNoStepStaysOnIt`] where two cones off
+/// one axis cross in a loop and two branches, and no shortening of a step
+/// along the loop, or along a run between two corners on a branch, lands a
+/// trial the march keeps, which has to be decided in front of the flat
+/// surfaces that hold that piece apart from the others.
+///
 /// [`Error::CannotFollowACrossingTowardsTheOtherEndOfItsRun`] when a run
 /// between two corners on a branch that runs off for ever, which is marched
 /// from one corner to the other, cannot be walked on towards the second
@@ -832,8 +838,9 @@ enum WhatARunLiesOn {
 /// asked of the numbers they store and of nothing rounded from them, or, for
 /// two cones that nearly meet, as the half-space `intersect` proved it with.
 ///
-/// **Exhaustive on purpose.** These are the five pairs that are marched, and a
-/// sixth would need its own flat surface worked out before it could be.
+/// **Exhaustive on purpose.** These are the five pairs that are marched, two
+/// cones off one axis in two ways, and a sixth pair would need its own flat
+/// surface worked out before it could be.
 #[derive(Clone, Copy)]
 enum TwoLoopsHeldApartBy {
     /// The one through the ball's centre square to the pipe's axis, which
@@ -976,7 +983,11 @@ impl TwoLoopsHeldApartBy {
 /// refusals are gaps: the crossing is there. For a pipe, a ball or a second
 /// cone off a cone's axis it is a degree-four curve whose loops `intersect`
 /// could not prove it names, since the marcher draws the ones it does (Q2788,
-/// Q2667); for a torus, the machinery is not built. A ball through a cone's
+/// Q2667, and Q2894 for two cones that are mirror images but for a rounding);
+/// for a torus, the machinery is not built. Where two cones off one axis
+/// cross in a loop and two branches, the cone's refusal also stands for a
+/// whole branch, which `intersect` names but which has no end to march to
+/// ([`refused_unless_the_run_is_on_the_loop`]). A ball through a cone's
 /// apex is refused under the cone's name in both halves too, for the reason
 /// `intersect`'s cone-and-ball arm gives.
 ///

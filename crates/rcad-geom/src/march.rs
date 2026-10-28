@@ -177,7 +177,8 @@ pub(crate) struct Marched {
 /// the tangent by more than a quarter turn, because past a half turn a step
 /// cannot be told from one the other way. And a trial the settling pulled back
 /// from far off has to land ahead of where it set out, not behind it, and
-/// where the settling had finished with it ([`one_step`]).
+/// where the settling had finished with it, and every trial where `inside`
+/// holds ([`one_step`]).
 ///
 /// A step whose sagitta is comfortably inside the budget grows for the next one,
 /// so a large gentle loop does not get walked at the step a tight corner needed.
@@ -274,7 +275,8 @@ pub(crate) struct Marched {
 /// settled onto both surfaces.
 ///
 /// [`Error::CannotFollowACrossingBecauseNoStepStaysOnIt`] when no shortening
-/// of a step lands a trial `inside` holds.
+/// of a step lands a trial that is kept ([`one_step`] says when a march can
+/// meet it).
 pub(crate) fn march(
     surfaces: [&Surface; 2],
     seed: Point,
@@ -859,9 +861,37 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 /// One step along the crossing, shortened until the straight piece it leaves
 /// behind stays inside `room`, stays straighter than it is long, turns no more
 /// than a quarter turn, and, on a trial that came back short, goes forward and
-/// ends where the settling had finished.
+/// ends where the settling had finished, and until it lands where `inside`
+/// holds.
 ///
 /// Returns where the step landed and how long it turned out to be.
+///
+/// # A trial that lands on another piece of the crossing is not kept
+///
+/// Where two pieces of one crossing pass closer to each other than a step, a
+/// trial can settle onto the other piece, and none of the questions above
+/// notices. Its sagitta is about the gap, well within a quarter of its chord.
+/// And near where two surfaces nearly touch, the way `∇S × ∇T` runs is a
+/// saddle, in along one piece and out along the other, so a trial that lands
+/// on the piece running out still goes forward. Measured, on two pointed cones
+/// of slope a half, the second turned `0.3` about the line along `x` through
+/// `(0, 0, 4)`, whose loop and the branch beyond it pass a hair apart near
+/// `(−1.5954, 0.1209, 3.2)`: a trial of `3.0e-7` from
+/// `(−1.59542496, 0.12090821, 3.19999975)` landed at
+/// `(−1.59542509, 0.12090806, 3.19999998)`, on the branch, and was kept. The
+/// march then went round the branch and out along its end that runs off for
+/// ever, until it had taken the `1 048 576` points a walk may (Q2894).
+///
+/// So `inside` names the piece the march is on, and a trial it does not hold
+/// is shortened as any other trial that is not kept is. `walk.rs` fences the
+/// loop of two cones that cross in a loop and two branches by the two flat
+/// surfaces `intersect` proves it in front of, and a run on a branch by the one
+/// the whole branch is in front of. Fenced, the march goes right round the
+/// loop of that pair, through both places it bends hard to pass the branch
+/// (`two_cones_whose_turned_axis_is_rounded_cross_in_a_loop_and_two_branches_that_nearly_meet`).
+/// Every other march passes `&|_| true`, and a crossing whose pieces meet on
+/// the flat surface between them, as a ball's and a pipe's two loops can, must
+/// not be fenced by it: a step through that surface is a step along the piece.
 ///
 /// # A trial that came back short before the settling had finished is not kept
 ///
@@ -992,10 +1022,14 @@ fn which_way_the_crossing_runs(surfaces: [&Surface; 2], at: Point) -> Result<Vec
 ///
 /// [`Error::CannotFollowACrossingBecauseNoStepStaysOnIt`] when shortening the
 /// step [`SHORTENINGS_BEFORE_GIVING_UP`] times still leaves a piece that strays
-/// too far. This is reachable and carries its own name —
+/// too far, or lands where `inside` does not hold. This is reachable and
+/// carries its own name —
 /// `a_step_asked_the_wrong_way_round_a_circle_is_refused_as_stepping_and_not_tangency`
-/// is the demonstration — but no walk reaches it, because a walk takes its
-/// direction from the point it is standing on.
+/// is the demonstration. A march that passes `&|_| true` does not meet it,
+/// because it takes its direction from the point it is standing on. A fenced
+/// one can, where every shortening still lands where `inside` does not hold,
+/// as on a piece that passes within a rounding of a flat surface fencing it.
+/// No test has shown one doing so.
 ///
 /// Whatever a trial refused with, when every trial refused. Today that is
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] or
