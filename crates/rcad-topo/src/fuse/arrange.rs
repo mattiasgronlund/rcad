@@ -2752,7 +2752,7 @@ impl<'f> Arrangement<'f> {
             places.into_iter().map(as_exact_as_it_is).collect();
         let tight: SmallVec<[PredicatePoint; 2]> =
             tight.into_iter().map(as_exact_as_it_is).collect();
-        for (which, (&place, &boxed_tight)) in places.iter().zip(&tight).enumerate() {
+        for (which, &place) in places.iter().enumerate() {
             // Being *on* both surfaces is what the meet just worked out,
             // and asking a predicate to confirm it would be a second
             // opinion about a fact this line already holds — one that a
@@ -2767,10 +2767,9 @@ impl<'f> Arrangement<'f> {
             }
             let mut sorted = surfaces;
             sorted.sort_by_key(name_of_surface_bits);
+            let folded = self.the_corner_that_is_this_place(first, second, which, &places, &tight);
             let which = u8::try_from(which).expect("three surfaces meet at most twice");
-            if let Some(corner) =
-                self.the_corner_that_is_this_place(first, second, place, boxed_tight, &places)
-            {
+            if let Some(corner) = folded {
                 self.nodes[corner].stands_for_too((sorted, which));
                 folded_into_a_corner.extend(on);
                 continue;
@@ -2922,7 +2921,7 @@ impl<'f> Arrangement<'f> {
     ) {
         let named = where_two_halves_meet(&self.surface, &self.crossings[first].partner);
         if let Some(corner) =
-            self.the_corner_that_is_this_place(first, second, meet.at, meet.at, &[meet.at])
+            self.the_corner_that_is_this_place(first, second, 0, &[meet.at], &[meet.at])
         {
             self.nodes[corner].stands_for_too((named, 6));
         } else {
@@ -3047,7 +3046,7 @@ impl<'f> Arrangement<'f> {
                 && nothing_rules_the_point_out(self.crossings[second].picked_by(), apex),
             "each of the rulings a plane or a cone cuts through a cone's apex holds the apex"
         );
-        if let Some(corner) = self.the_corner_that_is_this_place(first, second, apex, apex, &[apex])
+        if let Some(corner) = self.the_corner_that_is_this_place(first, second, 0, &[apex], &[apex])
         {
             self.nodes[corner].stands_for_too((named, 0));
             return;
@@ -3155,14 +3154,14 @@ impl<'f> Arrangement<'f> {
         });
         let places = where_two_pipes_touch(middle, cross_of_intervals(one, two), lesser.radius());
         let named = where_two_halves_meet(&self.surface, &self.crossings[first].partner);
-        for place in places {
+        for (at, &place) in places.iter().enumerate() {
             assert!(
                 nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
                     && nothing_rules_the_point_out(self.crossings[second].picked_by(), place),
                 "each half ellipse holds both places the four halves meet at"
             );
             let which = which_place_two_pipes_touch_at(place, &lesser, &greater, log)?;
-            self.name_where_two_halves_meet(first, second, place, &places, (named, which));
+            self.name_where_two_halves_meet(first, second, at, &places, (named, which));
         }
         Ok(())
     }
@@ -3184,8 +3183,8 @@ impl<'f> Arrangement<'f> {
         arc: &ArcOfTwoCones,
     ) {
         let named = where_two_halves_meet(&self.surface, &self.crossings[first].partner);
-        for (which, place) in (0..).zip(arc.touches) {
-            self.name_where_two_halves_meet(first, second, place, &arc.touches, (named, which));
+        for (which, at) in (0..).zip(0..arc.touches.len()) {
+            self.name_where_two_halves_meet(first, second, at, &arc.touches, (named, which));
         }
     }
 
@@ -3311,22 +3310,22 @@ impl<'f> Arrangement<'f> {
         sorted.sort_by_key(|pipe| name_of_surface_bits(&Surface::Cylinder(*pipe)));
         let [lesser, greater] = sorted;
         let named = where_two_halves_meet(&one, &other);
-        for place in places {
+        for (at, &place) in places.iter().enumerate() {
             if !nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
                 || !nothing_rules_the_point_out(self.crossings[second].picked_by(), place)
             {
                 continue;
             }
             let which = which_place_two_pipes_touch_at(place, &lesser, &greater, log)?;
-            self.name_where_two_halves_meet(first, second, place, &places, (named, which));
+            self.name_where_two_halves_meet(first, second, at, &places, (named, which));
         }
         Ok(true)
     }
 
-    /// The node named `name`, one of the two places four half ellipses meet
-    /// at, made a node of crossings `first` and `second` too: the corner of
-    /// the face that is the place, if one is, or the node placed at that place
-    /// already, or a new one.
+    /// The node named `name`, the place `at` of the two `places` four half
+    /// ellipses meet at, made a node of crossings `first` and `second` too: the
+    /// corner of the face that is the place, if one is, or the node placed at
+    /// that place already, or a new one.
     ///
     /// **The node placed already is found by the place and not by the name**
     /// ([`the_place_two_halves_meet_at`]), and takes `name` on beside its own
@@ -3339,16 +3338,16 @@ impl<'f> Arrangement<'f> {
         &mut self,
         first: usize,
         second: usize,
-        place: PredicatePoint,
+        at: usize,
         places: &[PredicatePoint],
         name: ([Surface; 3], u8),
     ) {
-        if let Some(corner) =
-            self.the_corner_that_is_this_place(first, second, place, place, places)
+        if let Some(corner) = self.the_corner_that_is_this_place(first, second, at, places, places)
         {
             self.nodes[corner].stands_for_too(name);
             return;
         }
+        let place = places[at];
         let the_place = the_place_two_halves_meet_at(name).expect(
             "a place four halves meet at is named [a, b, b] by two pipes or two cones, \
              with which 0 or 1",
@@ -3756,16 +3755,17 @@ impl<'f> Arrangement<'f> {
         past(where_the_crossing_starts(&self.surface, &partner, from))
     }
 
-    /// The node of the corner of the face that already is `place`, one of the
-    /// `places` where the face's surface and the partners of `first` and
-    /// `second` meet, if one is.
+    /// The node of the corner of the face that already is `places[which]`, one
+    /// of the `places` where the face's surface and the partners of `first`
+    /// and `second` meet, if one is. `tight` holds the same places in the same
+    /// order, each in the tightest box known to hold it.
     ///
     /// The place then makes no node of its own, and the corner stands for it
     /// ([`Node::also`]): the face on the third surface has no such corner and
     /// names the place by its three surfaces (§284.7).
     ///
-    /// **It is, when the model says so and `place` is no further from the
-    /// corner than writing the corner down cost**, or than `bake`'s whole room
+    /// **It is, when the model says so and `places[which]` is no further from
+    /// the corner than writing the corner down cost**, or than `bake`'s whole room
     /// for three planes `bake` solved the corner among. The model says so when the
     /// corner is on both crossings: [`Arrangement::place_the_corners`] takes
     /// the edge's own crossing and a surface the corner already knows about as
@@ -3775,8 +3775,8 @@ impl<'f> Arrangement<'f> {
     /// off one of the three surfaces (§248.6).
     ///
     /// **So the fold takes the model's word only as far as rounding reaches.**
-    /// Every point of `boxed_tight`, the tightest box known to hold `place`,
-    /// has to lie inside the corner's box grown
+    /// Every point of `tight[which]`, the tightest box known to hold
+    /// `places[which]`, has to lie inside the corner's box grown
     /// by [`what_writing_the_corner_down_cost`](super::bake::what_writing_the_corner_down_cost).
     /// That is the half of `bake.rs`'s room that follows the corner, from the
     /// same function. `bake.rs` lets a meet stand in for a stored corner within
@@ -3790,13 +3790,14 @@ impl<'f> Arrangement<'f> {
     /// allowance, and the 224 into corners proved off a surface lie within
     /// under one percent of it (§253.2).
     ///
-    /// **For a meet of three planes, or of two planes and a quadric,
-    /// `boxed_tight` is `place` narrowed by one checked step; for a meet of a
-    /// plane and two quadrics it is `place` narrowed by that step again and
+    /// **For a meet of three planes, or of two planes and a quadric, each box
+    /// of `tight` is its place narrowed by one checked step; for a meet of a
+    /// plane and two quadrics it is the place narrowed by that step again and
     /// again, until a step narrows no side**
-    /// ([`MeetOfThree::boxed_tight`]); for anything else it is `place`. The
-    /// node a meet becomes when it does not fold keeps `place` as its own box,
-    /// and every other question here reads `place`, the reach below included:
+    /// ([`MeetOfThree::boxed_tight`]); for anything else it is the place. The
+    /// node a meet becomes when it does not fold keeps its place as its own
+    /// box, and every other question here reads `places`, the reach below
+    /// included, but whether two places are proved apart, which reads `tight`:
     /// wired in as the node's own box, the narrowed one moved 13 tests, most of
     /// them to a refusal or to no solid, where asked only here it moves one,
     /// to the right answer (§345). The one other question that reads a
@@ -3852,12 +3853,29 @@ impl<'f> Arrangement<'f> {
     /// inside the room, so it folds again, for §253's reason this time, and
     /// the union answers with the two blocks (§345).
     ///
-    /// **A second place within the allowance** means nothing here says which
-    /// of the two the corner is, and both stay nodes. The places of one meet
-    /// are *different* points, and folding on a touch alone once merged them
-    /// (§244.3, §248). This, and not the touch, is what keeps them apart: of a
-    /// ball's two places grazing a block's corner, the one that misses the
-    /// corner's box lies inside its room too (§395.3).
+    /// **A second place within the allowance, proved apart from the first,
+    /// leaves both nodes**: their tight boxes share no point, so they are
+    /// *different* points and nothing here says which of the two the corner
+    /// is. Folding on a touch alone once merged such places (§244.3, §248).
+    /// This, and not the touch, is what keeps them apart: of a ball's two
+    /// places grazing a block's corner, `2⁻⁵⁰` apart, the one that misses the
+    /// corner's box lies inside its room too (§395.3). A second place that
+    /// reaches the room and sticks out past it leaves both nodes as well,
+    /// since the fold cannot say the corner is it.
+    ///
+    /// **Where every place that reaches the room lies inside it and no two
+    /// are proved apart, the corner stands for each of them.** That is a line
+    /// touching a curve at the corner, written down a rounding off touching.
+    /// On the front of the KiCad LED `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm`,
+    /// the line where the flange's flat meets the front touches the circle the
+    /// body's pipe cuts in it, at the corner `(-1.23, -1.27, 15)`, and the
+    /// front's normal is tilted `1.2e-15` off the `y` axis. The two places of
+    /// that meet came out within `1e-14` of the corner, with boxes that share a
+    /// point. Left two nodes beside it, they were asked their order along a
+    /// crossing and every fuse refused (Q2959). Nothing here asks whether the
+    /// line touches the circle or crosses it twice: either way every point of
+    /// both boxes lies inside the corner's room, which is the same wobble one
+    /// place inside it is (§17.2).
     ///
     /// **Only the face's corners are looked through, not every node.** They
     /// are the first nodes, one per side of each wire
@@ -3870,10 +3888,15 @@ impl<'f> Arrangement<'f> {
         &self,
         first: usize,
         second: usize,
-        place: PredicatePoint,
-        boxed_tight: PredicatePoint,
+        which: usize,
         places: &[PredicatePoint],
+        tight: &[PredicatePoint],
     ) -> Option<usize> {
+        assert_eq!(
+            places.len(),
+            tight.len(),
+            "each place of the meet has the tightest box known to hold it"
+        );
         self.node_of_corner
             .iter()
             .flatten()
@@ -3894,17 +3917,27 @@ impl<'f> Arrangement<'f> {
                 };
                 let allowed = super::bake::grown_by(node.point, room);
                 let reaches_the_room = |other: &PredicatePoint| boxes_overlap(allowed, *other);
-                let (meet, room) = (boxed_tight.enclosure(), allowed.enclosure());
-                let inside_the_room = (0..3).all(|axis| {
-                    room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
-                });
-                reaches_the_room(&place)
-                    && places
-                        .iter()
-                        .filter(|other| reaches_the_room(other))
-                        .count()
-                        == 1
-                    && inside_the_room
+                let room = allowed.enclosure();
+                let inside_the_room = |meet: &PredicatePoint| {
+                    let meet = meet.enclosure();
+                    (0..3).all(|axis| {
+                        room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
+                    })
+                };
+                let reaching: SmallVec<[usize; 2]> = (0..places.len())
+                    .filter(|&other| reaches_the_room(&places[other]))
+                    .collect();
+                let one_touch_at_the_corner = || {
+                    reaching.iter().all(|&one| {
+                        inside_the_room(&tight[one])
+                            && reaching
+                                .iter()
+                                .all(|&other| boxes_overlap(tight[one], tight[other]))
+                    })
+                };
+                reaches_the_room(&places[which])
+                    && inside_the_room(&tight[which])
+                    && (reaching.len() == 1 || one_touch_at_the_corner())
             })
     }
 
@@ -3915,11 +3948,11 @@ impl<'f> Arrangement<'f> {
         &self,
         first: usize,
         second: usize,
-        place: PredicatePoint,
-        boxed_tight: PredicatePoint,
+        which: usize,
         places: &[PredicatePoint],
+        tight: &[PredicatePoint],
     ) -> bool {
-        self.the_corner_that_is_this_place(first, second, place, boxed_tight, places)
+        self.the_corner_that_is_this_place(first, second, which, places, tight)
             .is_some()
     }
 
@@ -22272,15 +22305,16 @@ mod tests {
     /// A block whose side grazes a ball, with the block's corner on the ball.
     /// The side `y = 2⁻²⁵` and the ball of radius `1 + 2⁻⁵¹` meet on the face
     /// `x = −1` at `z = ±2⁻⁵¹`, `2⁻⁵⁰` apart, and the corner is the upper of the
-    /// two. Both lie inside the room writing the corner down cost, `2⁻⁴⁶`, so
-    /// nothing says which of them the corner is. Neither is folded into it: both
-    /// stay nodes, and whether they are one point is the policy's to say
-    /// (§248.6, §288.5).
+    /// two. Both lie inside the room writing the corner down cost, `2⁻⁴⁶`, and
+    /// both land exactly on an `f64`, so their boxes share no point: they are
+    /// proved two points, and nothing says which of them the corner is.
+    /// Neither is folded into it: both stay nodes (§248.6, §288.5).
     ///
     /// **No fuse sees this.** Every fuse of this block and ball refuses on the
     /// piece of the ball between the two places, fold or no fold (§288.3), so
-    /// this test, and not a fuse, is what holds `count == 1` and the second
-    /// place's check in place (§288.4).
+    /// this test, and not a fuse, is what holds the second place's check in
+    /// place (§288.4): with two places reaching the room, a fold takes both
+    /// boxes inside it and sharing a point.
     #[test]
     fn two_places_of_one_meet_inside_a_corners_room_are_neither_folded_into_it() {
         let place = f64::powi(2.0, -51);
@@ -22320,6 +22354,64 @@ mod tests {
             [([-1.0, edge, -place], false), ([-1.0, edge, place], false)],
             "the corner's own place has the other one inside its room, and the other \
              one is not the corner at all"
+        );
+    }
+
+    /// Two places of one meet whose boxes share a point, both inside the room
+    /// round the unit cube's corner at the origin, are both folded into it:
+    /// nothing proves them two points, so the corner stands for each. That is
+    /// a line touching a curve at a corner written down a rounding off
+    /// touching, as at the front corner of a KiCad LED (Q2959). Asked on the
+    /// cut `x = y`, so the room is the whole of what the fold allows.
+    ///
+    /// Two places whose tight boxes share no point are proved two, and neither
+    /// is folded, as the grazing block's are not, though their looser boxes
+    /// share a point. Nor is either when the second reaches a step past the
+    /// room, since the fold cannot say the corner is that one.
+    #[test]
+    fn two_places_of_one_meet_that_share_a_point_inside_a_corners_room_are_both_folded_into_it() {
+        let (cube, cut) = the_unit_cube_baked_and_the_plane_x_equals_y();
+        let bottom = cut_by(&the_face_facing(&cube, [0.0, 0.0, -1.0]), &[cut]);
+        let arrangement = drawn_up_to_its_corners(&bottom);
+        let wall = the_crossing_along(&arrangement, the_face_facing(&cube, [-1.0, 0.0, 0.0]));
+        let cut = the_crossing_of_the_cut(&arrangement, cut);
+        assert!(
+            is_a_corner_on_both(&arrangement, [0.0; 3], wall, cut),
+            "the fold is only asked about a corner on both crossings"
+        );
+
+        let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
+        let folds = |places: [PredicatePoint; 2], tight: [PredicatePoint; 2]| {
+            [0, 1]
+                .map(|which| arrangement.a_corner_is_this_place(wall, cut, which, &places, &tight))
+        };
+        let sharing = [from_to(0.0, room / 2.0), from_to(room / 4.0, room)];
+        let apart = [from_to(0.0, room / 4.0), from_to(room / 2.0, room)];
+        assert_eq!(
+            folds(sharing, sharing),
+            [true, true],
+            "two places inside the room that share a point are each the corner written down \
+             another way"
+        );
+        assert_eq!(
+            folds(apart, apart),
+            [false, false],
+            "two places inside the room that share no point are two points, and the corner is \
+             not both"
+        );
+        assert_eq!(
+            folds(sharing, apart),
+            [false, false],
+            "two places are proved apart by their tight boxes, however their loose ones overlap"
+        );
+        let past = [
+            from_to(0.0, room / 2.0),
+            from_to(room / 4.0, room.next_up()),
+        ];
+        assert_eq!(
+            folds(past, past),
+            [false, false],
+            "a second place that sticks out a step past the room leaves the first to the policy too"
         );
     }
 
@@ -22413,7 +22505,7 @@ mod tests {
             "the room at a corner no bigger than one"
         );
         let folds = |place: PredicatePoint| {
-            arrangement.a_corner_is_this_place(wall, cut, place, place, &[place])
+            arrangement.a_corner_is_this_place(wall, cut, 0, &[place], &[place])
         };
         assert!(
             folds(reaching(room)),
@@ -22455,11 +22547,11 @@ mod tests {
         let far = 1000.0 * what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
         let place = reaching(far);
         assert!(
-            arrangement.a_corner_is_this_place(one_wall, other_wall, place, place, &[place]),
+            arrangement.a_corner_is_this_place(one_wall, other_wall, 0, &[place], &[place]),
             "the bottom and the two walls meet at the corner `bake` placed among them"
         );
         assert!(
-            !arrangement.a_corner_is_this_place(one_wall, cut, place, place, &[place]),
+            !arrangement.a_corner_is_this_place(one_wall, cut, 0, &[place], &[place]),
             "a meet with a cut in it is folded only as far as the rounding reaches"
         );
     }
@@ -22488,7 +22580,7 @@ mod tests {
         let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
         let place = from_to(room / 2.0, room);
         assert!(
-            arrangement.a_corner_is_this_place(wall, cut, place, place, &[place]),
+            arrangement.a_corner_is_this_place(wall, cut, 0, &[place], &[place]),
             "a place inside the corner's room is the corner written down another way, \
              whether or not its box touches the corner's"
         );
@@ -22516,7 +22608,7 @@ mod tests {
         let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
         let by_cramer = reaching(1000.0 * room);
         let folds = |boxed_tight: PredicatePoint| {
-            arrangement.a_corner_is_this_place(wall, cut, by_cramer, boxed_tight, &[by_cramer])
+            arrangement.a_corner_is_this_place(wall, cut, 0, &[by_cramer], &[boxed_tight])
         };
         assert!(
             !folds(by_cramer),
@@ -22565,7 +22657,7 @@ mod tests {
             "the room off a plane `validate` grants a unit cube, plus the rounding, is {room}"
         );
         let folds = |place: PredicatePoint| {
-            arrangement.a_corner_is_this_place(one_wall, other_wall, place, place, &[place])
+            arrangement.a_corner_is_this_place(one_wall, other_wall, 0, &[place], &[place])
         };
         assert!(
             folds(from_to(rounding.next_up(), room)),
@@ -23046,12 +23138,13 @@ mod tests {
         let places: Vec<PredicatePoint> = places.into_iter().map(as_exact_as_it_is).collect();
         let mut said: Vec<([f64; 3], bool)> = places
             .iter()
-            .map(|&place| {
+            .enumerate()
+            .map(|(which, place)| {
                 (
                     place
                         .exact_coordinates()
                         .expect("every place here lands on an f64"),
-                    arrangement.a_corner_is_this_place(first, second, place, place, &places),
+                    arrangement.a_corner_is_this_place(first, second, which, &places, &places),
                 )
             })
             .collect();

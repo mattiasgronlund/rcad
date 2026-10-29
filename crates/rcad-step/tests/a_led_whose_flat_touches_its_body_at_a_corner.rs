@@ -96,15 +96,23 @@
 //! were on the straight line where the front's plane crosses the disc's, which
 //! the front drew its arcs round the disc as until Q2966.
 //!
-//! The `Z15.0` LED stops now on `order along a crossing` between two points
-//! both within `1e-14` of the front corner, enclosure `1.8e-14` (Q2959). The
-//! `D3.0` one stops on its flange's front, face slot 2, refused
-//! `CannotTellTheCellsOfAFaceApart`. These tests pin both.
+//! The `Z15.0` LED stopped next on `order along a crossing` between two points
+//! both within `1e-14` of the front corner, enclosure `1.8e-14`, in the check
+//! that the LED does not cross itself. They were the two places where the
+//! flat's line on the front meets the circle the body's pipe cuts in it, and
+//! the line touches that circle at the corner. Their boxes share a point and
+//! both lie inside the room writing the corner down cost, so nothing proves
+//! them two points, and the corner now stands for both (Q2959).
+//!
+//! Both LEDs stop now on the flange's front, face slot 8 in the `Z15.0` LED
+//! and slot 2 in the `D3.0` one, refused `CannotTellTheCellsOfAFaceApart` in
+//! the same check, where the windings of the front's cells are spread (Q2974).
+//! These tests pin both.
 
 use std::{env, fs, path::PathBuf};
 
 use rcad_geom::{Isometry, SIDE_OF_CYLINDER, Surface, Vector};
-use rcad_predicates::{Point, Policy, ProvenanceLog};
+use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -141,14 +149,17 @@ fn a_box_round_the_front_corner_gets_past_the_arcs_round_the_disc_and_stops_at_i
 /// `(1.27, -1.27, 15)` since Q2938's road answers a flat whose normal is
 /// exactly `(-1, 0, 0)`. Since Q2966 it gets past the point solved near
 /// `(-1.23, -1.27, 15.075)` on the straight line the front drew its arcs round
-/// the disc as, and stops ordering two points along a crossing that are both
-/// at its front corner, the far box included.
+/// the disc as. Since Q2959 the two places where the flat's line on the front
+/// meets the disc's circle, both within `1e-14` of the front corner and not
+/// proved apart, are the corner, and it stops where the `D3.0` LED does, the
+/// far box included.
 #[test]
-fn a_z15_led_gets_past_the_arcs_round_the_disc_and_stops_ordering_two_points_at_its_front_corner() {
+fn a_z15_led_gets_past_the_two_meets_at_its_front_corner_and_stops_telling_the_cells_of_its_front_apart()
+ {
     every_fuse_refuses(
         Z15,
         &a_box_round_each_of(&[[-1.23, -1.27, 15.0], [-1.23, -2.27, 15.0], FAR_OFF]),
-        |_, error| two_points_at_the_front_corner_cannot_be_ordered(error, [-1.23, -1.27, 15.0]),
+        |model, error| the_cells_of_the_front_cannot_be_told_apart(model, error, -1.27),
     );
 }
 
@@ -211,29 +222,6 @@ fn the_side_of_a_pipe_is_undecidable(_: &Model, error: &Error) -> bool {
         .iter()
         .map(|record| record.predicate())
         .eq([SIDE_OF_CYLINDER])
-}
-
-/// Refused `Undecidable` with the one record `order along a crossing`, handed
-/// two points each within `1e-12` of `corner` in every coordinate.
-///
-/// The predicate `fuse/arrange.rs` names `ALONG_A_CROSSING`, which it keeps
-/// private, so the string itself is compared.
-fn two_points_at_the_front_corner_cannot_be_ordered(error: &Error, corner: [f64; 3]) -> bool {
-    let Error::Undecidable { records } = error else {
-        return false;
-    };
-    let [record] = records.records() else {
-        return false;
-    };
-    let near_the_corner =
-        |point: &Point| {
-            point.enclosure().iter().zip(corner).all(|(along, at)| {
-                (along.lo() - at).abs() < 1e-12 && (along.hi() - at).abs() < 1e-12
-            })
-        };
-    record.predicate() == "order along a crossing"
-        && record.inputs().len() == 2
-        && record.inputs().iter().all(near_the_corner)
 }
 
 /// Refused `CannotTellTheCellsOfAFaceApart` on the flange's front, the face
