@@ -16309,6 +16309,8 @@ check-queue-selftest:
     refused dash-beside 's/  -  waits/  -,docs\/  waits/'           'stands alone'
     refused untracked   's/docs\/new.md/nowhere\/new.md/'           '"nowhere/new.md" is not tracked'
     refused bare-dir    's/  docs\/  parked/  docs  parked/'        'write it as docs/'
+    refused new-dir-two-deep 's/  tooling\/queue\/  changes/  proofs\/gappa\/  changes/' \
+        '"proofs/gappa/" is not tracked, and neither is the directory it would go in'
     refused item        's/workflows\/ci.yml/workflows\/ci.yml#job/' 'only a .rs file or the justfile'
     refused last-token  's/ §230.3$/ §230.3 later/'                 'does not end in'
     refused no-section  's/ §226.3$/ §226.9/'                       'cites §226.9'
@@ -16347,6 +16349,8 @@ check-queue-selftest:
         cmp -s "$dir/good.md" "$dir/$1.md" && fail "$1: the fixture did not change the good queue"
         got=$(q _queue-check "$dir/$1.md" "$decisions" 2>&1) || fail "$1: $3"
     }
+    passes new-dir-one-deep 's/  tooling\/queue\/  changes/  proofs\/  changes/' \
+        'a write set naming a directory nothing tracks yet, at the shallowest level nothing tracks, was refused'
     nofive='s/^Q7  5  todo  opus  tooling\/queue\/queue.py  wrong\/C a defect/Q7  5  STATE  opus  tooling\/queue\/queue.py  a defect/'
     passes five-on-open   "/^Q7 /a Q10  5  after:Q7  sonnet  -  no class, waiting on a tier 5 defect §230" \
         'a tier 5 row with no class that waits on an open tier 5 row was refused'
