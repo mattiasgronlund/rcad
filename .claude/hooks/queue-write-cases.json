@@ -285,12 +285,12 @@
   },
   {
     "expect": "allow",
-    "why": "kill <pid> is the allowed form",
+    "why": "kill <pid> is the allowed form, and this pid is long gone, so there is no cwd to find it outside of (§454.3's note)",
     "command": "kill 2698847"
   },
   {
     "expect": "allow",
-    "why": "kill -- -<pgid> for a setsid group is the allowed form",
+    "why": "kill -- -<pgid> for a setsid group is the allowed form, and this pgid is long gone too",
     "command": "kill -- -2698847"
   },
   {

@@ -1049,7 +1049,7 @@ function prepSchema() {
           properties: {
             id: { type: 'string', description: 'the row\'s id, as Q840' },
             model: { type: 'string', description: 'the row\'s model column, exactly as printed' },
-            write_set: { type: 'string', description: 'the row\'s write-set column, exactly as printed: paths joined by commas, or - for none' },
+            write_set: { type: 'string', description: 'the row\'s write set: the write-set column, exactly as printed, unless a `writes` ran after the column was written, in which case the set that printed line names instead (§230.3); paths joined by commas, or - for none' },
             line: { type: 'string', description: 'the row\'s whole line, exactly as printed; it is the lane\'s brief' },
           },
         },

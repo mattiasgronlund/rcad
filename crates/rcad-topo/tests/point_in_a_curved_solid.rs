@@ -560,8 +560,10 @@ fn where_it_is_in_a_fused_eighth([x, y, z]: [f64; 3]) -> Containment {
 /// plane was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, and this test
 /// pinned that refusal; the road for a plane leaning beside the one axis two
 /// round surfaces share takes it now (Q2177), as it takes any plane no nearer
-/// square to that axis than to parallel. The refusal is pinned by
-/// [`a_ray_along_a_balls_skin_leaning_to_a_pipe_off_its_centre_is_refused_with_four_points_there`].
+/// square to that axis than to parallel. The same plane against a ball off the
+/// pipe's axis was refused until Q2938, and
+/// [`a_ray_along_a_balls_skin_leaning_to_a_pipe_off_its_centre_meets_both_in_four_points`]
+/// pins its answer.
 #[test]
 fn a_ray_along_a_balls_skin_leaning_to_a_pipe_through_its_centre_meets_both_in_four_points() {
     let ball = Surface::Sphere(Sphere::new(Point::origin(), RADIUS).expect("a ball"));
@@ -648,28 +650,29 @@ fn assert_narrow_boxes_round(answer: &MeetOfThree, wanted: &[[f64; 3]]) {
 }
 
 /// §31.10's first route needs a meet of three surfaces, and for a ball off the
-/// pipe's axis the one it needs is one the milestone refuses.
+/// pipe's axis the one it needs is where a true quartic is zero.
 ///
-/// **This is the demonstration behind the route §35 chose.** Move the ball of
+/// **This was the demonstration behind the route §35 chose.** Move the ball of
 /// the test above half a unit along `y`, off the pipe's axis, and the two share
 /// no circle: taking the pipe `y² + z² = 1` from the ball
 /// `x² + (y − ½)² + z² = 9` leaves `y = x² − 7.75`, and on the plane
 /// `x + 16z = 8` that is `y = (8 − 16z)² − 7.75`, which the pipe then holds
 /// where a quartic in `z` is zero. It has four roots, near `z = 0.316`, `0.337`,
-/// `0.665` and `0.682`, so there are four points to find, and
-/// [`meet_of_three_surfaces`] refuses the three by name — §31.2's row 4, a gap
-/// deferred to the milestone that builds an algebraic solver.
+/// `0.665` and `0.682`, so there are four points to find.
 ///
-/// No wall is a mirror of all three either. The one wall through the pipe's
-/// axis and the plane's normal is `y = 0`, and the ball's centre `(0, 0.5, 0)`
-/// is off it, so the road for a plane one wall mirrors with both, which takes
-/// a ball whose centre is on that wall (Q2196), does not take this one.
+/// No wall is a mirror of all three. The one wall through the pipe's axis and
+/// the plane's normal is `y = 0`, and the ball's centre `(0, 0.5, 0)` is off
+/// it, so the road for a plane one wall mirrors with both, which takes a ball
+/// whose centre is on that wall (Q2196), does not take this one.
+/// [`meet_of_three_surfaces`] refused the three by name until Q2938, whose
+/// road for a plane that cuts both in conics works the quartic out exactly and
+/// finds all four points.
 ///
-/// The controls are what the same call *can* do: the plane `z = 0.5` it leaned
-/// from runs along the pipe and cuts it in two lines, and two planes and the
-/// ball come back answered, so what is refused is the degree and not the call.
+/// The controls are what the same call did before that: the plane `z = 0.5` it
+/// leaned from runs along the pipe and cuts it in two lines, and two planes and
+/// the ball come back answered.
 #[test]
-fn a_ray_along_a_balls_skin_leaning_to_a_pipe_off_its_centre_is_refused_with_four_points_there() {
+fn a_ray_along_a_balls_skin_leaning_to_a_pipe_off_its_centre_meets_both_in_four_points() {
     let ball = Surface::Sphere(Sphere::new(Point::new(0.0, 0.5, 0.0), RADIUS).expect("a ball"));
     let pipe = Surface::Cylinder(
         Cylinder::new(Axis::x(), 1.0).expect("a pipe of radius one along the x axis"),
@@ -678,34 +681,35 @@ fn a_ray_along_a_balls_skin_leaning_to_a_pipe_off_its_centre_is_refused_with_fou
         let y = (8.0 - 16.0 * z).powi(2) - 7.75;
         y * y + z * z - 1.0
     };
-    let sign_changes = (300..700)
-        .filter(|&step| {
-            let [here, next] = [step, step + 1].map(|at| quartic(f64::from(at) / 1000.0));
-            here.signum() != next.signum()
-        })
-        .count();
+    let heights: Vec<f64> = (300..700)
+        .map(|step| [step, step + 1].map(|at| f64::from(at) / 1000.0))
+        .filter(|&[here, next]| quartic(here).signum() != quartic(next).signum())
+        .map(|[here, next]| root_between(quartic, here, next))
+        .collect();
     assert_eq!(
-        sign_changes, 4,
+        heights.len(),
+        4,
         "four points to find between z = 0.3 and 0.7"
     );
+    let wanted: Vec<[f64; 3]> = heights
+        .iter()
+        .map(|&z| {
+            let x = 8.0 - 16.0 * z;
+            [x, x * x - 7.75, z]
+        })
+        .collect();
 
     let ray = Surface::Plane(
         Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.5), Vector::new(1.0, 0.0, 16.0))
             .expect("a normal with length"),
     );
-    let refusal = meet_of_three_surfaces(
+    let answer = meet_of_three_surfaces(
         [&ball, &pipe, &ray],
         &Policy::certified(),
         &mut ProvenanceLog::new(),
     )
-    .expect_err("a ball off a pipe's axis and a plane leaning to that axis is one plane short");
-    assert!(
-        matches!(
-            refusal,
-            rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
-        ),
-        "got {refusal:?}"
-    );
+    .expect("a plane that cuts a pipe and a ball in conics is answered");
+    assert_narrow_boxes_round(&answer, &wanted);
 
     let beside = Surface::Plane(
         Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.5), Vector::new(0.0, 0.0, 1.0))
@@ -732,6 +736,23 @@ fn a_ray_along_a_balls_skin_leaning_to_a_pipe_off_its_centre_is_refused_with_fou
         &mut ProvenanceLog::new(),
     )
     .expect("two planes and a ball is answered");
+}
+
+/// Where `f` changes sign between `low` and `high`, halved until no `f64` lies
+/// strictly between the two ends.
+fn root_between(f: impl Fn(f64) -> f64, mut low: f64, mut high: f64) -> f64 {
+    let high_is_above = f(high) > 0.0;
+    loop {
+        let middle = low.midpoint(high);
+        if middle <= low || middle >= high {
+            return middle;
+        }
+        if (f(middle) > 0.0) == high_is_above {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
 }
 
 /// The same grid against a bar and a ball that have been turned and moved,

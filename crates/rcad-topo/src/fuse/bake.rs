@@ -310,9 +310,11 @@ pub(crate) struct BakedEdge {
     /// wire with a seam in it stops being a chain once the seam is left out, and
     /// a cap circle starts and ends at the one corner it has.
     pub(crate) end: BakedCorner,
-    /// The surface of the face on the other side of this edge. Together with the
-    /// face's own surface it *is* where the edge runs (§17.4, §31.3), except
-    /// where [`Self::along_a_curved_surface`] says otherwise.
+    /// The surface of the face on the other side of this edge, or for an arc
+    /// between two curved faces whose run names a plane, that plane
+    /// ([`the_surface_a_side_is_baked_against`]). Together with the face's own
+    /// surface it *is* where the edge runs (§17.4, §31.3), except where
+    /// [`Self::along_a_curved_surface`] says otherwise.
     pub(crate) across: Surface,
     /// Where this edge runs, when the face and the face across are both flat
     /// and the edge's run names a curved surface. `None` everywhere else.
@@ -660,11 +662,12 @@ impl Bounds {
 /// planes and wires of the joined faces and drops every corner a lump of faces
 /// runs straight through, so that each corner left has three planes round it.
 ///
-/// **Any other solid is joined here, at the bake, and only on a ball, a pipe,
-/// a cone or a ring** ([`faces_baked_as_one`]). A curved solid can carry two
-/// faces on one ball, pipe or cone: a caller builds one, and a union whose
-/// pieces the joiner leaves apart writes one (rows Q575 and Q898,
-/// `docs/decisions.md` §231.5, §325.5). Those faces are baked as one face, and
+/// **Any other solid is joined here, at the bake** ([`faces_baked_as_one`]),
+/// on a ball, a pipe, a cone or a ring, and on a plane written one way. A
+/// curved solid can carry two faces on one ball, pipe or cone: a caller builds
+/// one, and a union whose pieces the joiner leaves apart writes one (rows Q575
+/// and Q898, `docs/decisions.md` §231.5, §325.5). A file can carry two on one
+/// plane (row Q2962). Those faces are baked as one face, and
 /// an edge between two of them is left out the way a seam is. Nothing has to be
 /// re-derived, because a corner with fewer than three surfaces round it is read
 /// out of the model rather than solved (§31.3), and every corner left keeps the
@@ -724,7 +727,8 @@ fn bake_one_solid(
 ///
 /// Two faces are in one group when an edge runs between them and they are one
 /// ball, pipe, cone or ring used one way round
-/// ([`one_curved_surface_used_one_way`]).
+/// ([`one_curved_surface_used_one_way`]), or one plane written and used one way
+/// ([`one_plane_written_and_used_one_way`]).
 /// Then the edge is not where the solid's skin stops but only where two faces
 /// of it were written apart, which is what a seam is too. Every other face is a
 /// group of one.
@@ -745,7 +749,8 @@ fn faces_baked_as_one<'model>(
         for wire in model.face_at(mine).wires() {
             for coedge in wire.coedges() {
                 if let Some(across) = face_across(model, mine, coedge.edge().key())
-                    && one_curved_surface_used_one_way(surfaces[&mine], surfaces[&across])
+                    && (one_curved_surface_used_one_way(surfaces[&mine], surfaces[&across])
+                        || one_plane_written_and_used_one_way(surfaces[&mine], surfaces[&across]))
                 {
                     one_face.join(at, position[&across]);
                 }
@@ -775,10 +780,9 @@ fn faces_baked_as_one<'model>(
 /// turning the axis round changes no sign. So the two faces face the same way
 /// exactly when the solid uses them the same way.
 ///
-/// **A plane is left to the joiner**, which runs on a wholly flat solid before
-/// this does. Two faces on one plane of a curved solid are not joined here: a
-/// plane does have two spellings that face opposite ways, and nothing here
-/// builds such a solid to try it on.
+/// **A plane is not one of these**: it has two spellings that face opposite
+/// ways, so `used` does not say the same thing for both, and
+/// [`one_plane_written_and_used_one_way`] asks it instead.
 ///
 /// **A cone was left apart until its corners were read whole** (row Q898).
 /// Joined without [`what_each_edge_left_out_ran_along`], the pieces of the cone
@@ -791,6 +795,28 @@ fn one_curved_surface_used_one_way(one: PlacedSurface, other: PlacedSurface) -> 
         Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_)
     ) && one_surface(&one.placed, &other.placed)
         && one.used == other.used
+}
+
+/// Whether two faces are one plane, written the same way and used the same way
+/// round.
+///
+/// **A plane's two spellings face opposite ways**, `(n, d)` and `(−n, −d)`,
+/// and [`one_surface`] folds them together, so `used` alone does not say which
+/// way a face looks out: the same `used` on the two spellings is two faces back
+/// to back. Written the same way, the same `used` is the same way out. That is
+/// how a file or a builder leaves one flat face split in two: the flat of a
+/// KiCad LED's flange, `x = −0.23` in
+/// `LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step`, is two faces on one plane
+/// stored bit for bit the same, with an edge between them along `z = 2`
+/// (row Q2962).
+///
+/// **The two spellings used opposite ways are left apart**, though they too
+/// look out the same way. A group is baked on one spelling with the use of its
+/// first face ([`bake_one_face`]), which for a face written the other way is
+/// the wrong way out. They reach the arrangement and are refused there by
+/// name.
+fn one_plane_written_and_used_one_way(one: PlacedSurface, other: PlacedSurface) -> bool {
+    one.placed.as_plane().is_some() && one.placed == other.placed && one.used == other.used
 }
 
 /// Write the one spelling each group is baked on into every face of it, as
@@ -1985,7 +2011,9 @@ fn middle_of_the_places(around: &[Surface]) -> PredicatePoint {
 ///
 /// **The face is on the one spelling [`spell_each_group_one_way`] gave the
 /// group**, and so is the `across` of each side whose face across is in a
-/// group. A closed side's [`BakedEdge::inside_across`] is still read off the
+/// group, but an arc between two curved faces whose run names a plane, which
+/// is baked against that plane ([`the_surface_a_side_is_baked_against`]).
+/// A closed side's [`BakedEdge::inside_across`] is still read off the
 /// two faces' own spellings: it is a side of the surface across, and every
 /// spelling of a curved surface has one inside and one outside.
 ///
@@ -2033,7 +2061,10 @@ fn bake_one_face(
                     keys: core::iter::once(coedge.edge().key()).collect(),
                     start: corners[&coedge.start().key().slot_in(model.id())].clone(),
                     end: corners[&coedge.end().key().slot_in(model.id())].clone(),
-                    across: surfaces[&across].baked_as,
+                    across: the_surface_a_side_is_baked_against(
+                        coedge.edge().stored_run(),
+                        [surfaces[&mine], surfaces[&across]],
+                    ),
                     along_a_curved_surface: where_an_edge_between_two_planes_runs(
                         coedge.edge().stored_run(),
                         [surfaces[&mine], surfaces[&across]],
@@ -2248,6 +2279,48 @@ fn the_side_a_closed_edge_is_walked_for(
     // The back is the side of `across` as the solid uses it; a face used
     // turned round has its stored surface's negative side in front.
     Ok(Some(keeps_the_back != across.used.is_reversed()))
+}
+
+/// The surface across a side, as [`BakedEdge::across`] carries it: the face
+/// across, on the spelling its group is baked on, but for an arc between two
+/// curved faces whose run names a plane, which is that plane moved into place
+/// with the face.
+///
+/// **Two curved faces whose run names a plane are a face and that plane**
+/// ([`which_two_surfaces_a_run_is_between`]). A ball on a pipe of its radius,
+/// centred on its axis, touches the pipe round the rim and never crosses it,
+/// so neither says where along the rim a side runs, and the rim's plane does.
+/// A KiCad LED's dome meets its body's pipe in two arcs; baked against the
+/// ball, the pipe's arc gave the arrangement two curved surfaces and no plane
+/// to tell which way it runs round, and every fuse of the LED refused
+/// `AFaceTrimmedByACurveThisCannotFollow` (Q2940).
+/// `every_reading_of_the_sides_of` in `holds.rs` reads the same side against
+/// the same plane (Q2923).
+///
+/// **An arc, and not a whole rim.** A bar united with a ball of its radius
+/// on its end has the whole rim as one closed side, and the union names the
+/// rim's plane in its run. Baked against that plane, its fuses with a box
+/// came out `Invalid(FacesDoNotAgreeWhichWayTheyFace)` or
+/// `ResultIsNotManifold` where they refuse `ACrossingThisCannotBeOrderedAlong`
+/// baked against the ball, so the closed side stays on the face across until
+/// the fuse can answer for it (Q2942).
+///
+/// `faces` is this face and the face across, in that order.
+fn the_surface_a_side_is_baked_against(
+    run: &EdgeRun,
+    [mine, across]: [PlacedSurface; 2],
+) -> Surface {
+    let EdgeRun::PartOfWhereItCrosses { and, .. } = run else {
+        return across.baked_as;
+    };
+    let both_curved = [mine, across]
+        .iter()
+        .all(|face| face.stored.as_plane().is_none());
+    if both_curved && and.as_plane().is_some() {
+        and.transformed(&mine.movement)
+    } else {
+        across.baked_as
+    }
 }
 
 /// Where an edge between two flat faces runs, moved into place with the face,

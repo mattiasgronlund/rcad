@@ -1534,9 +1534,8 @@ impl<'f> Arrangement<'f> {
     /// and Q898). What is left reaches here and is refused rather than arranged
     /// wrongly: two faces on one curved surface used opposite ways round, a
     /// pipe spelled twice where [`name_of_the_surface_either_way_round`] does
-    /// not fold the spellings together, and two faces of a curved solid on one
-    /// plane, which the bake leaves to the joiner and the joiner joins only on
-    /// a wholly flat solid.
+    /// not fold the spellings together, and a plane written the two opposite
+    /// ways and used opposite ways, which the bake leaves apart (row Q2962).
     fn crossing_for(
         &mut self,
         partner: Surface,
@@ -5521,7 +5520,7 @@ impl<'f> Arrangement<'f> {
     /// undecided answer means neither node was the start.
     ///
     /// **Where the sweep over them cannot say, round a plane's loop on a pipe
-    /// the tighter boxes are turned about the pipe's axis**
+    /// or a cone the tighter boxes are turned about its axis**
     /// ([`round_a_closed_crossing_by_its_angle`]), which names no start either.
     /// A round bar of radius `12.8` notched by a block whose faces `x = 0.6 r`
     /// and `y = 0.8 r` meet on its wall has, on its top cap, the feet of the
@@ -5530,7 +5529,11 @@ impl<'f> Arrangement<'f> {
     /// part them, and turned they are. Without that turn the bar's three pins in
     /// `two_nodes_merged_on_a_closed_crossing_under_a_tolerant_policy.rs` fail,
     /// its union refused `CannotTellTheCellsOfAFaceApart` as every fuse of it
-    /// was before (Q2082).
+    /// was before (Q2082). On the cap's rim of the upright one of the funnel
+    /// file's two pointed cones, one turned 0.3 off the other, the leaning cone
+    /// and the leaning cone's cap plane cross the rim `4.15e-16` apart, and the
+    /// union with the upright cone first was refused on those two until a
+    /// cone's loop was turned too (Q2910).
     ///
     /// **Hands back what an undecided answer's enclosure measures, alongside
     /// the answer**, so [`Arrangement::order_along`] does not ask
@@ -15218,29 +15221,37 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
     (0..3).all(|axis| outer[axis].lo() <= inner[axis].lo() && inner[axis].hi() <= outer[axis].hi())
 }
 
-/// Which of two points comes first round the loop a plane cuts a pipe in,
-/// read as how far each is turned about the pipe's axis from the start: `None`
-/// for every other pair, and wherever a sign it reads is not proved.
+/// Which of two points comes first round the loop a plane cuts a pipe or a
+/// cone in, read as how far each is turned about the surface's axis from the
+/// start: `None` for every other pair, and wherever a sign it reads is not
+/// proved.
 ///
-/// **Seen down the axis the loop is the pipe's circle**, each point of it over
-/// one point of the circle, since the plane does not lie along the axis. So
-/// going round the loop turns about the axis all the way round once, always
-/// the same way, and the points come in the order they are turned from the
-/// start. That way is the sign of `w·((from − c) × run)`, for `w` the axis,
+/// **Seen down the axis the loop goes round it once.** On a pipe it is the
+/// pipe's circle, each point of the loop over one point of the circle, since
+/// the plane does not lie along the axis. On a cone a closed loop is an
+/// ellipse, and the plane crosses each ruling of the nappe it lies on once: a
+/// plane along a ruling would cut a bend that runs off for ever. Seen down the
+/// axis each ruling of a nappe is a ray out from it, so the loop is over each
+/// ray once. Either way going round the
+/// loop turns about the axis all the way round once, always the same way, and
+/// the points come in the order they are turned from the start. That way is
+/// the sign of `w·((from − c) × run)`, for `w` the axis,
 /// `c` its stored origin and `run` the way the loop runs at the start, `∇S ×
 /// ∇T`. A point `p` then lies in the half turn ahead of the start where
 /// `w·((from − c) × (p − c))` has that sign, and in the half turn behind where
 /// it has the other. A point ahead comes before a point behind, and of two in
 /// one half turn the one the other is turned ahead of comes first. Where two
-/// are too nearly over one point of the circle for that turn to be proved, it
+/// are too nearly on one ray out from the axis for that turn to be proved, it
 /// is read again as `w·(a × (b − a))`, for `a` and `b` the two taken from `c`.
 /// For two points that is the same number, since `a × a` is nothing, and for
 /// two boxes it encloses the same turns, but it rounds products with the short
 /// step between them rather than two long products that nearly cancel. Where
-/// that is not proved either, its sign is read from how far apart they are up
-/// the axis instead (`turned_as_far_apart_up_the_axis`). Nothing here forms the
-/// loop's centre: any point of the axis is as good as `c`, and what lies along
-/// `w` drops out of each determinant.
+/// that is not proved either, round a pipe its sign is read from how far apart
+/// they are up the axis instead (`turned_as_far_apart_up_the_axis`). That
+/// reading takes the two as far from the axis as each other, which two points
+/// of a cone at different heights are not, so round a cone this stops before
+/// it. Nothing here forms the loop's centre: any point of the axis is as good
+/// as `c`, and what lies along `w` drops out of each determinant.
 ///
 /// **Where the sweep cannot say, this can, for a point a rounding past the
 /// start.** A square bar standing on an edge, its top edge on the plane `y = 0`
@@ -15269,30 +15280,48 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
 /// working size of `25` is refused `CannotTellTheCellsOfAFaceApart`, as every
 /// fuse of it was before (Q2082).
 ///
+/// **Round a cone it parts two meets of a cap's rim a rounding apart.** The
+/// upright cone of
+/// `two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule` in
+/// `tests/a_funnel_with_a_leaning_spout.rs`, of slope a half up `z`, has its
+/// cap's rim, where `z = 8` cuts it, walked from `(0, 4, 8)`. Near `(−3.9541,
+/// −0.6045, 8)` the leaning cone crosses that rim, and the leaning cone's cap
+/// plane crosses it `4.15e-16` further round. Their tighter boxes share `x`,
+/// between two neighbouring `f64`, and nothing the fuse read before this
+/// parted them, so the union with the upright cone first was refused on them.
+/// Turned about `z` they are parted (Q2910).
+///
 /// **It is read only where the sweep cannot say**, and that is the reading
 /// this has to agree with. Where the start is on the loop the two count from
 /// one place and agree everywhere. Where it is a rounding off, as above, the
 /// sweep counts from where its line of sight from the start grazes the loop,
-/// and this from the point of the loop over the start's own place on the
-/// circle, and those are a rounding apart too. A node between the two would be
+/// and this from the point of the loop on the start's own ray out from the
+/// axis, and those are a rounding apart too. A node between the two would be
 /// put first by one reading and last by the other, and swept against one node
 /// and turned against another it could sit in a ring of three, none of them
 /// first. The square bar's corner is not between them: worked out exactly, the
 /// area the three sweep is positive, so the sweep would put the corner first
-/// as this does.
+/// as this does. The upright cone's rim above starts on the loop exactly; no
+/// cone's loop walked from a start a rounding off it has been checked so.
 fn round_a_closed_crossing_by_its_angle(
     pair: [&Surface; 2],
     from: PredicatePoint,
     one: PredicatePoint,
     other: PredicatePoint,
 ) -> Option<Decision> {
-    let ([Surface::Plane(flat), Surface::Cylinder(pipe)]
-    | [Surface::Cylinder(pipe), Surface::Plane(flat)]) = pair
-    else {
+    let (flat, axis, round_a_pipe) = if let [Surface::Plane(flat), Surface::Cylinder(pipe)]
+    | [Surface::Cylinder(pipe), Surface::Plane(flat)] = pair
+    {
+        (flat, pipe.axis(), true)
+    } else if let [Surface::Plane(flat), Surface::Cone(cone)]
+    | [Surface::Cone(cone), Surface::Plane(flat)] = pair
+    {
+        (flat, cone.axis(), false)
+    } else {
         return None;
     };
-    let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
-    let along = pipe.axis().direction().components().map(Interval::exactly);
+    let origin = axis.origin().coordinates().map(Interval::exactly);
+    let along = axis.direction().components().map(Interval::exactly);
     let off_the_axis = |place: PredicatePoint| {
         let at = place.enclosure();
         [0, 1, 2].map(|axis| at[axis] - origin[axis])
@@ -15324,6 +15353,9 @@ fn round_a_closed_crossing_by_its_angle(
     let stepped_past_one = (the_way_it_turns * turned(first, step)).sign();
     if proved(stepped_past_one) {
         return Some(stepped_past_one);
+    }
+    if !round_a_pipe {
+        return None;
     }
     let other_up_past_one =
         (the_way_it_turns * turned_as_far_apart_up_the_axis(flat, along, first, second)).sign();
@@ -28705,5 +28737,65 @@ mod two_loops_of_two_leaning_pipes {
             .expect("a radius"),
         );
         [[thin, fat], [fat, thin]]
+    }
+}
+
+#[cfg(test)]
+mod two_points_a_rounding_apart_on_a_cone_caps_rim {
+    //! The rim of the upright cone's cap in
+    //! `two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule`
+    //! in `tests/a_funnel_with_a_leaning_spout.rs`: the cone of slope a half
+    //! up `z` from the origin, cut by `z = 8` in a circle of radius 4, walked
+    //! from `(0, 4, 8)`. Two of its nodes are a rounding apart near
+    //! `(−3.9541, −0.6045, 8)`: `R`, where the leaning cone crosses the rim,
+    //! and `P`, where the leaning cone's cap plane does.
+
+    use rcad_geom::{Axis, Cone, Plane, Point, Surface, Vector};
+    use rcad_predicates::{Decision, Interval, Point as PredicatePoint};
+
+    use super::round_a_closed_crossing_by_its_angle;
+
+    /// Worked out exactly from the stored numbers, `R` is at `x =
+    /// −3.9540523939117884914`, `y = −0.6045408722331804570`, and `P` at `x =
+    /// −3.9540523939117884286`, `y = −0.6045408722331808674`. So going
+    /// anticlockwise about `z`, the way the loop runs from `(0, 4, 8)` with the
+    /// cap first, `R` comes first, and `P` is turned `w·(R × P) = 1.66e-15`
+    /// past it. Their tightened boxes, as the fuse reads them, share `x`
+    /// between two neighbouring `f64`, and each is one `ulp` wide in `y`, one
+    /// `ulp` apart. Before this read a cone's loop (Q2910) it answered `None`
+    /// for every plane and cone, and every fuse with the upright cone first was
+    /// refused on these two.
+    #[test]
+    fn two_points_on_a_cone_caps_rim_a_rounding_apart_come_in_the_order_they_turn_round_its_axis() {
+        let cap = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 8.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("the z axis is a unit normal"),
+        );
+        let skin = Surface::Cone(Cone::new(Axis::z(), 0.5).expect("a positive slope"));
+        let from = PredicatePoint::Exact([0.0, 4.0, 8.0]);
+        let across = |lo: f64, hi: f64| Interval::new(lo, hi).expect("lo is below hi");
+        let x = across(-3.954_052_393_911_789, -3.954_052_393_911_788_4);
+        let up = Interval::exactly(8.0);
+        let r = PredicatePoint::Constructed([
+            x,
+            across(-0.604_540_872_233_180_5, -0.604_540_872_233_180_4),
+            up,
+        ]);
+        let p = PredicatePoint::Constructed([
+            x,
+            across(-0.604_540_872_233_180_9, -0.604_540_872_233_180_8),
+            up,
+        ]);
+        let read = |pair: [&Surface; 2]| {
+            [[r, p], [p, r]]
+                .map(|[one, other]| round_a_closed_crossing_by_its_angle(pair, from, one, other))
+        };
+        assert_eq!(
+            [read([&cap, &skin]), read([&skin, &cap])],
+            [
+                [Some(Decision::Pos), Some(Decision::Neg)],
+                [Some(Decision::Neg), Some(Decision::Pos)],
+            ]
+        );
     }
 }

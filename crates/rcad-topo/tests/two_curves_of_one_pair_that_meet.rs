@@ -1191,17 +1191,27 @@ fn coaxial_circles_come_together_only_where_their_surfaces_touch() {
 /// more than [`DynamicRange::LARGEST_SUPPORTED_RATIO`], so there is no
 /// certified answer to find.
 ///
-/// **What refuses is the order round where one cone's cap cuts the other
-/// cone**, between the two places the rims cross that cut, `1.35e−15` apart.
-/// With the upright cone first it is the cut of the upright cap through the
-/// turned cone, at `x < 0`; with the turned cone first, the cut of the turned
-/// cap through the upright cone, at `x > 0`. The box where a cap and both
+/// **What refuses is which side of the turned cone a corner lies**, where the
+/// upright rim crosses the turned cap's plane, a gap's width round the rim
+/// from where it crosses the turned cone. Every fuse asks it while it puts
+/// the walks round a cap into cells: with the upright cone first, of the
+/// corner at `x < 0` on the upright cap; with the turned cone first, of the
+/// one at `x > 0` on the turned cap. The corner's box is `4.4e−15` across
+/// along `x`, more than the gap, and the turned cone's sum over it spans
+/// `5.7e−14` and holds nought.
+///
+/// Until Q2910 every fuse stopped a step before that, on the order round
+/// where one cone's cap cuts the other cone, between the two places the rims
+/// cross that cut, `1.35e−15` apart: the cut of the upright cap through the
+/// turned cone with the upright cone first, and of the turned cap through the
+/// upright cone with the turned cone first. The box where a cap and both
 /// cones meet comes back up to `1.3e−14` across, ten times the gap, but
 /// [`rcad_geom::MeetOfThree::boxed_tight`] narrows it to one ulp along each
-/// axis, and the order along the upright rim is decided. Narrowed, the boxes
-/// of the two places on the cut are clear of each other along `y`, but the
-/// sweep round the cut from where it starts, over those two boxes, is
-/// `1.9e−15` wide, `2.1e−15` at `x > 0`, and holds nought.
+/// axis. Narrowed, the boxes of the two places on the cut are clear of each
+/// other along `y`, but the sweep round the cut from where it starts, over
+/// those two boxes, was `1.9e−15` wide, `2.1e−15` at `x > 0`, and held
+/// nought. Q2910 turns the points of a plane's loop on a cone about the
+/// cone's axis instead, and that order is decided.
 ///
 /// Turned 0.25 or 0.4 rather than 0.3, the corners where the rulings reach
 /// the rims lie outside the supported range too, and the two are refused
@@ -1250,7 +1260,7 @@ fn two_cones_on_one_apex_leaning_apart_meet_both_rims_in_corners_too_close_for_a
         };
         refused_on_one_question_at(
             &said,
-            "order along a crossing",
+            "side of cone",
             [x, -1.2090817444663618, 8.0],
             &format!("{rule:?} (first first: {first_first})"),
         );

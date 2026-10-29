@@ -25,7 +25,12 @@ strips: every tree on this machine runs the same recipes with the same command
 lines, so a pattern written for one tree's run matches another's. On
 2026-10-17, Q1626's lane killed Q2240's land gate in another tree this way.
 `kill <pid>`, `kill -- -<pgid>`, and a `pgrep` read on its own before a kill by
-number are left alone. `docs/decisions.md` §454.
+number are left alone — unless the pid or pgid names a process whose
+`/proc/<pid>/cwd` resolves outside the tree this hook's own process is running
+in, in which case that kill is refused too: a pid read off the wrong `ps` or
+`pgrep` output still names a real process, and its cwd says whose tree it is
+in even when the command line cannot. A pid that no longer exists passes,
+since there is nothing left to check. `docs/decisions.md` §454, §454.3's note.
 """
 
 import ast
@@ -64,7 +69,10 @@ KILL_REASON = (
     "before you stop a run, then stop it by number: `kill <pid>`, or `kill -- -<pgid>` for a `setsid` "
     "group. When the pid is lost, `pgrep -af <your tree's absolute path>`, read the list, and kill only "
     "the pids you read, by number. Never `pkill`, `killall`, or a `kill` whose pids come from a `pgrep` "
-    "read at the moment of the kill. This hook also keeps a hand edit off docs/queue.md the same way: "
+    "read at the moment of the kill. A kill by number is also refused when the pid or pgid names a "
+    "process running outside this session's own tree: that pid was read off a list that named another "
+    "tree's run, and the fix is to re-read `pgrep -af <your tree's absolute path>` and kill the pid it "
+    "actually printed. This hook also keeps a hand edit off docs/queue.md the same way: "
     "`just queue take <id> <branch>` and the other queue verbs there replace it (docs/decisions.md §263). "
     "This call was refused because {why}."
 )
@@ -442,8 +450,11 @@ def other_script_writes(name, script, queue_in_argv):
     return None
 
 
-def kills_by_pattern(command, variables):
-    """Why this shell text kills by matching a pattern instead of a pid, or None (§454)."""
+def kills_by_pattern(command, variables, tree=None):
+    """Why this shell text kills by matching a pattern instead of a pid, or by a pid
+    or pgid whose process runs outside the calling session's tree, or None (§454)."""
+    if tree is None:
+        tree = os.getcwd()
     code, bodies = split_heredocs(command)
     commands = list(simple_commands(code, bodies, variables))
     for index, (words, _redirects, heredocs) in enumerate(commands):
@@ -453,12 +464,16 @@ def kills_by_pattern(command, variables):
         name, args = os.path.basename(words[0]), words[1:]
         if name in PKILL_FORMS:
             return f"`{name}` picks its targets by pattern"
-        if name == "kill" and kill_reads_pgrep(args, commands, index):
-            return "`kill` reads its targets from a `pgrep` run at the moment of the kill"
+        if name == "kill":
+            if kill_reads_pgrep(args, commands, index):
+                return "`kill` reads its targets from a `pgrep` run at the moment of the kill"
+            why = kill_targets_outside_tree(args, tree)
+            if why:
+                return why
         if name == "pgrep" and piped_to_xargs_kill(commands, index):
             return "`pgrep` is piped to `xargs kill`, which picks its targets by pattern"
         if name in ("bash", "sh", "zsh", "dash"):
-            why = kills_in_shell_script(args, heredocs, variables)
+            why = kills_in_shell_script(args, heredocs, variables, tree)
             if why:
                 return why
     return None
@@ -474,6 +489,52 @@ def kill_reads_pgrep(args, commands, index):
     return False
 
 
+def kill_targets_outside_tree(args, tree):
+    """Why one of `kill`'s own pid or pgid targets runs outside `tree`, or None.
+
+    A pid that no longer exists has nothing to check, and passes: §454.3 wrote
+    down the pid before the kill, and a run that already ended is not the one
+    that can land in another tree's gate.
+    """
+    root = os.path.realpath(tree)
+    for target in kill_targets(args):
+        pid = abs(target)
+        if pid == 0:
+            continue
+        cwd = process_cwd(pid)
+        if cwd is None:
+            continue
+        cwd = os.path.realpath(cwd)
+        if cwd != root and not cwd.startswith(root + os.sep):
+            return f"pid {pid} is running in {cwd}, not in this session's tree ({root})"
+    return None
+
+
+def kill_targets(args):
+    """Each number `kill`'s own args name as a target, negative for a process group.
+
+    `kill` takes at most one signal spec, as `-9`, `-KILL`, `-s KILL` or `-n 9`,
+    always before the targets; a `--` only ends that spec, the way §454.3's
+    `kill -- -<pgid>` form uses it to tell a negative pgid from one.
+    """
+    index = 0
+    if args and args[0] in ("-s", "-n") and len(args) > 1:
+        index = 2
+    elif args and args[0] != "--" and re.match(r"^-([0-9]+|[A-Za-z]+)$", args[0]):
+        index = 1
+    if index < len(args) and args[index] == "--":
+        index += 1
+    return [int(arg) for arg in args[index:] if re.match(r"^-?[0-9]+$", arg)]
+
+
+def process_cwd(pid):
+    """Where pid is running, or None when there is no such process any more."""
+    try:
+        return os.readlink(f"/proc/{pid}/cwd")
+    except OSError:
+        return None
+
+
 def piped_to_xargs_kill(commands, index):
     """True when the simple command right after this `pgrep` is `xargs kill`."""
     if index + 1 >= len(commands):
@@ -485,7 +546,7 @@ def piped_to_xargs_kill(commands, index):
     return bool(rest) and os.path.basename(rest[0]) == "kill"
 
 
-def kills_in_shell_script(args, heredocs, variables):
+def kills_in_shell_script(args, heredocs, variables, tree):
     """Recurse into a `bash -c`/heredoc script the same way a kill at top level is judged."""
     scripts = list(heredocs)
     for position, arg in enumerate(args):
@@ -493,7 +554,7 @@ def kills_in_shell_script(args, heredocs, variables):
             scripts.append(args[position + 1])
             break
     for script in scripts:
-        why = kills_by_pattern(script, dict(variables))
+        why = kills_by_pattern(script, dict(variables), tree)
         if why:
             return why
     return None

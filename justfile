@@ -3543,6 +3543,14 @@ test-ignored:
 # each writing form refused, each reading form allowed, each form that runs
 # `pin` or `unpin` asked about, since only Mattias pins (§430), and each kill
 # form refused or allowed.
+#
+# `queue-write-cases.json` cannot hold the two cases below: each needs a pid
+# that is actually running, and a case there is a fixed JSON string with no
+# shell left to run before it reaches the guard (§454.3's note). So this
+# recipe starts one `sleep` in this tree and one in `/tmp`, feeds `kill
+# <pid>` for each straight to `guard.py`, and checks the one in this tree
+# comes out allowed and the one in `/tmp` comes out refused — on the base
+# before this row, both came out allowed, since `guard.py` read no cwd at all.
 [doc("The hooks against their own cases: shell patching, context budget, worktrees.")]
 check-hooks:
     #!/usr/bin/env bash
@@ -3556,6 +3564,30 @@ check-hooks:
     .claude/hooks/check-session-start-hub.sh
     .claude/hooks/check-decisions-zero.sh
     .claude/hooks/check-queue-write-guard.sh
+    tree=$(pwd)
+    sleep 5 &
+    inside_pid=$!
+    cd /tmp
+    sleep 5 &
+    outside_pid=$!
+    cd "$tree"
+    inside_out=$(printf '{"tool_name":"Bash","tool_input":{"command":"kill %s"}}' "$inside_pid" | python3 tooling/queue/guard.py)
+    outside_out=$(printf '{"tool_name":"Bash","tool_input":{"command":"kill %s"}}' "$outside_pid" | python3 tooling/queue/guard.py)
+    kill "$inside_pid" "$outside_pid" 2>/dev/null || true
+    wait 2>/dev/null || true
+    failed=0
+    if [ -n "$inside_out" ]; then
+        echo "a live process in this tree was refused, and should be allowed: $inside_out"
+        failed=1
+    fi
+    if ! jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null 2>&1 <<<"$outside_out"; then
+        echo "a live process outside this tree was not refused: ${outside_out:-<nothing printed>}"
+        failed=1
+    fi
+    if [ "$failed" -ne 0 ]; then
+        exit 1
+    fi
+    echo "kill <pid>: a live process in this tree is allowed, one outside it is refused"
 
 # Every `just` recipe and every repo path a project skill names still exists.
 #
@@ -4289,8 +4321,12 @@ check-lanes-workflow:
     printf '%s\n' 'pub fn kept() -> u32 {' '    1' '}' '' > "$cfgtest/removed.rs"
     printf '%s\n' '#[cfg(test)]' 'pub fn helper() -> u32 {' '    5' '}' > "$cfgtest/toggled.rs"
     commit "$cfgtest" branch
+    diff_cache_1_set=''
+    diff_cache_2_set=''
+    diff_cache_3_set=''
+    diff_cache_4_set=''
     scan() {
-        local n t at prev line types prog got failed
+        local n t at prev line types prog got same
         n=$(grep -cxF -- "$create" "$1" || true)
         if [ "$n" != 1 ]; then
             echo "$1 has the line '$create' $n times, expected once"
@@ -4479,7 +4515,14 @@ check-lanes-workflow:
         line=$(grep -E -- "$runs_awk" "$4" || true)
         prog=${line#*"| awk '"}
         prog=${prog%"'"}
-        got=$(git -C "$fixture" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+        same=0
+        cmp -s "$4" "$recipes" && same=1
+        if [ "$same" = 1 ] && [ -n "$diff_cache_1_set" ]; then
+            got="$diff_cache_1"
+        else
+            got=$(git -C "$fixture" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+            if [ "$same" = 1 ]; then diff_cache_1="$got"; diff_cache_1_set=1; fi
+        fi
         if [ "$got" != "$runs_want" ]; then
             echo "the lines-that-run recipe in $4 printed, on the fixture repo:"
             printf '%s\n' "$got"
@@ -4488,19 +4531,34 @@ check-lanes-workflow:
             echo "a line it skips that runs lets a behaviour change merge with no failing test (§375)"
             return 16
         fi
-        got=$(git -C "$fixture" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD HEAD | awk "$prog" 2>&1 || true)
+        if [ "$same" = 1 ] && [ -n "$diff_cache_2_set" ]; then
+            got="$diff_cache_2"
+        else
+            got=$(git -C "$fixture" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD HEAD | awk "$prog" 2>&1 || true)
+            if [ "$same" = 1 ]; then diff_cache_2="$got"; diff_cache_2_set=1; fi
+        fi
         if [ "$got" != "$runs_empty" ]; then
             echo "the lines-that-run recipe in $4 printed '$got' for an empty diff, not '$runs_empty'; a git diff that failed would read as nothing that runs changed (§375)"
             return 16
         fi
-        got=$(git -C "$many" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+        if [ "$same" = 1 ] && [ -n "$diff_cache_3_set" ]; then
+            got="$diff_cache_3"
+        else
+            got=$(git -C "$many" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+            if [ "$same" = 1 ]; then diff_cache_3="$got"; diff_cache_3_set=1; fi
+        fi
         if [ "$got" != "$many_want" ]; then
             echo "the lines-that-run recipe in $4 printed, on a commit that adds fifteen functions:"
             printf '%s\n' "$got"
             echo "and should have printed the first ten, then 'lines that run: 15'; a verifier copies the whole print into its report (§382)"
             return 17
         fi
-        got=$(git -C "$cfgtest" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+        if [ "$same" = 1 ] && [ -n "$diff_cache_4_set" ]; then
+            got="$diff_cache_4"
+        else
+            got=$(git -C "$cfgtest" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+            if [ "$same" = 1 ]; then diff_cache_4="$got"; diff_cache_4_set=1; fi
+        fi
         if [ "$got" != "$cfg_want" ]; then
             echo "the lines-that-run recipe in $4 printed, on a commit that removes a whole #[cfg(test)] module and separately gates an existing function behind one:"
             printf '%s\n' "$got"
@@ -4626,34 +4684,33 @@ check-lanes-workflow:
             echo "$1 does not put the hand-over rule into both the lane's brief and a relay's ('$hand_over_use' twice, found $n); a process cleared after §416 keeps a lane.md without it (Q1422)"
             return 22
         fi
-        failed=0
         n=$(grep -cF -- "$prep_type" "$1" || true)
         if [ "$n" != 1 ] || ! grep -qxF -- "$prep_tools" "$2/prep.md" 2>/dev/null || ! grep -qxF -- "$prep_model" "$2/prep.md" 2>/dev/null; then
             echo "$1 does not send one agent of type prep (\"$prep_type\" $n times), or $2/prep.md does not make it a Sonnet agent with the tools '$prep_tools' and none that writes; prep runs in the dispatcher's own tree (§396.4)"
-            [ "$failed" != 0 ] || failed=23
+            return 23
         fi
         if ! grep -qxF -- "$prep_stage" "$1" || ! grep -qxF -- "$work_stage" "$1" || ! grep -qxF -- "$verify_stage" "$1" \
             || ! grep -qF -- "$prep_needs" "$1" || ! grep -qxF -- "$handed_needs" "$1"; then
             echo "$1 does not run prep before the lane, start no lane for a row prep did not answer ok, and hand back the files prep said the row needs (§396.4)"
-            [ "$failed" != 0 ] || failed=24
+            return 24
         fi
         if ! grep -qxF -- "$brief_writes" "$1" || ! grep -qxF -- "$brief_model" "$1" || ! grep -qxF -- "$brief_pins" "$1" || ! grep -qxF -- "$brief_same" "$1" \
             || ! grep -qF -- "$prep_rows_model" "$1" || ! grep -qF -- "$prep_both" "$1"; then
             echo "$1 does not build the lane's write set from the rows prep quotes, start it with the model and marks prep answered, or does not refuse an answer whose model is not its rows', or which gives both marks (§396.4, §352.4, §399)"
-            [ "$failed" != 0 ] || failed=25
+            return 25
         fi
         if ! grep -qF -- "$both_forms" "$1"; then
             echo "$1 does not refuse a lane that gives fields of both forms, notes beside a brief or a field prep would answer (§396.4)"
-            [ "$failed" != 0 ] || failed=26
+            return 26
         fi
         if ! grep -qF -- "$rows_note" "$1" || ! grep -qF -- "$tests_note" "$1" || ! grep -qF -- "$tests_note_recipe" "$1" || ! grep -qF -- "$report_default" "$1" \
             || ! grep -qxF -- "$rows_note_use" "$1" || ! grep -qxF -- "$tests_note_use" "$1" || ! grep -qxF -- "$report_set" "$1"; then
             echo "$1 does not give a brief built from a row the two notes every brief the dispatcher wrote carried (Q1047, Q1505, Q1347), or a writing lane the for_the_verifier field by default"
-            [ "$failed" != 0 ] || failed=27
+            return 27
         fi
         if ! grep -F -- "$relay_outcome" "$1" | grep -qF -- "$gone_outcome" || ! grep -qF -- "$gone_rule" "$2/lane.md"; then
             echo "$1 does not let a writing lane report does_not_reproduce, or $2/lane.md does not tell a lane to run its row's inputs on the base first; a lane whose row's fault is gone from main has nowhere to say so (§433.8)"
-            [ "$failed" != 0 ] || failed=28
+            return 28
         fi
         at=$(grep -nxF -- "$gone_route" "$1" | head -1 | cut -d: -f1)
         prev=$(grep -nxF -- "$gone_unverified" "$1" | head -1 | cut -d: -f1)
@@ -4662,31 +4719,31 @@ check-lanes-workflow:
         if [ -z "$at" ] || [ -z "$prev" ] || [ "$at" -ge "$prev" ] || [ -z "$line" ] || [ -z "$got" ] || [ "$line" -ge "$got" ] \
             || ! grep -qxF -- "$gone_steps" "$2/verifier.md"; then
             echo "$1 does not send a does_not_reproduce lane to its verifier before verify: false is read ('$gone_route' above '$gone_unverified'), or to the closing merger before the lander is weighed ('$gone_close' above '$land_first'), or $2/verifier.md has no '$gone_steps' steps; a row nobody ran again would close, or the lander would look for a branch to merge (§433.8)"
-            [ "$failed" != 0 ] || failed=29
+            return 29
         fi
         if ! grep -qF -- "$gone_refusal" "$1" || ! grep -qF -- "$gone_done" "$2/merger.md"; then
             echo "$1 does not stop a does_not_reproduce lane whose verifier did not confirm ('$gone_refusal'), or $2/merger.md does not close a confirmed one with '$gone_done'; a fault that still shows would close its row (§433.8)"
-            [ "$failed" != 0 ] || failed=30
+            return 30
         fi
         n=$(grep -cxF -- "$readonly_rows_schema" "$1" || true)
         if [ "$n" != 2 ] || ! grep -qxF -- "$readonly_rows_required" "$1"; then
             echo "$1 does not give a read-only report the same rows field, required the same way, as a writing lane's ('$readonly_rows_schema' want twice, found $n; '$readonly_rows_required' missing); a read-only lane would then have no way to hand back the rows it leaves, and paste them into remaining instead (§418.3)"
-            [ "$failed" != 0 ] || failed=31
+            return 31
         fi
         if ! grep -qF -- "$share_guard" "$1" || ! grep -qF -- "$share_message" "$1"; then
             echo "$1 does not throw at the start when args.lanes has more than one entry unless args.shareOneRun is true ('$share_guard'), or its message does not name one Workflow call per row ('$share_message'); five times a dispatcher put a fill of several rows into one run before this, and prose alone did not stop it (§230.4)"
-            [ "$failed" != 0 ] || failed=32
+            return 32
         fi
         if ! grep -qF -- "$answers_flag" "$1" || ! grep -qF -- "$answers_confirmed" "$1" \
             || ! grep -qF -- "$answers_asked" "$1" || ! grep -qF -- "$answers_told" "$1" \
             || ! grep -qF -- "$answers_lane" "$2/lane.md" || ! grep -qF -- "$answers_prep" "$2/prep.md" \
             || ! grep -qxF -- "$answers_verifier" "$2/verifier.md" || ! grep -qF -- "$answers_merger" "$2/merger.md"; then
             echo "$1 does not pass the rows a verifier confirmed to just land ('$answers_flag'), give the verifier '$answers_confirmed', ask it to run them ('$answers_asked') or tell the merger ('$answers_told'), or $2 does not say it in lane.md ('$answers_lane'), prep.md ('$answers_prep'), verifier.md ('$answers_verifier') or merger.md ('$answers_merger'); a row a fix lane answers would stay open until someone closed it by hand, as 17532d10 did (§450.3 rule 4)"
-            [ "$failed" != 0 ] || failed=33
+            return 33
         fi
         if ! grep -qF -- "$gone_rows_guard" "$1" || ! grep -qF -- "$gone_rows_reason" "$1" || ! grep -qF -- "$gone_blocked_rule" "$2/lane.md"; then
             echo "$1 does not refuse a does_not_reproduce report that still names rows ('$gone_rows_guard' ... '$gone_rows_reason'), or $2/lane.md does not tell a lane that a row whose shape another open row's fault stops first reports blocked instead, naming that row ('$gone_blocked_rule'); a does_not_reproduce report holding rows would else close at the base with a pin never written, as Q2185 did (§433.8)"
-            [ "$failed" != 0 ] || failed=34
+            return 34
         fi
         at=$(grep -nxF -- "$gone_route" "$1" | head -1 | cut -d: -f1)
         line=$(grep -nxF -- "$nothing_route" "$1" | head -1 | cut -d: -f1)
@@ -4696,53 +4753,53 @@ check-lanes-workflow:
             || ! grep -qxF -- "$nothing_shared_def" "$1" || ! grep -qxF -- "$nothing_fn" "$1" \
             || ! grep -qxF -- "$nothing_whole" "$1" || ! grep -qxF -- "$nothing_flag" "$1" || [ "$n" -lt 3 ]; then
             echo "$1 does not see, right after the does_not_reproduce check and before verify: false is read ('$gone_route' above '$nothing_route' above '$gone_unverified'), that a writing lane's branch is its base for a reason other than does_not_reproduce, sharing the does_not_reproduce check rather than testing the sha again ('branchIsBase(report)' wanted at least 3 times, found $n), and hand its report back whole the way a read-only lane's goes ('$nothing_whole', set by '$nothing_flag'); such a lane has no road through lanes.js otherwise (Q1382, §399)"
-            [ "$failed" != 0 ] || failed=35
+            return 35
         fi
         at=$(grep -nF -- "$pins_named" "$1" | head -1 | cut -d: -f1)
         line=$(grep -nxF -- "$same_kind" "$1" | head -1 | cut -d: -f1)
         n=$(grep -cF -- "$pins_note_use" "$1" || true)
         if [ -z "$at" ] || [ -z "$line" ] || [ "$at" -ge "$line" ] || ! grep -qF -- "$pins_note" "$1" || [ "$n" != 2 ]; then
             echo "$1 does not stop a pinsOnly lane that names no test it pins before it picks the kind ('$pins_named' above '$same_kind'), or does not tell such a lane to '$pins_note' in both its brief and a relay's ('$pins_note_use' want twice, found $n); a pins-only lane whose pinned test passed on its base would be verified as moved text and refused for every line that runs, as Q368's was (Q2546, §287)"
-            [ "$failed" != 0 ] || failed=40
+            return 40
         fi
         if ! grep -qxF -- "$crate_dir" "$1" || ! grep -qxF -- "$crate_use" "$1" || ! grep -qF -- "$crate_prep" "$2/prep.md"; then
             echo "$1 does not read a crate's src/ off a write-set entry naming the crate whole ('$crate_dir', used as '$crate_use'), or $2/prep.md does not say so ('$crate_prep'); a lane on crates/<c>/ whole would be refused for declaring no source directory to revert, as Q1770's was (Q2547, §396)"
-            [ "$failed" != 0 ] || failed=41
+            return 41
         fi
         n=$(grep -cxF -- "$resolve" "$1" || true)
         at=$(grep -nxF -- "$resolve" "$1" | head -1 | cut -d: -f1)
         line=$(grep -nxF -- "$create" "$1" | head -1 | cut -d: -f1)
         if [ "$n" != 1 ] || [ -z "$line" ] || [ "$at" -ge "$line" ] || ! grep -qF -- "$resolve_blocked" "$1" || ! grep -qF -- "$resolve_why" "$2/lane.md"; then
             echo "$1 does not have a lane resolve its base before it branches ('$resolve' want once, found $n, and above '$create'), or stop as blocked when it does not resolve ('$resolve_blocked'), or $2/lane.md does not say why ('$resolve_why'); a base whose tail was written from memory would go to a lane that falls back on the prefix by itself, as Q660's did (Q2548, §237)"
-            [ "$failed" != 0 ] || failed=42
+            return 42
         fi
         if ! grep -qF -- "$removed_section" "$2/verifier.md"; then
             echo "$2/verifier.md does not tell the verifier to read lines-that-run's test-code-removed section instead of the diff by eye ('$removed_section'); a test or an assertion a branch takes out would go back to being caught only by an eyeball read of the whole diff, as it was before this print's second section existed (Q787, §375.5)"
-            [ "$failed" != 0 ] || failed=43
+            return 43
         fi
         if ! grep -qF -- "$write_set_check" "$2/verifier.md" || ! grep -qF -- "$write_set_mismatch_use" "$2/verifier.md"; then
             echo "$2/verifier.md does not tell the verifier to build the write set the way '$write_set_check', or does not tell it to '$write_set_mismatch_use'; a prep run that miscopied a write-set column into a lane's brief would go unchecked, since the lane and its verifier would both work from the same miscopy (Q1699, §396)"
-            [ "$failed" != 0 ] || failed=44
+            return 44
         fi
         if ! grep -qxF -- "$write_set_field" "$1" || ! grep -qF -- "$write_set_required" "$1" || ! grep -qF -- "$write_set_unproven" "$1"; then
             echo "$1 does not declare the write_set_mismatch field ('$write_set_field'), require it ('$write_set_required'), or refuse a lane whose write set does not match the queue ('$write_set_unproven'); a verifier's mismatch finding would have nowhere to land and nothing would stop the merge on it (Q1699, §396)"
-            [ "$failed" != 0 ] || failed=44
+            return 44
         fi
         if ! grep -qF -- "$relay_hold_own" "$1" || ! grep -qF -- "$relay_hold_check" "$1" || ! grep -qF -- "$relay_hold_widen" "$1" \
             || ! grep -qxF -- "$hold_rule" "$2/lane.md" || ! grep -qxF -- "$hold_refused" "$2/lane.md"; then
             echo "$1 does not brief a relay to own the row's current hold, read with just queue show, rather than the taken set its brief lists ('$relay_hold_own'), or $2/lane.md does not say a lane edits nothing outside its current hold, widening first and reporting blocked when the widen is refused ('$hold_rule' ... '$hold_refused'); a relay that inherited a narrowed hold would edit a file the fill had already given to another row, as Q2406's did (§424)"
-            [ "$failed" != 0 ] || failed=45
+            return 45
         fi
         n=$(grep -cF -- "$readonly_budget_use" "$1" || true)
         if [ "$n" != 1 ] || ! grep -qF -- "$readonly_budget_text" "$1" || ! grep -qF -- "$readonly_budget_text" "$2/lane.md"; then
             echo "$1 does not give READING its own budget wording calling readOnlyBudget() once ('$readonly_budget_use', found $n), or $1 or $2/lane.md does not say a read-only lane carries on past the warning to '$readonly_budget_text'; a read-only lane would stop at the first budget warning with nothing to hand over, as Q2566's and Q2832's trace lanes did (§416)"
-            [ "$failed" != 0 ] || failed=46
+            return 46
         fi
         if ! grep -qxF -- "$verified_route" "$1" || ! grep -qxF -- "$stopped_to_merger" "$1"; then
             echo "$1 does not let a row the verifier called merge or fix_first through to a merger when the dispatcher itself also stopped it ('$verified_route'), or does not send such a row to the Opus merger instead of the Haiku lander ('$stopped_to_merger'); a row the verifier called ready would then be handed back with no land: or merge: agent at all, though the run completes, as 17 runs in 2026-10-07..10-21 were (§461.2)"
-            [ "$failed" != 0 ] || failed=47
+            return 47
         fi
-        return "$failed"
+        return 0
     }
     scan "$file" "$agents" "$claude" "$recipes" "$script" || exit 1
     swap() {
@@ -18317,7 +18374,17 @@ check-queue-api-selftest:
         || fail "next did not skip a row that meets the write-corrected held row"
     got=$(q "$writes_wt" show "$held_wrong" 2>&1) || fail "show failed after writes corrected a held row"
     grep -qxF "narrowed to docs/decisions.d/, taken with -" <<<"$got" \
-        || fail "show did not say what writes corrected the held row's write set to"
+        && fail "show still said the held row was narrowed, though writes moved what it was taken with too"
+
+    # Q2670: writes on a held row moves the set it was taken with, not only
+    # the write set itself, so a later narrow can reach what writes just
+    # granted, where before the fix it stayed refused outside the stale -.
+    got=$(q "$writes_wt" narrow "$held_wrong" docs/decisions.d/230-one-queue.md 2>&1) \
+        || fail "narrow was refused an entry writes had just moved the held row's taken set onto"
+    grep -qxF "$held_wrong: narrowed from docs/decisions.d/ to docs/decisions.d/230-one-queue.md, taken with docs/decisions.d/" <<<"$got" \
+        || fail "narrow did not report narrowing onto the entry writes granted"
+    got=$(q "$writes_wt" narrow "$held_wrong" docs/decisions.d/ 2>&1) \
+        || fail "narrow back to the full directory was refused"
 
     # writes refuses a write set that meets a running hold, the same guard
     # narrow runs before it widens a hold back (§424.7). held_wrong's own
@@ -18337,6 +18404,27 @@ check-queue-api-selftest:
         && fail "writes accepted a write set a row already carries"
     grep -qF "write set is docs/decisions.d/230-one-queue.md already" <<<"$got" \
         || fail "writes did not refuse a write set a row already carries"
+
+    # Q2670: a writes run ahead of a row's first take is no longer undone by
+    # it. take_step used to read row.write_set, the docs/queue.md column,
+    # straight off; it now reads the latest writes-given set when the row has
+    # no hold yet.
+    fresh_write=$(q "$writes_wt" add 2 opus - "from/- a row writes sets ahead of its first take §230") \
+        || fail "add for the fresh-write row failed"
+    g "$writes_wt" commit -qam "a row for writes ahead of a fresh take"
+    got=$(q "$writes_wt" writes "$fresh_write" docs/q2670-fresh.md 2>&1) \
+        || fail "writes refused to set the fresh-write row's write set"
+    got=$(q "$writes_wt" show "$fresh_write" 2>&1) || fail "show failed after writes set the fresh-write row's write set"
+    grep -qxF 'write set set to docs/q2670-fresh.md by `writes`, - in docs/queue.md' <<<"$got" \
+        || fail "show did not say what writes set ahead of the take"
+    got=$(q "$writes_wt" take "$fresh_write" lane-fresh-write 2>&1) \
+        || fail "take of the fresh-write row was refused"
+    got=$(awk -F '\t' -v id="$fresh_write" '$1 == "take" && $2 == id { print $6 }' "$claims_file")
+    [ "$got" = docs/q2670-fresh.md ] \
+        || fail "take wrote the stale docs/queue.md column, not the write set writes had just given"
+    got=$(q "$writes_wt" show "$fresh_write" 2>&1) || fail "show failed after taking the fresh-write row"
+    grep -qF "narrowed to" <<<"$got" \
+        && fail "show said the freshly taken row was narrowed, though its write set is what it was taken with"
 
     # Q252 (§263.3, §263.4): `give` releases a hold and restores the state
     # the take replaced, an after: list included since take's own claims event

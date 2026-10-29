@@ -6045,8 +6045,9 @@ pub(crate) enum TheCutHalfway {
 /// the two are not exactly mirror images, do not touch, and pass close by
 /// each other where the exact pair would touch. `intersect` names those
 /// as one loop and two branches where
-/// [`a_loop_and_two_branches_that_nearly_meet`] proves it, but `walk.rs` and
-/// `along_a_crossing.rs`, which ask here, still refuse them.
+/// [`a_loop_and_two_branches_that_nearly_meet`] proves it. `walk.rs` marches
+/// the loop and the run between two corners on a branch; only
+/// `along_a_crossing.rs`, which asks here, still refuses them.
 ///
 /// [`Error::NotFinite`] where the gap between two apexes side by side, or how
 /// far the flat surface halfway between them is from the origin, leaves

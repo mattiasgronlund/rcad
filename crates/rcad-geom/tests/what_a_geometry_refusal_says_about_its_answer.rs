@@ -340,31 +340,31 @@ fn a_crossing_whose_size_overflows_is_a_gap() {
     }
 }
 
-/// The plane `x + 16z = 8`, a pipe of radius one along `x` and a ball of
-/// radius three about `(0, ½, 0)` meet in four points, and no order of the
-/// three reaches them.
+/// The plane `y = 0`, which holds the axis of a ring of radius four and tube
+/// one, and a ball of radius four about `(0, ½, 0)`, meet in four points, and
+/// no order of the three reaches them.
 ///
-/// On the pipe the ball is `x² = y + 7.75`, so a point is on all three where
-/// `y² + ((8 − x)/16)² = 1` with that `y`, and that sum is below one at
-/// `x = ±2.8` and above it at `x = ±2.598` and `±2.96`: two roots on each
-/// side. The plane leans well off square to the pipe's axis, and the ball's
-/// centre is half a unit off the wall through that axis and the plane's
-/// normal, so no wall mirrors the three (Q2196). The floor across a pipe of
-/// radius twelve along `(0, 3, 4)` and a ball of thirteen about `(0, 3, 4)`,
-/// which held `(±12, 0, 0)` exactly, was this test's shape until such a wall
-/// answered it.
+/// The plane cuts the ring in the two circles `(x ∓ 4)² + z² = 1` and the ball
+/// in `x² + z² = 15.75`, which differ from the first by `8x = 30.75`. So the
+/// four points are `(±123/32, 0, ±√999/32)`: `14.7744 + 0.25 + 0.9756 = 16`
+/// puts them on the ball, and `(123/32 − 4)² + 999/1024 = 1` on the ring. The
+/// ball's centre is half a unit off the ring's axis, so the road for a ball on
+/// it does not take them, and the road for a plane that cuts both in conics
+/// hands a ring on. The plane `x + 16z = 8`, a pipe of radius one along `x`
+/// and a ball of radius three about `(0, ½, 0)` was this test's shape until
+/// that road answered it, in `where_a_plane_and_two_round_surfaces_meet.rs`.
 #[test]
-fn a_plane_leaning_across_a_pipe_and_a_ball_off_its_axis_is_a_gap() {
-    let leaning = a_plane([1.0, 0.0, 16.0], [8.0, 0.0, 0.0]);
-    let pipe = a_pipe([1.0, 0.0, 0.0], [0.0, 0.0, 0.0], 1.0);
-    let round = a_ball([0.0, 0.5, 0.0], 3.0);
+fn a_plane_holding_a_rings_axis_and_a_ball_off_it_is_a_gap() {
+    let cap = a_plane([0.0, 1.0, 0.0], [0.0, 0.0, 0.0]);
+    let ring = Surface::Torus(Torus::new(Axis::z(), 4.0, 1.0).expect("a ring"));
+    let round = a_ball([0.0, 0.5, 0.0], 4.0);
     for order in [
-        [&leaning, &pipe, &round],
-        [&leaning, &round, &pipe],
-        [&pipe, &leaning, &round],
-        [&pipe, &round, &leaning],
-        [&round, &leaning, &pipe],
-        [&round, &pipe, &leaning],
+        [&cap, &ring, &round],
+        [&cap, &round, &ring],
+        [&ring, &cap, &round],
+        [&ring, &round, &cap],
+        [&round, &cap, &ring],
+        [&round, &ring, &cap],
     ] {
         let refusal =
             meet_of_three_surfaces(order, &Policy::certified(), &mut ProvenanceLog::new())
