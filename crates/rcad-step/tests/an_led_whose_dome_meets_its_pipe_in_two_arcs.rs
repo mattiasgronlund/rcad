@@ -49,12 +49,20 @@
 //!   box that misses the LED. The rim is inside the pipe there by `4e-16` and
 //!   `8e-16`, and the pipe's side of a point of the ball is now read with the
 //!   ball's own equation, where the box's width counts only times how far the
-//!   ball's centre is off the axis (Q2956). Every fuse now stops refused
+//!   ball's centre is off the axis (Q2956). Every fuse then stopped refused
 //!   `Undecidable` on order along a crossing, on the body's pipe, between two
 //!   nodes in one box near `(2.34, 2.492, 3.5)`: where the line the plane
 //!   `x = 2.34` cuts the pipe in meets each of two sloped planes, with normals
 //!   `(−0.619, ±3.5e-16, ±0.786)`. On `x = 2.34` the two sloped planes are
-//!   two parallel lines `4.8e-16` apart along the pipe.
+//!   two parallel lines `4.8e-16` apart along the pipe, so they are that far
+//!   apart along every line of the plane up the pipe, and the order now reads
+//!   them off the stored numbers (Q2984). Every fuse now stops refused
+//!   `Undecidable` on order along a crossing again, on the body's pipe,
+//!   between two nodes in one box near `(2.34, −2.492, 3.5)`, round the loop
+//!   the slope with normal `(−0.619, −3.5e-16, −0.786)` cuts the pipe in: its
+//!   meets with the other slope and with `x = 2.34`. The two slopes cross in a
+//!   line `3.1e-16` off that plane and along it, so on the slope the two cut
+//!   in parallel lines a rounding apart.
 //! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
 //!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
 //!   rounding apart in direction. Q2938's road answers that triple, and the
@@ -92,7 +100,7 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
-fn a_d5_led_gets_past_its_dome_rim_and_stops_where_two_slopes_meet_its_pipe() {
+fn a_d5_led_gets_past_where_two_slopes_cross_its_pipe_along_a_plane_and_stops_round_a_slope() {
     every_fuse_refuses(D5, &[[0.04, 0.0, 4.0], FAR_OFF], |error| {
         let Error::Undecidable { records } = error else {
             return false;
@@ -107,8 +115,8 @@ fn a_d5_led_gets_past_its_dome_rim_and_stops_where_two_slopes_meet_its_pipe() {
             let [x, y, z] = at.enclosure();
             2.339 < x.lo()
                 && x.hi() < 2.341
-                && 2.4919 < y.lo()
-                && y.hi() < 2.4920
+                && -2.4920 < y.lo()
+                && y.hi() < -2.4919
                 && 3.4999 < z.lo()
                 && z.hi() < 3.5
         };
