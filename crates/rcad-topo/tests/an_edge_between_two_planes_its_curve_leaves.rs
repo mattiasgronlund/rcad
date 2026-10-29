@@ -330,7 +330,7 @@ fn a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it() {
 #[test]
 fn a_fuse_with_the_tilted_disc_read_back_from_bytes_is_refused_for_the_edge_round_it() {
     let mut not_refused = Vec::new();
-    let places: [(Vector, fn(Rule, &Result<Fused>) -> bool); 3] = [
+    let places: [(Vector, WhatItGivesNow); 3] = [
         (Vector::new(-1.0, -1.0, -1.0), |_, fused| {
             could_not_order_two_meets_where_the_line_meets_the_pipe(fused)
         }),
@@ -381,6 +381,9 @@ fn a_fuse_with_the_tilted_disc_read_back_from_bytes_is_refused_for_the_edge_roun
     }
     assert!(not_refused.is_empty(), "{not_refused:#?}");
 }
+
+/// Whether a fuse under a rule gave what it gives now.
+type WhatItGivesNow = fn(Rule, &Result<Fused>) -> bool;
 
 /// Whether `fused` is refused `Undecidable` for one thing alone: the order
 /// along a crossing of two meets that are both at `(1, 2√2, 4)`, to `1e-12`.
