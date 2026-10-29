@@ -285,16 +285,40 @@ FIRST = "first"
 def extract_word(text):
     """The word after a row's pin and tag, where §432.3 stores it, or `None`
     if the row has fewer than six fields or nothing stands there."""
+    words = words_from_the_word_on(text)
+    return words[0] if words else None
+
+
+@functools.cache
+def later_words(text):
+    """The came-from words that follow a row's own, as in Q2005's
+    `from/fuzz:where_two_surfaces_cross was/Q1781`. §432.2 gives a row one
+    word, and only the first sets its parent; the page shows the rest. A
+    tuple, since every caller of a text shares the one answer the cache keeps;
+    the queue page asks once for each step of every chain it draws."""
+    words = words_from_the_word_on(text)
+    if not words or resolve_from_word(words[0]) is None:
+        return ()
+    later = []
+    for word in words[1:]:
+        if resolve_from_word(word) is None:
+            break
+        later.append(word)
+    return tuple(later)
+
+
+def words_from_the_word_on(text):
+    """A row's description from the word on, past its pin and tag."""
     fields = text.split()
     if len(fields) < 6:
-        return None
+        return []
     words = fields[5:]
     i = 0
     if i < len(words) and PIN.match(words[i]):
         i += 1
     if i < len(words) and (CLASS.match(words[i]) or words[i] == SMALL):
         i += 1
-    return words[i] if i < len(words) else None
+    return words[i:]
 
 
 def resolve_from_word(word):
@@ -357,12 +381,13 @@ class Graph:
         self.closed_commit = {}  # row id -> Commit
         self._find_added()
         self._find_closed()
+        self.inputs = KnownInputs(top, ref)
         walk_order = {commit.sha: i for i, commit in enumerate(self.commits)}
         oldest_first = sorted(self.added_at, key=lambda r: (walk_order[self.added_at[r].sha], row_sort_key(r)))
         read = self._read_words_and_commits()
         # row id -> ParentInfo, without the sources read from row text
         self.parent_of, _ = settle(read, oldest_first, {})
-        with_text, self.read_from_text = settle(read, oldest_first, self._sources_named_by_text(KnownInputs(top, ref)))
+        with_text, self.read_from_text = settle(read, oldest_first, self._sources_named_by_text(self.inputs))
         self.without_text = Tree(self.parent_of)
         self.with_text = Tree(with_text)
 
@@ -589,6 +614,9 @@ class KnownInputs:
         self.corpus_files_named = defaultdict(list)  # a file's own name -> every corpus path ending in it
         for path in self.corpus_tails:
             self.corpus_files_named[path.rsplit("/", 1)[-1]].append(path)
+        # `name_present` for every target at once; the queue page asks it of every row.
+        self._any_target_named = re.compile(
+            r"(?<![0-9A-Za-z_])(" + "|".join(map(re.escape, self.targets)) + r")(?![0-9A-Za-z_])" if self.targets else r"(?!)")
 
     def source_named_by(self, text):
         """The one fuzz target or corpus file whose input `text` names, as
@@ -603,6 +631,23 @@ class KnownInputs:
         named with no input of its own: Q58 names the writer target, and is no
         fault of it.
         """
+        sources = self._inputs_whose_input_is_named(text)
+        return sources.pop() if len(sources) == 1 else None
+
+    def inputs_named_by(self, text):
+        """Every fuzz target or corpus file `text` names in any way, as
+        `fuzz:<target>` or `step:<file>`: each input `source_named_by` reads,
+        however many there are, and each target named in passing too. A
+        target named in passing says nothing of where a fault came from, but
+        it does say the row's work touches that target (§473)."""
+        passing = {f"fuzz:{target}" for target in self._any_target_named.findall(text)}
+        return self._inputs_whose_input_is_named(text) | passing
+
+    def corpus_paths_of(self, step_file):
+        """Every corpus path whose tail, as `from/step:` writes it, is `step_file`."""
+        return sorted(path for path, tail in self.corpus_tails.items() if tail.replace(" ", "_") == step_file)
+
+    def _inputs_whose_input_is_named(self, text):
         sources = {f"fuzz:{target}" for target in CRASH_FILE_UNDER_ITS_TARGET.findall(text)}
         if CRASH_FILE_ALONE.search(text):
             named = [target for target in self.targets if name_present(target, text)]
@@ -616,7 +661,7 @@ class KnownInputs:
             path = self._corpus_file_called(name, text)
             if path is not None:
                 sources.add(f"step:{self.corpus_tails[path].replace(' ', '_')}")
-        return sources.pop() if len(sources) == 1 else None
+        return sources
 
     def _targets_of_a_seed_starting(self, digits):
         targets = set()

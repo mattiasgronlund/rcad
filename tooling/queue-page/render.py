@@ -25,7 +25,13 @@ Every row of main's copy also gets a page of its own, `<out>/rows/<id>.html`:
 its tier, its class, the rows it came from and the rows that came from it as
 `just lineage` reads them, the files it expects to change, and the row itself.
 The front page names a row by its id alone, and every Q id on either kind of
-page links to that row's page (§444).
+page links to that row's page (§444). Beside the one parent lineage gives it,
+a row's page shows every other link found to it: the rows that name it in a
+reading lineage did not take, the rows whose text names it, the fuzz targets
+and STEP files its own text names, and what the commits that added and closed
+it say of it. Every fuzz target and STEP file any of those reach gets a page
+too, `<out>/inputs/<kind>-<name>.html`, holding every row whose work is linked
+to it (§473).
 
 The state this keeps across runs is `<out>/.history-cache.json`, one entry
 per commit sha already tallied, `<out>/.fuzz-cache.json`, one entry per
@@ -40,6 +46,10 @@ the real history (600 first-parent commits touching docs/queue.md,
 with it empty the render took 235 s at c8a9eda5, since lineage then parses
 every copy of the 1.7 MB file that main's history holds. With all three caches
 full it took 3.4 s, 0.64 s of it the lineage and 0.26 s the row pages (§444).
+On 2026-10-29, at 2895 rows and on the same caches as the code before it,
+what §473 adds took 0.7 to 0.9 s: 0.5 to 0.9 s finding every link the pages
+show (`Related`), up to 0.16 s more for the row pages, and 0.01 s for the
+input pages.
 
 A failure here — no `main` here, no commit ever touched the file — is said on
 stderr and returned as a nonzero exit, never raised past `main`: the caller
@@ -53,7 +63,8 @@ import re
 import subprocess
 import sys
 import tempfile
-from collections import Counter, namedtuple
+import urllib.parse
+from collections import Counter, defaultdict, namedtuple
 from datetime import datetime, timezone
 from itertools import groupby
 
@@ -121,8 +132,11 @@ def main(argv):
     fuzz, fuzz_cache = fuzz_section.section(fuzz_root, read_json(fuzz_cache_path))
     write_atomically(fuzz_cache_path, json.dumps(fuzz_cache, sort_keys=True))
     rendered_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    page = render_page(points, current_state(tip, tip_text, graph, rendered_at), fuzz, rendered_at, Links(tip, "rows/"))
-    write_row_pages(os.path.join(out_dir, "rows"), tip, graph)
+    related = Related(tip, graph)
+    links = Links(tip, "rows/", related.inputs, "inputs/")
+    page = render_page(points, current_state(tip, tip_text, graph, rendered_at), fuzz, rendered_at, links)
+    write_row_pages(os.path.join(out_dir, "rows"), tip, graph, related)
+    write_input_pages(os.path.join(out_dir, "inputs"), tip, graph, related)
     write_atomically(os.path.join(out_dir, "index.html"), page)
     return 0
 
@@ -1057,11 +1071,15 @@ def closed_section(rows, links):
 
 
 class Links:
-    """How a page names a row: linked to the row's own page when main's copy holds the row, and so it has one."""
+    """How a page names a row or an input: a row linked to its own page when
+    main's copy holds the row, and so it has one, and a fuzz target or STEP
+    file always, since `Related` gives a page to every input a page names."""
 
-    def __init__(self, tip, to_rows):
+    def __init__(self, tip, to_rows, inputs, to_inputs):
         self.ids = set(tip.ids())
         self.to_rows = to_rows
+        self.inputs = inputs
+        self.to_inputs = to_inputs
 
     def ref(self, row_id):
         """A row named by its id, of any letter, as code."""
@@ -1080,17 +1098,101 @@ class Links:
             return html.escape(row_id)
         return f'<a href="{self.to_rows}{row_id}.html">{row_id}</a>'
 
+    def input_link(self, node):
+        """A `fuzz:<target>` or `step:<file>` node by its name alone, linked to its page."""
+        assert node in self.inputs, f"a page names {node}, which Related did not reach, so it has no page to link"
+        name = html.escape(node.split(":", 1)[1])
+        return f'<a href="{self.to_inputs}{urllib.parse.quote(input_page_name(node))}">{name}</a>'
 
-def write_row_pages(directory, tip, graph):
+
+class Related:
+    """Every link found to each row of main's copy beyond the one parent
+    lineage gives it, and every fuzz target and STEP file those links reach,
+    each of which gets a page (§473).
+
+    lineage keeps one parent a row, so that each input's counts take every
+    row once (§433.2, §472). These are the rest: a row named by another's
+    reading that lineage did not take, by another's text, or as an input by
+    its own text. A row's text is both main's copy of it and the copy the
+    commit that added it holds. Its inputs are read from the description
+    alone, as lineage reads them, so a `done:` hash is never taken for a
+    fuzz seed's; its rows from the whole line, since an `after:` names rows.
+    """
+
+    def __init__(self, tip, graph):
+        self.inputs_named = {}  # row id -> sorted inputs its text names
+        self.rows_naming_input = defaultdict(list)  # input -> [row id]
+        self.rows_naming_row = defaultdict(list)  # row id -> [row id whose text names it]
+        self.also_named_by = defaultdict(list)  # row id -> [row id with a reading not taken naming it]
+        for row in sorted(tip.rows, key=lambda row: lineage.row_sort_key(row.id)):
+            texts = [row.text, graph.added_text(row.id)] if row.id in graph.added_at else [row.text]
+            descriptions = "\n".join(lineage.description(text) for text in texts)
+            self.inputs_named[row.id] = sorted(graph.inputs.inputs_named_by(descriptions))
+            named_rows = {other for text in texts for other in ROW_REF.findall(text)} - {row.id}
+            for other in sorted(named_rows, key=lineage.row_sort_key):
+                self.rows_naming_row[other].append(row.id)
+            not_taken = readings_not_taken(row.id, graph) if row.id in graph.added_at else []
+            for named in not_taken:
+                if not lineage.is_an_input(named):
+                    self.also_named_by[named].append(row.id)
+            for node in sorted({*self.inputs_named[row.id], *filter(lineage.is_an_input, not_taken)}):
+                self.rows_naming_input[node].append(row.id)
+        self.inputs = (
+            set(graph.with_text.source_roots())
+            | set(graph.without_text.source_roots())
+            | set(self.rows_naming_input)
+        )
+
+
+def readings_not_taken(row_id, graph):
+    """Each row or input a reading of `row_id`'s source names that is not
+    the parent lineage gave it: the commit's row under a word that beat it,
+    the parent it has without the source its text names, and each word
+    after its first. Each once, in that order."""
+    info = graph.with_text.parent_of[row_id]
+    named = []
+    if info.label == lineage.WORD_LABEL and info.beside is not None:
+        named.append(info.beside.parent)
+    if row_id in graph.read_from_text:
+        without = graph.parent_of[row_id]
+        named.append(without.parent)
+        if without.beside is not None:
+            named.append(without.beside.parent)
+    named += [lineage.resolve_from_word(word).parent for word in lineage.later_words(graph.added_text(row_id))]
+    return [parent for parent in dict.fromkeys(named) if parent is not None and parent != row_id]
+
+
+def write_row_pages(directory, tip, graph, related):
     """One page for every row of main's copy (§444), and none left for a row it no longer holds."""
-    links = Links(tip, "")
+    links = Links(tip, "", related.inputs, "../inputs/")
     os.makedirs(directory, exist_ok=True)
     for row in tip.rows:
         assert ANY_ROW_ID.match(row.id), f"{row.id!r} cannot name a page, and check-queue refuses an id of that shape"
-        write_if_changed(os.path.join(directory, f"{row.id}.html"), row_page(row, graph, links))
+        write_if_changed(os.path.join(directory, f"{row.id}.html"), row_page(row, graph, related, links))
     for name in os.listdir(directory):
         if name.endswith(".html") and name[: -len(".html")] not in links.ids:
             os.remove(os.path.join(directory, name))
+
+
+def write_input_pages(directory, tip, graph, related):
+    """One page for every fuzz target and STEP file a row is linked to (§473), and none left for one no row is."""
+    links = Links(tip, "../rows/", related.inputs, "")
+    os.makedirs(directory, exist_ok=True)
+    pages = {input_page_name(node): node for node in related.inputs}
+    for name, node in pages.items():
+        write_if_changed(os.path.join(directory, name), input_page(node, graph, related, links))
+    for name in os.listdir(directory):
+        if name.endswith(".html") and name not in pages:
+            os.remove(os.path.join(directory, name))
+
+
+def input_page_name(node):
+    """`fuzz-<target>.html` or `step-<file>.html`, with each `/` of a corpus
+    file's tail (§433.1) written `~`, so that every input's page sits in the
+    one directory."""
+    kind, name = node.split(":", 1)
+    assert "~" not in name, f"{node!r} holds a ~, which its page's name writes for a /"
+    return f"{kind}-{name.replace('/', '~')}.html"
 
 
 def write_if_changed(path, text):
@@ -1109,14 +1211,21 @@ def write_if_changed(path, text):
     write_atomically(path, text)
 
 
-def row_page(row, graph, links):
+def row_page(row, graph, related, links):
+    named_in = related.rows_naming_row.get(row.id, [])
+    inputs_named = related.inputs_named[row.id]
     return ROW_PAGE.format(
         base_style=BASE_STYLE,
+        detail_style=DETAIL_STYLE,
         id=html.escape(row.id),
         tier=html.escape(row.tier),
         row_class=class_html(row.tag),
         provenance=provenance_html(row.id, graph, links),
         results=results_html(row.id, graph, links),
+        also_named_by=steps_list(related.also_named_by.get(row.id, []), graph, links, "no other reading names it"),
+        named_in=" ".join(links.ref(other) for other in named_in) if named_in else "no other row's text names it",
+        inputs_named=join_and(source_html(node, links) for node in inputs_named) if inputs_named else "none",
+        commits=commits_html(row.id, graph, links),
         write_set=write_set_html(row.write_set),
         text=links.text(row.text),
     )
@@ -1150,8 +1259,9 @@ def provenance_html(row_id, graph, links):
 
     A step whose source is read from the row's text (§433.6) says what it
     would be without that, and one whose word and commit name different
-    parents says both (§472). A chain that comes back to a row it already
-    passed stops there and says so.
+    parents says both (§472). A chain that reaches a fuzz target or a STEP
+    file ends on it, with what it counts, linked to its page (§473). A chain
+    that comes back to a row it already passed stops there and says so.
     """
     steps = []
     passed = [row_id]
@@ -1160,7 +1270,10 @@ def provenance_html(row_id, graph, links):
         info = graph.with_text.parent_of.get(node)
         steps.append(step_html(node, info, graph, links))
         parent = info.parent if info is not None else None
-        if parent is None or parent.startswith(("fuzz:", "step:")):
+        if parent is None:
+            break
+        if lineage.is_an_input(parent):
+            steps.append(f"{source_html(parent, links)}: {input_counts(parent, graph)}")
             break
         if parent in passed:
             steps.append(f"{links.ref(parent)} again, so the chain goes round, and stops here")
@@ -1176,11 +1289,13 @@ def step_html(node, info, graph, links):
             return f"{links.ref(node)}: no commit on main's history added it"
         return f"{links.ref(node)}: carried over from the retired <code>docs/test-plan.md</code>, and lineage follows only Q rows"
     commit = graph.added_at[node]
-    day = commit.date.astimezone(timezone.utc).strftime("%Y-%m-%d")
     came = came_from(info, links)
     if node in graph.read_from_text:
         came += f"; without reading its text, {came_from(graph.parent_of[node], links)}"
-    return f"{links.ref(node)}, added in <code>{commit.sha[:8]}</code> on {day}, <q>{links.text(commit.subject)}</q>: {came}"
+    later = lineage.later_words(graph.added_text(node))
+    if later:
+        came += f"; it carries {join_and(word_html(word, links) for word in later)} after its word too, and lineage reads only the first (§473)"
+    return f"{links.ref(node)}, added in <code>{commit.sha[:8]}</code> on {day_of(commit)}, <q>{links.text(commit.subject)}</q>: {came}"
 
 
 def results_html(row_id, graph, links):
@@ -1243,12 +1358,64 @@ def other_reading(info, links):
     return f", in the tree of {source_html(info.beside.parent, links)}, which its word names (§472)"
 
 
+INPUT_KINDS = {"fuzz": "fuzz target", "step": "STEP file"}
+
+
 def source_html(parent, links):
-    if parent.startswith("fuzz:"):
-        return f"the fuzz target <code>{html.escape(parent[len('fuzz:'):])}</code>"
-    if parent.startswith("step:"):
-        return f"the STEP file <code>{html.escape(parent[len('step:'):])}</code>"
+    if lineage.is_an_input(parent):
+        return f"the {INPUT_KINDS[parent.split(':', 1)[0]]} <code>{links.input_link(parent)}</code>"
     return links.ref(parent)
+
+
+def word_html(word, links):
+    """A came-from word with the row, fuzz target or STEP file it names linked."""
+    parent = lineage.resolve_from_word(word).parent
+    if parent is None:
+        return f"<code>{html.escape(word)}</code>"
+    if lineage.is_an_input(parent):
+        name, link = parent.split(":", 1)[1], links.input_link(parent)
+    else:
+        name, link = parent, links.link(parent)
+    assert word.endswith(name), f"the word {word!r} names {parent}, and does not end in {name!r}"
+    return f"<code>{html.escape(word[: -len(name)])}{link}</code>"
+
+
+def day_of(commit):
+    return commit.date.astimezone(timezone.utc).strftime("%Y-%m-%d")
+
+
+def steps_list(row_ids, graph, links, none):
+    """Each row as a step of its own Came from would give it, or `none` where there is no row."""
+    if not row_ids:
+        return none
+    steps = (step_html(row_id, graph.with_text.parent_of.get(row_id), graph, links) for row_id in row_ids)
+    return "<ul>" + "".join(f"<li>{step}</li>" for step in steps) + "</ul>"
+
+
+def commits_html(row_id, graph, links):
+    """The commit that added the row and the one that closed it, each with
+    every paragraph of its message that names the row, as Q2949's merge
+    names the row it files after it."""
+    lines = []
+    if row_id in graph.added_at:
+        lines.append(commit_html("added in", graph.added_at[row_id], row_id, links))
+    if row_id in graph.closed_commit:
+        lines.append(commit_html(f"{graph.closed_kind[row_id]} in", graph.closed_commit[row_id], row_id, links))
+    if not lines:
+        return "no commit lineage reads added or closed it"
+    return "<ul>" + "".join(f"<li>{line}</li>" for line in lines) + "</ul>"
+
+
+def commit_html(what, commit, row_id, links):
+    """`ROW_REF` finds the row as `lineage.token_present` would, since lineage
+    reads Q rows alone, and with one pattern compiled once for every row."""
+    assert ROW_REF.fullmatch(row_id), f"lineage read a commit for {row_id}, and it reads only Q rows"
+    quoted = "".join(
+        f'<blockquote class="qp-message">{links.text(paragraph)}</blockquote>'
+        for paragraph in commit.paragraphs
+        if row_id in ROW_REF.findall(paragraph)
+    )
+    return f"{what} <code>{commit.sha[:8]}</code> on {day_of(commit)}, <q>{links.text(commit.subject)}</q>{quoted}"
 
 
 def write_set_html(write_set):
@@ -1256,6 +1423,54 @@ def write_set_html(write_set):
     if write_set == "-":
         return "no tracked file, only a new section of its own"
     return "<ul>" + "".join(f"<li><code>{html.escape(path)}</code></li>" for path in write_set.split(",")) + "</ul>"
+
+
+def input_page(node, graph, related, links):
+    """Every row lineage links to a fuzz target or a STEP file (§473): the
+    rows in its tree; the rows hung elsewhere that the commit that filed
+    them, the parent their text would not override, or a later word ties to
+    a row in that tree; and the rows whose text or later word names it."""
+    kind, name = node.split(":", 1)
+    tree = set(graph.with_text.subtree(node))
+    linked = sorted(
+        {other for row_id in tree for other in related.also_named_by.get(row_id, [])} - tree, key=lineage.row_sort_key)
+    named_by = [row_id for row_id in related.rows_naming_input.get(node, []) if row_id not in tree and row_id not in linked]
+    return INPUT_PAGE.format(
+        base_style=BASE_STYLE,
+        detail_style=DETAIL_STYLE,
+        title=f"The {INPUT_KINDS[kind]} {html.escape(name)}",
+        what_it_is=what_it_is_html(kind, name, graph),
+        counts=input_counts(node, graph),
+        came_from_it=descendants_html(node, [node], graph, links) if tree else "nothing: no row hangs on it",
+        linked=steps_list(linked, graph, links, "no row hung elsewhere is tied to a row in its tree"),
+        named_by=steps_list(named_by, graph, links, "no row outside its tree names it"),
+    )
+
+
+def what_it_is_html(kind, name, graph):
+    """Where the input lives, or that no commit on main ever held it, since a row's word can name any file."""
+    if kind == "fuzz":
+        path = f"<code>{lineage.TARGETS_DIR}{html.escape(name)}.rs</code>"
+        if name in graph.inputs.targets:
+            return path
+        return f"{path}, which no commit on main ever held: only a row names this target"
+    assert kind == "step", f"{kind!r} is no kind of input"
+    paths = graph.inputs.corpus_paths_of(name)
+    if not paths:
+        return f"no line of <code>{lineage.MANIFEST_PATH}</code> on main ever listed a file of this name: only a row names it"
+    files = join_and(f"<code>{html.escape(path)}</code>" for path in paths)
+    return f"{files} in the STEP corpus, as <code>{lineage.MANIFEST_PATH}</code> lists it"
+
+
+def input_counts(node, graph):
+    """The faults an input shows and the rows its tree holds, as `just lineage` counts them (§433, §472)."""
+    tree = graph.with_text.subtree(node)
+    faults = sum(1 for row_id in tree if lineage.shows_its_fault(graph.with_text.parent_of[row_id], node))
+    return f"{how_many(faults, 'fault')} it shows, {how_many(len(tree), 'row')} in its tree"
+
+
+def how_many(count, noun):
+    return f"{count} {noun}{'' if count == 1 else 's'}"
 
 
 ROW_PAGE = """<!DOCTYPE html>
@@ -1266,20 +1481,7 @@ ROW_PAGE = """<!DOCTYPE html>
 <title>{id} · rcad queue</title>
 <style>
 {base_style}
-dl.qp-row {{ display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; max-width: 1100px; margin: 0; }}
-dl.qp-row dt {{ color: var(--qp-ink-2); font-weight: 600; }}
-dl.qp-row dd {{ margin: 0; }}
-dl.qp-row ol {{ margin: 0; padding-left: 20px; }}
-dl.qp-row ul ul {{ margin: 0; }}
-pre.qp-row-text {{
-  white-space: pre-wrap;
-  font-size: 12px;
-  background: var(--qp-surface);
-  border: 1px solid var(--qp-border);
-  border-radius: 8px;
-  padding: 8px 12px;
-  max-width: 1100px;
-}}
+{detail_style}
 </style>
 </head>
 <body>
@@ -1290,6 +1492,10 @@ pre.qp-row-text {{
 <dt>Class</dt><dd>{row_class}</dd>
 <dt>Came from</dt><dd><ol>{provenance}</ol></dd>
 <dt>Resulted in</dt><dd>{results}</dd>
+<dt>Also named by</dt><dd>{also_named_by}</dd>
+<dt>Named in the text of</dt><dd>{named_in}</dd>
+<dt>Fuzz targets and STEP files it names</dt><dd>{inputs_named}</dd>
+<dt>Its commits</dt><dd>{commits}</dd>
 <dt>Expects to change</dt><dd>{write_set}</dd>
 </dl>
 <h2>The row</h2>
@@ -1298,7 +1504,56 @@ pre.qp-row-text {{
 </html>
 """
 
-# The palette, the type and the plain elements both kinds of page share.
+INPUT_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title} · rcad queue</title>
+<style>
+{base_style}
+{detail_style}
+</style>
+</head>
+<body>
+<p class="qp-sub"><a href="../index.html">rcad queue</a></p>
+<h1>{title}</h1>
+<dl class="qp-row">
+<dt>What it is</dt><dd>{what_it_is}</dd>
+<dt>Counted</dt><dd>{counts}</dd>
+<dt>Came from it</dt><dd>{came_from_it}</dd>
+<dt>Tied to a row in its tree</dt><dd>{linked}</dd>
+<dt>Named by</dt><dd>{named_by}</dd>
+</dl>
+</body>
+</html>
+"""
+
+# The list of fields and the quoted text a row's page and an input's page share.
+DETAIL_STYLE = """dl.qp-row { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; max-width: 1100px; margin: 0; }
+dl.qp-row dt { color: var(--qp-ink-2); font-weight: 600; }
+dl.qp-row dd { margin: 0; }
+dl.qp-row ol { margin: 0; padding-left: 20px; }
+dl.qp-row ul ul { margin: 0; }
+pre.qp-row-text {
+  white-space: pre-wrap;
+  font-size: 12px;
+  background: var(--qp-surface);
+  border: 1px solid var(--qp-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  max-width: 1100px;
+}
+blockquote.qp-message {
+  white-space: pre-wrap;
+  font-size: 12px;
+  color: var(--qp-ink-2);
+  border-left: 2px solid var(--qp-grid);
+  margin: 4px 0 4px 4px;
+  padding-left: 8px;
+}"""
+
+# The palette, the type and the plain elements every page shares.
 BASE_STYLE = """:root {
   color-scheme: light;
   --qp-surface: #fcfcfb;

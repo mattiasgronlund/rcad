@@ -14972,6 +14972,22 @@ queue-page:
 # names a STEP file and files one that names the same file, which hangs on the
 # row closed (§472).
 #
+# A seventh commit checks every link the pages show beside the one parent
+# (§473). It adds a STEP corpus manifest, two of whose files share a name, and
+# a fuzz target; closes Q49 done, with one paragraph of its message naming Q49
+# and Q52 and one naming neither; and files Q50 from Q2 with a second word
+# naming Q48, Q51 from demo.stp with text naming two corpus files and the
+# target, and Q52 from plate.step, which stays on that file since Q49 is not
+# in its tree. Row pages are checked for the rows that name the row in a
+# reading lineage did not take, the rows whose text names it, the inputs its
+# text names, and its commits with the paragraphs that name it. Input pages
+# are checked for what the input is, its counts, its tree, the rows hung
+# elsewhere that the commit that filed them ties to its tree, and the rows
+# that name it. A page planted for an input no row is linked to must go. An
+# eighth commit closes nothing and files Q53, whose second word names a row in
+# demo.stp's tree: a reading lineage did not take ties a row to a file's tree
+# as a commit does, and the file's page lists it beside those.
+#
 # The Families section (§450.3) says there is none at the fourth commit, whose
 # rows name no `tests/*.rs` file. The fifth commit adds three open rows on one
 # test file, one by an item and one in tier 5, a parked fourth that is no
@@ -14987,7 +15003,7 @@ queue-page:
 # cache both ways: a log left alone is served from it, a log that grew is read
 # again.
 [private]
-[doc("queue-page's charts, tables, row pages and fuzzing section, checked against hand counts of a scratch repository and fixture fuzz nights.")]
+[doc("queue-page's charts, tables, row and input pages and fuzzing section, checked against hand counts of a scratch repository and fixture fuzz nights.")]
 check-queue-page-selftest:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -15484,10 +15500,10 @@ check-queue-page-selftest:
     [ "$(chain Q28)" = 'Q28 Q29 Q28 ' ] || fail "Q28's chain should go Q28, Q29 and stop on Q28: $(chain Q28)"
     on_page D1 '<li><code><a href="D1.html">D1</a></code>: carried over from the retired <code>docs/test-plan.md</code>, and lineage follows only Q rows</li>' \
         "D1 is a D row, which lineage does not follow"
-    on_page Q30 '</q>: came from the fuzz target <code>demo</code>, which its text names (§433.6); without reading its text, came from <code><a href="Q5.html">Q5</a></code>, read from the commit that added it</li></ol>' \
-        "its text names a crash file of the demo target, which stands over the lane merge that added it (§433.6), and the chain ends at the target"
-    on_page Q31 '</q>: came from the STEP file <code>demo.stp</code>, as its own word says; without its word, came from <code><a href="Q5.html">Q5</a></code>, read from the commit that added it</li></ol>' \
-        "its word names a STEP file, and the chain ends there, and Q5, whose lane's merge added it, is not in that file's tree (§472)"
+    on_page Q30 '</q>: came from the fuzz target <code><a href="../inputs/fuzz-demo.html">demo</a></code>, which its text names (§433.6); without reading its text, came from <code><a href="Q5.html">Q5</a></code>, read from the commit that added it</li><li>the fuzz target <code><a href="../inputs/fuzz-demo.html">demo</a></code>: 1 fault it shows, 1 row in its tree</li></ol>' \
+        "its text names a crash file of the demo target, which stands over the lane merge that added it (§433.6), and the chain ends at the target, linked to its page (§473)"
+    on_page Q31 '</q>: came from the STEP file <code><a href="../inputs/step-demo.stp.html">demo.stp</a></code>, as its own word says; without its word, came from <code><a href="Q5.html">Q5</a></code>, read from the commit that added it</li><li>the STEP file <code><a href="../inputs/step-demo.stp.html">demo.stp</a></code>: 1 fault it shows, 1 row in its tree</li></ol>' \
+        "its word names a STEP file, and the chain ends there, linked to its page (§473), and Q5, whose lane's merge added it, is not in that file's tree (§472)"
     on_page Q2 "<dt>Resulted in</dt><dd><ul><li><code><a href=\"Q21.html\">Q21</a></code>, added in <code>${sha_d:0:8}</code> on 2026-09-04, <q>Merge lane-q5-the-tables: rows waiting, parked, pinned and meeting a running lane</q>: came from <code><a href=\"Q2.html\">Q2</a></code>, as its own word says; without its word, came from <code><a href=\"Q5.html\">Q5</a></code>, read from the commit that added it</li></ul></dd>" \
         "Q21 came from Q2, as its word says, and each row below gets the step its own Came from gives it"
     on_page Q20 '<dt>Resulted in</dt><dd>nothing: no row came from it</dd>' "no row came from Q20"
@@ -15579,11 +15595,84 @@ check-queue-page-selftest:
         -e '/^Q48  /a Q49  1  todo  opus  -  from/step:demo.stp what fixing Q48 showed in the same file §433' "$hub/docs/queue.md"
     g add docs/queue.md
     GIT_COMMITTER_DATE='2026-09-06T10:00:00+00:00' g commit -q -m "commit F: Q48 done, and Q49 filed from what fixing it showed"
+    sha_f=$(g rev-parse HEAD)
     render || fail "queue-page failed to render commit F"
-    on_page Q49 '</q>: came from <code><a href="Q48.html">Q48</a></code>, read from the commit that added it, in the tree of the STEP file <code>demo.stp</code>, which its word names (§472)</li>' \
+    on_page Q49 '</q>: came from <code><a href="Q48.html">Q48</a></code>, read from the commit that added it, in the tree of the STEP file <code><a href="../inputs/step-demo.stp.html">demo.stp</a></code>, which its word names (§472)</li>' \
         "Q49's word names demo.stp, and Q48, which commit F closed as it filed Q49, is in that file's tree (§472)"
     [ "$(chain Q49)" = 'Q49 Q48 ' ] || fail "Q49's page should trace it to Q48 and stop at the STEP file Q48's word names: $(chain Q49)"
+    on_page Q49 '<li>the STEP file <code><a href="../inputs/step-demo.stp.html">demo.stp</a></code>: 3 faults it shows, 3 rows in its tree</li></ol>' \
+        "Q49's chain should end on demo.stp, linked to its page, which counts Q31, Q48 and Q49 (§473)"
     [ "$(results Q48)" = '( Q49 ) ' ] || fail "Q48's page should hold Q49, which hangs on it: $(results Q48)"
+
+    # Commit G (§473): the links beside the one parent, and the input pages.
+    mkdir -p "$hub/corpus" "$hub/fuzz/fuzz_targets"
+    printf '%064d  %s\n' 0 parts/plate.step 0 a/box.step 0 b/box.step > "$hub/corpus/manifest.sha256"
+    printf 'fn main() {}\n' > "$hub/fuzz/fuzz_targets/writer_target.rs"
+    sed -i -e '/^Q49  /s/todo/done:abcdefa/' \
+        -e '/^Q49  /a Q50  1  todo  opus  -  from/Q2 was/Q48 a row with a second word §473\
+    Q51  1  todo  opus  -  from/step:demo.stp a fault in demo.stp that plate.step, a/box.step and writer_target show too §473\
+    Q52  1  todo  opus  -  from/step:plate.step a fault plate.step shows, found fixing Q49 §473' "$hub/docs/queue.md"
+    g add docs/queue.md corpus/manifest.sha256 fuzz/fuzz_targets/writer_target.rs
+    GIT_COMMITTER_DATE='2026-09-07T10:00:00+00:00' g commit -q -m "commit G: Q49 done, and Q50 to Q52 filed" \
+        -m "Fixing Q49 turned up Q52, a fault plate.step shows." -m "The corpus gains plate.step, and the fuzz targets gain writer_target."
+    sha_g=$(g rev-parse HEAD)
+    printf x > "$out/inputs/step-gone.stp.html"
+    render || fail "queue-page failed to render commit G"
+    # A field's rows on any page under $out, each list as ( and ) around the rows in it.
+    field() {
+        grep "^<dt>$2</dt>" "$out/$1.html" | grep -oE '<ul>|</ul>|<li><code>(<a href="[^"]*">)?[TDQ][0-9]+<' \
+            | sed -E 's/^<ul>$/(/; s/^<\/ul>$/)/; s/.*>([TDQ][0-9]+)<$/\1/' | tr '\n' ' '
+    }
+    on_input() { grep -qF -- "$2" "$out/inputs/$1.html" || fail "$1's page: $3"; }
+    [ "$(LC_ALL=C ls "$out/inputs" | tr '\n' ' ')" = 'fuzz-demo.html fuzz-writer_target.html step-a~box.step.html step-demo.stp.html step-plate.step.html ' ] \
+        || fail "every fuzz target and STEP file a row is linked to should have a page, a/box.step's written with ~ for its /, and the page planted for gone.stp, which no row is, should be gone: $(LC_ALL=C ls "$out/inputs" | tr '\n' ' ')"
+    [ "$(field rows/Q5 'Also named by')" = '( Q21 Q27 Q28 Q29 Q30 Q31 ) ' ] \
+        || fail "Q5's lane merge added Q21, Q27, Q28 and Q29, whose words name other rows, Q30, whose text names a crash file, and Q31, whose word names a STEP file, so each names Q5 in a reading lineage did not take: $(field rows/Q5 'Also named by')"
+    [ "$(field rows/Q49 'Also named by')" = '( Q50 Q52 ) ' ] \
+        || fail "commit G closed Q49 as it filed Q50 and Q52, whose words name other parents, and not Q51, which hangs on Q49: $(field rows/Q49 'Also named by')"
+    [ "$(field rows/Q48 'Also named by')" = '( Q50 ) ' ] || fail "Q50's second word was/Q48 names Q48: $(field rows/Q48 'Also named by')"
+    on_page Q50 '; it carries <code>was/<a href="Q48.html">Q48</a></code> after its word too, and lineage reads only the first (§473)</li>' \
+        "Q50's second word, linked, beside the first, which sets where it came from"
+    on_page Q49 '<dt>Named in the text of</dt><dd><code><a href="Q52.html">Q52</a></code></dd>' "Q52's text names Q49"
+    on_page Q51 '<dt>Fuzz targets and STEP files it names</dt><dd>the fuzz target <code><a href="../inputs/fuzz-writer_target.html">writer_target</a></code>, the STEP file <code><a href="../inputs/step-a~box.step.html">a/box.step</a></code> and the STEP file <code><a href="../inputs/step-plate.step.html">plate.step</a></code></dd>' \
+        "Q51's text names writer_target, plate.step and a/box.step, and not demo.stp, which no manifest lists"
+    on_page Q52 "<dt>Its commits</dt><dd><ul><li>added in <code>${sha_g:0:8}</code> on 2026-09-07, <q>commit G: <a href=\"Q49.html\">Q49</a> done, and <a href=\"Q50.html\">Q50</a> to <a href=\"Q52.html\">Q52</a> filed</q><blockquote class=\"qp-message\">Fixing <a href=\"Q49.html\">Q49</a> turned up <a href=\"Q52.html\">Q52</a>, a fault plate.step shows.</blockquote></li></ul></dd>" \
+        "commit G added Q52, and of its message only the paragraph naming Q52 shows"
+    on_page Q49 "<dt>Its commits</dt><dd><ul><li>added in <code>${sha_f:0:8}</code> on 2026-09-06, <q>commit F: <a href=\"Q48.html\">Q48</a> done, and <a href=\"Q49.html\">Q49</a> filed from what fixing it showed</q></li><li>done in <code>${sha_g:0:8}</code> on 2026-09-07, <q>commit G: <a href=\"Q49.html\">Q49</a> done, and <a href=\"Q50.html\">Q50</a> to <a href=\"Q52.html\">Q52</a> filed</q><blockquote class=\"qp-message\">Fixing <a href=\"Q49.html\">Q49</a>" \
+        "commit F added Q49 with no message body, and commit G closed it done with a paragraph naming it"
+    on_page D1 '<dt>Its commits</dt><dd>no commit lineage reads added or closed it</dd>' "lineage reads only Q rows"
+    on_page Q31 '<li>the STEP file <code><a href="../inputs/step-demo.stp.html">demo.stp</a></code>: 4 faults it shows, 4 rows in its tree</li></ol>' \
+        "Q31's chain should end on demo.stp, whose tree commit G grew by Q51"
+    on_input step-demo.stp '<h1>The STEP file demo.stp</h1>' "its title names it"
+    on_input step-demo.stp '<dt>What it is</dt><dd>no line of <code>corpus/manifest.sha256</code> on main ever listed a file of this name: only a row names it</dd>' \
+        "only a word names demo.stp"
+    on_input step-demo.stp '<dt>Counted</dt><dd>4 faults it shows, 4 rows in its tree</dd>' "Q31, Q48, Q49 and Q51 are each a fault it shows (§472)"
+    [ "$(field inputs/step-demo.stp 'Came from it')" = '( Q31 Q48 ( Q49 ( Q51 ) ) ) ' ] \
+        || fail "demo.stp's tree should hold Q31 and Q48, Q49 below Q48 and Q51 below Q49: $(field inputs/step-demo.stp 'Came from it')"
+    [ "$(field inputs/step-demo.stp 'Tied to a row in its tree')" = '( Q50 Q52 ) ' ] \
+        || fail "Q50 and Q52 hang elsewhere, and the commit that filed them closed Q49, which is in demo.stp's tree: $(field inputs/step-demo.stp 'Tied to a row in its tree')"
+    on_input step-demo.stp '<dt>Named by</dt><dd>no row outside its tree names it</dd>' "no row outside demo.stp's tree names it"
+    on_input step-plate.step '<dt>What it is</dt><dd><code>parts/plate.step</code> in the STEP corpus, as <code>corpus/manifest.sha256</code> lists it</dd>' \
+        "the manifest lists plate.step"
+    on_input step-plate.step '<dt>Counted</dt><dd>1 fault it shows, 1 row in its tree</dd>' "Q52 is the one fault it shows"
+    [ "$(field inputs/step-plate.step 'Came from it')" = '( Q52 ) ' ] || fail "plate.step's tree should hold Q52: $(field inputs/step-plate.step 'Came from it')"
+    [ "$(field inputs/step-plate.step 'Named by')" = '( Q51 ) ' ] \
+        || fail "Q51's text names plate.step, and Q52, whose word names it, is in its tree already: $(field inputs/step-plate.step 'Named by')"
+    on_input step-a~box.step '<h1>The STEP file a/box.step</h1>' "its title names it by its tail, a/box.step"
+    on_input fuzz-writer_target '<dt>What it is</dt><dd><code>fuzz/fuzz_targets/writer_target.rs</code></dd>' "commit G added the writer target"
+    on_input fuzz-writer_target '<dt>Came from it</dt><dd>nothing: no row hangs on it</dd>' "no row hangs on the writer target"
+    [ "$(field inputs/fuzz-writer_target 'Named by')" = '( Q51 ) ' ] || fail "Q51's text names writer_target: $(field inputs/fuzz-writer_target 'Named by')"
+    on_input fuzz-demo '<dt>What it is</dt><dd><code>fuzz/fuzz_targets/demo.rs</code>, which no commit on main ever held: only a row names this target</dd>' \
+        "only Q30's crash file names the demo target"
+
+    # Commit H closes nothing, so only Q53's second word ties it to demo.stp's tree.
+    sed -i -e '/^Q52  /a Q53  1  todo  opus  -  from/Q2 from/Q31 a row whose second word names a row in a file tree §473' "$hub/docs/queue.md"
+    g add docs/queue.md
+    GIT_COMMITTER_DATE='2026-09-08T10:00:00+00:00' g commit -q -m "commit H: Q53 filed"
+    render || fail "queue-page failed to render commit H"
+    [ "$(field rows/Q31 'Also named by')" = '( Q53 ) ' ] || fail "Q53's second word from/Q31 names Q31: $(field rows/Q31 'Also named by')"
+    [ "$(field inputs/step-demo.stp 'Tied to a row in its tree')" = '( Q50 Q52 Q53 ) ' ] \
+        || fail "Q53 hangs on Q2, and its second word names Q31, which is in demo.stp's tree, though no commit ties it there: $(field inputs/step-demo.stp 'Tied to a row in its tree')"
 
     # §308 (Q2469): a `cores:` skip line comes from the justfile's own
     # cores_fit_skip, never from queue.py, in two forms: the night fuzz
@@ -15666,7 +15755,7 @@ check-queue-page-selftest:
     ) || fail "parse_blocked_line or meeting_reason could not read the pinned-and-skipped-above line §430.7"
     [ "$pinned_check" = "ok" ] || fail "the pinned-skip check did not print ok: $pinned_check"
 
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the Queue section counts each tier's ready and blocked rows by model and lists them in runs, every Q id that is a row links to that row's page, which gives its tier, class, write set, text, where it came from and what came from it, the lineage cache serves a kept commit and works out a new one, the fuzzing section matches its fixture nights, both forms of a cores-skip line read as a row waiting for threads, and a row whose write set meets a pinned row already skipped reads as pinned and skipped above too"
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the Queue section counts each tier's ready and blocked rows by model and lists them in runs, every Q id that is a row links to that row's page, which gives its tier, class, write set, text, where it came from and what came from it, every other row and input linked to it and its commits, every fuzz target and STEP file a row is linked to has a page of its own, the lineage cache serves a kept commit and works out a new one, the fuzzing section matches its fixture nights, both forms of a cores-skip line read as a row waiting for threads, and a row whose write set meets a pinned row already skipped reads as pinned and skipped above too"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
