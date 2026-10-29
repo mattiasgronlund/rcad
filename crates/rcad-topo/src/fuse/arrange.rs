@@ -1534,9 +1534,8 @@ impl<'f> Arrangement<'f> {
     /// and Q898). What is left reaches here and is refused rather than arranged
     /// wrongly: two faces on one curved surface used opposite ways round, a
     /// pipe spelled twice where [`name_of_the_surface_either_way_round`] does
-    /// not fold the spellings together, and two faces of a curved solid on one
-    /// plane, which the bake leaves to the joiner and the joiner joins only on
-    /// a wholly flat solid.
+    /// not fold the spellings together, and a plane written the two opposite
+    /// ways and used opposite ways, which the bake leaves apart (row Q2962).
     fn crossing_for(
         &mut self,
         partner: Surface,
