@@ -16812,6 +16812,18 @@ check-queue-selftest:
     grep -qxF "skip Q2 (tier 1): its crates/rcad-topo/tests/two_arcs_where_two_curved_surfaces_cross.rs meets Q1's crates/rcad-topo/tests/two_arcs_where_two_curved_surfaces_cross.rs, held by lane:lane-q1" <<<"$got" \
         || fail "a shared meet did not let the fill go on to check the write sets' other entries"
 
+    # §424.4 (Q2739): the count of holders is kept per shared file, not summed
+    # across both. A row naming both `arrange.rs` and `assemble.rs`, each held
+    # by exactly one other holder, meets neither file twice, so it is taken.
+    fence sharedtwofiles <<'MD'
+    Q1  1  lane:lane-q1  opus  crates/rcad-topo/src/fuse/arrange.rs  the only holder of arrange.rs §230
+    Q2  1  lane:lane-q2  opus  crates/rcad-topo/src/fuse/assemble.rs  the only holder of assemble.rs §230
+    Q3  1  todo  opus  crates/rcad-topo/src/fuse/arrange.rs,crates/rcad-topo/src/fuse/assemble.rs  names both shared files, one holder on each §230
+    MD
+    drive sharedtwofiles next 1
+    [ "$(takes)" = "Q3 " ] \
+        || fail "a row naming two shared files, each held by only one holder, was skipped though neither file has two holders"
+
     # A directory above a shared file is not itself a shared entry: it still
     # meets every row under it at once, both files on the list included.
     fence shareddir <<'MD'
