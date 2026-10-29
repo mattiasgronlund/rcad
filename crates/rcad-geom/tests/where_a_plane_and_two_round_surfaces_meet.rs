@@ -2338,3 +2338,67 @@ fn a_plane_along_an_leds_body_across_its_domes_rim_meets_both_at_four_corners() 
         points_near(order, &corners);
     }
 }
+
+/// **A side of an LED's lead, carried across the rim where its dome sits on
+/// its body** (Q2963, from `LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step`, as its
+/// faces 16 and 14 store the two sides). The body is a pipe of radius 1.5
+/// along `−y` and the dome a ball of radius 1.5 about a point on its axis, so
+/// drawn, the two touch along the rim `y = −10.15`, and each side, a plane
+/// leaning 2.6° off `x = 1.79` or `x = 2.39`, meets both where it crosses that
+/// circle, twice. Stored, the pipe's axis leans `5.6e−17` off `y`, so 3.8 along
+/// it, at the ball's centre, the axis has drifted `2.1e−16` toward `−x`. On the
+/// `+x` side, where both planes are, the dome bulges past the pipe by a hair,
+/// so the two cross in a thin loop round the rim, and each plane cuts that
+/// loop at four corners: `1.5e−8` or `2.2e−8` either side of the rim, and
+/// mirrored in `z = 2`. Each is worked out over the rationals the stored
+/// numbers name, not by this code: on the plane the ball and the pipe differ
+/// by a quadratic in `y`, whose roots are the corners' `y`, and the ball gives
+/// each its two `z`.
+///
+/// The wall `z = 2` is a mirror of all three. Worked out exactly at each root,
+/// the sign of the chord the plane cuts in the pipe's circle there needed
+/// products that fell out of range, so the three were refused, as the dome's
+/// split in every fuse of this file was, until a box round the root was asked
+/// first (Q2954).
+#[test]
+fn the_side_of_an_leds_lead_across_its_domes_rim_meets_both_at_four_corners() {
+    let dome = ball([1.27, -10.15, 2.0], 1.5);
+    let body = pipe([1.27, -6.35, 2.0], [-5.551115123126e-17, -1.0, 0.0], 1.5);
+    for (normal, offset, corners) in [
+        (
+            [-0.9989527574506751, 0.04575356140993512, 0.0],
+            -2.251380245112493,
+            [
+                [1.788854961154612, -10.150000014795168, 0.5925947529992487],
+                [1.788854961154612, -10.150000014795168, 3.407405247000751],
+                [1.7888549625098946, -10.149999985204833, 0.592594753498888],
+                [1.7888549625098946, -10.149999985204833, 3.4074052465011118],
+            ],
+        ),
+        (
+            [0.9989527574506751, -0.04575356140993512, 0.0],
+            2.8507518995828978,
+            [
+                [2.3888549608371594, -10.150000021726202, 1.0009186336388425],
+                [2.3888549608371594, -10.150000021726202, 2.9990813663611577],
+                [2.388854962827346, -10.149999978273799, 1.0009186358676199],
+                [2.388854962827346, -10.149999978273799, 2.99908136413238],
+            ],
+        ),
+    ] {
+        let side = Plane::from_point_and_normal_as_written(
+            Point::new(normal[0] * offset, normal[1] * offset, 0.0),
+            Vector::new(normal[0], normal[1], normal[2]),
+        )
+        .expect("a normal with length");
+        assert_eq!(
+            (side.normal().components(), side.offset()),
+            (normal, offset),
+            "the side the file stores"
+        );
+        let side = Surface::Plane(side);
+        for order in every_order([&side, &dome, &body]) {
+            points_near(order, &corners);
+        }
+    }
+}
