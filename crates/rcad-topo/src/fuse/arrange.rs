@@ -5287,7 +5287,9 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::as_three_planes_through_one_line_say`]), two meets of a
     /// plane's line on a pipe with two planes that cross it in parallel lines
     /// ([`Arrangement::as_two_cuts_crossing_the_plane_in_parallel_lines_say`]),
-    /// where a second plane cuts a plane's loop
+    /// which side of one plane cutting a plane's loop a node on another lies
+    /// ([`Arrangement::as_the_side_of_one_cut_the_other_is_on_says`]), where a
+    /// second plane cuts a plane's loop
     /// ([`Arrangement::as_a_flat_cut_through_the_loop_says`]) and where two
     /// parallel planes cut it
     /// ([`Arrangement::as_two_parallel_cuts_through_the_loop_say`]) only where
@@ -5409,6 +5411,12 @@ impl<'f> Arrangement<'f> {
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) =
                 self.as_two_cuts_crossing_the_plane_in_parallel_lines_say(crossing, first, second)
+        {
+            decided = proved;
+        }
+        if matches!(decided, Decision::Undecidable { .. })
+            && let Some(proved) =
+                self.as_the_side_of_one_cut_the_other_is_on_says(crossing, first, second)
         {
             decided = proved;
         }
@@ -6432,6 +6440,136 @@ impl<'f> Arrangement<'f> {
             theirs_further_along_w
         } else {
             the_other_way(theirs_further_along_w)
+        })
+    }
+
+    /// Which of two nodes on the loop a plane cuts a ball, a pipe or a cone in
+    /// comes first, where each is where a plane of its own cuts the loop: read
+    /// off which side of the first's plane the second is on, and which way the
+    /// loop runs across that plane at each. `None` everywhere else, and
+    /// wherever a sign it reads is not proved.
+    ///
+    /// **It is [`Arrangement::as_two_parallel_cuts_through_the_loop_say`] with
+    /// the second's plane moved to run through the second, facing as the
+    /// first's does.** Write `M` for the first's plane, nought at the first.
+    /// Where the loop runs the same way across `M` at both nodes,
+    /// `n_M · (∇W₀ × ∇W₁)` proved one sign over both boxes, the two are on one
+    /// half of the loop across `n_M`, and the arc of that half between them is
+    /// where `M` lies between nought and its value at the second. So the
+    /// second comes after the first where that value has the sign the loop
+    /// runs across `M`, from a start where `M` is outside that range.
+    ///
+    /// **The side of `M` the second is on is read exactly.** The second lies
+    /// on the line `L` the loop's plane and its own plane cross in, inside its
+    /// box. Along an axis `L` runs along, the box spans `[lo, hi]`. `M` is
+    /// affine along `L`, so where it has one sign at the two points `L` crosses
+    /// `lo` and `hi` at, it has that sign at the second, and each of those
+    /// signs is a meet of three planes
+    /// ([`side_of_a_plane_where_three_planes_meet`](rcad_predicates::side_of_a_plane_where_three_planes_meet)).
+    ///
+    /// Only a node that stands for one meet is read, as in
+    /// [`Arrangement::as_the_quadric_says`], and both starts are asked, as in
+    /// [`the_lower_meet_first_round_the_loop`].
+    ///
+    /// The LED of `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step` is the shape
+    /// (Q2988). Its flange's front, normal `(0, 1, −1.158e−15)` at offset
+    /// `−3.810000000000007`, and its body's front disc, normal
+    /// `(5.55e−17, 1, 0)` at `−3.81`, are one plane written twice. The lead's
+    /// bottom `z = 5.7` cuts the flange's rim, a pipe of radius `1.9` whose
+    /// axis leans `1.1e−15` off `y`, in a loop about `3e15` long, and both
+    /// planes cut that loop near `(3.146, −3.81, 5.7)`, in boxes that touch
+    /// along `y`. Every fuse of the LED was refused on which of the two comes
+    /// first.
+    fn as_the_side_of_one_cut_the_other_is_on_says(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::RoundAClosedCurve {
+            from,
+            node,
+            named_the_start,
+            ref wound_as,
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let round = |surface: &Surface| {
+            matches!(
+                surface,
+                Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+            )
+        };
+        let flat = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
+            (Some(flat), None) if round(&wound_as[1]) => *flat,
+            (None, Some(flat)) if round(&wound_as[0]) => *flat,
+            (Some(_) | None, Some(_) | None) => return None,
+        };
+        let the_cut_at = |at: usize| {
+            let (surfaces, _) = self.the_one_meet_it_stands_for(at)?;
+            if !wound_as.iter().all(|surface| surfaces.contains(surface)) {
+                return None;
+            }
+            let mut others = surfaces
+                .iter()
+                .filter(|surface| !wound_as.contains(surface));
+            let (Some(Surface::Plane(cut)), None) = (others.next(), others.next()) else {
+                return None;
+            };
+            Some(*cut)
+        };
+        let (mine, theirs) = (the_cut_at(first)?, the_cut_at(second)?);
+        let across = mine.normal().components().map(Interval::exactly);
+        let runs_at = |at: usize| {
+            let place = self.nodes[at].point;
+            let forward = cross_of_intervals(
+                gradient_at(&wound_as[0], place).enclosure(),
+                gradient_at(&wound_as[1], place).enclosure(),
+            );
+            dot_of(across, forward).sign()
+        };
+        let (runs, runs_there) = (runs_at(first), runs_at(second));
+        // Compared rather than matched: only one proved way is read, and every
+        // other answer leaves the pair to the policy (§40).
+        if runs != runs_there || !(runs == Decision::Pos || runs == Decision::Neg) {
+            return None;
+        }
+        let held = self.narrowed_box_of(second).enclosure();
+        let side_where_the_line_crosses = |axis: usize, at: f64| {
+            let mut square = [0.0; 4];
+            square[axis] = 1.0;
+            square[3] = -at;
+            rcad_predicates::side_of_a_plane_where_three_planes_meet(
+                [flat.coefficients(), theirs.coefficients(), square],
+                mine.coefficients(),
+            )
+            .ok()
+        };
+        let theirs_past_mine = (0..3).find_map(|axis| {
+            let [lo, hi] = [held[axis].lo(), held[axis].hi()];
+            if !(lo.is_finite() && hi.is_finite()) {
+                return None;
+            }
+            let at_lo = side_where_the_line_crosses(axis, lo)?;
+            let at_hi = side_where_the_line_crosses(axis, hi)?;
+            // Compared rather than matched: only one proved sign at both ends
+            // is read (§40).
+            (at_lo == at_hi && (at_lo == Decision::Pos || at_lo == Decision::Neg)).then_some(at_lo)
+        })?;
+        let [at_mine, at_theirs] = [Interval::exactly(mine.offset()), dot_of(across, held)];
+        let clear_of_the_arc = |start: PredicatePoint| {
+            let along = dot_of(across, start.enclosure());
+            let [past_mine, past_theirs] = [at_mine, at_theirs].map(|at| (along - at).sign());
+            past_mine == past_theirs && (past_mine == Decision::Pos || past_mine == Decision::Neg)
+        };
+        if !(clear_of_the_arc(from) && clear_of_the_arc(named_the_start.unwrap_or(node))) {
+            return None;
+        }
+        Some(if theirs_past_mine == runs {
+            Decision::Pos
+        } else {
+            Decision::Neg
         })
     }
 
