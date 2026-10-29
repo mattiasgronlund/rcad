@@ -3755,16 +3755,17 @@ impl<'f> Arrangement<'f> {
         past(where_the_crossing_starts(&self.surface, &partner, from))
     }
 
-    /// The node of the corner of the face that already is `place`, one of the
-    /// `places` where the face's surface and the partners of `first` and
-    /// `second` meet, if one is.
+    /// The node of the corner of the face that already is `places[which]`, one
+    /// of the `places` where the face's surface and the partners of `first`
+    /// and `second` meet, if one is. `tight` holds the same places in the same
+    /// order, each in the tightest box known to hold it.
     ///
     /// The place then makes no node of its own, and the corner stands for it
     /// ([`Node::also`]): the face on the third surface has no such corner and
     /// names the place by its three surfaces (§284.7).
     ///
-    /// **It is, when the model says so and `place` is no further from the
-    /// corner than writing the corner down cost**, or than `bake`'s whole room
+    /// **It is, when the model says so and `places[which]` is no further from
+    /// the corner than writing the corner down cost**, or than `bake`'s whole room
     /// for three planes `bake` solved the corner among. The model says so when the
     /// corner is on both crossings: [`Arrangement::place_the_corners`] takes
     /// the edge's own crossing and a surface the corner already knows about as
@@ -3774,8 +3775,8 @@ impl<'f> Arrangement<'f> {
     /// off one of the three surfaces (§248.6).
     ///
     /// **So the fold takes the model's word only as far as rounding reaches.**
-    /// Every point of `boxed_tight`, the tightest box known to hold `place`,
-    /// has to lie inside the corner's box grown
+    /// Every point of `tight[which]`, the tightest box known to hold
+    /// `places[which]`, has to lie inside the corner's box grown
     /// by [`what_writing_the_corner_down_cost`](super::bake::what_writing_the_corner_down_cost).
     /// That is the half of `bake.rs`'s room that follows the corner, from the
     /// same function. `bake.rs` lets a meet stand in for a stored corner within
@@ -3789,13 +3790,14 @@ impl<'f> Arrangement<'f> {
     /// allowance, and the 224 into corners proved off a surface lie within
     /// under one percent of it (§253.2).
     ///
-    /// **For a meet of three planes, or of two planes and a quadric,
-    /// `boxed_tight` is `place` narrowed by one checked step; for a meet of a
-    /// plane and two quadrics it is `place` narrowed by that step again and
+    /// **For a meet of three planes, or of two planes and a quadric, each box
+    /// of `tight` is its place narrowed by one checked step; for a meet of a
+    /// plane and two quadrics it is the place narrowed by that step again and
     /// again, until a step narrows no side**
-    /// ([`MeetOfThree::boxed_tight`]); for anything else it is `place`. The
-    /// node a meet becomes when it does not fold keeps `place` as its own box,
-    /// and every other question here reads `place`, the reach below included:
+    /// ([`MeetOfThree::boxed_tight`]); for anything else it is the place. The
+    /// node a meet becomes when it does not fold keeps its place as its own
+    /// box, and every other question here reads `places`, the reach below
+    /// included, but whether two places are proved apart, which reads `tight`:
     /// wired in as the node's own box, the narrowed one moved 13 tests, most of
     /// them to a refusal or to no solid, where asked only here it moves one,
     /// to the right answer (§345). The one other question that reads a
@@ -3851,12 +3853,29 @@ impl<'f> Arrangement<'f> {
     /// inside the room, so it folds again, for §253's reason this time, and
     /// the union answers with the two blocks (§345).
     ///
-    /// **A second place within the allowance** means nothing here says which
-    /// of the two the corner is, and both stay nodes. The places of one meet
-    /// are *different* points, and folding on a touch alone once merged them
-    /// (§244.3, §248). This, and not the touch, is what keeps them apart: of a
-    /// ball's two places grazing a block's corner, the one that misses the
-    /// corner's box lies inside its room too (§395.3).
+    /// **A second place within the allowance, proved apart from the first,
+    /// leaves both nodes**: their tight boxes share no point, so they are
+    /// *different* points and nothing here says which of the two the corner
+    /// is. Folding on a touch alone once merged such places (§244.3, §248).
+    /// This, and not the touch, is what keeps them apart: of a ball's two
+    /// places grazing a block's corner, `2⁻⁵⁰` apart, the one that misses the
+    /// corner's box lies inside its room too (§395.3). A second place that
+    /// reaches the room and sticks out past it leaves both nodes as well,
+    /// since the fold cannot say the corner is it.
+    ///
+    /// **Where every place that reaches the room lies inside it and no two
+    /// are proved apart, the corner stands for each of them.** That is a line
+    /// touching a curve at the corner, written down a rounding off touching.
+    /// On the front of the KiCad LED `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm`,
+    /// the line where the flange's flat meets the front touches the circle the
+    /// body's pipe cuts in it, at the corner `(-1.23, -1.27, 15)`, and the
+    /// front's normal is tilted `1.2e-15` off the `y` axis. The two places of
+    /// that meet came out within `1e-14` of the corner, with boxes that share a
+    /// point. Left two nodes beside it, they were asked their order along a
+    /// crossing and every fuse refused (Q2959). Nothing here asks whether the
+    /// line touches the circle or crosses it twice: either way every point of
+    /// both boxes lies inside the corner's room, which is the same wobble one
+    /// place inside it is (§17.2).
     ///
     /// **Only the face's corners are looked through, not every node.** They
     /// are the first nodes, one per side of each wire
@@ -22286,15 +22305,16 @@ mod tests {
     /// A block whose side grazes a ball, with the block's corner on the ball.
     /// The side `y = 2⁻²⁵` and the ball of radius `1 + 2⁻⁵¹` meet on the face
     /// `x = −1` at `z = ±2⁻⁵¹`, `2⁻⁵⁰` apart, and the corner is the upper of the
-    /// two. Both lie inside the room writing the corner down cost, `2⁻⁴⁶`, so
-    /// nothing says which of them the corner is. Neither is folded into it: both
-    /// stay nodes, and whether they are one point is the policy's to say
-    /// (§248.6, §288.5).
+    /// two. Both lie inside the room writing the corner down cost, `2⁻⁴⁶`, and
+    /// both land exactly on an `f64`, so their boxes share no point: they are
+    /// proved two points, and nothing says which of them the corner is.
+    /// Neither is folded into it: both stay nodes (§248.6, §288.5).
     ///
     /// **No fuse sees this.** Every fuse of this block and ball refuses on the
     /// piece of the ball between the two places, fold or no fold (§288.3), so
-    /// this test, and not a fuse, is what holds `count == 1` and the second
-    /// place's check in place (§288.4).
+    /// this test, and not a fuse, is what holds the second place's check in
+    /// place (§288.4): with two places reaching the room, a fold takes both
+    /// boxes inside it and sharing a point.
     #[test]
     fn two_places_of_one_meet_inside_a_corners_room_are_neither_folded_into_it() {
         let place = f64::powi(2.0, -51);
@@ -22334,6 +22354,64 @@ mod tests {
             [([-1.0, edge, -place], false), ([-1.0, edge, place], false)],
             "the corner's own place has the other one inside its room, and the other \
              one is not the corner at all"
+        );
+    }
+
+    /// Two places of one meet whose boxes share a point, both inside the room
+    /// round the unit cube's corner at the origin, are both folded into it:
+    /// nothing proves them two points, so the corner stands for each. That is
+    /// a line touching a curve at a corner written down a rounding off
+    /// touching, as at the front corner of a KiCad LED (Q2959). Asked on the
+    /// cut `x = y`, so the room is the whole of what the fold allows.
+    ///
+    /// Two places whose tight boxes share no point are proved two, and neither
+    /// is folded, as the grazing block's are not, though their looser boxes
+    /// share a point. Nor is either when the second reaches a step past the
+    /// room, since the fold cannot say the corner is that one.
+    #[test]
+    fn two_places_of_one_meet_that_share_a_point_inside_a_corners_room_are_both_folded_into_it() {
+        let (cube, cut) = the_unit_cube_baked_and_the_plane_x_equals_y();
+        let bottom = cut_by(&the_face_facing(&cube, [0.0, 0.0, -1.0]), &[cut]);
+        let arrangement = drawn_up_to_its_corners(&bottom);
+        let wall = the_crossing_along(&arrangement, the_face_facing(&cube, [-1.0, 0.0, 0.0]));
+        let cut = the_crossing_of_the_cut(&arrangement, cut);
+        assert!(
+            is_a_corner_on_both(&arrangement, [0.0; 3], wall, cut),
+            "the fold is only asked about a corner on both crossings"
+        );
+
+        let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
+        let folds = |places: [PredicatePoint; 2], tight: [PredicatePoint; 2]| {
+            [0, 1]
+                .map(|which| arrangement.a_corner_is_this_place(wall, cut, which, &places, &tight))
+        };
+        let sharing = [from_to(0.0, room / 2.0), from_to(room / 4.0, room)];
+        let apart = [from_to(0.0, room / 4.0), from_to(room / 2.0, room)];
+        assert_eq!(
+            folds(sharing, sharing),
+            [true, true],
+            "two places inside the room that share a point are each the corner written down \
+             another way"
+        );
+        assert_eq!(
+            folds(apart, apart),
+            [false, false],
+            "two places inside the room that share no point are two points, and the corner is \
+             not both"
+        );
+        assert_eq!(
+            folds(sharing, apart),
+            [false, false],
+            "two places are proved apart by their tight boxes, however their loose ones overlap"
+        );
+        let past = [
+            from_to(0.0, room / 2.0),
+            from_to(room / 4.0, room.next_up()),
+        ];
+        assert_eq!(
+            folds(past, past),
+            [false, false],
+            "a second place that sticks out a step past the room leaves the first to the policy too"
         );
     }
 
