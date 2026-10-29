@@ -12,15 +12,19 @@ Q2037's trace was, and it covers every row named on any of them. It may be
 open or closed: a trace that is done still covers the rows it named. A file
 that has had a trace is a family again only once three open rows that no
 trace names share it, and then the family is those rows alone, the ones a new
-trace would name. A file that has had no trace keeps all its rows, whatever a
-trace on another file named.
+trace would name. A file that has had no trace of its own still loses a row
+once that row's own write set also names a file a trace is on: a trace clears
+a row off every `tests/*.rs` file the row's write set shares with it, not only
+the file the trace's own heading names.
 
-A row counts as named on a file when its own `from/` or `was/` link, followed
-back through as many such links as it takes, reaches a trace on that file or a
-row that trace names directly: the trace's own fix rows (`from/<trace>`, by
-450.3 rule 4) and a member the trace re-filed (`was/<member>`), however many
-hops either takes. A chain that reaches a trace on a *different* file is no
-match; the row stays a member of its own file's family.
+A row counts as named when its own `from/` or `was/` link, followed back
+through as many such links as it takes, reaches a trace, or a row that trace
+names directly: the trace's own fix rows (`from/<trace>`, by 450.3 rule 4) and
+a member the trace re-filed (`was/<member>`), however many hops either takes.
+The match is checked once per row, against the sinks of every file the row's
+own write set names, not once per file families() happens to be grouping by —
+so a row shared between a traced file and an untraced one is cleared off
+both, not only the traced one.
 
 A row with two entries on one file, `x.rs#a,x.rs#b`, counts once on it. 450.2's
 awk line counted it twice.
@@ -56,11 +60,11 @@ CAME_FROM = re.compile(r"^(from|was)/([TDQ][0-9]+|-)$")
 def families(queue):
     """Each family on `queue` as `(test file, member rows)`, the largest first, then by file.
 
-    The members are in id order, and a family that has had a trace lists only
-    the rows whose from/was chain does not reach it.
+    The members are in id order, and a family lists only the rows whose
+    from/was chain does not reach a trace on one of the test files the row's
+    own write set names.
     """
     traces = [(row.id, *trace) for row in queue.rows for trace in [trace_of(row)] if trace is not None]
-    traced_files = {file for _, files, _ in traces for file in files}
     sinks_by_file = {}
     for trace_id, files, named in traces:
         for file in files:
@@ -68,9 +72,7 @@ def families(queue):
             sinks_by_file[file].add(trace_id)
     found = []
     for file, members in members_by_file(queue).items():
-        if file in traced_files:
-            sinks = sinks_by_file.get(file, set())
-            members = [row for row in members if not reaches_a_sink(row, sinks, queue)]
+        members = [row for row in members if not reaches_a_sink(row, sinks_of(row, sinks_by_file), queue)]
         if len(members) >= FAMILY:
             found.append((file, sorted(members, key=id_order)))
     return sorted(found, key=lambda family: (-len(family[1]), family[0]))
@@ -86,11 +88,30 @@ def members_by_file(queue):
     for row in queue.rows:
         if row.is_closed() or row.state.startswith("parked:") or row.write_set == "-":
             continue
-        files = {entry.partition("#")[0] for entry in row.write_set.split(",")}
-        for file in files:
-            if file not in MERGED_RS_FILES and TEST_FILE.search(file):
-                by_file.setdefault(file, []).append(row)
+        for file in test_files_of(row):
+            by_file.setdefault(file, []).append(row)
     return by_file
+
+
+def sinks_of(row, sinks_by_file):
+    """The sinks that bear on `row`: the union, over every test file its own
+    write set names, of that file's sinks.
+
+    A row shared between a file a trace is on and a file no trace has been on
+    is checked against the first file's sinks even while families() is
+    grouping by the second: that is the whole point, so the second file loses
+    the row too.
+    """
+    sinks = set()
+    for file in test_files_of(row):
+        sinks.update(sinks_by_file.get(file, set()))
+    return sinks
+
+
+def test_files_of(row):
+    """The `tests/*.rs` files `row`'s write set names, excluding `MERGED_RS_FILES`."""
+    files = {entry.partition("#")[0] for entry in row.write_set.split(",")}
+    return {file for file in files if file not in MERGED_RS_FILES and TEST_FILE.search(file)}
 
 
 def trace_of(row):
