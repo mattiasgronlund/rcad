@@ -28915,3 +28915,115 @@ mod two_points_a_rounding_apart_on_a_balls_rim {
         );
     }
 }
+
+#[cfg(test)]
+mod where_a_ball_crosses_a_pipe_of_its_radius {
+    //! A ball and a pipe of one radius, the ball's centre off the pipe's axis,
+    //! cross in one loop round the side of the pipe the ball leans to: over
+    //! each point of that side of the pipe's circle the loop has one point
+    //! above the ball's centre and one below, and the two meet where the side
+    //! ends.
+
+    use rcad_geom::{Axis, Cylinder, Point, Sphere, Surface, Vector};
+    use rcad_predicates::{Decision, Interval, Point as PredicatePoint};
+
+    use super::round_a_closed_crossing_by_its_angle;
+
+    fn in_both_orders(
+        ball: &Surface,
+        pipe: &Surface,
+        from: PredicatePoint,
+        [early, late]: [PredicatePoint; 2],
+    ) -> [[Option<Decision>; 2]; 2] {
+        [[ball, pipe], [pipe, ball]].map(|pair| {
+            [[early, late], [late, early]]
+                .map(|[one, other]| round_a_closed_crossing_by_its_angle(pair, from, one, other))
+        })
+    }
+
+    /// A pipe of radius 1 up `z` and a ball of radius 1 about `(0, −0.5, 0)`
+    /// cross where `y < −0.25`, at height `±√(−y − 0.25)`. Walked from
+    /// `(0, −1, −√0.75)` with the ball first, the loop runs along `−x` there,
+    /// below, to where the side ends at `y = −0.25`, and comes back above along
+    /// `+x`: so of the two points above at `x = ∓sin 0.3`, the one at `−sin 0.3`
+    /// comes first. With the pipe first it runs the other way round, and the
+    /// one at `+sin 0.3` comes first. Walked from above, the start is on the
+    /// two points' own stretch, and this does not say.
+    #[test]
+    fn two_points_above_come_in_the_order_the_loop_comes_back_through_them() {
+        let ball = Surface::Sphere(Sphere::new(Point::new(0.0, -0.5, 0.0), 1.0).expect("a ball"));
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a pipe"));
+        let (across, down) = (0.3_f64.sin(), -(0.3_f64.cos()));
+        let up = (-down - 0.25).sqrt();
+        let above = [-across, across].map(|x| PredicatePoint::Exact([x, down, up]));
+        let below = PredicatePoint::Exact([0.0, -1.0, -(0.75_f64.sqrt())]);
+        let over = PredicatePoint::Exact([0.0, -1.0, 0.75_f64.sqrt()]);
+        assert_eq!(
+            [
+                in_both_orders(&ball, &pipe, below, above),
+                in_both_orders(&ball, &pipe, over, above),
+            ],
+            [
+                [
+                    [Some(Decision::Pos), Some(Decision::Neg)],
+                    [Some(Decision::Neg), Some(Decision::Pos)],
+                ],
+                [[None, None], [None, None]],
+            ]
+        );
+    }
+
+    /// The dome of `LED_D5.0mm-3.step` and the pipe of its body, both of radius
+    /// `2.5`, the ball's centre `2e-15` off the pipe's axis along `−y`, as
+    /// every fuse of it in `tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`
+    /// splits the dome. Their loop is about `1e-7` tall, round the `−y` half of
+    /// the rim, walked from `(2.54, −2.5, 9.0999999075)`, below the rim plane:
+    /// the pipe's axis runs down `z`, so along `−x` there. The plane `y = −0.2`,
+    /// written twice a rounding apart, crosses the loop above the rim plane near
+    /// `(0.048, −0.2, 9.10000002843)`, at `A` where face 8 writes it and at
+    /// `B` where faces 12 and 15 do. The loop comes back along `+x` above, so
+    /// `A`, nearer `y = 0`, comes first. Their tightened boxes, as the fuse
+    /// reads them, are `6.7e-16` apart along `y`, and the turn of one past the
+    /// other about a line through the ball's centre is about the loop's height
+    /// times that, `2e-23`, under what the boxes leave of it, so before this
+    /// read a ball and a pipe it answered `None` and every fuse of the LED was
+    /// refused on these two (Q2956).
+    #[test]
+    fn the_led_domes_two_meets_of_one_plane_written_twice_come_in_order() {
+        let ball = Surface::Sphere(
+            Sphere::new(Point::new(2.54, -5.051_514_762_044e-15, 9.1), 2.5)
+                .expect("a positive radius"),
+        );
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::as_written(
+                    Point::new(2.54, -3.030_908_857_227e-15, 9.1),
+                    Vector::new(0.0, 3.330_669_073_875e-16, -1.0),
+                )
+                .expect("a direction of length one"),
+                2.5,
+            )
+            .expect("a positive radius"),
+        );
+        let from = PredicatePoint::Exact([2.54, -2.500_000_000_000_003, 9.099_999_907_515_713]);
+        let across = |lo: f64, hi: f64| Interval::new(lo, hi).expect("lo is below hi");
+        let up = across(9.100_000_028_429_601, 9.100_000_028_429_603);
+        let a = PredicatePoint::Constructed([
+            across(0.048_012_841_124_576_98, 0.048_012_841_124_576_99),
+            across(-0.199_999_999_999_995_63, -0.199_999_999_999_995_6),
+            up,
+        ]);
+        let b = PredicatePoint::Constructed([
+            across(0.048_012_841_124_577_04, 0.048_012_841_124_577_044),
+            across(-0.199_999_999_999_996_3, -0.199_999_999_999_996_26),
+            up,
+        ]);
+        assert_eq!(
+            in_both_orders(&ball, &pipe, from, [a, b]),
+            [
+                [Some(Decision::Pos), Some(Decision::Neg)],
+                [Some(Decision::Neg), Some(Decision::Pos)],
+            ]
+        );
+    }
+}
