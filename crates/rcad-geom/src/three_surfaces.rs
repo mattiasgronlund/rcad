@@ -248,7 +248,10 @@ pub enum MeetOfThree {
     /// round surfaces in curves that cross gives the two crossings in the
     /// order [`two_points_or_nowhere`] finds them: the one on the side of `−τ`
     /// first, for `τ = n × ĝ / |n|` and `ĝ` the way the difference of the two
-    /// rises along the plane.
+    /// rises along the plane. A plane that cuts both in conics gives up to
+    /// four, in the order of the coordinate on the plane its quartic is
+    /// written in, which the triple fixes
+    /// ([`what_a_plane_that_cuts_both_in_conics_leaves`]).
     ///
     /// Most are a box the true meeting point is somewhere inside, because
     /// solving a quadratic divides and a quotient of two ranges almost never
