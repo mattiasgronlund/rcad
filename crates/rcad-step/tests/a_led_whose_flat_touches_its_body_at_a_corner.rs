@@ -279,7 +279,7 @@ fn the_side_of_a_point_on_the_rim_at_the_front_is_undecidable(_: &Model, error: 
     let [point] = record.inputs() else {
         return false;
     };
-    let [x, y, z] = point.enclosure().map(|side| (side.lo() + side.hi()) / 2.0);
+    let [x, _, z] = point.enclosure().map(|side| (side.lo() + side.hi()) / 2.0);
     let off_the_rim = ((x - 1.27).hypot(z - 6.0) - 1.9).abs();
     record.predicate() == SIDE_OF_PLANE
         && is_within_1e_9_of(point, [x, -3.81, z])
