@@ -222,7 +222,13 @@ what is not a row.
 
 - `["add", "<tier>", "<model>", "<write set>", "<what, ending in §N>"]`, with
   §N your section or the one your row cites. The write set is one word, paths
-  joined by commas, or `-` for none. A row whose fix adds a refusal, or turns a
+  joined by commas, or `-` for none. A directory nothing tracks yet, and whose
+  own parent nothing tracks either, is named at the shallowest level: `proofs/`,
+  not `proofs/gappa/`, when nothing is tracked under `proofs/` at all.
+  `check-queue` checks only one level up, so the deeper name is refused as
+  untracked with its parent untracked too, and `just land` stops at
+  `queue-apply`; the shallow name already covers every file a lane later
+  writes under it (Q2661, §230). A row whose fix adds a refusal, or turns a
   panic into one, names its crate's `error.rs`, since the new variant goes
   there: Q574, Q604 and Q605 were each dropped and filed again for want of it
   (§360.6). Every row says which row it came from (§432), and `just land`
