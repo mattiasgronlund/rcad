@@ -11574,6 +11574,9 @@ impl<'f> Arrangement<'f> {
                             .or_else(|| {
                                 Self::side_of_a_pipe_at_a_point_of_a_ball(&on, at, &partner)
                             })
+                            .or_else(|| {
+                                Self::side_of_a_ball_at_a_point_of_a_pipe(&on, at, &partner)
+                            })
                             .unwrap_or(undecided)
                     }
                     (side, _) => side,
@@ -11618,15 +11621,10 @@ impl<'f> Arrangement<'f> {
     /// or `None` where `partner` is no pipe, `on` holds no ball, or the box
     /// `at` does not tell.
     ///
-    /// For the ball's centre `c` and radius `r`, the pipe's origin `o`,
-    /// direction `u` and radius `R`, and `e = c − o`, a point `p` of the ball,
-    /// with `q = p − c` and so `|q| = r`, has the pipe's own value
-    /// `|(p − o) × u|² − R²·|u|²` of
-    /// `(r² − R²)·|u|² − (q·u)² + 2·(q × u)·(e × u) + |e × u|²`, by Lagrange's
-    /// identity on `q × u`. Read straight off the box, the pipe's value takes
-    /// the box's width times the radius. Read this way, at a point level with
-    /// the centre along the axis, as a rim is, the width enters only squared
-    /// or times `e × u`, which is how far the centre is off the axis.
+    /// On the ball the ball's own value is nothing, so the pipe's is
+    /// [`a_pipes_value_less_a_balls`], whose box the width of `at` enters
+    /// only squared or times how far the centre is off the axis, where the
+    /// pipe's own value takes the width times the radius.
     ///
     /// It is sound because the point is on the ball: a node of a face is on
     /// the face's surface, which is first in `on`, and on the partner of
@@ -11646,30 +11644,50 @@ impl<'f> Arrangement<'f> {
         let Surface::Cylinder(pipe) = partner else {
             return None;
         };
-        let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
-        let along = pipe.axis().direction().components().map(Interval::exactly);
-        let skin = Interval::exactly(pipe.radius());
-        let box_ = at.enclosure();
         on.iter().find_map(|surface| {
             let Surface::Sphere(ball) = surface else {
                 return None;
             };
-            let centre = ball.centre().coordinates().map(Interval::exactly);
-            let radius = Interval::exactly(ball.radius());
-            let step = core::array::from_fn(|axis| box_[axis] - centre[axis]);
-            let off_the_axis = cross_of_intervals(
-                core::array::from_fn(|axis| centre[axis] - origin[axis]),
-                along,
-            );
-            let up = dot_of(step, along);
-            let leaning = dot_of(cross_of_intervals(step, along), off_the_axis);
-            let side = ((radius * radius - skin * skin) * dot_of(along, along) - up * up
-                + (leaning + leaning)
-                + dot_of(off_the_axis, off_the_axis))
-            .sign();
+            let side = a_pipes_value_less_a_balls(pipe, ball, at).sign();
             [Decision::Pos, Decision::Neg, Decision::Zero]
                 .contains(&side)
                 .then_some(side)
+        })
+    }
+
+    /// Which side of `partner`, a ball, a point is that lies on a pipe among
+    /// the surfaces it is `on`: `Pos` outside, `Neg` inside and `Zero` on it,
+    /// or `None` where `partner` is no ball, `on` holds no pipe, or the box
+    /// `at` does not tell.
+    ///
+    /// On the pipe the pipe's own value is nothing, so the ball's, times the
+    /// square of the pipe's direction, is [`a_pipes_value_less_a_balls`]
+    /// turned round. It is sound for the reason
+    /// [`Arrangement::side_of_a_pipe_at_a_point_of_a_ball`] is, with the two
+    /// surfaces' parts swapped.
+    ///
+    /// The rim of the dome of `LED_D5.0mm-3.step` is where the dome's ball
+    /// touches the body's pipe, and a node of the pipe's face there is outside
+    /// the ball by about `4e-16` where a box's side `y = 0.1` crosses it, and
+    /// `8e-16` where the plane `y = 0.2` does. Read off their boxes, the
+    /// ball's value spans `1.95e-14` and `3.38e-14`, and every fuse of the LED
+    /// was refused (queue row Q2992).
+    fn side_of_a_ball_at_a_point_of_a_pipe(
+        on: &[Surface],
+        at: PredicatePoint,
+        partner: &Surface,
+    ) -> Option<Decision> {
+        let Surface::Sphere(ball) = partner else {
+            return None;
+        };
+        on.iter().find_map(|surface| {
+            let Surface::Cylinder(pipe) = surface else {
+                return None;
+            };
+            let side = a_pipes_value_less_a_balls(pipe, ball, at).sign();
+            [Decision::Pos, Decision::Neg, Decision::Zero]
+                .contains(&side)
+                .then(|| the_other_way(side))
         })
     }
 
@@ -13833,6 +13851,37 @@ impl<'f> Arrangement<'f> {
     fn to(&self, half_edge: usize) -> usize {
         self.arcs[half_edge / 2].ends[1 - half_edge % 2]
     }
+}
+
+/// The pipe's own value at `at` less the ball's times the square of the
+/// pipe's direction, read over `at`'s box so that the box is levered by how
+/// far the ball's centre is off the pipe's axis and not by the radius.
+///
+/// For the pipe's origin `o`, direction `u` and radius `R`, the ball's centre
+/// `c` and radius `r`, `e = c − o` and `q = p − c`, the pipe's value
+/// `|(p − o) × u|² − R²·|u|²` less `(|p − c|² − r²)·|u|²` is
+/// `(r² − R²)·|u|² − (q·u)² + 2·(q × u)·(e × u) + |e × u|²` at every point
+/// `p`, by Lagrange's identity on `q × u`. Read straight off the box, either
+/// value takes the box's width times the radius. Read this way, at a point
+/// level with the centre along the axis, as a rim is, the width enters only
+/// squared or times `e × u`, which is how far the centre is off the axis.
+fn a_pipes_value_less_a_balls(pipe: &Cylinder, ball: &Sphere, at: PredicatePoint) -> Interval {
+    let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
+    let along = pipe.axis().direction().components().map(Interval::exactly);
+    let skin = Interval::exactly(pipe.radius());
+    let centre = ball.centre().coordinates().map(Interval::exactly);
+    let radius = Interval::exactly(ball.radius());
+    let box_ = at.enclosure();
+    let step = core::array::from_fn(|axis| box_[axis] - centre[axis]);
+    let off_the_axis = cross_of_intervals(
+        core::array::from_fn(|axis| centre[axis] - origin[axis]),
+        along,
+    );
+    let up = dot_of(step, along);
+    let leaning = dot_of(cross_of_intervals(step, along), off_the_axis);
+    (radius * radius - skin * skin) * dot_of(along, along) - up * up
+        + (leaning + leaning)
+        + dot_of(off_the_axis, off_the_axis)
 }
 
 /// Whether two walks are on the same side of every curve drawn in full that
@@ -29836,6 +29885,120 @@ mod the_side_of_a_pipe_at_a_point_of_a_ball {
             assert_eq!(
                 Arrangement::side_of_a_pipe_at_a_point_of_a_ball(&[ball], at, &pipe),
                 Some(Decision::Neg),
+                "{at:?}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod the_side_of_a_ball_at_a_point_of_a_pipe {
+    //! A point on a pipe is read against a ball with the sum that reads a
+    //! point of the ball against the pipe, turned round: the box a point is
+    //! held in is levered by how far the centre is off the axis, not by the
+    //! radius.
+
+    use rcad_geom::{Axis, Cylinder, Point, Sphere, Surface, Vector};
+    use rcad_predicates::{Decision, Interval, Point as PredicatePoint};
+
+    use super::{Arrangement, side_of_surface};
+
+    /// A pipe of radius 5 up `z` and a ball of radius 5 about `(0, 2, 0)`. Of
+    /// the pipe's points `(5, 0, 0)` and `(0, −5, 0)` are outside the ball,
+    /// `(0, 5, 0)` and `(3, 4, 0)` inside, and `(0, 5, 4)` on it.
+    #[test]
+    fn points_of_a_pipe_are_read_against_a_ball_of_its_radius() {
+        let ball = Surface::Sphere(Sphere::new(Point::new(0.0, 2.0, 0.0), 5.0).expect("a ball"));
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a pipe"));
+        let read = |at: [f64; 3]| {
+            Arrangement::side_of_a_ball_at_a_point_of_a_pipe(
+                &[pipe],
+                PredicatePoint::Exact(at),
+                &ball,
+            )
+        };
+        assert_eq!(
+            [
+                [5.0, 0.0, 0.0],
+                [0.0, -5.0, 0.0],
+                [0.0, 5.0, 0.0],
+                [3.0, 4.0, 0.0],
+                [0.0, 5.0, 4.0],
+            ]
+            .map(read),
+            [
+                Some(Decision::Pos),
+                Some(Decision::Pos),
+                Some(Decision::Neg),
+                Some(Decision::Neg),
+                Some(Decision::Zero),
+            ]
+        );
+        assert_eq!(
+            Arrangement::side_of_a_ball_at_a_point_of_a_pipe(
+                &[ball],
+                PredicatePoint::Exact([5.0, 0.0, 0.0]),
+                &ball,
+            ),
+            None,
+            "a point on no pipe is left to the box"
+        );
+        assert_eq!(
+            Arrangement::side_of_a_ball_at_a_point_of_a_pipe(
+                &[pipe],
+                PredicatePoint::Exact([5.0, 0.0, 0.0]),
+                &pipe,
+            ),
+            None,
+            "a pipe is no ball"
+        );
+    }
+
+    /// The pipe of the body of `LED_D5.0mm-3.step` and its dome, both of
+    /// radius `2.5`, the ball's centre `2e-15` off the pipe's axis along `−y`.
+    /// The dome's rim `z = 9.1` is a rounding inside the pipe on the `+y`
+    /// half, so the pipe there is outside the ball: by about `4e-16` where the
+    /// side `y = 0.1` of a box crosses the rim, at `(5.038, 0.1, 9.1)`, and
+    /// `8e-16` where the plane `y = 0.2` does. Read over those points' boxes,
+    /// as the pipe's face holds them, the ball's own value spans `1.95e-14`
+    /// and `3.38e-14`, and every fuse of the LED was refused there (Q2992,
+    /// `tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs` in `rcad-step`).
+    #[test]
+    fn the_led_bodys_pipe_is_outside_its_dome_where_the_ball_leans_away() {
+        let ball = Surface::Sphere(
+            Sphere::new(Point::new(2.54, -5.051_514_762_044e-15, 9.1), 2.5)
+                .expect("a positive radius"),
+        );
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::as_written(
+                    Point::new(2.54, -3.030_908_857_227e-15, 9.1),
+                    Vector::new(0.0, 3.330_669_073_875e-16, -1.0),
+                )
+                .expect("a direction of length one"),
+                2.5,
+            )
+            .expect("a positive radius"),
+        );
+        let across = |lo: f64, hi: f64| Interval::new(lo, hi).expect("lo is below hi");
+        let by_the_box = PredicatePoint::Constructed([
+            across(5.037_999_199_359_357, 5.037_999_199_359_36),
+            across(0.1, 0.1),
+            across(9.1, 9.100_000_000_000_001),
+        ]);
+        let by_the_far_plane = PredicatePoint::Constructed([
+            across(5.031_987_158_875_419_5, 5.031_987_158_875_426),
+            across(0.200_000_000_000_003_73, 0.200_000_000_000_003_8),
+            across(9.1, 9.100_000_000_000_005),
+        ]);
+        for at in [by_the_box, by_the_far_plane] {
+            assert!(
+                matches!(side_of_surface(&ball, at), Decision::Undecidable { .. }),
+                "the box alone does not tell {at:?}"
+            );
+            assert_eq!(
+                Arrangement::side_of_a_ball_at_a_point_of_a_pipe(&[pipe], at, &ball),
+                Some(Decision::Pos),
                 "{at:?}"
             );
         }
