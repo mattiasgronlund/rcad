@@ -5687,11 +5687,53 @@ fn what_a_plane_that_cuts_both_in_conics_leaves(
         (binary_exponent(squared_by(gone)) - binary_exponent(squared_by(kept))) / 2
     };
     let widened = slid_exactly(1.0, stretch)?;
-    let [mine, theirs] = [
+    let forms = [
         the_conic_stretched_and_lifted(&mine, kept, stretch)?,
         the_conic_stretched_and_lifted(&theirs, kept, stretch)?,
     ];
-    let [a, b] = [&mine, &theirs].map(|form| as_a_quadratic_in_one_number(form, [kept, 2, gone]));
+    let shared_in = |unknown: TheUnknownKept| {
+        the_points_two_conics_share(
+            flat,
+            [&written[0], &written[1]],
+            &forms,
+            [off, first, second],
+            [kept, gone],
+            widened,
+            unknown,
+        )
+    };
+    shared_in(TheUnknownKept::AsItIs).or_else(|| shared_in(TheUnknownKept::Sheared))
+}
+
+/// Which unknown [`the_points_two_conics_share`] keeps in the quartic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TheUnknownKept {
+    /// The stretched `t` the two conics square by less.
+    AsItIs,
+    /// `t + g`, `g` the unknown taken out, so two points at one `t` are apart.
+    Sheared,
+}
+
+/// The points two conics `forms`, stretched and lifted, share on `flat`, from
+/// the quartic in `unknown`, or `None` where that quartic cannot say.
+fn the_points_two_conics_share(
+    flat: &Plane,
+    written: [&HowASurfaceIsWritten; 2],
+    forms: &[[[Exact; 3]; 3]; 2],
+    [off, first, second]: [usize; 3],
+    [kept, gone]: [usize; 2],
+    widened: f64,
+    unknown: TheUnknownKept,
+) -> Option<MeetOfThree> {
+    let normal = flat.normal().components();
+    let on_the_plane = [first, second];
+    let [a, b] = forms.each_ref().map(|form| {
+        let form = match unknown {
+            TheUnknownKept::AsItIs => form.clone(),
+            TheUnknownKept::Sheared => sheared(form, [kept, gone]),
+        };
+        as_a_quadratic_in_one_number(&form, [kept, 2, gone])
+    });
     if ![&a[2][0], &b[2][0]]
         .iter()
         .any(|squared| matches!(squared.sign(), Decision::Pos | Decision::Neg))
@@ -5724,7 +5766,11 @@ fn what_a_plane_that_cuts_both_in_conics_leaves(
     }
     let highest_first: Vec<Exact> = shared.iter().rev().cloned().collect();
     let found = where_a_polynomial_is_zero(&highest_first)?;
-    if !found.or_maybe_at.is_empty() {
+    if !found
+        .or_maybe_at
+        .iter()
+        .all(|maybe| it_keeps_one_sign_over(&shared, maybe.inside))
+    {
         return None;
     }
 
@@ -5735,8 +5781,12 @@ fn what_a_plane_that_cuts_both_in_conics_leaves(
             return None;
         }
         let other_root = quotient_or_everything(-the_value_over(&ends, root), pull);
+        let along_the_kept = match unknown {
+            TheUnknownKept::AsItIs => root,
+            TheUnknownKept::Sheared => root - other_root,
+        };
         let mut boxed = [Interval::exactly(0.0); 3];
-        boxed[on_the_plane[kept]] = root * Interval::exactly(widened);
+        boxed[on_the_plane[kept]] = along_the_kept * Interval::exactly(widened);
         boxed[on_the_plane[gone]] = other_root;
         boxed[off] = quotient_or_everything(
             Interval::exactly(flat.offset())
@@ -5746,7 +5796,7 @@ fn what_a_plane_that_cuts_both_in_conics_leaves(
         );
         let PredicatePoint::Constructed(narrowed) = narrowed_onto_two_quadrics_by_checked_steps(
             flat,
-            [&written[0], &written[1]],
+            written,
             PredicatePoint::Constructed(boxed),
         ) else {
             unreachable!("a box narrowed is a box");
@@ -5867,6 +5917,58 @@ fn the_conic_stretched_and_lifted(
 /// it 25 binades of each conic to spare at either end. Before, `T` was 200,
 /// which answered the first three and refused the fourth.
 const HIGHEST_BINADE_A_CONIC_IS_LIFTED_TO: i32 = 232;
+
+/// `form`, a conic in the unknowns `kept` and `gone`, `t` and `g`, written in
+/// `s = t + g` and `g` instead, exactly: `t = s − g` turns
+/// `F_tt·t² + 2F_tg·tg + F_gg·g² + 2F_t·t + 2F_g·g + F` into
+/// `F_tt·s² + 2(F_tg − F_tt)·sg + (F_tt − 2F_tg + F_gg)·g² + 2F_t·s + 2(F_g − F_t)·g + F`.
+fn sheared(form: &[[Exact; 3]; 3], [kept, gone]: [usize; 2]) -> [[Exact; 3]; 3] {
+    let mut sheared = form.clone();
+    let across = form[kept][gone].minus(&form[kept][kept]);
+    sheared[kept][gone] = across.clone();
+    sheared[gone][kept] = across;
+    sheared[gone][gone] = form[kept][kept]
+        .minus(&form[kept][gone])
+        .minus(&form[kept][gone])
+        .plus(&form[gone][gone]);
+    let along = form[gone][2].minus(&form[kept][2]);
+    sheared[gone][2] = along.clone();
+    sheared[2][gone] = along;
+    sheared
+}
+
+/// Whether the polynomial `coefficients`, lowest power first, keeps one sign
+/// all over `inside`.
+fn it_keeps_one_sign_over(coefficients: &[Exact], inside: Interval) -> bool {
+    let Some(at_the_end) = the_exact_value_at(coefficients, inside.lo()) else {
+        return false;
+    };
+    let slope: Option<Vec<Exact>> = coefficients
+        .iter()
+        .zip(0_u32..)
+        .skip(1)
+        .map(|(number, power)| number.times(&Exact::of(f64::from(power))))
+        .collect();
+    let Some(slope) = slope else {
+        return false;
+    };
+    let wide = (Interval::exactly(inside.hi()) - Interval::exactly(inside.lo())).hi();
+    let from_the_end = Interval::new(0.0, wide).expect("a box runs upwards");
+    let reach = at_the_end.enclosure() + the_value_over(&slope, inside) * from_the_end;
+    !reach.contains_zero()
+}
+
+/// The polynomial `coefficients`, lowest power first, at `place`, exactly, by
+/// Horner's rule; or `None` where a product falls out of range.
+fn the_exact_value_at(coefficients: &[Exact], place: f64) -> Option<Exact> {
+    let step = Exact::of(place);
+    coefficients
+        .iter()
+        .rev()
+        .try_fold(Exact::of(0.0), |so_far, number| {
+            Some(so_far.times(&step)?.plus(number))
+        })
+}
 
 /// The form `numbers` as `f₂·z² + f₁·z + f₀` in `z`, the number `order[2]`
 /// names, each `fᵢ` a polynomial in `x`, the number `order[0]` names, lowest
