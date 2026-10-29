@@ -1464,6 +1464,18 @@ impl<'f> Arrangement<'f> {
 
     /// One crossing per curve that matters to this face, with the ones that are
     /// really the same curve folded together.
+    ///
+    /// **A side between two flat faces whose run names a curved surface is
+    /// drawn along that surface** ([`BakedEdge::along_a_curved_surface`]), not
+    /// against the face across. The face across is this face's own plane
+    /// written down a rounding apart, so the two cross in a straight line far
+    /// from the arc the side is. A KiCad LED's flange front drew the three arcs
+    /// round its body's front disc as that line, and every corner of the
+    /// flange then had to be placed against a plane a rounding off its own:
+    /// the rim's corner `(-1.23, -6.35, 4.4697)` was `5.3e-15` off it, and
+    /// side of plane refused (Q2966).
+    ///
+    /// [`BakedEdge::along_a_curved_surface`]: super::bake::BakedEdge::along_a_curved_surface
     fn draw_the_crossings(
         &mut self,
         cuts: &[Surface],
@@ -1475,8 +1487,11 @@ impl<'f> Arrangement<'f> {
         for wire in &face.wires {
             let mut along = Vec::new();
             for edge in wire {
+                let drawn_against = edge
+                    .along_a_curved_surface
+                    .map_or(edge.across, |runs_on| runs_on.curved);
                 let crossing = self
-                    .crossing_for(edge.across, false, Some(edge), &mut drawn, policy, log)?
+                    .crossing_for(drawn_against, false, Some(edge), &mut drawn, policy, log)?
                     .ok_or(Error::AFaceMeetsItsNeighbourNowhere {
                         face: self.face.keys[0],
                     })?;
