@@ -11341,6 +11341,16 @@ impl<'f> Arrangement<'f> {
         Ok(sides)
     }
 
+    /// Which side of `partner`, a pipe, a point lies that is on a ball among
+    /// the surfaces it is `on`. Not read yet: `None` everywhere.
+    fn side_of_a_pipe_at_a_point_of_a_ball(
+        _on: &[Surface],
+        _at: PredicatePoint,
+        _partner: &Surface,
+    ) -> Option<Decision> {
+        None
+    }
+
     /// Which side of the plane the half ellipse `crossing` lies in `at` is:
     /// `Pos` or `Neg`, or `None` where that cannot be told.
     ///
@@ -29179,5 +29189,110 @@ mod where_a_ball_crosses_a_pipe_of_its_radius {
                 [Some(Decision::Neg), Some(Decision::Pos)],
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod the_side_of_a_pipe_at_a_point_of_a_ball {
+    //! A point on a ball is outside a pipe of its radius by twice its step out
+    //! from the pipe's axis dotted with the ball centre's, and so on: the box
+    //! a point is held in is levered by how far the centre is off the axis,
+    //! not by the radius.
+
+    use rcad_geom::{Axis, Cylinder, Point, Sphere, Surface, Vector};
+    use rcad_predicates::{Decision, Interval, Point as PredicatePoint};
+
+    use super::{Arrangement, side_of_surface};
+
+    /// A ball of radius 5 about `(0, 2, 0)` and a pipe of radius 5 up `z`. Of
+    /// the ball's points `(0, 7, 0)` and `(4, 5, 0)` are outside the pipe,
+    /// `(0, −3, 0)` and `(3, 2, 4)` inside, and `(0, 5, 4)` on it.
+    #[test]
+    fn points_of_a_ball_are_read_against_a_pipe_of_its_radius() {
+        let ball = Surface::Sphere(Sphere::new(Point::new(0.0, 2.0, 0.0), 5.0).expect("a ball"));
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a pipe"));
+        let read = |at: [f64; 3]| {
+            Arrangement::side_of_a_pipe_at_a_point_of_a_ball(
+                &[ball],
+                PredicatePoint::Exact(at),
+                &pipe,
+            )
+        };
+        assert_eq!(
+            [
+                [0.0, 7.0, 0.0],
+                [4.0, 5.0, 0.0],
+                [0.0, -3.0, 0.0],
+                [3.0, 2.0, 4.0],
+                [0.0, 5.0, 4.0],
+            ]
+            .map(read),
+            [
+                Some(Decision::Pos),
+                Some(Decision::Pos),
+                Some(Decision::Neg),
+                Some(Decision::Neg),
+                Some(Decision::Zero),
+            ]
+        );
+        assert_eq!(
+            Arrangement::side_of_a_pipe_at_a_point_of_a_ball(
+                &[pipe],
+                PredicatePoint::Exact([0.0, 7.0, 0.0]),
+                &pipe,
+            ),
+            None,
+            "a point on no ball is left to the box"
+        );
+    }
+
+    /// The dome of `LED_D5.0mm-3.step` and the pipe of its body, both of
+    /// radius `2.5`, the ball's centre `2e-15` off the pipe's axis along `−y`.
+    /// The dome's rim `z = 9.1` is inside the pipe on the `+y` half: the
+    /// pipe's own value is about `−4e-16` where the side `y = 0.1` of a box
+    /// crosses it, at `(5.038, 0.1, 9.1)`, and `−8e-16` where the plane
+    /// `y = 0.2` does. Read over those points' boxes, as the fuse holds them,
+    /// that value spans `8.9e-15` and `3.6e-14`, and every fuse of the LED was
+    /// refused there (Q2956,
+    /// `tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs` in `rcad-step`).
+    #[test]
+    fn the_led_domes_rim_is_inside_its_pipe_where_the_ball_leans_away() {
+        let ball = Surface::Sphere(
+            Sphere::new(Point::new(2.54, -5.051_514_762_044e-15, 9.1), 2.5)
+                .expect("a positive radius"),
+        );
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::as_written(
+                    Point::new(2.54, -3.030_908_857_227e-15, 9.1),
+                    Vector::new(0.0, 3.330_669_073_875e-16, -1.0),
+                )
+                .expect("a direction of length one"),
+                2.5,
+            )
+            .expect("a positive radius"),
+        );
+        let across = |lo: f64, hi: f64| Interval::new(lo, hi).expect("lo is below hi");
+        let by_the_box = PredicatePoint::Constructed([
+            across(5.037_999_199_359_358_5, 5.037_999_199_359_359),
+            across(0.1, 0.1),
+            across(9.1, 9.100_000_000_000_001),
+        ]);
+        let by_the_far_plane = PredicatePoint::Constructed([
+            across(5.031_987_158_875_419_5, 5.031_987_158_875_426),
+            across(0.200_000_000_000_003_73, 0.200_000_000_000_003_8),
+            across(9.1, 9.100_000_000_000_005),
+        ]);
+        for at in [by_the_box, by_the_far_plane] {
+            assert!(
+                matches!(side_of_surface(&pipe, at), Decision::Undecidable { .. }),
+                "the box alone does not tell {at:?}"
+            );
+            assert_eq!(
+                Arrangement::side_of_a_pipe_at_a_point_of_a_ball(&[ball], at, &pipe),
+                Some(Decision::Neg),
+                "{at:?}"
+            );
+        }
     }
 }
