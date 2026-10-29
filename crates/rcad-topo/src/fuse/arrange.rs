@@ -15243,7 +15243,8 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
 /// or a ball in, read as how far each is turned from the start about the
 /// surface's axis, or about the line through the ball's centre along the
 /// plane's normal: `None` for every other pair, and wherever a sign it reads is
-/// not proved.
+/// not proved. Round the loop a ball crosses a pipe in it reads
+/// [`round_a_ball_crossing_a_pipe_of_its_radius`] instead.
 ///
 /// **Seen down the axis the loop goes round it once.** On a pipe it is the
 /// pipe's circle, each point of the loop over one point of the circle, since
@@ -15351,6 +15352,11 @@ fn round_a_closed_crossing_by_its_angle(
     one: PredicatePoint,
     other: PredicatePoint,
 ) -> Option<Decision> {
+    if let [Surface::Sphere(ball), Surface::Cylinder(pipe)]
+    | [Surface::Cylinder(pipe), Surface::Sphere(ball)] = pair
+    {
+        return round_a_ball_crossing_a_pipe_of_its_radius(pair, ball, pipe, from, one, other);
+    }
     let (flat, origin, along, round_a_pipe) =
         if let [Surface::Plane(flat), Surface::Cylinder(pipe)]
         | [Surface::Cylinder(pipe), Surface::Plane(flat)] = pair
@@ -15448,6 +15454,146 @@ fn turned_as_far_apart_up_the_axis(
     let both = [0, 1, 2].map(|axis| first[axis] + second[axis]);
     let climbs = -(dot_of(normal, along) * dot_of(step, along));
     climbs * dot_of(normal, cross_of_intervals(along, both))
+}
+
+/// Which of two points comes first round the loop a ball crosses a pipe of
+/// its radius in, read off which of the loop's two stretches each and the
+/// start are on, and how far each is turned about the pipe's axis: `None` for
+/// a ball and a pipe of two radii, and wherever a sign it reads is not proved.
+///
+/// **The loop has one stretch above the ball's centre and one below.** Take
+/// `w` the pipe's axis, `c` the ball's centre and `r` the radius, and for a
+/// point `p` write `q` for its step out from the axis square to `w`, `δ` for
+/// the centre's, and `h` for how far `p` is from `c` along `w`. On the pipe
+/// `|q|² = r²`, and on the ball `|q − δ|² + h² = r²`, so the loop is where
+/// `h² = 2q·δ − |δ|²`. Over each point of the pipe's circle on the side the
+/// ball leans to, `q·δ > |δ|²/2`, there is one point of the loop above the
+/// centre and one below, and the two meet where that side ends: one loop, the
+/// two stretches one after the other round it. A ball centred on the axis
+/// touches the pipe along one circle, every point of it at `h = 0`, on
+/// neither stretch, so this does not say there.
+///
+/// **Each stretch turns about the axis one way, and the two the other way to
+/// each other.** The loop runs along `∇S × ∇T`, and the ball's gradient is
+/// `p − c` and the pipe's `|w|²q` ([`gradient_at`]). With the ball first,
+/// `w·(q × ((p − c) × |w|²q))` is `|q|²·|w|²·w·(p − c)`, since every term
+/// with `q − δ` in both places is square to `w`; with the pipe first it is
+/// the negative. So it has the sign of `h`, or the other one, all along a
+/// stretch. Two points of the loop off the centre's height both have `q·δ >
+/// |δ|²/2 > 0`, so they lie on the half of the circle about `δ`, less than a
+/// half turn apart, and every point of the circle between them has `q·δ` at
+/// least the smaller of theirs: their stretch runs from one to the other over
+/// that short arc, turning the one way all along. So the one the other is
+/// turned ahead of, `w·(a × b)` for `a` and `b` the two taken from the axis,
+/// read against that way at either, comes first along it. Where that turn is
+/// not proved it is read again as `w·(a × (b − a))`, as
+/// [`round_a_closed_crossing_by_its_angle`] does.
+///
+/// **From the start, the loop runs on along the start's stretch to its end,
+/// all of the other stretch, and the rest of the start's stretch back.** So a
+/// point ahead of the start on its stretch comes before one on the other
+/// stretch, and that before one behind the start; of two the same of those
+/// three, the one ahead along their stretch comes first. A point of the
+/// start's stretch is ahead of it where `w·(s × p)`, for `s` and `p` the two
+/// taken from the axis, has the sign of the way the loop turns at the start,
+/// by the short arc again: the start too is a point of the loop off the
+/// centre's height.
+///
+/// **It parts two meets of one plane written twice a rounding apart.** The
+/// dome of `LED_D5.0mm-3.step` and the pipe of its body are both of radius
+/// `2.5`, and the file stores the ball's centre `2e-15` off the pipe's axis,
+/// so the two cross in a loop about `1e-7` tall round the `−y` half of the
+/// rim, walked from `(2.54, −2.5, 9.0999999075)`, `9.2e-8` below the centre,
+/// along `−x`. The plane `y = −0.2`, written by face 8 and by faces 12 and 15
+/// a rounding apart, crosses that loop four times near `(0.048, −0.2, 9.1)`:
+/// twice on each stretch, `2.8e-8` from the centre's height, `6.7e-16` apart
+/// along `y`. Swept round a line through the ball's centre, their tightened
+/// boxes leave that height times their step, `2e-23`, unproved: every fuse
+/// of the LED was refused on them, with an enclosure of `1.8e-29`. Turned
+/// about the pipe's axis the step is levered by the `2.49` they are out from
+/// it, and they are parted (Q2956,
+/// `tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs` in `rcad-step`).
+///
+/// **It reads the start where it is held, as the sweep does.** A start held a
+/// rounding off the loop stands for the points of the loop near it, and those
+/// are on the stretch of its own proved height wherever it is more than a
+/// rounding from the centre's height: the LED's is `9.2e-8` from it. A node a
+/// sweep from the start puts in another order is one between the start and
+/// those points, and the LED's four are a quarter turn from it.
+fn round_a_ball_crossing_a_pipe_of_its_radius(
+    pair: [&Surface; 2],
+    ball: &Sphere,
+    pipe: &Cylinder,
+    from: PredicatePoint,
+    one: PredicatePoint,
+    other: PredicatePoint,
+) -> Option<Decision> {
+    if ball.radius() != pipe.radius() {
+        return None;
+    }
+    let centre = ball.centre().coordinates().map(Interval::exactly);
+    let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
+    let along = pipe.axis().direction().components().map(Interval::exactly);
+    // Compared rather than matched: only proved signs are read, and every
+    // other answer leaves the pair to the policy (§40).
+    let proved = |sign: Decision| sign == Decision::Pos || sign == Decision::Neg;
+    let height = |place: PredicatePoint| {
+        let at = place.enclosure();
+        dot_of([0, 1, 2].map(|axis| at[axis] - centre[axis]), along).sign()
+    };
+    let off_the_axis = |place: PredicatePoint| {
+        let at = place.enclosure();
+        [0, 1, 2].map(|axis| at[axis] - origin[axis])
+    };
+    let turned = |first: [Interval; 3], second: [Interval; 3]| {
+        dot_of(cross_of_intervals(first, second), along)
+    };
+    let the_way_it_turns_at = |place: PredicatePoint| {
+        let run = cross_of(gradient_at(pair[0], place), gradient_at(pair[1], place));
+        turned(off_the_axis(place), run)
+    };
+    let start = height(from);
+    if !proved(start) {
+        return None;
+    }
+    let the_way_it_turns_at_the_start = the_way_it_turns_at(from);
+    // 0 ahead of the start on its stretch, 1 on the other, 2 behind the start.
+    let how_soon = |place: PredicatePoint| {
+        let its_height = height(place);
+        if !proved(its_height) {
+            return None;
+        }
+        if its_height != start {
+            return Some(1);
+        }
+        let ahead = (the_way_it_turns_at_the_start
+            * turned(off_the_axis(from), off_the_axis(place)))
+        .sign();
+        if ahead == Decision::Pos {
+            Some(0)
+        } else if ahead == Decision::Neg {
+            Some(2)
+        } else {
+            None
+        }
+    };
+    let (Some(one_soon), Some(other_soon)) = (how_soon(one), how_soon(other)) else {
+        return None;
+    };
+    match one_soon.cmp(&other_soon) {
+        Ordering::Less => return Some(Decision::Pos),
+        Ordering::Greater => return Some(Decision::Neg),
+        Ordering::Equal => {}
+    }
+    let [first, second] = [one, other].map(off_the_axis);
+    let the_way_it_turns = the_way_it_turns_at(one);
+    let other_past_one = (the_way_it_turns * turned(first, second)).sign();
+    if proved(other_past_one) {
+        return Some(other_past_one);
+    }
+    let step = [0, 1, 2].map(|axis| second[axis] - first[axis]);
+    let stepped_past_one = (the_way_it_turns * turned(first, step)).sign();
+    proved(stepped_past_one).then_some(stepped_past_one)
 }
 
 /// Which of two points comes first round the loop a plane cuts a pipe in, read
@@ -28944,32 +29090,40 @@ mod where_a_ball_crosses_a_pipe_of_its_radius {
     /// A pipe of radius 1 up `z` and a ball of radius 1 about `(0, −0.5, 0)`
     /// cross where `y < −0.25`, at height `±√(−y − 0.25)`. Walked from
     /// `(0, −1, −√0.75)` with the ball first, the loop runs along `−x` there,
-    /// below, to where the side ends at `y = −0.25`, and comes back above along
-    /// `+x`: so of the two points above at `x = ∓sin 0.3`, the one at `−sin 0.3`
-    /// comes first. With the pipe first it runs the other way round, and the
-    /// one at `+sin 0.3` comes first. Walked from above, the start is on the
-    /// two points' own stretch, and this does not say.
+    /// below, to where the side ends at `y = −0.25`, comes back above along
+    /// `+x`, and below again along `−x` back to the start. So of two points
+    /// above, at `x = ∓sin 0.3`, the one at `−sin 0.3` comes first, and of two
+    /// below, at `x = −sin 0.3` and `−sin 0.6`, the one at `−sin 0.3`. Walked
+    /// from `(0, −1, √0.75)`, between the two above, it runs along `+x` there,
+    /// and the one at `+sin 0.3` comes first. With the pipe first each runs the
+    /// other way round, and the other of each two comes first.
     #[test]
-    fn two_points_above_come_in_the_order_the_loop_comes_back_through_them() {
+    fn two_points_come_in_the_order_the_loop_is_walked_through_them_from_its_start() {
         let ball = Surface::Sphere(Sphere::new(Point::new(0.0, -0.5, 0.0), 1.0).expect("a ball"));
         let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a pipe"));
-        let (across, down) = (0.3_f64.sin(), -(0.3_f64.cos()));
-        let up = (-down - 0.25).sqrt();
-        let above = [-across, across].map(|x| PredicatePoint::Exact([x, down, up]));
-        let below = PredicatePoint::Exact([0.0, -1.0, -(0.75_f64.sqrt())]);
-        let over = PredicatePoint::Exact([0.0, -1.0, 0.75_f64.sqrt()]);
+        let on_the_loop = |turned: f64, x_sign: f64, above: f64| {
+            let down = -turned.cos();
+            PredicatePoint::Exact([x_sign * turned.sin(), down, above * (-down - 0.25).sqrt()])
+        };
+        let above = [-1.0, 1.0].map(|x_sign| on_the_loop(0.3, x_sign, 1.0));
+        let below = [0.3, 0.6].map(|turned| on_the_loop(turned, -1.0, -1.0));
+        let start_below = on_the_loop(0.0, 1.0, -1.0);
+        let start_above = on_the_loop(0.0, 1.0, 1.0);
+        let first_comes_first = [
+            [Some(Decision::Pos), Some(Decision::Neg)],
+            [Some(Decision::Neg), Some(Decision::Pos)],
+        ];
+        let second_comes_first = [
+            [Some(Decision::Neg), Some(Decision::Pos)],
+            [Some(Decision::Pos), Some(Decision::Neg)],
+        ];
         assert_eq!(
             [
-                in_both_orders(&ball, &pipe, below, above),
-                in_both_orders(&ball, &pipe, over, above),
+                in_both_orders(&ball, &pipe, start_below, above),
+                in_both_orders(&ball, &pipe, start_below, below),
+                in_both_orders(&ball, &pipe, start_above, above),
             ],
-            [
-                [
-                    [Some(Decision::Pos), Some(Decision::Neg)],
-                    [Some(Decision::Neg), Some(Decision::Pos)],
-                ],
-                [[None, None], [None, None]],
-            ]
+            [first_comes_first, first_comes_first, second_comes_first]
         );
     }
 
