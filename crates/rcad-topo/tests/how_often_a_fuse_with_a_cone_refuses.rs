@@ -340,16 +340,17 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// answers, and `assemble`'s *"this crossing holds no straight line"* is right
 /// about every cone-and-cone pair that reaches it.
 ///
-/// The two corner-up-cube families are asserted at **something answered and
-/// something refused**, and no more than that. Every plane of such a cube leans
-/// more steeply than a shallow cone's own side, so `intersect` names every
-/// crossing — but naming a crossing is where a cone's support currently ends,
-/// and the arrangement, the selection and the mesher each have their own reasons
-/// to give up further down. Those refusals are **named, counted and printed**,
-/// and what they say is where the next lane's work is. A floor rather than a
-/// ceiling is the honest assertion for a family whose real rate is the thing
-/// being reported; a floor on the refusals too, because a family measured at
-/// none refused would be a rate to re-derive rather than one to relax (§19.1).
+/// The two corner-up-cube families are asserted at **every fuse answered**.
+/// Every plane of such a cube leans more steeply than a shallow cone's own
+/// side, so `intersect` names every crossing, and the arrangement, the
+/// selection and the mesher each had their own reasons to give up further
+/// down. They were asserted at something answered and something refused, a
+/// floor on the refusals too, because a family measured at none refused would
+/// be a rate to re-derive rather than one to relax (§19.1). Since Q2910 turned
+/// the points of a plane's loop on a cone about the cone's axis, both answer
+/// 96 of 96, and that pin broke, as it was written to. The same fuses, of the
+/// same draws, are checked against their inputs by
+/// [`a_bar_answers_every_corner_up_cube_so_what_a_frustum_refuses_there_is_the_cones`].
 ///
 /// The middle family, a frustum against an ordinary upright block, is the one
 /// the cone work is measured on, and its history is the argument for pinning a
@@ -436,11 +437,12 @@ fn how_each_fuse_went(family: Family) -> (usize, usize, BTreeMap<String, usize>)
 /// points, and the rows that cut account for their inputs' closed-form volumes
 /// by inclusion and exclusion, the same whichever way round they are asked.
 ///
-/// **And what the frustum refuses of the corner-up cubes is the cone's.** A
+/// **And what the frustum refused of the corner-up cubes was the cone's.** A
 /// round bar of the same size in the same place, against the same cubes,
-/// answers every fuse since Q1737, and the frustum refuses 12 —
+/// answers every fuse since Q1737, and the frustum refused 12 until Q2910 —
 /// [`a_bar_answers_every_corner_up_cube_so_what_a_frustum_refuses_there_is_the_cones`]
-/// is that control, and Q1956 traces the 12.
+/// is that control, and it holds every answer of the frustum and of a pointed
+/// cone to its inputs.
 #[test]
 fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
     let mut every = Vec::new();
@@ -465,16 +467,14 @@ fn how_often_a_certified_fuse_with_a_cone_in_it_refuses() {
     for (family, fuses, answered, refused, gave_up) in every {
         match family {
             Family::AFrustumAgainstACornerUpCube | Family::APointedConeAgainstACornerUpCube => {
-                assert!(
-                    answered > 0,
-                    "{}: every plane of a corner-up cube cuts a shallow cone in an ellipse, so \
-                     some of these have to come through — and none of {fuses} did",
-                    family.named()
-                );
-                assert!(
-                    refused > 0,
-                    "{}: measured at none refused of {fuses}, which is not what this family has \
-                     ever given — re-derive the number rather than relax it",
+                assert_eq!(
+                    (answered, refused),
+                    (96, 0),
+                    "{}: every plane of a corner-up cube cuts a shallow cone in an ellipse, and \
+                     every fuse was measured answering since Q2910 turned the points of a \
+                     plane's loop on a cone about the cone's axis. It answered {answered} of \
+                     {fuses} here, refusing {gave_up:?}. When this breaks, re-derive the number \
+                     over this whole family rather than relax it (§19.1)",
                     family.named()
                 );
             }
@@ -824,41 +824,47 @@ fn a_grid_of_points_is_classified_the_way_the_cone_says() {
 /// cone's own.**
 ///
 /// The same cubes, stood on their corners in the same places, are put to a
-/// frustum and to a round bar as wide as the frustum's wide end and as tall.
-/// A cube's planes cut the bar in ellipses as they cut the cone, so what the
-/// bar refuses is what this family costs any curved solid, and what the
-/// frustum refuses past that is the cone's. Over the sixteen draws:
+/// frustum, to a round bar as wide as the frustum's wide end and as tall, and
+/// to a pointed cone of the frustum's slope and height. A cube's planes cut
+/// the bar in ellipses as they cut the cone, so what the bar refuses is what
+/// this family costs any curved solid, and what the frustum or the pointed
+/// cone refuses past that is the cone's. Over the sixteen draws:
 ///
 /// | | answered | refused |
 /// |---|---:|---:|
-/// | a frustum | 84 | 12 |
+/// | a frustum | 96 | 0 |
 /// | a round bar of the same size | 96 | 0 |
+/// | a pointed cone of the same slope and height | 96 | 0 |
 ///
 /// **This control used to say the opposite**: the bar refused about as often
 /// as the frustum, so the frustum's refusals were read as the family's. Q1737
 /// taught the arrangement to count a loop a plane cuts round a bar from the
 /// one corner whose box holds the loop's start, where that corner and the start
-/// lie too close to put in order, and the bar now answers every fuse. So the
-/// frustum's 12 are the cone's: all six fuses of draws 1 and 14 (slope a half,
-/// far 8, near 4 and 3, a cube of 7 and of 8 at height 4), each refused as
-/// *"could not settle 1 decisions the answer depends on"*. Q1956 traces them.
+/// lie too close to put in order, and the bar answered every fuse. So the
+/// frustum's 12 refusals then were the cone's: all six fuses of draws 1 and 14
+/// (slope a half, far 8, near 4 and 3, a cube of 7 and of 8 at height 4), each
+/// refused as *"could not settle 1 decisions the answer depends on"*, which
+/// Q1956 was to trace. Q2910 taught the same count a loop a plane cuts round a
+/// cone, turning its points about the cone's axis, and all 12 answer. The
+/// pointed cone was put to the cubes here then, since
+/// [`how_often_a_certified_fuse_with_a_cone_in_it_refuses`] only counts its
+/// answers.
 ///
 /// **Every answer is checked, not only counted**, because a fuse that wrote the
 /// wrong solid would raise the count as much as one that wrote the right one.
 /// [`the_six_fuses_held_to_their_inputs`] says how. Every draw's cube reaches
-/// into the bar, so every one of the bar's 32 intersections holds something,
-/// and so do the frustum's 28.
+/// into each solid, so every one of the 32 intersections of each holds
+/// something.
 ///
-/// **The frustum is held to a floor at the 84 measured**, in the shape §19.1
-/// asks for: fewer is a regression, and more is Q1956's work, when the floor is
-/// re-derived rather than left behind.
+/// **All three are held at every fuse answered**, in the shape §19.1 asks
+/// for: fewer is a regression, to re-derive rather than relax.
 #[test]
 fn a_bar_answers_every_corner_up_cube_so_what_a_frustum_refuses_there_is_the_cones() {
     let policy = Policy::certified();
-    let mut gave_up: [BTreeMap<String, usize>; 2] = [BTreeMap::new(), BTreeMap::new()];
-    let mut answered = [0usize; 2];
-    let mut tries = [0usize; 2];
-    let mut cut = [0usize; 2];
+    let mut gave_up: [BTreeMap<String, usize>; 3] = Default::default();
+    let mut answered = [0usize; 3];
+    let mut tries = [0usize; 3];
+    let mut cut = [0usize; 3];
     let mut draw = Draw(0x5EED);
 
     for at in 0..DRAWS {
@@ -871,28 +877,29 @@ fn a_bar_answers_every_corner_up_cube_so_what_a_frustum_refuses_there_is_the_con
             .expect("a finite shift")
             .compose(&stood_on_its_corner());
 
-        for which in 0..2 {
+        for which in 0..3 {
             let mut model =
                 Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
             // A bar as wide as the frustum's wide end and as tall as it is, so
             // the cube meets at least as much curved surface either way.
-            let solid = if which == 0 {
-                a_frustum(&mut model, slope, near, far)
-            } else {
-                model
+            let solid = match which {
+                0 => a_frustum(&mut model, slope, near, far),
+                1 => model
                     .add_round_bar(
                         slope * far,
                         far - near,
                         &Isometry::translation(Vector::new(0.0, 0.0, near))
                             .expect("a finite shift"),
                     )
-                    .expect("a bar of that radius")
+                    .expect("a bar of that radius"),
+                _ => a_pointed_cone(&mut model, slope, far),
             };
+            let low = if which == 2 { 0.0 } else { near };
             let wide_at = |height: f64| {
-                if which == 0 {
-                    slope * height
-                } else {
+                if which == 1 {
                     slope * far
+                } else {
+                    slope * height
                 }
             };
             let cube = a_block(&mut model, [side; 3], Vector::new(0.0, 0.0, 0.0))
@@ -903,7 +910,7 @@ fn a_bar_answers_every_corner_up_cube_so_what_a_frustum_refuses_there_is_the_con
             let back = placed.inverse();
             let in_both = |at: Point| {
                 let in_the_solid =
-                    at.z() > near && at.z() < far && at.x().hypot(at.y()) < wide_at(at.z());
+                    at.z() > low && at.z() < far && at.x().hypot(at.y()) < wide_at(at.z());
                 in_the_solid
                     && back
                         .apply_to_point(at)
@@ -912,11 +919,11 @@ fn a_bar_answers_every_corner_up_cube_so_what_a_frustum_refuses_there_is_the_con
                         .all(|&along| along > 0.0 && along < side)
             };
             let what = format!(
-                "draw {at} ({}, slope {slope}, near {near}, far {far}, a cube of {side} at {up})",
-                ["a frustum", "a bar"][which]
+                "draw {at} ({}, slope {slope}, near {low}, far {far}, a cube of {side} at {up})",
+                ["a frustum", "a bar", "a pointed cone"][which]
             );
             let sampled = sampled_volume(
-                [slope * far, near, far],
+                [slope * far, low, far],
                 in_both,
                 &mut Draw(0x5A3D + at as u64),
             );
@@ -946,11 +953,15 @@ fn a_bar_answers_every_corner_up_cube_so_what_a_frustum_refuses_there_is_the_con
         "a bar of the same size: {} of {} answered, {:?}",
         answered[1], tries[1], gave_up[1]
     );
-    println!("intersections with something in them, frustum and bar: {cut:?}");
+    println!(
+        "a pointed cone of the same slope and height: {} of {} answered, {:?}",
+        answered[2], tries[2], gave_up[2]
+    );
+    println!("intersections with something in them, frustum, bar and pointed cone: {cut:?}");
     assert_eq!(
         tries,
-        [6 * DRAWS; 2],
-        "every draw asks all six fuses of both pairs"
+        [6 * DRAWS; 3],
+        "every draw asks all six fuses of all three pairs"
     );
     assert_eq!(
         (answered[1], &gave_up[1]),
@@ -960,18 +971,19 @@ fn a_bar_answers_every_corner_up_cube_so_what_a_frustum_refuses_there_is_the_con
          Re-derive this rather than relax it (§19.1)"
     );
     assert_eq!(
-        cut[1],
-        2 * DRAWS,
-        "every draw's cube reaches into the bar, so no check above passed for want of a cut"
+        cut,
+        [2 * DRAWS; 3],
+        "every draw's cube reaches into each solid, so no check above passed for want of a cut"
     );
-    assert!(
-        answered[0] >= 84,
-        "a frustum against a corner-up cube was measured answering 84 of 96, every answer \
-         checked as the bar's are, and it answered {} here. The 12 it refused are all six fuses \
-         of draws 1 and 14, which Q1956 traces. Fewer is a regression; more is Q1956's work, \
-         and then this floor is re-derived rather than left (§19.1)",
-        answered[0]
-    );
+    for (which, named) in [(0, "a frustum"), (2, "a pointed cone")] {
+        assert_eq!(
+            (answered[which], &gave_up[which]),
+            (tries[which], &BTreeMap::new()),
+            "{named} against a corner-up cube was measured answering every fuse since Q2910 \
+             turned a plane's loop on a cone about the cone's axis, each checked as the bar's \
+             are. Re-derive this rather than relax it (§19.1)"
+        );
+    }
 }
 
 /// Union, intersection and difference of `solid` and `cube`, each both ways
