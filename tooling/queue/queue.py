@@ -1916,16 +1916,23 @@ def narrowed(here, args):
 
     `elsewhere` already carries the narrowed set of a row held from another
     tree; a row this copy shows as `lane:` is read from the copy, so the fill
-    needs the claims file's word for it too. A todo row has no hold at all,
-    so its own copy of `docs/queue.md` is the only other place its write set
-    could come from, and `writes` corrects it there only once the row lands.
+    needs the claims file's word for it too. The take that made the hold
+    never touches the column, so a held row's correction is read against
+    that column, not against `taken`: since `writes` moved `taken` along
+    with `write_set` too (Q2670), the two agree right after a plain `writes`
+    on a held row, and comparing them would stop telling the fill about it.
+    A todo row has no hold at all, so its own copy of `docs/queue.md` is the
+    only other place its write set could come from, and `writes` corrects it
+    there only once the row lands.
     """
     sep = "\037"
+    queue = here.read()
     holds = Claims(here.claims).holds()
     for row_id, hold in sorted(holds.items()):
-        if hold["write_set"] != hold["taken"]:
+        row = queue.find(row_id)
+        column = row.write_set if row is not None else hold["taken"]
+        if hold["write_set"] != column:
             print(sep.join(["R", "narrowed", "", "6", row_id, "-", "-", "-", hold["write_set"]]))
-    queue = here.read()
     for row_id, write_set in sorted(latest_writes(here.claims).items()):
         if row_id in holds:
             continue
