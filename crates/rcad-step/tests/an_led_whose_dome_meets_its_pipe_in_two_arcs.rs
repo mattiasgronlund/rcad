@@ -23,16 +23,19 @@
 //! now reads such an arc against the plane its run names, as `classify` does
 //! since Q2923, and every fuse of either LED gets past the rim (Q2940).
 //!
-//! Each now stops at `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, and these
-//! tests pin that:
+//! These tests pin where each stops now:
 //!
-//! - The `D5.0` LED stops where its dome is split: the plane `y = 0.2` or
+//! - The `D5.0` LED stops where its dome is split, refused
+//!   `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`: the plane `y = 0.2` or
 //!   `y = -0.2`, the ball and the pipe, which touch along the rim, have no road
 //!   to where the three meet (Q2941).
-//! - The `D3.0` LED stops on the other side of the pair Q2938 names, where its
-//!   flange's flat meets the body's pipe and the flange's rim, a pipe of
-//!   radius 1.9 about the same axis a rounding apart in direction. Q2938 moves
-//!   this one.
+//! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
+//!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
+//!   rounding apart in direction. Q2938's road answers that triple, and the
+//!   fuse now stops in the check that the LED does not cross itself, on the
+//!   flange's flat `x = -0.23`: `crossing_for` (fuse/arrange.rs) finds the flat
+//!   meets one of its neighbours on its own plane, and it is refused
+//!   `AFaceMeetsItsNeighbourOnItsOwnSurface`.
 //!
 //! When either answers, its test turns into the volume check of commit
 //! `f179ca02a`: what the box and the LED share is the box's part inside the
@@ -56,21 +59,27 @@ const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
 fn a_d5_led_gets_past_its_dome_rim_and_stops_where_its_dome_is_split() {
-    every_fuse_refuses_where_three_surfaces_meet(D5, &[[0.04, 0.0, 4.0], FAR_OFF]);
+    every_fuse_refuses(D5, &[[0.04, 0.0, 4.0], FAR_OFF], |error| {
+        matches!(
+            error,
+            Error::Geometry(rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+        )
+    });
 }
 
 #[test]
-fn a_d3_led_gets_past_its_dome_rim_and_stops_where_its_flat_meets_two_pipes() {
-    every_fuse_refuses_where_three_surfaces_meet(
+fn a_d3_led_gets_past_where_its_flat_meets_two_pipes_and_stops_on_its_flat() {
+    every_fuse_refuses(
         D3,
         &[[-0.23, -6.35, 1.999999956464], [-0.23, -7.35, 2.0], FAR_OFF],
+        |error| matches!(error, Error::AFaceMeetsItsNeighbourOnItsOwnSurface { .. }),
     );
 }
 
 /// The LED in `file` and a box of side `2 * HALF` centred on each of
-/// `centres`, fused under intersection and under difference, each refused
-/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`.
-fn every_fuse_refuses_where_three_surfaces_meet(file: &str, centres: &[[f64; 3]]) {
+/// `centres`, fused under intersection and under difference, each refused as
+/// `the_refusal` takes.
+fn every_fuse_refuses(file: &str, centres: &[[f64; 3]], the_refusal: impl Fn(&Error) -> bool) {
     let (led, solid) = the_led(file);
     for &centre in centres {
         for rule in [Rule::Intersection, Rule::Difference] {
@@ -83,9 +92,7 @@ fn every_fuse_refuses_where_three_surfaces_meet(file: &str, centres: &[[f64; 3]]
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             ) {
-                Err(Error::Geometry(
-                    rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat,
-                )) => {}
+                Err(error) if the_refusal(&error) => {}
                 Err(error) => panic!(
                     "{file}: {rule:?} with a box round {centre:?} refused {error:?}, which is not \
                      the refusal this pins"
