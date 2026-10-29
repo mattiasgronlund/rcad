@@ -17180,6 +17180,55 @@ check-queue-selftest:
     grep -q '^Q1  1  lane:lane-new-a ' "$a/docs/queue.md" \
         || fail "take did not write lane:lane-new-a once the only other lane: state left was one main's history held"
 
+    # Q2735: a lane tree an agent's lock no longer holds is still a lane
+    # tree, not another dispatcher's copy of docs/queue.md -- `elsewhere`
+    # trusts a stale `lane:` line from such a tree only while the claims
+    # file still holds the row that line names. Q10 is parked, and its hold
+    # was taken and released in the claims file; q2735-lane's own copy,
+    # inherited from before that release, still shows Q10 as `lane:lane-old`
+    # and its tree's lock is gone, the way a verifier's or a dispatcher's
+    # unlock leaves it (§411.6). Q11 shares Q10's write set, docs/a.md, and
+    # must not be skipped for a hold the claims file no longer has (§263.9).
+    q2735hub="$dir/q2735-hub"
+    mkdir -p "$q2735hub/docs/decisions.d"
+    printf '## 230. One queue\n' > "$q2735hub/docs/decisions.d/sections.md"
+    cat > "$q2735hub/docs/queue.md" <<'MD'
+    # Queue
+
+    ## Tier 1
+
+    ```
+    Q10  1  parked:§230  opus  docs/a.md  a row parked once its lane released it §230
+    Q11  1  todo  opus  docs/a.md  a second row sharing Q10's file §230
+    ```
+
+    ## Closed
+
+    ```
+    ```
+    MD
+    touch "$q2735hub/docs/a.md"
+    g "$q2735hub" init -q -b main
+    g "$q2735hub" add -A
+    g "$q2735hub" commit -q -m root
+
+    q2735lane="${q2735hub}-worktrees/q2735-sess-worktrees/q2735-lane"
+    g "$q2735hub" worktree add -q -b q2735-lane-old "$q2735lane" main
+    sed -i 's/^Q10  1  parked:§230 /Q10  1  lane:q2735-lane-old /' "$q2735lane/docs/queue.md"
+    g "$q2735hub" worktree lock --reason "agent q2735-lane since 2026-10-29T00:00:00Z" "$q2735lane"
+    g "$q2735hub" worktree unlock "$q2735lane"
+
+    q2735claims=$(g "$q2735hub" rev-parse --path-format=absolute --git-common-dir)/rcad-queue-claims
+    {
+        printf 'take\tQ10\t2026-10-29T00:00:00Z\t%s\tq2735-lane-old\tdocs/a.md\t1\n' "$q2735lane"
+        printf 'release\tQ10\t2026-10-29T00:05:00Z\t%s\tpark\n' "$q2735lane"
+    } > "$q2735claims"
+
+    got=$("$j" --justfile '{{ justfile() }}' --working-directory "$q2735hub" queue next 1 2>&1) \
+        || fail "queue next failed on the unlocked-lane-tree fixture: $got"
+    grep -q '^take Q11 ' <<<"$got" \
+        || fail "Q10's park, which released the claims hold, was outranked by a stale lane: line left in an unlocked lane tree, so Q11, sharing Q10's docs/a.md, was skipped: $got"
+
     # Q2315: a wait on a row held only by another branch, never merged into
     # this copy's own history, still gets §435.4's refusal or §435.6's move.
     # `exists_elsewhere` lets `after` name such a row at all; `open_blockers`
