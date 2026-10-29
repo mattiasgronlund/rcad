@@ -32,10 +32,18 @@
 //! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
 //!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
 //!   rounding apart in direction. Q2938's road answers that triple, and the
-//!   fuse now stops in the check that the LED does not cross itself, on the
-//!   flange's flat `x = -0.23`: `crossing_for` (fuse/arrange.rs) finds the flat
-//!   meets one of its neighbours on its own plane, and it is refused
-//!   `AFaceMeetsItsNeighbourOnItsOwnSurface`.
+//!   fuse then stopped in the check that the LED does not cross itself, on the
+//!   flange's flat `x = -0.23`. The file writes that flat as two faces, slots 5
+//!   and 6, on one plane stored bit for bit the same and used one way round,
+//!   with an edge between them along `z = 2`. Bake joined faces only on a
+//!   curved surface, so `crossing_for` (fuse/arrange.rs) met the flat against
+//!   its own plane and refused `AFaceMeetsItsNeighbourOnItsOwnSurface`. Bake
+//!   now joins two faces on one plane written and used one way (Q2962), and
+//!   every fuse is refused `Undecidable` on side of cylinder alone, for a box
+//!   round the front corner `(-0.23, -6.35, 2)` from `z = -0.767` to `3.068`.
+//!   Q2967's trace has that corner solved from the flat, the flange's front and
+//!   the body's front disc, the last two one plane written twice a rounding
+//!   apart, which is Q2939's cause on the `D5.0` horizontal LED's front corner.
 //!
 //! When either answers, its test turns into the volume check of commit
 //! `f179ca02a`: what the box and the LED share is the box's part inside the
@@ -43,7 +51,7 @@
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, Vector};
+use rcad_geom::{Isometry, SIDE_OF_CYLINDER, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -68,11 +76,21 @@ fn a_d5_led_gets_past_its_dome_rim_and_stops_where_its_dome_is_split() {
 }
 
 #[test]
-fn a_d3_led_gets_past_where_its_flat_meets_two_pipes_and_stops_on_its_flat() {
+fn a_d3_led_gets_past_its_flat_in_two_faces_and_stops_at_its_front_corner() {
     every_fuse_refuses(
         D3,
         &[[-0.23, -6.35, 1.999999956464], [-0.23, -7.35, 2.0], FAR_OFF],
-        |error| matches!(error, Error::AFaceMeetsItsNeighbourOnItsOwnSurface { .. }),
+        |error| {
+            matches!(
+                error,
+                Error::Undecidable { records }
+                    if records
+                        .records()
+                        .iter()
+                        .map(|record| record.predicate())
+                        .eq([SIDE_OF_CYLINDER])
+            )
+        },
     );
 }
 
