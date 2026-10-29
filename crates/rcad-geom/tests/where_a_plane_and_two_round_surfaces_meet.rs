@@ -2288,3 +2288,53 @@ fn the_cap_of_an_led_square_to_its_body_and_rim_shares_nothing_with_them() {
         assert_eq!(meet(order), Ok(MeetOfThree::Nowhere), "{order:?}");
     }
 }
+
+/// **A plane along an LED's body, across the rim where its dome sits on it**
+/// (Q2954, from `LED_D5.0mm-3.step`, as its faces 12 and 15 write the plane).
+/// The body is a pipe of radius 2.5 up `z` and the dome a ball of radius 2.5
+/// about a point on its axis, so drawn, the two touch along the rim `z = 9.1`
+/// and the plane `y = −0.2` meets both where its two lines along the pipe
+/// touch the dome's circle, at `x = 2.54 ± √6.21`. Stored, the ball's centre
+/// is `2.02e−15` off the pipe's axis toward `−y`, so on that side the dome
+/// bulges past the pipe by a hair and each line crosses the circle twice,
+/// `2.8e−8` above and below the rim: four corners. Each is worked out over the
+/// rationals the stored numbers name, not by this code: on the plane the two
+/// differ by a quadratic in `z` alone, whose roots are the corners' heights.
+///
+/// The wall `x = 2.54` is a mirror of all three, and at each height the plane
+/// cuts the pipe's circle in a chord far from a touch. Worked out exactly at
+/// the root, that chord's sign needs products whose smallest parts fall off
+/// the bottom of the range, wherever the three are slid, so the three were
+/// refused until a box round the root was asked first.
+#[test]
+fn a_plane_along_an_leds_body_across_its_domes_rim_meets_both_at_four_corners() {
+    let along = Surface::Plane(
+        Plane::from_point_and_normal_as_written(
+            Point::new(0.0, -0.20000000000000234, 0.0),
+            Vector::new(0.0, -1.0, 6.661338147751e-16),
+        )
+        .expect("a normal with length"),
+    );
+    let dome = ball([2.54, -5.051514762044e-15, 9.1], 2.5);
+    let body = Surface::Cylinder(
+        Cylinder::new(
+            Axis::as_written(
+                Point::new(2.54, -3.030908857227e-15, 9.1),
+                Vector::new(0.0, 3.330669073875e-16, -1.0),
+            )
+            .expect("a direction with length"),
+            2.5,
+        )
+        .expect("a radius"),
+    );
+    let y = -0.1999999999999963;
+    let corners = [
+        [0.04801284112457704, y, 9.099999971570396],
+        [5.031987158875423, y, 9.099999971570396],
+        [0.04801284112457704, y, 9.100000028429603],
+        [5.031987158875423, y, 9.100000028429603],
+    ];
+    for order in every_order([&along, &dome, &body]) {
+        points_near(order, &corners);
+    }
+}
