@@ -28,8 +28,9 @@
 //! tolerant policy, in a model of 100 mm.
 
 use rcad_geom::{
-    Axis, Cone, Cylinder, Deflection, DynamicRange, Isometry, Plane, Point, Sphere, Surface,
-    SurfaceMeet, Torus, Vector, intersect,
+    Axis, Cone, Cylinder, Deflection, DynamicRange, Isometry, MeetOfThree, Plane, Point, Sphere,
+    Surface, SurfaceMeet, Torus, Vector, intersect, meet_of_three_surfaces,
+    where_a_closed_crossing_starts,
 };
 use rcad_predicates::expansion::{expansion_sign, expansion_sum, scale_expansion};
 use rcad_predicates::{Decision, Policy, ProvenanceLog, Record};
@@ -683,34 +684,55 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_opposite_its_seam_turned_near_a_quart
 /// [`a_thin_bar_up_the_inside_of_a_thick_one_rests_on_it_along_its_seam_and_every_fuse_answers`]
 /// with the thin bar turned `lean` about `x`: `4e−16`, `1e−15`, `1e−14` and
 /// `1e−8`. Its axis then runs `(x, −lean·z)`, so the thin pipe touches the
-/// thick one at `(2, 0, 0)` alone and pokes out of it a little above and
+/// thick one at `(2x, 0, 0)` alone and pokes out of it a little above and
 /// below. `intersect` names two curves both ways round, and they cross at
-/// that point, at angles `−lean·z (1 ± 1/√2)` round the thick axis. Two
-/// placements: the thin bar at `x = 1`, whose seam runs along the thick wall,
-/// and at `x = −1`, where it touches the thick wall opposite its seam. Every
-/// fuse is refused, at every lean, and which refusal depends on which bar
-/// comes first. Both refusals are a limit up to `1e−14` and a gap at `1e−8`
-/// (§16.10). The places below are worked out to first order in the lean.
+/// that point, at angles `−lean·z (1 ± 1/√2)` round the thick axis. Each is a
+/// loop that runs from that point out to `(0, ±2, ∓2/lean)`, far past both
+/// bars. Two placements: the thin bar at `x = 1`, whose seam runs along the
+/// thick wall, and at `x = −1`, where it touches the thick wall opposite its
+/// seam. Every fuse is refused, at every lean, and every refusal is a limit
+/// up to `1e−14` and a gap at `1e−8` (§16.10). The places below are worked
+/// out to first order in the lean.
 ///
 /// **The order.** A fuse cuts every face of its first solid before any face of
 /// its second, and stops at the first face that refuses
-/// (`Scratch::split_both_groups` in `fuse/mod.rs`). With the thick bar first
-/// the first face cut is its floor, and that is refused
-/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. With the thin bar first at
-/// `x = 1` it is the thin floor, refused `side of cylinder` at its seam corner
-/// `(2, 3·lean, −3)`. At `x = −1` the thin floor has no corner on the thick
-/// wall, the thin floor and roof are cut, and the thin wall is refused
-/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. Before any face is cut,
+/// (`Scratch::split_both_groups` in `fuse/mod.rs`). Each cap meets both walls
+/// in two points: the thick floor at `y = lean (4 ± 2√2)`, the thin floor at
+/// `y = 3·lean (2 ± √2)`, and each roof at the opposite `y`.
+/// `meet_of_three_surfaces` finds all of them since Q2955's conic road
+/// (checked here). Before it, the thick floor was refused
+/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` with the thick bar first, and
+/// the thin wall at `x = −1` with the thin bar first. Before any face is cut,
 /// `tell_each_edge_what_its_neighbour_leaves_out` in `fuse/cuts.rs` asks the
 /// same side of both thin caps and drops the refusal, as its doc says it does.
+/// What stops each fuse now:
 ///
-/// **`WhereThreeSurfacesMeetNeedsTwoOfThemFlat`** is asked where a thick cap
-/// meets both walls. It meets them in two points `4√2·lean` apart, beside
-/// coordinates of 3: a spread past
-/// [`DynamicRange::LARGEST_SUPPORTED_RATIO`] up to `1e−14`, a limit, and of
-/// `5.3e7` at `1e−8`, where the two points are there to find, a gap. That gap
-/// is Q2202's family, a plane and two round surfaces that Q2196's mirror road
-/// does not take.
+/// - With the thin bar first at `x = 1`, the thin floor, refused `side of
+///   cylinder` at its seam corner `(2, 3·lean, −3)`, at every lean.
+/// - With the thick bar first at `4e−16`, the thick floor, at its meet with
+///   both walls at `y = lean (4 − 2√2)`. At `x = 1` the fuse is refused
+///   `order along a crossing` between that meet and the floor's seam corner
+///   `(2, 0, −2)`, `4.7e−16` apart beside coordinates of 2. At `x = −1` it is
+///   refused `orient3d` of the floor's normal and the two walls' gradients
+///   there, a determinant of `y − 4·lean`, that is `−2√2·lean` or `−1.1e−15`,
+///   beside entries of 2.
+/// - Every other fuse, `ACrossingThisCannotBeOrderedAlong`.
+///   `where_a_closed_crossing_starts` finds no start on either loop of the
+///   walls' crossing, either way round, and says
+///   `CannotWorkOutHowBigACrossingIs` (checked here). `how_a_crossing_runs`
+///   in `fuse/arrange.rs` refuses `ACrossingThisCannotBeOrderedAlong` where
+///   that call finds no start. That these fuses stop there is read and not
+///   traced; at `1e−7`, where it starts each loop at its far end
+///   `(0, ±2, ∓2/lean)`, these fuses are refused `order along a crossing`
+///   with that far end as one input, as Q2754 is at `1e−6`.
+///
+/// **Limit or gap.** Every answer has the two corners where the thin wall
+/// crosses the thick floor, `4√2·lean` apart beside coordinates of 3. Up to
+/// `1e−14` that is a spread past [`DynamicRange::LARGEST_SUPPORTED_RATIO`], a
+/// limit. At `1e−8` it is `5.3e7`, and the answer is there to find, so the
+/// two refusals left there are gaps: `side of cylinder` (Q2753), and
+/// `ACrossingThisCannotBeOrderedAlong`, which needs a start on each loop
+/// within the bars rather than `2/lean` off.
 ///
 /// **`side of cylinder`** is asked of the thin floor's seam corner, which is a
 /// sample of its rim (§17.1). The rim is `(1 + cos t, 3·lean + sin t, −3)`,
@@ -722,22 +744,63 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_opposite_its_seam_turned_near_a_quart
 /// spread: a limit. At `1e−8` the box lies between the crossings, so every rim
 /// point in it is outside and the answer is there: a gap.
 /// `a_corner_of_two_surfaces_is_where_the_partner_crosses_their_curve` in
-/// `fuse/arrange.rs` would read the corner on its rim, and does not, since
-/// the meet of the floor and both walls is refused
-/// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` too.
+/// `fuse/arrange.rs` would read the corner on its rim, and does not. It takes
+/// a corner only where one place of the meet of its two surfaces and the
+/// partner comes that near, and that meet is the two crossings, both in the
+/// corner's box up to `1e−14`. Why it declines at `1e−8` is not traced
+/// (Q2753).
 #[test]
 fn a_thin_bar_turned_a_hair_inside_a_thick_one_is_refused_at_the_first_face_a_fuse_cuts_that_refuses()
  {
     for (x, seam_on_the_thick_wall) in [(1.0, true), (-1.0, false)] {
-        for (lean, answer_is_there) in
-            [(4e-16, false), (1e-15, false), (1e-14, false), (1e-8, true)]
-        {
+        for (lean, answer_is_there, the_thick_floor_stops) in [
+            (4e-16, false, true),
+            (1e-15, false, false),
+            (1e-14, false, false),
+            (1e-8, true, false),
+        ] {
             let build =
                 move |model: &mut Model| a_thin_bar_turned_inside_a_thick_one(model, x, lean);
             let mut model = a_model();
-            let [thick, thin] = build(&mut model).map(|solid| the_wall(&model, solid));
+            let bars = build(&mut model);
+            let [thick, thin] = bars.map(|solid| the_wall(&model, solid));
             assert_eq!(curves(&thick, &thin), Ok(2), "x {x}, lean {lean}");
             assert_eq!(curves(&thin, &thick), Ok(2), "x {x}, lean {lean}");
+            let caps: Vec<Surface> = bars
+                .iter()
+                .flat_map(|&solid| the_caps(&model, solid))
+                .collect();
+            assert_eq!(caps.len(), 4, "x {x}, lean {lean}: two bars' caps");
+            for cap in &caps {
+                let meet = meet_of_three_surfaces(
+                    [cap, &thick, &thin],
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                assert!(
+                    matches!(&meet, Ok(MeetOfThree::At(places)) if places.len() == 2),
+                    "x {x}, lean {lean}: {cap:?} meets both walls at two points: {meet:?}"
+                );
+            }
+            let walls_cross = intersect(
+                &thick,
+                &thin,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            let Ok(SurfaceMeet::Curves(loops)) = &walls_cross else {
+                panic!("x {x}, lean {lean}: the walls cross in two loops: {walls_cross:?}");
+            };
+            for walls in [[&thick, &thin], [&thin, &thick]] {
+                for run in loops {
+                    let start =
+                        where_a_closed_crossing_starts(run, walls, &mut ProvenanceLog::new());
+                    assert!(
+                        matches!(start, Err(rcad_geom::Error::CannotWorkOutHowBigACrossingIs)),
+                        "x {x}, lean {lean}: a loop of the walls starts at {start:?}"
+                    );
+                }
+            }
             let caps_meet_the_walls =
                 DynamicRange::measure(3.0, 4.0 * SQRT_2 * lean).expect("two points apart");
             assert_eq!(
@@ -778,13 +841,25 @@ fn a_thin_bar_turned_a_hair_inside_a_thick_one_is_refused_at_the_first_face_a_fu
                         answer_is_there,
                         "{what}: the box {y:?} lies between the crossings {low} and {high}"
                     );
+                } else if thick_first && the_thick_floor_stops && seam_on_the_thick_wall {
+                    refused_on_one_question_at(
+                        &said,
+                        "order along a crossing",
+                        [2.0, 0.0, -2.0],
+                        &what,
+                    );
+                } else if thick_first && the_thick_floor_stops {
+                    refused_on_one_question_of(
+                        &said,
+                        "orient3d",
+                        [[0.0, 0.0, -1.0], [-2.0, 0.0, 0.0], [-1.0, 0.0, 0.0]],
+                        &what,
+                    );
                 } else {
                     assert!(
                         matches!(
                             said,
-                            Err(rcad_topo::Error::Geometry(
-                                rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat
-                            ))
+                            Err(rcad_topo::Error::ACrossingThisCannotBeOrderedAlong)
                         ),
                         "{what}: {said:?}"
                     );
@@ -1784,21 +1859,52 @@ fn refused_on_one_question_within<'a>(
         panic!("{what}: should be refused on one question: {records:#?}");
     };
     assert_eq!(refused.predicate(), question, "{what}: {refused:#?}");
-    for input in refused.inputs() {
-        let sides = input.enclosure();
-        let far = (0..3)
-            .map(|i| {
-                (sides[i].lo() - place[i])
-                    .abs()
-                    .max((sides[i].hi() - place[i]).abs())
-            })
-            .fold(0.0, f64::max);
+    for &input in refused.inputs() {
+        let far = how_far_a_box_reaches_from(input, place);
         assert!(
             far <= within,
             "{what}: an input reaches {far} from {place:?}: {refused:#?}"
         );
     }
     refused
+}
+
+/// [`refused_on_one_question_at`], with one input for each of `places`, each
+/// within `1e-9` of its own place along each axis, in order.
+fn refused_on_one_question_of<'a, const N: usize>(
+    said: &'a rcad_topo::Result<Vec<SolidKey>>,
+    question: &str,
+    places: [[f64; 3]; N],
+    what: &str,
+) -> &'a Record {
+    let Err(rcad_topo::Error::Undecidable { records }) = said else {
+        panic!("{what}: should be refused Undecidable, and said {said:?}");
+    };
+    let [refused] = records.records() else {
+        panic!("{what}: should be refused on one question: {records:#?}");
+    };
+    assert_eq!(refused.predicate(), question, "{what}: {refused:#?}");
+    assert_eq!(refused.inputs().len(), N, "{what}: {refused:#?}");
+    for (&input, place) in refused.inputs().iter().zip(places) {
+        let far = how_far_a_box_reaches_from(input, place);
+        assert!(
+            far <= 1e-9,
+            "{what}: an input reaches {far} from {place:?}: {refused:#?}"
+        );
+    }
+    refused
+}
+
+/// The farthest any corner of `input`'s box lies from `place` along one axis.
+fn how_far_a_box_reaches_from(input: rcad_predicates::Point, place: [f64; 3]) -> f64 {
+    let sides = input.enclosure();
+    (0..3)
+        .map(|i| {
+            (sides[i].lo() - place[i])
+                .abs()
+                .max((sides[i].hi() - place[i]).abs())
+        })
+        .fold(0.0, f64::max)
 }
 
 /// The plane and the cone of a pointed cone's two faces, as the model places
@@ -1847,6 +1953,17 @@ fn the_wall(model: &Model, solid: SolidKey) -> Surface {
         .map(|face| face.surface())
         .find(|surface| matches!(surface, Surface::Cylinder(_)))
         .expect("a bar's wall is a pipe")
+}
+
+/// The planes of a bar's floor and roof, as the model places them.
+fn the_caps(model: &Model, solid: SolidKey) -> Vec<Surface> {
+    model
+        .solid(solid)
+        .expect("a solid of this model")
+        .faces()
+        .map(|face| face.surface())
+        .filter(|surface| matches!(surface, Surface::Plane(_)))
+        .collect()
 }
 
 /// The sign of `|w|² − 1`, decided exactly, and its value to a rounding.
