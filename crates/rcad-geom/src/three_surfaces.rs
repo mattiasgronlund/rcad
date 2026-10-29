@@ -3502,8 +3502,10 @@ fn a_touching_point_could_not_be_placed(
 /// alone. A plane parallel to the axis has `k = 0`, and there `K` is
 /// `W·(N·G − e²·W)` and the foot `o + t·w/W − (e/N)·n`.
 ///
-/// **Which of the three is decided exactly, at the root itself and not at a
-/// box round it.** `K` is `κ₂t² + 2κ₁t + κ₀` for `κ = A·g`, with `k²` taken
+/// **Which of the three is decided over a box round the root where `K` keeps
+/// clear of zero there ([`the_sign_of_the_chord_over`]), and exactly, at the
+/// root itself, where it does not**, which a touch never does. `K` is
+/// `κ₂t² + 2κ₁t + κ₀` for `κ = A·g`, with `k²` taken
 /// off `κ₂`, `e·W·k` off `κ₁` and `(e·W)²` off `κ₀`, and
 /// [`the_sign_of_the_chord_at`] puts the root into it with nothing rounded: a
 /// root that is a fraction as the fraction, and one that is a square root —
@@ -3840,8 +3842,10 @@ struct ChordsUpAnAxis<'a> {
 /// Where `flat` meets the circles of `chords`, at the roots of its heights:
 /// at each root the plane misses the circle there, touches it at the foot, or
 /// cuts it in a chord with two ends, as the sign of the chord at the root
-/// says, worked out exactly ([`what_a_plane_beside_their_one_axis_leaves`]
-/// has the arithmetic). The lower root's points come first, and the
+/// says: over a box round the root where that keeps clear of zero, and worked
+/// out exactly where it does not
+/// ([`what_a_plane_beside_their_one_axis_leaves`] has the arithmetic). The
+/// lower root's points come first, and the
 /// `−(n × w)` end of a chord before the other.
 ///
 /// Where the heights' quadratic is nothing at every height, the plane shares
@@ -3909,7 +3913,9 @@ fn the_ends_of_the_chords_at_the_roots(
                 )
             }
         };
-        let Some(how) = the_sign_of_the_chord_at(root, &chord, &shared) else {
+        let Some(how) = the_sign_of_the_chord_over(height, &chord)
+            .or_else(|| the_sign_of_the_chord_at(root, &chord, &shared))
+        else {
             return Err(refused());
         };
         if how != Decision::Neg {
@@ -4030,9 +4036,33 @@ fn how_wide_the_chord_is(
     ])
 }
 
+/// The sign of `k` over `height`, a box round one root of the heights, where
+/// that box keeps `k` clear of zero — or `None` where it does not.
+///
+/// The box holds the root and each of `chord`'s numbers is held in a box, so
+/// a sign every point of `k`'s box shares is `k`'s sign at the root. A plane
+/// that touches the circle there has `k` nothing at the root, so its box holds
+/// zero and the touch is left to [`the_sign_of_the_chord_at`], which tells it
+/// from a near miss exactly.
+///
+/// **Asked first because the exact sign can run out where the box is plain.**
+/// The exact sign multiplies `chord`'s numbers by the heights', and those can
+/// be held in parts so far apart that the products' smallest parts fall off
+/// the bottom of the range wherever the three are slid. A plane along an
+/// LED's body, across the rim its dome sits on, was refused so, where the
+/// chord at each root is near `6.21`.
+fn the_sign_of_the_chord_over(height: Interval, chord: &[Exact; 3]) -> Option<Decision> {
+    let [squared, half_linear, constant] = chord.each_ref().map(Exact::enclosure);
+    let sign =
+        (squared * (height * height) + Interval::exactly(2.0) * half_linear * height + constant)
+            .sign();
+    matches!(sign, Decision::Pos | Decision::Neg).then_some(sign)
+}
+
 /// The sign of `k` at `root` of `A t² + 2B t + C`, for `chord` `k`'s three
 /// numbers and `shared` the quadratic's, exactly — or `None` where a product
-/// falls out of range.
+/// falls out of range. Asked where a box round the root holds zero
+/// ([`the_sign_of_the_chord_over`]).
 ///
 /// - **A root that is a fraction `X/Y`** — `−C/(2B)`, or `−B/A` — is put in
 ///   over its denominator squared: `Y²·k(X/Y) = κ₂X² + 2κ₁XY + κ₀Y²`, which has
