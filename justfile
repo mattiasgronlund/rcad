@@ -14820,18 +14820,23 @@ queue mode="" *args:
             if (say) printf "skip %s (tier %s): its cores:%s does not fit the %d threads of the machine: %s holds them\n", id[i], tier[i], need, threads, names
             return 1
         }
-        function blocked(i, say,    j, sharedcount, h1, h2) {
+        # §424.4: two write sets can share more than one entry of
+        # `queue_shared_files` at once (Q2739), so the count of holders is
+        # kept per shared path in `sharedcount`/`h1`/`h2`, not summed across
+        # every path a pair meets on.
+        function blocked(i, say,    j, k, p, sharedcount, h1, h2) {
             if (cores_fit_skip(i, say)) return 1
-            sharedcount = 0
             for (j = 1; j <= r; j++)
                 if (kind[j] == "running" && sets_meet(ws[i], ws[j])) {
                     if (meet_shared) {
-                        sharedcount++
-                        if (sharedcount == 1) h1 = id[j] " (held by " st[j] ")"
-                        else if (sharedcount == 2) {
-                            h2 = id[j] " (held by " st[j] ")"
-                            if (say) printf "skip %s (tier %s): its %s is shared, and %s and %s already hold it\n", id[i], tier[i], mine, h1, h2
-                            return 1
+                        for (k = 1; k <= nshpaths; k++) {
+                            p = shpaths[k]; sharedcount[p]++
+                            if (sharedcount[p] == 1) h1[p] = id[j] " (held by " st[j] ")"
+                            else if (sharedcount[p] == 2) {
+                                h2[p] = id[j] " (held by " st[j] ")"
+                                if (say) printf "skip %s (tier %s): its %s is shared, and %s and %s already hold it\n", id[i], tier[i], p, h1[p], h2[p]
+                                return 1
+                            }
                         }
                         continue
                     }
@@ -14841,12 +14846,14 @@ queue mode="" *args:
             for (j = 1; j <= e; j++)
                 if (sets_meet(ws[i], ews[j])) {
                     if (meet_shared) {
-                        sharedcount++
-                        if (sharedcount == 1) h1 = eid[j] " (held elsewhere by " est[j] ")"
-                        else if (sharedcount == 2) {
-                            h2 = eid[j] " (held elsewhere by " est[j] ")"
-                            if (say) printf "skip %s (tier %s): its %s is shared, and %s and %s already hold it\n", id[i], tier[i], mine, h1, h2
-                            return 1
+                        for (k = 1; k <= nshpaths; k++) {
+                            p = shpaths[k]; sharedcount[p]++
+                            if (sharedcount[p] == 1) h1[p] = eid[j] " (held elsewhere by " est[j] ")"
+                            else if (sharedcount[p] == 2) {
+                                h2[p] = eid[j] " (held elsewhere by " est[j] ")"
+                                if (say) printf "skip %s (tier %s): its %s is shared, and %s and %s already hold it\n", id[i], tier[i], p, h1[p], h2[p]
+                                return 1
+                            }
                         }
                         continue
                     }
@@ -14856,12 +14863,14 @@ queue mode="" *args:
             for (j = 1; j <= taken_n; j++)
                 if (sets_meet(ws[i], ws[taken[j]])) {
                     if (meet_shared) {
-                        sharedcount++
-                        if (sharedcount == 1) h1 = id[taken[j]] " (taken above)"
-                        else if (sharedcount == 2) {
-                            h2 = id[taken[j]] " (taken above)"
-                            if (say) printf "skip %s (tier %s): its %s is shared, and %s and %s already hold it\n", id[i], tier[i], mine, h1, h2
-                            return 1
+                        for (k = 1; k <= nshpaths; k++) {
+                            p = shpaths[k]; sharedcount[p]++
+                            if (sharedcount[p] == 1) h1[p] = id[taken[j]] " (taken above)"
+                            else if (sharedcount[p] == 2) {
+                                h2[p] = id[taken[j]] " (taken above)"
+                                if (say) printf "skip %s (tier %s): its %s is shared, and %s and %s already hold it\n", id[i], tier[i], p, h1[p], h2[p]
+                                return 1
+                            }
                         }
                         continue
                     }
@@ -14873,12 +14882,14 @@ queue mode="" *args:
             for (j = 1; j <= pinheld_n; j++)
                 if (sets_meet(ws[i], ws[pinheld[j]])) {
                     if (meet_shared) {
-                        sharedcount++
-                        if (sharedcount == 1) h1 = id[pinheld[j]] " (pinned and skipped above)"
-                        else if (sharedcount == 2) {
-                            h2 = id[pinheld[j]] " (pinned and skipped above)"
-                            if (say) printf "skip %s (tier %s): its %s is shared, and %s and %s already hold it\n", id[i], tier[i], mine, h1, h2
-                            return 1
+                        for (k = 1; k <= nshpaths; k++) {
+                            p = shpaths[k]; sharedcount[p]++
+                            if (sharedcount[p] == 1) h1[p] = id[pinheld[j]] " (pinned and skipped above)"
+                            else if (sharedcount[p] == 2) {
+                                h2[p] = id[pinheld[j]] " (pinned and skipped above)"
+                                if (say) printf "skip %s (tier %s): its %s is shared, and %s and %s already hold it\n", id[i], tier[i], p, h1[p], h2[p]
+                                return 1
+                            }
                         }
                         continue
                     }
@@ -14900,15 +14911,20 @@ queue mode="" *args:
             for (y = 1; y <= m; y++) print "    " raw[pick[y]]
             lanes_n++
         }
-        function sets_meet(x, y,    ex, ey, nx, ny, i, j, shmine, shtheirs, sharedfound) {
+        # A shared file meets per §424.4, so one call can find more than one
+        # entry of queue_shared_files in common between the two sets:
+        # shpaths/nshpaths, globals rather than locals, are how blocked reads
+        # which files those were, so it keeps the holders of each file apart.
+        function sets_meet(x, y,    ex, ey, nx, ny, i, j, seen) {
+            nshpaths = 0
             nx = split(x, ex, ","); ny = split(y, ey, ",")
             for (i = 1; i <= nx; i++)
                 for (j = 1; j <= ny; j++)
                     if (entries_meet(ex[i], ey[j])) {
                         if (!shared_match) { mine = ex[i]; theirs = ey[j]; meet_shared = 0; return 1 }
-                        if (!sharedfound) { sharedfound = 1; shmine = ex[i]; shtheirs = ey[j] }
+                        if (!(shared_path in seen)) { seen[shared_path] = 1; shpaths[++nshpaths] = shared_path }
                     }
-            if (sharedfound) { mine = shmine; theirs = shtheirs; meet_shared = 1; return 1 }
+            if (nshpaths) { meet_shared = 1; return 1 }
             return 0
         }
         function entries_meet(x, y,    px, py, ix, iy, h, m) {
@@ -14921,7 +14937,7 @@ queue mode="" *args:
             if (h) { py = substr(y, 1, h - 1); iy = substr(y, h + 1) }
             if (px == py) {
                 m = !(ix != "" && iy != "" && ix != iy)
-                if (m && (px in shared)) shared_match = 1
+                if (m && (px in shared)) { shared_match = 1; shared_path = px }
                 return m
             }
             if (px ~ /\/$/ && index(py, px) == 1) return 1
