@@ -1,9 +1,10 @@
-//! One plane and two curved surfaces, where that is not a quartic.
+//! One plane and two curved surfaces, where that is not a quartic, and where it
+//! is.
 //!
 //! `three_surfaces.rs` works out where three surfaces meet by crossing two
 //! planes into a line and cutting that line with the third surface. One plane
 //! and two quadrics has no second plane to cross, and in general it is a quartic
-//! — two conics in one plane — which nothing in this milestone solves.
+//! — two conics in one plane — which only its last road solves.
 //!
 //! **These families of it are not a quartic**, and all of them are ordinary
 //! mechanical CAD:
@@ -43,15 +44,24 @@
 //!   circle on a plane known exactly, and that plane answers it instead: a
 //!   slanted cut through where a rod's round end meets it.
 //!
-//! Every corner below is worked out by hand first and written in the test, and
-//! every one of them lands on a whole number — so a box round it has no width
-//! and the answer is checked against the arithmetic-free number and not against
-//! a second run of the same code.
+//! **The rest is the quartic, solved exactly** from the two conics the plane
+//! cuts (Q2938). A plane leaning well off square to a pipe against a ball off
+//! its axis is it, and so is a cap across a bar leaning past the cap's own
+//! bar. So is an LED's front flat with its body's pipe and its rim's, whether
+//! the flat leans off parallel to them by a rounding or is stored as exactly
+//! `x = −1.23` along the rim's stored axis: it meets both twice, `10¹⁵` or so
+//! along them.
 //!
-//! What is still refused is written with the corner it refuses in whole
-//! numbers beside it. That is what makes it a **gap** rather than a limit
-//! (§16.10): the points are there, and no discriminant this file has reaches
-//! them.
+//! Every corner below is worked out apart from this code first and written in
+//! the test. Most land on whole numbers, so a box round it has no width and
+//! the answer is checked against the arithmetic-free number and not against a
+//! second run of the same code. A quartic's corners are written as roots of
+//! it found by hand, or as the stretch between two numbers it changes sign
+//! across; an LED's are worked out over the rationals its stored numbers name.
+//!
+//! What is still refused is written with the corner it refuses beside it.
+//! That is what makes it a **gap** rather than a limit (§16.10): the points
+//! are there, and no road this file has reaches them.
 
 #![forbid(unsafe_code)]
 
@@ -1877,10 +1887,13 @@ fn a_ball_resting_on_a_rod_cut_leaning_through_where_they_touch_meets_both_there
 /// the circle where `x² + 0.5x = 1.1875`, at `x = (√5 − 0.5)/2` inside it.
 /// Both times the wall `y = 0` holds both axes and the cap's normal, so it is
 /// a mirror of all three. Moved `0.125` along `y` instead, the leaning bar's
-/// axis passes the first one's by, no wall through either axis and the normal
-/// holds the other, and the three are refused.
+/// axis passes the first one's by, and no wall through either axis is a mirror
+/// of all three. The ellipse is then `x²/2 + (y − 0.125)² = 1`, and taking
+/// `x²` off the circle leaves `y² − 0.5y = 0.40625`, so the four corners are at
+/// `y = (0.5 ± √1.875)/2` and `x = ±√(1.5625 − y²)`. Before row Q2938 the three
+/// were refused; the road for a plane that cuts both in conics answers them.
 #[test]
-fn a_cap_across_a_leaning_bar_meets_it_where_their_axes_cross_and_is_refused_where_they_pass() {
+fn a_cap_across_a_leaning_bar_meets_it_where_their_axes_cross_and_where_they_pass() {
     let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, 5.0]);
     let upright = pipe([0.0; 3], [0.0, 0.0, 1.0], 1.25);
     let crossing = pipe([0.0, 0.0, 5.0], [1.0, 0.0, 1.0], 1.0);
@@ -1889,6 +1902,9 @@ fn a_cap_across_a_leaning_bar_meets_it_where_their_axes_cross_and_is_refused_whe
     let (x, y) = (1.125_f64.sqrt(), 0.4375_f64.sqrt());
     let moved_x = (5.0_f64.sqrt() - 0.5) / 2.0;
     let moved_y = (1.5625 - moved_x * moved_x).sqrt();
+    let [passing_high, passing_low] = [1.0, -1.0].map(|side| (0.5 + side * 1.875_f64.sqrt()) / 2.0);
+    let [passing_high_x, passing_low_x] =
+        [passing_high, passing_low].map(|y| (1.5625 - y * y).sqrt());
     for order in [[0, 1, 2], [2, 0, 1], [1, 2, 0]] {
         let [crossing, moved_along_x, passing] = [&crossing, &moved_along_x, &passing]
             .map(|leaning| order.map(|at| [&cap, &upright, leaning][at]));
@@ -1900,10 +1916,65 @@ fn a_cap_across_a_leaning_bar_meets_it_where_their_axes_cross_and_is_refused_whe
             moved_along_x,
             &[[moved_x, -moved_y, 5.0], [moved_x, moved_y, 5.0]],
         );
-        assert_eq!(
-            meet(passing),
-            Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+        points_near(
+            passing,
+            &[
+                [-passing_high_x, passing_high, 5.0],
+                [passing_high_x, passing_high, 5.0],
+                [-passing_low_x, passing_low, 5.0],
+                [passing_low_x, passing_low, 5.0],
+            ],
         );
+    }
+}
+
+/// **A plane leaning across a pipe, and a ball beside the pipe's axis.** The
+/// plane `x + 16z = 8`, the pipe of radius one along `x` and the ball of radius
+/// three about `(0, ½, 0)`. On the pipe the ball is `y = x² − 7.75`, so a point
+/// is on all three where `y² + ((8 − x)/16)² = 1` with that `y`. That is a
+/// quartic in `x`, below one at `x = ±2.8` and above it at `±2.598` and
+/// `±2.96`, so it has its four roots one in each stretch between, and each
+/// root names one point. The plane leans well off square to the pipe's axis,
+/// and the ball's centre is half a unit off the wall through that axis and the
+/// plane's normal, so no wall mirrors the three (Q2196). Before row Q2938 the
+/// three were refused in every order; the road for a plane that cuts both in
+/// conics answers them.
+#[test]
+fn a_plane_leaning_across_a_pipe_and_a_ball_off_its_axis_meets_them_at_four_corners() {
+    let leaning = flat([1.0, 0.0, 16.0], [8.0, 0.0, 0.0]);
+    let along_x = pipe([0.0; 3], [1.0, 0.0, 0.0], 1.0);
+    let round = ball([0.0, 0.5, 0.0], 3.0);
+    let stretches = [[-2.96, -2.8], [-2.8, -2.598], [2.598, 2.8], [2.8, 2.96]];
+    for order in every_order([&leaning, &along_x, &round]) {
+        let answer = meet(order).expect("these three meet");
+        let MeetOfThree::At(points) = &answer else {
+            panic!("{order:?}: {answer:?}");
+        };
+        assert_eq!(points.len(), stretches.len(), "{order:?}: {answer:?}");
+        let mut points = points.to_vec();
+        points.sort_by(|one, other| {
+            one.enclosure()[0]
+                .lo()
+                .total_cmp(&other.enclosure()[0].lo())
+        });
+        for (point, [low, high]) in points.iter().zip(stretches) {
+            let sides = point.enclosure();
+            assert!(
+                sides.iter().all(|side| side.width() <= 1e-13)
+                    && low < sides[0].lo()
+                    && sides[0].hi() < high,
+                "{order:?}: {point:?} is not a narrow box with x between {low} and {high}"
+            );
+            for surface in order {
+                assert!(
+                    !matches!(
+                        which_side_of(surface, *point),
+                        Decision::Pos | Decision::Neg
+                    ),
+                    "{order:?}: {point:?} is certified off {surface:?}"
+                );
+            }
+        }
     }
 }
 
@@ -2021,4 +2092,199 @@ fn a_cap_holding_a_rings_axis_meets_a_ball_or_a_cone_on_it_at_their_circles() {
         meet([&cap, &ball([0.0, 1e-9, 0.0], 4.0), &bend]),
         Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
     );
+}
+
+/// The body pipe and the rim pipe of an LED, as its STEP file stores them: one
+/// stored point on both axes, and the two directions a rounding apart, about
+/// `1.1e−15`.
+fn an_leds_body_and_rim(on_both_axes: [f64; 3], body_radius: f64, rim_radius: f64) -> [Surface; 2] {
+    [
+        pipe(on_both_axes, [-5.551115123126e-17, -1.0, 0.0], body_radius),
+        pipe(on_both_axes, [0.0, 1.0, -1.110223024625e-15], rim_radius),
+    ]
+}
+
+/// The six orders three surfaces can be asked in.
+fn every_order([one, two, three]: [&Surface; 3]) -> [[&Surface; 3]; 6] {
+    [
+        [one, two, three],
+        [one, three, two],
+        [two, one, three],
+        [two, three, one],
+        [three, one, two],
+        [three, two, one],
+    ]
+}
+
+/// **The front flat of an LED, its body and its rim** (Q2938, from
+/// `LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step` and the six LED files beside
+/// it). The body is a pipe of radius 2.5 and the rim one of 2.9, about one
+/// stored point, and the flat at `x = −1.23` is tangent to the body and cuts
+/// the rim. Drawn, the three share nothing, since the flat runs along both
+/// axes. Stored, the two axes are about `1.1e−15` apart in direction, so the
+/// pipes cross where the axes have drifted `0.4` apart, a few `1e14` out, and
+/// the flat leans into both by a rounding.
+///
+/// **So the three do meet, twice, far out**, and `Nowhere` would be wrong.
+/// Each corner below is worked out over the rationals the stored numbers name,
+/// not by this code: with `x` taken off the flat, each pipe is a conic in
+/// `(y, z)`, the resultant of the two in `z` is a quartic in `y`, and its
+/// Sturm sequence counts two real roots and no more. Each comes back in every
+/// order, a box no wider than a billionth of the size of its corner, holding
+/// it, and not certified off any of the three. The second flat is the same
+/// LED's at a height of nine, leaning the other way; the third is a thinner
+/// LED's, of radii 1.5 and 1.9.
+///
+/// **The fourth is `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step`'s**, whose flat
+/// leans `2·10⁻³²` along `y` where the others lean `10⁻¹⁶`. The two conics'
+/// own numbers then reach 365 and 582 binades below their largest, and with
+/// the largest of each lifted to `2²⁰⁰` a product the quartic needs fell
+/// below `2⁻⁹⁶⁹`, so the three were refused until the lift moved up.
+///
+/// **The last three flats are exactly `x = −1.23` or `x = −0.23`**, as
+/// `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step`,
+/// `LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step` and
+/// `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step` store them. Such a flat runs
+/// exactly along the rim's stored axis, so the road for a plane along a pipe
+/// takes it before the road for two conics is asked. That road's exact steps
+/// fell out of range on these three, and they were refused until it handed
+/// them on. Their corners are worked out over the rationals the same way.
+#[test]
+fn the_front_flat_of_an_led_meets_its_body_and_rim_twice_far_out_along_them() {
+    for (normal, offset, on_both_axes, [body_radius, rim_radius], corners) in [
+        (
+            [-1.0, -1.020894735288e-16, 1.069665918538e-31],
+            1.2300000000000006,
+            [1.27, -6.35, 3.0],
+            [2.5, 2.9],
+            [
+                [-0.9199001755034281, -3037529862558177.5, 4.471194559982997],
+                [-1.1533980207892414, -750341602938617.5, 2.240205655268641],
+            ],
+        ),
+        (
+            [-1.0, 1.020894735287e-16, -1.069665918538e-31],
+            1.2299999999999993,
+            [1.27, -6.35, 9.0],
+            [2.5, 2.9],
+            [
+                [-1.124463014885949, 1033769510863244.8, 9.488300833981354],
+                [-0.9975051039096011, 2277364042092330.5, 8.279495380211568],
+            ],
+        ),
+        (
+            [-1.0, 1.55820775386e-16, -1.924578414602e-31],
+            0.22999999999999887,
+            [1.27, -6.35, 10.0],
+            [1.5, 1.9],
+            [
+                [-0.1130199095964989, 750734875460068.2, 10.469304608987658],
+                [0.0838406976263085, 2014113309658867.0, 9.248144477552888],
+            ],
+        ),
+        (
+            [-1.0, -2.102719556706e-32, 2.575941704354e-47],
+            0.23,
+            [1.27, -3.81, 2.0],
+            [1.5, 1.9],
+            [
+                [-0.22999999999999998, -1493341088686801.8, 2.491751281309587],
+                [-0.22999999999999998, -737012837785723.6, 1.6520582429848565],
+            ],
+        ),
+        (
+            [-1.0, 0.0, 0.0],
+            1.23,
+            [1.27, -1.27, 15.0],
+            [2.5, 2.9],
+            [
+                [-1.23, -1984930593544855.8, 15.734021801566158],
+                [-1.23, -880650497379884.1, 14.508024613168697],
+            ],
+        ),
+        (
+            [-1.0, 0.0, 0.0],
+            0.23,
+            [1.27, -1.27, 10.0],
+            [1.5, 1.9],
+            [
+                [-0.23, -1493341088686799.0, 10.491751281309586],
+                [-0.23, -737012837785721.1, 9.652058242984856],
+            ],
+        ),
+        (
+            [-1.0, 0.0, 0.0],
+            0.23,
+            [1.27, -3.81, 6.0],
+            [1.5, 1.9],
+            [
+                [-0.23, -1493341088686801.5, 6.491751281309587],
+                [-0.23, -737012837785723.8, 5.6520582429848565],
+            ],
+        ),
+    ] {
+        let front = flat(normal, [-offset, 0.0, 0.0]);
+        let [body, rim] = an_leds_body_and_rim(on_both_axes, body_radius, rim_radius);
+        for order in every_order([&front, &body, &rim]) {
+            corners_far_out_near(order, &corners);
+        }
+    }
+}
+
+/// The points `surfaces` meet at, one near each of `corners` in whatever order
+/// they come: a box no wider than a billionth of the corner's size, or of one
+/// where the corner is nearer nothing than that, holding the corner give or
+/// take as much, and not certified off any of the three.
+fn corners_far_out_near(surfaces: [&Surface; 3], corners: &[[f64; 3]]) {
+    let answer = meet(surfaces).expect("these three meet");
+    let MeetOfThree::At(points) = &answer else {
+        panic!("{surfaces:?}: {answer:?}");
+    };
+    assert_eq!(points.len(), corners.len(), "{surfaces:?}: {answer:?}");
+    for corner in corners {
+        let near: Vec<&PredicatePoint> = points
+            .iter()
+            .filter(|point| {
+                point
+                    .enclosure()
+                    .into_iter()
+                    .zip(corner)
+                    .all(|(side, expected)| {
+                        let room = 1e-9 * expected.abs().max(1.0);
+                        side.width() <= room
+                            && side.lo() - room <= *expected
+                            && *expected <= side.hi() + room
+                    })
+            })
+            .collect();
+        assert_eq!(near.len(), 1, "{surfaces:?}: {answer:?} near {corner:?}");
+        for surface in surfaces {
+            assert!(
+                !matches!(
+                    which_side_of(surface, *near[0]),
+                    Decision::Pos | Decision::Neg
+                ),
+                "{surfaces:?}: {:?} is certified off {surface:?}",
+                near[0]
+            );
+        }
+    }
+}
+
+/// **The cap of an LED, a rounding off square to its body and its rim**
+/// (Q2938, from `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step`). The plane
+/// `y = −3.81` through the stored point on both axes cuts the body of radius
+/// 1.5 and the rim of radius 1.9 in two bands `0.4` apart, so the three share
+/// nothing. Over the rationals the stored numbers name, the resultant of the
+/// two conics the cap cuts has no real root at all.
+#[test]
+fn the_cap_of_an_led_square_to_its_body_and_rim_shares_nothing_with_them() {
+    let cap = flat(
+        [-2.102719556706e-32, 1.0, -1.158067919543e-15],
+        [0.0, -3.8100000000000023, 0.0],
+    );
+    let [body, rim] = an_leds_body_and_rim([1.27, -3.81, 2.0], 1.5, 1.9);
+    for order in every_order([&cap, &body, &rim]) {
+        assert_eq!(meet(order), Ok(MeetOfThree::Nowhere), "{order:?}");
+    }
 }
