@@ -2339,6 +2339,73 @@ fn a_plane_along_an_leds_body_across_its_domes_rim_meets_both_at_four_corners() 
     }
 }
 
+/// **The same LED's planes `y = ±0.2` as its faces 8 and 10 write them, which
+/// lean by `7.8e−32` toward `x` as well** (Q2955, from `LED_D5.0mm-3.step`,
+/// where every fuse split the dome on them). The dome and the body are the
+/// ones above. On the `−y` side the dome bulges past the pipe by a hair, so
+/// the plane `y = −0.2` meets both at four corners, at `x = 2.54 ± √6.21` and
+/// `2.8e−8` above and below the rim; on the `+y` side the pipe stands proud of
+/// the dome everywhere, so the plane `y = 0.2` meets the two nowhere. Each
+/// corner is worked out apart from this code, by Newton's steps on the two
+/// surfaces in 80-digit decimals over the numbers the file stores, to a miss
+/// of `1e−79` on both.
+///
+/// The lean toward `x` breaks the wall `x = 2.54` that mirrors all three, so
+/// the road above does not take it, and the road for two conics kept the
+/// height: each height holds two corners, mirrored across the wall but for
+/// `7.8e−32`, so the quartic in the height had a root it could not tell from
+/// two, and the three were refused.
+#[test]
+fn the_planes_either_side_of_an_leds_body_across_its_domes_rim_meet_both_at_four_corners_or_nowhere()
+ {
+    let dome = ball([2.54, -5.051514762044e-15, 9.1], 2.5);
+    let body = Surface::Cylinder(
+        Cylinder::new(
+            Axis::as_written(
+                Point::new(2.54, -3.030908857227e-15, 9.1),
+                Vector::new(0.0, 3.330669073875e-16, -1.0),
+            )
+            .expect("a direction with length"),
+            2.5,
+        )
+        .expect("a radius"),
+    );
+    let side = |normal: [f64; 3], offset: f64| {
+        let side = Plane::from_point_and_normal_as_written(
+            Point::new(0.0, normal[1] * offset, 0.0),
+            Vector::new(normal[0], normal[1], normal[2]),
+        )
+        .expect("a normal with length");
+        assert_eq!(
+            (side.normal().components(), side.offset()),
+            (normal, offset),
+            "the side the file stores"
+        );
+        Surface::Plane(side)
+    };
+    let below = side(
+        [-7.764378988396e-32, -1.0, 6.661338147751e-16],
+        0.20000000000000168,
+    );
+    let above = side(
+        [7.764378988396e-32, 1.0, -6.661338147751e-16],
+        0.19999999999999835,
+    );
+    let y = -0.19999999999999563;
+    let corners = [
+        [0.04801284112457698, y, 9.099999971570396],
+        [5.031987158875423, y, 9.099999971570396],
+        [0.04801284112457698, y, 9.100000028429603],
+        [5.031987158875423, y, 9.100000028429603],
+    ];
+    for order in every_order([&below, &dome, &body]) {
+        points_near(order, &corners);
+    }
+    for order in every_order([&above, &dome, &body]) {
+        assert_eq!(meet(order), Ok(MeetOfThree::Nowhere), "{order:?}");
+    }
+}
+
 /// **A side of an LED's lead, carried across the rim where its dome sits on
 /// its body** (Q2963, from `LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step`, as its
 /// faces 16 and 14 store the two sides). The body is a pipe of radius 1.5

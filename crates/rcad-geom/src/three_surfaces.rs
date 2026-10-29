@@ -132,8 +132,11 @@
 //! meets twice, `7·10¹⁴` to `3·10¹⁵` along them; so is a plane leaning well off
 //! square to a pipe's axis against a ball whose centre is off the wall
 //! through that axis and the plane's normal, and the cap of one bar across a
-//! second bar leaning to it whose axis passes the first one's by. It is asked
-//! after every other road, so no answer one of them gives moves.
+//! second bar leaning to it whose axis passes the first one's by. Where two
+//! points share the coordinate kept, the quartic is asked again in that
+//! coordinate plus the other, which parts them: the planes either side of the
+//! `D5.0` LED's body, across its dome's rim, are it. It is asked after every
+//! other road, so no answer one of them gives moves.
 //! [`what_a_plane_that_cuts_both_in_conics_leaves`].
 //!
 //! **Three curved surfaces, two of which bend the same way, are one plane and
@@ -250,7 +253,8 @@ pub enum MeetOfThree {
     /// first, for `τ = n × ĝ / |n|` and `ĝ` the way the difference of the two
     /// rises along the plane. A plane that cuts both in conics gives up to
     /// four, in the order of the coordinate on the plane its quartic is
-    /// written in, which the triple fixes
+    /// written in, or of that coordinate plus the other one where the quartic
+    /// is asked again sheared, which the triple fixes
     /// ([`what_a_plane_that_cuts_both_in_conics_leaves`]).
     ///
     /// Most are a box the true meeting point is somewhere inside, because
@@ -5621,7 +5625,32 @@ fn the_plane_reaches_the_pipe_only_off_the_other(
 /// root whose `Y` cannot be told from nothing is handed on, and every other
 /// root is one point, boxed in intervals from its `u`'s box and narrowed by
 /// [`narrowed_onto_two_quadrics_by_checked_steps`]. The points come in the
-/// order of their `u`, which the triple fixes (§31.3).
+/// order of the unknown the quartic is in, `u` or the sheared one below, which
+/// the triple fixes (§31.3).
+///
+/// **Where two points share the unknown kept, it is asked again in a sheared
+/// one.** Two points at one `u` make the quartic touch zero there, and two
+/// points a hair apart in `u` leave two roots a hair apart, which
+/// [`where_a_polynomial_is_zero`] cannot tell from a touch or from nothing. So
+/// where the quartic in `t`, the unknown kept once stretched, says nothing, the
+/// two conics are written in `s = t + g` and `g`, `g` the unknown taken out
+/// ([`sheared`]), and the quartic in `s` is asked; each root's `t` is then
+/// `s − g`. The shear is exact and moves no point, and it is asked second, so
+/// every triple the quartic in `t` answers keeps its answer. The `D5.0` LED's
+/// dome is it: the planes `y = −0.2` and `y = 0.2` its faces 8 and 10 store
+/// cut the dome's ball and the body's pipe, whose centre and axis are
+/// `2·10⁻¹⁵` apart, in two conics that cross four times or not at all, at the
+/// heights `z = 9.1 ± 2.8·10⁻⁸` and two at each height, mirrored across
+/// `x = 2.54` but for `7.8·10⁻³²`. Kept as the height, the quartic has five
+/// turning points it cannot tell from nothing for `y = −0.2` and one for
+/// `y = 0.2`, and no root it can place. In `z + x` the four points lie at four
+/// places, two near `9.148` and two near `14.132`, `5.7·10⁻⁸` apart.
+///
+/// **A turning point is cleared where the quartic keeps one sign over its box**
+/// ([`it_keeps_one_sign_over`]). In `z + x` the quartic for `y = −0.2` turns
+/// between each two near roots, and the one for `y = 0.2` turns at the same two
+/// places without reaching zero, and Horner's rule in intervals over a box one
+/// rounding wide cannot tell any of those four turning points from nothing.
 ///
 /// **Both conics are stretched and lifted first.** The unknown kept is
 /// written `2ˢ·t`, `s` half the binades between what the two conics square
@@ -5645,11 +5674,13 @@ fn the_plane_reaches_the_pipe_only_off_the_other(
 /// and [`what_a_plane_along_a_pipe_leaves`] hands those on here, since it
 /// cannot multiply them out within range. No road above reaches these points.
 ///
-/// **It hands on** a torus, a product out of range, two conics both linear in
-/// the unknown taken out, an `R` that is nothing everywhere — two conics that
-/// share a curve — a touch [`where_a_polynomial_is_zero`] cannot tell from
-/// nothing, and a root whose `Y` it cannot tell from nothing. It is asked
-/// last, so every triple a road above answers keeps its answer.
+/// **It hands on** a torus, a product out of range, and what the quartic in
+/// `t` and the one in `s` both hand on: two conics both linear in the unknown
+/// taken out, an `R` that is nothing everywhere — two conics that share a
+/// curve — a turning point [`where_a_polynomial_is_zero`] cannot tell from
+/// nothing and [`it_keeps_one_sign_over`] cannot clear, and a root whose `Y`
+/// it cannot tell from nothing. It is asked last, so every triple a road above
+/// answers keeps its answer.
 fn what_a_plane_that_cuts_both_in_conics_leaves(
     flat: &Plane,
     one: &Surface,
@@ -5687,11 +5718,53 @@ fn what_a_plane_that_cuts_both_in_conics_leaves(
         (binary_exponent(squared_by(gone)) - binary_exponent(squared_by(kept))) / 2
     };
     let widened = slid_exactly(1.0, stretch)?;
-    let [mine, theirs] = [
+    let forms = [
         the_conic_stretched_and_lifted(&mine, kept, stretch)?,
         the_conic_stretched_and_lifted(&theirs, kept, stretch)?,
     ];
-    let [a, b] = [&mine, &theirs].map(|form| as_a_quadratic_in_one_number(form, [kept, 2, gone]));
+    let shared_in = |unknown: TheUnknownKept| {
+        the_points_two_conics_share(
+            flat,
+            [&written[0], &written[1]],
+            &forms,
+            [off, first, second],
+            [kept, gone],
+            widened,
+            unknown,
+        )
+    };
+    shared_in(TheUnknownKept::AsItIs).or_else(|| shared_in(TheUnknownKept::Sheared))
+}
+
+/// Which unknown [`the_points_two_conics_share`] keeps in the quartic.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TheUnknownKept {
+    /// The stretched `t` the two conics square by less.
+    AsItIs,
+    /// `t + g`, `g` the unknown taken out, so two points at one `t` are apart.
+    Sheared,
+}
+
+/// The points two conics `forms`, stretched and lifted, share on `flat`, from
+/// the quartic in `unknown`, or `None` where that quartic cannot say.
+fn the_points_two_conics_share(
+    flat: &Plane,
+    written: [&HowASurfaceIsWritten; 2],
+    forms: &[[[Exact; 3]; 3]; 2],
+    [off, first, second]: [usize; 3],
+    [kept, gone]: [usize; 2],
+    widened: f64,
+    unknown: TheUnknownKept,
+) -> Option<MeetOfThree> {
+    let normal = flat.normal().components();
+    let on_the_plane = [first, second];
+    let [a, b] = forms.each_ref().map(|form| {
+        let form = match unknown {
+            TheUnknownKept::AsItIs => form.clone(),
+            TheUnknownKept::Sheared => sheared(form, [kept, gone]),
+        };
+        as_a_quadratic_in_one_number(&form, [kept, 2, gone])
+    });
     if ![&a[2][0], &b[2][0]]
         .iter()
         .any(|squared| matches!(squared.sign(), Decision::Pos | Decision::Neg))
@@ -5724,7 +5797,11 @@ fn what_a_plane_that_cuts_both_in_conics_leaves(
     }
     let highest_first: Vec<Exact> = shared.iter().rev().cloned().collect();
     let found = where_a_polynomial_is_zero(&highest_first)?;
-    if !found.or_maybe_at.is_empty() {
+    if !found
+        .or_maybe_at
+        .iter()
+        .all(|maybe| it_keeps_one_sign_over(&shared, maybe.inside))
+    {
         return None;
     }
 
@@ -5735,8 +5812,12 @@ fn what_a_plane_that_cuts_both_in_conics_leaves(
             return None;
         }
         let other_root = quotient_or_everything(-the_value_over(&ends, root), pull);
+        let along_the_kept = match unknown {
+            TheUnknownKept::AsItIs => root,
+            TheUnknownKept::Sheared => root - other_root,
+        };
         let mut boxed = [Interval::exactly(0.0); 3];
-        boxed[on_the_plane[kept]] = root * Interval::exactly(widened);
+        boxed[on_the_plane[kept]] = along_the_kept * Interval::exactly(widened);
         boxed[on_the_plane[gone]] = other_root;
         boxed[off] = quotient_or_everything(
             Interval::exactly(flat.offset())
@@ -5746,7 +5827,7 @@ fn what_a_plane_that_cuts_both_in_conics_leaves(
         );
         let PredicatePoint::Constructed(narrowed) = narrowed_onto_two_quadrics_by_checked_steps(
             flat,
-            [&written[0], &written[1]],
+            written,
             PredicatePoint::Constructed(boxed),
         ) else {
             unreachable!("a box narrowed is a box");
@@ -5867,6 +5948,75 @@ fn the_conic_stretched_and_lifted(
 /// it 25 binades of each conic to spare at either end. Before, `T` was 200,
 /// which answered the first three and refused the fourth.
 const HIGHEST_BINADE_A_CONIC_IS_LIFTED_TO: i32 = 232;
+
+/// `form`, a conic in the unknowns `kept` and `gone`, `t` and `g`, written in
+/// `s = t + g` and `g` instead, exactly: `t = s − g` turns
+/// `F_tt·t² + 2F_tg·tg + F_gg·g² + 2F_t·t + 2F_g·g + F` into
+/// `F_tt·s² + 2(F_tg − F_tt)·sg + (F_tt − 2F_tg + F_gg)·g² + 2F_t·s + 2(F_g − F_t)·g + F`.
+fn sheared(form: &[[Exact; 3]; 3], [kept, gone]: [usize; 2]) -> [[Exact; 3]; 3] {
+    let mut sheared = form.clone();
+    let across = form[kept][gone].minus(&form[kept][kept]);
+    sheared[kept][gone] = across.clone();
+    sheared[gone][kept] = across;
+    sheared[gone][gone] = form[kept][kept]
+        .minus(&form[kept][gone])
+        .minus(&form[kept][gone])
+        .plus(&form[gone][gone]);
+    let along = form[gone][2].minus(&form[kept][2]);
+    sheared[gone][2] = along.clone();
+    sheared[2][gone] = along;
+    sheared
+}
+
+/// Whether the polynomial `coefficients`, lowest power first, keeps one sign
+/// all over `inside`.
+///
+/// **By the mean value, from one end.** For every `t` in the box,
+/// `p(t) = p(lo) + p′(ξ)·(t − lo)` for some `ξ` between `lo` and `t`, so `p`
+/// over the box lies inside `p(lo)`, worked out exactly, plus `p′` over the box
+/// by Horner's rule in intervals times `[0, hi − lo]`. Where that keeps clear
+/// of zero, no root is in the box. Horner's rule over the box for `p` itself
+/// spreads by about the box's width times the slope `p` would have with every
+/// number in it made positive, where this spreads by the width times the
+/// slope's own size, and near a turning point that is small.
+///
+/// **Measured on the `D5.0` LED's dome**, in
+/// [`what_a_plane_that_cuts_both_in_conics_leaves`]'s `z + x`: at each of the
+/// four turning points the exact value at the box's low end is `±2.78·10²⁶¹`,
+/// Horner's rule over the box reaches `4.0·10²⁶⁴` to `9.6·10²⁶⁴` either side of
+/// zero, and the leading coefficient is `1.38·10²⁷⁵`. This clears all four. Kept as the
+/// height, the six turning points it is asked about are worth `1.2·10²³¹` to
+/// `9·10²⁴⁴` at an end, and it clears none of them.
+fn it_keeps_one_sign_over(coefficients: &[Exact], inside: Interval) -> bool {
+    let Some(at_the_end) = the_exact_value_at(coefficients, inside.lo()) else {
+        return false;
+    };
+    let slope: Option<Vec<Exact>> = coefficients
+        .iter()
+        .zip(0_u32..)
+        .skip(1)
+        .map(|(number, power)| number.times(&Exact::of(f64::from(power))))
+        .collect();
+    let Some(slope) = slope else {
+        return false;
+    };
+    let wide = (Interval::exactly(inside.hi()) - Interval::exactly(inside.lo())).hi();
+    let from_the_end = Interval::new(0.0, wide).expect("a box runs upwards");
+    let reach = at_the_end.enclosure() + the_value_over(&slope, inside) * from_the_end;
+    !reach.contains_zero()
+}
+
+/// The polynomial `coefficients`, lowest power first, at `place`, exactly, by
+/// Horner's rule; or `None` where a product falls out of range.
+fn the_exact_value_at(coefficients: &[Exact], place: f64) -> Option<Exact> {
+    let step = Exact::of(place);
+    coefficients
+        .iter()
+        .rev()
+        .try_fold(Exact::of(0.0), |so_far, number| {
+            Some(so_far.times(&step)?.plus(number))
+        })
+}
 
 /// The form `numbers` as `f₂·z² + f₁·z + f₀` in `z`, the number `order[2]`
 /// names, each `fᵢ` a polynomial in `x`, the number `order[0]` names, lowest
