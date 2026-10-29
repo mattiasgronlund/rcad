@@ -126,16 +126,26 @@
 //! meet is at one node now turn by nothing there, so how they bend sorts them
 //! as well (Q2982).
 //!
-//! The `D3.0` LED stops now `Undecidable` with the one record `order along a
-//! crossing`, the far box included, between two points a rounding apart in
+//! The `D3.0` LED stopped next `Undecidable` with the one record `order along
+//! a crossing`, the far box included, between two points a rounding apart in
 //! `y` where the flange's rim crosses the front at `z = 5.7`, near
-//! `(3.146, -3.81, 5.7)`. The `Z15.0` LED stops with the same record, between
-//! the two points where the plane `x = -0.3` meets its body's pipe at
-//! `y = -7.37`, `3.9` apart in `z`. The tests pin both.
+//! `(3.146, -3.81, 5.7)`. One is on the flange's front, normal
+//! `(0, 1, -1.158e-15)` at offset `-3.810000000000007`, and one on the body's
+//! front disc, normal `(5.55e-17, 1, 0)` at offset `-3.81`: one plane written
+//! twice. Which side of the first's plane the second is on is now read
+//! exactly, along the line the second lies on, and so is the order (Q2988).
+//!
+//! The `D3.0` LED stops now `Undecidable` with the one record `side of
+//! plane`, the far box included, at a point on the flange's rim at the front:
+//! near `(-0.627, -3.81, 5.9)` for the boxes round the front corner, and
+//! `(-0.606, -3.81, 6.3)` for the far one. The `Z15.0` LED stops with the one
+//! record `order along a crossing`, between the two points where the plane
+//! `x = -0.3` meets its body's pipe at `y = -7.37`, `3.9` apart in `z`. The
+//! tests pin both.
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, SIDE_OF_CYLINDER, Vector};
+use rcad_geom::{Isometry, SIDE_OF_CYLINDER, SIDE_OF_PLANE, Vector};
 use rcad_predicates::{Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -190,14 +200,17 @@ fn a_z15_led_tells_the_cells_of_its_front_apart_and_stops_on_the_order_of_two_po
     );
 }
 
-/// The `D3.0` LED tells the cells of its front apart since Q2974, and stops
-/// on the order of two points on its flange's rim, the far box included.
+/// The `D3.0` LED tells the cells of its front apart since Q2974. Since Q2988
+/// it puts in order the two points where `z = 5.7` crosses its flange's rim
+/// at the front, one on the flange's front and one on the body's front disc,
+/// the one plane written twice. It stops on the side of a plane of a point on
+/// the rim at the front, the far box included.
 #[test]
-fn a_d3_led_tells_the_cells_of_its_front_apart_and_stops_on_the_order_of_two_points_on_its_rim() {
+fn a_d3_led_orders_two_points_on_its_rim_and_stops_on_the_side_of_a_point_on_its_rim() {
     every_fuse_refuses(
         D3,
         &a_box_round_each_of(&[[-0.23, -3.81, 5.999999956464], [-0.23, -4.81, 6.0], FAR_OFF]),
-        the_order_of_two_points_on_the_rim_at_z_5_7_is_undecidable,
+        the_side_of_a_point_on_the_rim_at_the_front_is_undecidable,
     );
 }
 
@@ -253,26 +266,24 @@ fn the_side_of_a_pipe_is_undecidable(_: &Model, error: &Error) -> bool {
         .eq([SIDE_OF_CYLINDER])
 }
 
-/// Refused `Undecidable` with the one record `order along a crossing`, both
-/// its points within `1e-9` of where the flange's rim, the pipe of radius 1.9
-/// about `x = 1.27, z = 6`, crosses the front `y = -3.81` at `z = 5.7`.
-fn the_order_of_two_points_on_the_rim_at_z_5_7_is_undecidable(_: &Model, error: &Error) -> bool {
+/// Refused `Undecidable` with the one record `side of plane`, its one point
+/// within `1e-9` of the front `y = -3.81` and of the flange's rim there, the
+/// circle of radius 1.9 about `x = 1.27, z = 6`.
+fn the_side_of_a_point_on_the_rim_at_the_front_is_undecidable(_: &Model, error: &Error) -> bool {
     let Error::Undecidable { records } = error else {
         return false;
     };
     let [record] = records.records() else {
         return false;
     };
-    let on_the_rim = [
-        1.27 + (1.9_f64.powi(2) - 0.3_f64.powi(2)).sqrt(),
-        -3.81,
-        5.7,
-    ];
-    record.predicate() == ALONG_A_CROSSING
-        && record
-            .inputs()
-            .iter()
-            .all(|point| is_within_1e_9_of(point, on_the_rim))
+    let [point] = record.inputs() else {
+        return false;
+    };
+    let [x, y, z] = point.enclosure().map(|side| (side.lo() + side.hi()) / 2.0);
+    let off_the_rim = ((x - 1.27).hypot(z - 6.0) - 1.9).abs();
+    record.predicate() == SIDE_OF_PLANE
+        && is_within_1e_9_of(point, [x, -3.81, z])
+        && off_the_rim < 1e-9
 }
 
 /// Refused `Undecidable` with the one record `order along a crossing`, its two
