@@ -851,7 +851,7 @@ pub enum Error {
     /// quadrics is a degree-eight system.
     ///
     /// **"In general" is doing real work in that sentence**, and
-    /// `three_surfaces.rs`'s module doc names twelve families it answers. In
+    /// `three_surfaces.rs`'s module doc names thirteen families it answers. In
     /// seven, the plane and two quadrics are no quartic at all: two quadrics
     /// that square `p` the same way differ by something flat; two surfaces
     /// turned about one axis are cut
@@ -916,36 +916,53 @@ pub enum Error {
     /// at `(±12, 0, 0)`; and so is a ball resting on a rod, cut leaning through
     /// where the two touch.
     ///
-    /// This is what is left over — among it a plane leaning well off square to
-    /// the axis of a pipe or a cone, which cuts it in a curve too far from a
-    /// line for the road for crossing curves, against a second round surface
-    /// off the wall through that axis and the plane's normal, such as the plane
-    /// `x + 16z = 8` against a pipe of radius one along `x` and a ball of
-    /// radius three half a unit off that axis, which meet in four points
-    /// (`a_ray_along_a_balls_skin_leaning_to_a_pipe_off_its_centre_is_refused_with_four_points_there`
-    /// in `rcad-topo`), or a bar's cap across a second bar leaning to it whose
-    /// axis passes the first one's by; two curves that touch rather than
-    /// cross, where no ball is centred on the other surface's axis and no wall
-    /// mirrors all three; a plane a rounding off parallel to a pipe's axis
-    /// that cuts the pipe, against a second round surface off that axis and
-    /// off that wall, which the road along a pipe takes only where it is
-    /// exactly parallel; and three curved surfaces two of which differ by a
-    /// plane that no stored [`Plane`](crate::Plane) is exactly, such as two
-    /// balls whose centres lie along a diagonal.
+    /// The thirteenth is the quartic itself, worked out exactly. Take off the
+    /// plane the coordinate its normal leans along most, and each curved
+    /// surface is a conic in the other two, every number of it exact. The two
+    /// conics share a point just where a polynomial of degree four in one of
+    /// those two is nothing, and each real root of it, boxed on signs worked
+    /// out exactly, names one point (Q2938). An LED's front flat, a rounding
+    /// off parallel to its body's pipe and its rim's, is it: it meets both
+    /// twice, `7·10¹⁴` to `3·10¹⁵` along them. So is a plane leaning well off
+    /// square to a pipe's axis against a ball off the wall through that axis
+    /// and the plane's normal — the plane `x + 16z = 8`, a pipe of radius one
+    /// along `x` and a ball of radius three half a unit off that axis meet in
+    /// four points
+    /// (`a_ray_along_a_balls_skin_leaning_to_a_pipe_off_its_centre_meets_both_in_four_points`
+    /// in `rcad-topo`) — and a bar's cap across a second bar leaning to it
+    /// whose axis passes the first one's by
+    /// (`a_cap_across_a_leaning_bar_meets_it_where_their_axes_cross_and_where_they_pass`).
+    /// It is asked after every other road, so no answer one of them gives
+    /// moves.
     ///
-    /// A **gap** and not a limit (§16.10): the points are there, and a real
-    /// algebraic solver reaches them. The family of fixes is the
-    /// Dupont–Lazard–Lazard–Petitjean machinery or a certified numerical solver
-    /// with a separation bound of its own, and both are a milestone rather than
-    /// a lane (`docs/decisions.md` §31.2). The consumer that calls it due is
-    /// named there too: two capped bars crossing near one of their caps. For
-    /// the plane no stored plane is, the fix is smaller: roads that take the
-    /// plane as the exact numbers it is, as the first family's road already
-    /// does. `three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved`,
-    /// `a_cap_across_a_leaning_bar_meets_it_where_their_axes_cross_and_is_refused_where_they_pass`,
+    /// This is what is left over: one plane and two curved surfaces that no
+    /// road above answers and that the thirteenth hands on — two conics whose
+    /// numbers it cannot multiply out within `f64`'s range, two that are both
+    /// linear in the coordinate it takes out, two that share a whole curve, a
+    /// place where the quartic may touch nothing and it cannot tell, and a root
+    /// at which it cannot tell what names the other coordinate from nothing;
+    /// three curved surfaces no two of which differ by a plane a stored
+    /// [`Plane`](crate::Plane) is exactly, such as two balls whose centres lie
+    /// along a diagonal; and a triple with a ring and fewer than two planes
+    /// outside the eighth family, such as a plane holding a ring's axis and a
+    /// ball off that axis.
+    ///
+    /// A **gap** and not a limit (§16.10): the points are there, or the curve
+    /// the three share is. For one plane and two curved surfaces, the
+    /// thirteenth road is the exact solver `docs/decisions.md` §31.2 deferred,
+    /// and it answers the corner of the consumer §31.2 names — a cap and two
+    /// pipes, where two capped bars cross near one of their caps, as the cap
+    /// across a leaning bar above is. For three curved surfaces and for a
+    /// ring, the family of fixes is still the Dupont–Lazard–Lazard–Petitjean
+    /// machinery or a certified numerical solver with a separation bound of its
+    /// own, a milestone rather than a lane. For the plane no stored plane is,
+    /// the fix is smaller: roads
+    /// that take the plane as the exact numbers it is, as the first family's
+    /// road already does.
+    /// `three_curved_surfaces_meeting_at_a_point_are_refused_rather_than_solved`,
     /// `two_balls_whose_plane_no_stored_plane_is_and_a_bar_are_still_refused`
-    /// and the `rcad-topo` pin above are the demonstrations that the points
-    /// exist.
+    /// and `a_plane_holding_a_rings_axis_and_a_ball_off_it_is_a_gap` are the
+    /// demonstrations that the points exist.
     #[error(
         "where three surfaces meet is only worked out when two of them are flat, and fewer than \
          two of these are"

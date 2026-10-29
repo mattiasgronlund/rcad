@@ -33,12 +33,18 @@
 //! baked said they ran along the body's pipe. The check now skips a flat face
 //! a pipe holds strictly inside, and the disc is 0.4 inside the rim (Q2947).
 //!
-//! It stops now where the flange's flat meets the body's pipe and the rim's,
-//! two pipes about one axis a rounding apart in direction that never meet,
-//! refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` (Q2938). These tests pin
-//! that. When it answers, each turns back into the volume check of commit
-//! `f179ca02a`: what the box and the LED share is the box's part inside the
-//! LED, and the intersection and the difference add up to the LED.
+//! It stopped next where the flange's flat meets the body's pipe and the
+//! rim's, two pipes about one axis a rounding apart in direction that never
+//! meet, refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. Q2938's road
+//! answers that triple.
+//!
+//! It stops now on the flange's front, face slot 2, the plane `y = -1.27`,
+//! refused `AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve` by
+//! `cut_the_crossings_into_arcs` (fuse/arrange.rs) in the check that the LED
+//! does not cross itself. These
+//! tests pin that. When it answers, each turns back into the volume check of
+//! commit `f179ca02a`: what the box and the LED share is the box's part inside
+//! the LED, and the intersection and the difference add up to the LED.
 //!
 //! `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step` is the same LED with its axis
 //! at `z = 15`, and `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step` a smaller one,
@@ -61,17 +67,29 @@
 //! that only touch cannot say which way along the rim an arc runs. Bake now
 //! reads such an arc against the rim's plane (Q2940), and the `Z15.0` LED gets
 //! past its body's pipe. The `D3.0` LED stopped at its front disc as the
-//! `Z3.0` one did, and gets past it as that one does. Both stop where three
-//! surfaces meet, refused `Undecidable` on the flange's flat and two curved
-//! surfaces about one point: `x = -1.23` and two about `(1.27, -1.27, 15)` in
-//! the `Z15.0` LED, its flat and two about `(1.27, -3.81, 6)` in the `D3.0`
-//! one. That is the triple Q2938 names in
-//! `LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step`, and Q2938 is the row whose
-//! road it waits on. These tests pin that too.
+//! `Z3.0` one did, and gets past it as that one does.
+//!
+//! Both stopped next where three surfaces meet, refused `Undecidable` on the
+//! flange's flat and two curved surfaces about one point: `x = -1.23` and two
+//! about `(1.27, -1.27, 15)` in the `Z15.0` LED, its flat and two about
+//! `(1.27, -3.81, 6)` in the `D3.0` one. The two curved surfaces are the
+//! body's pipe and the rim's, about one axis a rounding apart in direction,
+//! the pair Q2938 names. The flat's normal there is exactly `(-1, 0, 0)`, and
+//! the road along a pipe ran out of range writing the lines the flat cuts. It
+//! now hands the triple on to Q2938's road for a plane that cuts both in
+//! conics, which answers it as it answers the `Z3.0` LED's flat that leans
+//! off `x` by a rounding.
+//!
+//! Both stop now at the front corner, refused `Undecidable` with the one
+//! record `order along a crossing`, the far box included: in the `Z15.0` LED
+//! between the corner `(-1.23, -1.27, 15)` and a point solved near
+//! `(-1.23, -1.27, 15.075)` in a box `4.4e-16` wide, in the `D3.0` one between
+//! `(-0.23, -3.81, 5.999999956464)` and a point near `z = 6.147`. These tests
+//! pin that too.
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, Vector, WHERE_THREE_SURFACES_MEET};
+use rcad_geom::{Isometry, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -87,42 +105,42 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
-fn a_box_round_the_back_corner_gets_past_the_front_disc_and_stops_where_the_flat_meets_two_pipes() {
+fn a_box_round_the_back_corner_gets_past_where_the_flat_meets_two_pipes_and_stops_on_the_front() {
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -2.27, 3.0]]),
-        where_the_flat_meets_two_pipes,
+        an_edge_of_the_front_is_not_drawn_along_it,
     );
 }
 
 #[test]
-fn a_box_round_the_front_corner_gets_past_the_front_disc_and_stops_where_the_flat_meets_two_pipes()
-{
+fn a_box_round_the_front_corner_gets_past_where_the_flat_meets_two_pipes_and_stops_on_the_front() {
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -1.27, 3.0]]),
-        where_the_flat_meets_two_pipes,
+        an_edge_of_the_front_is_not_drawn_along_it,
     );
 }
 
-/// The `Z15.0` LED gets past its body's pipe since Q2940 and stops where its
+/// The `Z15.0` LED gets past its body's pipe since Q2940, and past where its
 /// flange's flat `x = -1.23` meets two curved surfaces about
-/// `(1.27, -1.27, 15)`, the far box included. Q2938 is the row whose road this
-/// triple waits on.
+/// `(1.27, -1.27, 15)` since Q2938's road answers a flat whose normal is
+/// exactly `(-1, 0, 0)`. It stops ordering two points along a crossing at its
+/// front corner, the far box included.
 #[test]
-fn a_z15_led_gets_past_its_body_and_stops_where_three_surfaces_meet() {
+fn a_z15_led_gets_past_where_its_flat_meets_two_pipes_and_stops_ordering_its_front_corner() {
     every_fuse_refuses(
         Z15,
         &a_box_round_each_of(&[[-1.23, -1.27, 15.0], [-1.23, -2.27, 15.0], FAR_OFF]),
-        where_three_surfaces_meet_is_undecidable,
+        the_order_along_a_crossing_is_undecidable,
     );
 }
 
 #[test]
-fn a_d3_led_gets_past_its_front_disc_and_stops_where_three_surfaces_meet() {
+fn a_d3_led_gets_past_where_its_flat_meets_two_pipes_and_stops_ordering_its_front_corner() {
     let mut fuses = a_box_round_each_of(&[[-0.23, -3.81, 5.999999956464], [-0.23, -4.81, 6.0]]);
     fuses.push((FAR_OFF, Rule::Intersection));
-    every_fuse_refuses(D3, &fuses, where_three_surfaces_meet_is_undecidable);
+    every_fuse_refuses(D3, &fuses, the_order_along_a_crossing_is_undecidable);
 }
 
 /// A box round each corner, to be fused with the LED under intersection and
@@ -165,14 +183,13 @@ fn every_fuse_refuses(
     }
 }
 
-fn where_the_flat_meets_two_pipes(error: &Error) -> bool {
-    matches!(
-        error,
-        Error::Geometry(rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
-    )
+fn an_edge_of_the_front_is_not_drawn_along_it(error: &Error) -> bool {
+    matches!(error, Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { .. })
 }
 
-fn where_three_surfaces_meet_is_undecidable(error: &Error) -> bool {
+/// The predicate `fuse/arrange.rs` names `ALONG_A_CROSSING`, which it keeps
+/// private, so the string itself is compared.
+fn the_order_along_a_crossing_is_undecidable(error: &Error) -> bool {
     let Error::Undecidable { records } = error else {
         return false;
     };
@@ -180,7 +197,7 @@ fn where_three_surfaces_meet_is_undecidable(error: &Error) -> bool {
         .records()
         .iter()
         .map(|record| record.predicate())
-        .eq([WHERE_THREE_SURFACES_MEET])
+        .eq(["order along a crossing"])
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
