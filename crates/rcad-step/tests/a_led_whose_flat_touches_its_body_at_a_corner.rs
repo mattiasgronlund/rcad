@@ -38,13 +38,21 @@
 //! meet, refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. Q2938's road
 //! answers that triple.
 //!
-//! It stops now on the flange's front, face slot 2, the plane `y = -1.27`,
+//! It stopped next on the flange's front, face slot 2, the plane `y = -1.27`,
 //! refused `AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve` by
 //! `cut_the_crossings_into_arcs` (fuse/arrange.rs) in the check that the LED
-//! does not cross itself. These
-//! tests pin that. When it answers, each turns back into the volume check of
-//! commit `f179ca02a`: what the box and the LED share is the box's part inside
-//! the LED, and the intersection and the difference add up to the LED.
+//! does not cross itself. The front drew the arcs round the disc as where its
+//! plane crosses the disc's, two spellings of one plane, which is a straight
+//! line and not the circle the arcs run along. The arrangement now draws such
+//! an arc where the face's plane crosses the pipe it runs along (Q2966).
+//!
+//! It stops now `Undecidable` on side of cylinder at `#74`, the front corner:
+//! bake solves it from the front, the flat and the disc, three planes two of
+//! which are a rounding apart, and the box it gets runs along the flat, `z`
+//! from `2.50` to `3.27` (Q2939). These tests pin that. When it answers, each
+//! turns back into the volume check of commit `f179ca02a`: what the box and
+//! the LED share is the box's part inside the LED, and the intersection and
+//! the difference add up to the LED.
 //!
 //! `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step` is the same LED with its axis
 //! at `z = 15`, and `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step` a smaller one,
@@ -80,17 +88,23 @@
 //! conics, which answers it as it answers the `Z3.0` LED's flat that leans
 //! off `x` by a rounding.
 //!
-//! Both stop now at the front corner, refused `Undecidable` with the one
+//! Both stopped next at the front corner, refused `Undecidable` with the one
 //! record `order along a crossing`, the far box included: in the `Z15.0` LED
 //! between the corner `(-1.23, -1.27, 15)` and a point solved near
 //! `(-1.23, -1.27, 15.075)` in a box `4.4e-16` wide, in the `D3.0` one between
-//! `(-0.23, -3.81, 5.999999956464)` and a point near `z = 6.147`. These tests
-//! pin that too.
+//! `(-0.23, -3.81, 5.999999956464)` and a point near `z = 6.147`. Those points
+//! were on the straight line where the front's plane crosses the disc's, which
+//! the front drew its arcs round the disc as until Q2966.
+//!
+//! The `Z15.0` LED stops now on `order along a crossing` between two points
+//! both within `1e-14` of the front corner, enclosure `1.8e-14` (Q2959). The
+//! `D3.0` one stops on its flange's front, face slot 2, refused
+//! `CannotTellTheCellsOfAFaceApart`. These tests pin both.
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_geom::{Isometry, SIDE_OF_CYLINDER, Surface, Vector};
+use rcad_predicates::{Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -105,42 +119,46 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
-fn a_box_round_the_back_corner_gets_past_where_the_flat_meets_two_pipes_and_stops_on_the_front() {
+fn a_box_round_the_back_corner_gets_past_the_arcs_round_the_disc_and_stops_at_the_front_corner() {
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -2.27, 3.0]]),
-        an_edge_of_the_front_is_not_drawn_along_it,
+        the_side_of_a_pipe_is_undecidable,
     );
 }
 
 #[test]
-fn a_box_round_the_front_corner_gets_past_where_the_flat_meets_two_pipes_and_stops_on_the_front() {
+fn a_box_round_the_front_corner_gets_past_the_arcs_round_the_disc_and_stops_at_it() {
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -1.27, 3.0]]),
-        an_edge_of_the_front_is_not_drawn_along_it,
+        the_side_of_a_pipe_is_undecidable,
     );
 }
 
 /// The `Z15.0` LED gets past its body's pipe since Q2940, and past where its
 /// flange's flat `x = -1.23` meets two curved surfaces about
 /// `(1.27, -1.27, 15)` since Q2938's road answers a flat whose normal is
-/// exactly `(-1, 0, 0)`. It stops ordering two points along a crossing at its
-/// front corner, the far box included.
+/// exactly `(-1, 0, 0)`. Since Q2966 it gets past the point solved near
+/// `(-1.23, -1.27, 15.075)` on the straight line the front drew its arcs round
+/// the disc as, and stops ordering two points along a crossing that are both
+/// at its front corner, the far box included.
 #[test]
-fn a_z15_led_gets_past_where_its_flat_meets_two_pipes_and_stops_ordering_its_front_corner() {
+fn a_z15_led_gets_past_the_arcs_round_the_disc_and_stops_ordering_two_points_at_its_front_corner() {
     every_fuse_refuses(
         Z15,
         &a_box_round_each_of(&[[-1.23, -1.27, 15.0], [-1.23, -2.27, 15.0], FAR_OFF]),
-        the_order_along_a_crossing_is_undecidable,
+        |_, error| two_points_at_the_front_corner_cannot_be_ordered(error, [-1.23, -1.27, 15.0]),
     );
 }
 
 #[test]
-fn a_d3_led_gets_past_where_its_flat_meets_two_pipes_and_stops_ordering_its_front_corner() {
+fn a_d3_led_gets_past_the_arcs_round_the_disc_and_stops_telling_the_cells_of_its_front_apart() {
     let mut fuses = a_box_round_each_of(&[[-0.23, -3.81, 5.999999956464], [-0.23, -4.81, 6.0]]);
     fuses.push((FAR_OFF, Rule::Intersection));
-    every_fuse_refuses(D3, &fuses, the_order_along_a_crossing_is_undecidable);
+    every_fuse_refuses(D3, &fuses, |model, error| {
+        the_cells_of_the_front_cannot_be_told_apart(model, error, -3.81)
+    });
 }
 
 /// A box round each corner, to be fused with the LED under intersection and
@@ -153,11 +171,12 @@ fn a_box_round_each_of(corners: &[[f64; 3]]) -> Vec<([f64; 3], Rule)> {
 }
 
 /// The LED in `file` and a box of side `2 * HALF` centred on each corner of
-/// `fuses`, fused under its rule, each refused as `the_refusal` takes.
+/// `fuses`, fused under its rule, each refused as `the_refusal` takes, handed
+/// the model it was refused in.
 fn every_fuse_refuses(
     file: &str,
     fuses: &[([f64; 3], Rule)],
-    the_refusal: impl Fn(&Error) -> bool,
+    the_refusal: impl Fn(&Model, &Error) -> bool,
 ) {
     let (led, solid) = the_led(file);
     for &(corner, rule) in fuses {
@@ -171,7 +190,7 @@ fn every_fuse_refuses(
             &mut ProvenanceLog::new(),
         ) {
             Err(error) => assert!(
-                the_refusal(&error),
+                the_refusal(&model, &error),
                 "{file}: {rule:?} with a box round {corner:?} refused {error:?}, which is not \
                  the refusal this pins"
             ),
@@ -183,13 +202,7 @@ fn every_fuse_refuses(
     }
 }
 
-fn an_edge_of_the_front_is_not_drawn_along_it(error: &Error) -> bool {
-    matches!(error, Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { .. })
-}
-
-/// The predicate `fuse/arrange.rs` names `ALONG_A_CROSSING`, which it keeps
-/// private, so the string itself is compared.
-fn the_order_along_a_crossing_is_undecidable(error: &Error) -> bool {
+fn the_side_of_a_pipe_is_undecidable(_: &Model, error: &Error) -> bool {
     let Error::Undecidable { records } = error else {
         return false;
     };
@@ -197,7 +210,53 @@ fn the_order_along_a_crossing_is_undecidable(error: &Error) -> bool {
         .records()
         .iter()
         .map(|record| record.predicate())
-        .eq(["order along a crossing"])
+        .eq([SIDE_OF_CYLINDER])
+}
+
+/// Refused `Undecidable` with the one record `order along a crossing`, handed
+/// two points each within `1e-12` of `corner` in every coordinate.
+///
+/// The predicate `fuse/arrange.rs` names `ALONG_A_CROSSING`, which it keeps
+/// private, so the string itself is compared.
+fn two_points_at_the_front_corner_cannot_be_ordered(error: &Error, corner: [f64; 3]) -> bool {
+    let Error::Undecidable { records } = error else {
+        return false;
+    };
+    let [record] = records.records() else {
+        return false;
+    };
+    let near_the_corner =
+        |point: &Point| {
+            point.enclosure().iter().zip(corner).all(|(along, at)| {
+                (along.lo() - at).abs() < 1e-12 && (along.hi() - at).abs() < 1e-12
+            })
+        };
+    record.predicate() == "order along a crossing"
+        && record.inputs().len() == 2
+        && record.inputs().iter().all(near_the_corner)
+}
+
+/// Refused `CannotTellTheCellsOfAFaceApart` on the flange's front, the face
+/// of the LED on the plane `y = front`.
+fn the_cells_of_the_front_cannot_be_told_apart(model: &Model, error: &Error, front: f64) -> bool {
+    let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
+        return false;
+    };
+    let surface = model
+        .face(*face)
+        .expect("the refusal names a face of the LED")
+        .surface();
+    let Surface::Plane(plane) = surface else {
+        return false;
+    };
+    [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+        .into_iter()
+        .all(|[x, z]| {
+            plane
+                .signed_distance_to(rcad_geom::Point::new(x, front, z))
+                .abs()
+                < 1e-9
+        })
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {

@@ -1464,6 +1464,18 @@ impl<'f> Arrangement<'f> {
 
     /// One crossing per curve that matters to this face, with the ones that are
     /// really the same curve folded together.
+    ///
+    /// **A side between two flat faces whose run names a curved surface is
+    /// drawn along that surface** ([`BakedEdge::along_a_curved_surface`]), not
+    /// against the face across. The face across is this face's own plane
+    /// written down a rounding apart, so the two cross in a straight line far
+    /// from the arc the side is. A KiCad LED's flange front drew the three arcs
+    /// round its body's front disc as that line, and every corner of the
+    /// flange then had to be placed against a plane a rounding off its own:
+    /// the rim's corner `(-1.23, -6.35, 4.4697)` was `5.3e-15` off it, and
+    /// side of plane refused (Q2966).
+    ///
+    /// [`BakedEdge::along_a_curved_surface`]: super::bake::BakedEdge::along_a_curved_surface
     fn draw_the_crossings(
         &mut self,
         cuts: &[Surface],
@@ -1475,8 +1487,11 @@ impl<'f> Arrangement<'f> {
         for wire in &face.wires {
             let mut along = Vec::new();
             for edge in wire {
+                let drawn_against = edge
+                    .along_a_curved_surface
+                    .map_or(edge.across, |runs_on| runs_on.curved);
                 let crossing = self
-                    .crossing_for(edge.across, false, Some(edge), &mut drawn, policy, log)?
+                    .crossing_for(drawn_against, false, Some(edge), &mut drawn, policy, log)?
                     .ok_or(Error::AFaceMeetsItsNeighbourNowhere {
                         face: self.face.keys[0],
                     })?;
@@ -7417,8 +7432,9 @@ impl<'f> Arrangement<'f> {
     /// [`Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve`] when two edges of
     /// the face cover one stretch of a crossing: an arc of a circle and its
     /// chord, both drawn on the line where the face's plane crosses the plane
-    /// across them, as the half disc leaning off a round bar's lid draws them
-    /// (`a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it`). The
+    /// across them, as the half disc leaning off a round bar's lid drew them
+    /// until its arc was drawn along the pipe its run names (Q2966,
+    /// `a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it`). The
     /// arc's own run names the pipe, so the stretch is the chord's alone.
     fn cut_the_crossings_into_arcs(
         &mut self,
@@ -7757,8 +7773,9 @@ impl<'f> Arrangement<'f> {
     /// [`Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve`] when an edge starts
     /// and ends at one corner on a crossing that does not close: a closed
     /// circle round a pipe, drawn on the line where the face's plane crosses
-    /// the plane across it, as the disc leaning off a round bar's lid draws it
-    /// (`a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it`).
+    /// the plane across it, as the disc leaning off a round bar's lid drew it
+    /// until it was drawn along the pipe its run names (Q2966,
+    /// `a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it`).
     fn arcs_an_edge_covers(
         &self,
         crossing: usize,
