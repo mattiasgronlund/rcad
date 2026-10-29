@@ -37,11 +37,16 @@
 //!   `y = -0.2`, written twice a rounding apart by face 8 and by faces 12 and
 //!   15, crosses the rim. The order now turns them about the line through the
 //!   ball's centre along the rim plane's normal, and they are parted (Q2956).
-//!   Every fuse then stops refused on order along a crossing again, between
-//!   the two meets of those two planes with the ball and the pipe near
-//!   `(0.048, -0.2, 9.10000002843)`. The ball is stored `2e-15` off the
-//!   pipe's axis, so the two cross in a thin loop up to `1e-7` tall, round the
-//!   `-y` half of the rim.
+//!   Every fuse then stopped on order along a crossing again, between the
+//!   meets of those two planes with the ball and the pipe near
+//!   `(0.048, -0.2, 9.1)`. The ball is stored `2e-15` off the pipe's axis, so
+//!   the two cross in a thin loop up to `1e-7` tall, round the `-y` half of
+//!   the rim. The order now reads which stretch of that loop each is on, and
+//!   how far it is turned about the pipe's axis (Q2956). Every fuse then stops
+//!   refused `Undecidable` on side of cylinder alone, for a point of the rim:
+//!   `(5.038, 0.1, 9.1)` for the box round the flat's corner, and where the
+//!   plane `y = 0.2` crosses the rim, `(5.032, 0.2, 9.1)`, for the box that
+//!   misses the LED.
 //! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
 //!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
 //!   rounding apart in direction. Q2938's road answers that triple, and the
@@ -79,7 +84,7 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
-fn a_d5_led_orders_its_dome_rim_and_stops_on_where_its_dome_crosses_its_pipe() {
+fn a_d5_led_orders_its_dome_rim_and_where_its_dome_crosses_its_pipe_and_stops_on_its_rim() {
     every_fuse_refuses(D5, &[[0.04, 0.0, 4.0], FAR_OFF], |error| {
         let Error::Undecidable { records } = error else {
             return false;
@@ -87,12 +92,17 @@ fn a_d5_led_orders_its_dome_rim_and_stops_on_where_its_dome_crosses_its_pipe() {
         let [record] = records.records() else {
             return false;
         };
-        record.predicate() == "order along a crossing"
-            && record.inputs().len() == 2
-            && record.inputs().iter().all(|node| {
-                let [x, _, z] = node.enclosure();
-                0.048 < x.lo() && x.hi() < 0.0481 && 9.100_000_02 < z.lo() && z.hi() < 9.100_000_03
-            })
+        let [point] = record.inputs() else {
+            return false;
+        };
+        let [x, y, z] = point.enclosure();
+        record.predicate() == SIDE_OF_CYLINDER
+            && 5.03 < x.lo()
+            && x.hi() < 5.04
+            && 0.1 <= y.lo()
+            && y.hi() < 0.200_000_000_001
+            && 9.1 <= z.lo()
+            && z.hi() < 9.100_000_1
     });
 }
 
