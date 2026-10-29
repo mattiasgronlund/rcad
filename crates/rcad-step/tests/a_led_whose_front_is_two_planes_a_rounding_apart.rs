@@ -27,16 +27,25 @@
 //! reads such an arc against the rim's plane (Q2940), and every fuse here gets
 //! past the body's pipe too.
 //!
-//! Each now stops `Undecidable` on side of plane at the rim's corner on the
-//! front plane, in the check that the LED does not cross itself:
-//! `passes_through`, under `place_the_corners` (fuse/arrange.rs), cannot tell
-//! which side of a plane that corner lies. In this LED the corner is
-//! `(-1.23, -6.35, 4.4697)`, enclosure `5.3e-15`. These tests pin it, in this
-//! LED and in the six others Q2929 found refusing as this one did.
+//! Each then stopped `Undecidable` on side of plane at the rim's corner on the
+//! front plane, `(-1.23, -6.35, 4.4697)` in this LED, enclosure `5.3e-15`, in
+//! the check that the LED does not cross itself. The flange's front drew the
+//! three arcs round the disc as where its plane crosses the disc's, two
+//! spellings of one plane, which is a straight line nowhere near the arcs, and
+//! `place_the_corners` (fuse/arrange.rs) asked which side of the disc's plane
+//! the rim's corner lies. The arrangement now draws such an arc where the
+//! face's plane crosses the pipe it runs along (Q2966).
+//!
+//! Each now stops `Undecidable` on side of cylinder at the front corner,
+//! where the circle round the disc touches the flange's flat: bake solves it
+//! from three planes, two of them a rounding apart, and the box it gets runs
+//! along the flat, `z` from `0.834` to `4.170` in this LED (Q2939). These
+//! tests pin it, in this LED and in the six others Q2929 found refusing as
+//! this one did.
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::SIDE_OF_PLANE;
+use rcad_geom::SIDE_OF_CYLINDER;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -55,24 +64,24 @@ const THE_OTHER_SIX: [&str; 6] = [
 ];
 
 #[test]
-fn an_led_whose_front_disc_sits_inside_its_rim_gets_past_its_body_and_stops_at_the_rims_corner() {
-    every_fuse_stops_at_the_rims_corner_on_the_front(
+fn an_led_whose_disc_sits_inside_its_rim_gets_past_the_rims_corner_to_its_front_corner() {
+    every_fuse_stops_at_the_front_corner(
         "LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step",
         &[FAR_OFF, [-1.23, -6.35, 3.0]],
     );
 }
 
 #[test]
-fn six_more_leds_get_past_their_body_and_stop_at_the_rims_corner() {
+fn six_more_leds_get_past_the_rims_corner_and_stop_at_their_front_corner() {
     for file in THE_OTHER_SIX {
-        every_fuse_stops_at_the_rims_corner_on_the_front(file, &[FAR_OFF]);
+        every_fuse_stops_at_the_front_corner(file, &[FAR_OFF]);
     }
 }
 
 /// The LED in `file` and a box of side 0.2 centred on each of `centres`, fused
 /// under intersection and under difference, each refused `Undecidable` on side
-/// of plane alone.
-fn every_fuse_stops_at_the_rims_corner_on_the_front(file: &str, centres: &[[f64; 3]]) {
+/// of cylinder alone.
+fn every_fuse_stops_at_the_front_corner(file: &str, centres: &[[f64; 3]]) {
     let (led, solid) = the_led(file);
     for &centre in centres {
         for rule in [Rule::Intersection, Rule::Difference] {
@@ -90,10 +99,10 @@ fn every_fuse_stops_at_the_rims_corner_on_the_front(file: &str, centres: &[[f64;
                         .records()
                         .iter()
                         .map(|record| record.predicate())
-                        .eq([SIDE_OF_PLANE]) => {}
+                        .eq([SIDE_OF_CYLINDER]) => {}
                 Err(error) => panic!(
                     "{file}: {rule:?} with a box round {centre:?} refused {error:?}, which is not \
-                     the refusal at the rim's corner this pins"
+                     the refusal at the front corner this pins"
                 ),
                 Ok(_) => panic!(
                     "{file}: {rule:?} with a box round {centre:?} answers: check its volume as \
