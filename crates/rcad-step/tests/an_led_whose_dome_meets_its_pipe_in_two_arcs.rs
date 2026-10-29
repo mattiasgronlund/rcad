@@ -31,11 +31,30 @@
 //!   along the rim, had no road to where the three meet (Q2941). The road for
 //!   two conics kept the height, and each height holds two of the four
 //!   corners; it now asks again in the height plus `x` and answers four
-//!   corners or none (Q2955). Every fuse then stops refused `Undecidable` on
-//!   order along a crossing alone, between two nodes on the rim at
-//!   `x = 5.031987`, `z = 9.1`, whose boxes are `5.6e-16` apart in `y`: Q2956
-//!   reads them as where the plane `y = -0.2`, written twice a rounding apart
-//!   by face 8 and by faces 12 and 15, crosses the rim.
+//!   corners or none (Q2955). Every fuse then stopped refused `Undecidable` on
+//!   order along a crossing, between two nodes on the rim at `x = 5.031987`,
+//!   `z = 9.1`, whose boxes are `5.6e-16` apart in `y`: where the plane
+//!   `y = -0.2`, written twice a rounding apart by face 8 and by faces 12 and
+//!   15, crosses the rim. The order now turns them about the line through the
+//!   ball's centre along the rim plane's normal, and they are parted (Q2956).
+//!   Every fuse then stopped on order along a crossing again, between the
+//!   meets of those two planes with the ball and the pipe near
+//!   `(0.048, -0.2, 9.1)`. The ball is stored `2e-15` off the pipe's axis, so
+//!   the two cross in a thin loop up to `1e-7` tall, round the `-y` half of
+//!   the rim. The order now reads which stretch of that loop each is on, and
+//!   how far it is turned about the pipe's axis (Q2956). Every fuse then
+//!   stopped refused `Undecidable` on side of cylinder alone, for a point of
+//!   the rim: `(5.038, 0.1, 9.1)` for the box round the flat's corner, and
+//!   where the plane `y = 0.2` crosses the rim, `(5.032, 0.2, 9.1)`, for the
+//!   box that misses the LED. The rim is inside the pipe there by `4e-16` and
+//!   `8e-16`, and the pipe's side of a point of the ball is now read with the
+//!   ball's own equation, where the box's width counts only times how far the
+//!   ball's centre is off the axis (Q2956). Every fuse now stops refused
+//!   `Undecidable` on order along a crossing, on the body's pipe, between two
+//!   nodes in one box near `(2.34, 2.492, 3.5)`: where the line the plane
+//!   `x = 2.34` cuts the pipe in meets each of two sloped planes, with normals
+//!   `(−0.619, ±3.5e-16, ±0.786)`. On `x = 2.34` the two sloped planes are
+//!   two parallel lines `4.8e-16` apart along the pipe.
 //! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
 //!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
 //!   rounding apart in direction. Q2938's road answers that triple, and the
@@ -59,7 +78,7 @@
 use std::{env, fs, path::PathBuf};
 
 use rcad_geom::{Isometry, SIDE_OF_CYLINDER, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -73,17 +92,29 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
-fn a_d5_led_splits_its_dome_and_stops_ordering_two_nodes_on_its_rim() {
+fn a_d5_led_gets_past_its_dome_rim_and_stops_where_two_slopes_meet_its_pipe() {
     every_fuse_refuses(D5, &[[0.04, 0.0, 4.0], FAR_OFF], |error| {
-        matches!(
-            error,
-            Error::Undecidable { records }
-                if records
-                    .records()
-                    .iter()
-                    .map(|record| record.predicate())
-                    .eq(["order along a crossing"])
-        )
+        let Error::Undecidable { records } = error else {
+            return false;
+        };
+        let [record] = records.records() else {
+            return false;
+        };
+        let [one, other] = record.inputs() else {
+            return false;
+        };
+        let near_where_the_slopes_meet_the_pipe = |at: &PredicatePoint| {
+            let [x, y, z] = at.enclosure();
+            2.339 < x.lo()
+                && x.hi() < 2.341
+                && 2.4919 < y.lo()
+                && y.hi() < 2.4920
+                && 3.4999 < z.lo()
+                && z.hi() < 3.5
+        };
+        record.predicate() == "order along a crossing"
+            && near_where_the_slopes_meet_the_pipe(one)
+            && near_where_the_slopes_meet_the_pipe(other)
     });
 }
 

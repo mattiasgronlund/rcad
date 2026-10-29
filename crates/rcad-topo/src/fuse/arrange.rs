@@ -5568,8 +5568,9 @@ impl<'f> Arrangement<'f> {
     /// be one point. The node's own box has been asked by name already, and an
     /// undecided answer means neither node was the start.
     ///
-    /// **Where the sweep over them cannot say, round a plane's loop on a pipe
-    /// or a cone the tighter boxes are turned about its axis**
+    /// **Where the sweep over them cannot say, round a plane's loop on a pipe,
+    /// a cone or a ball the tighter boxes are turned about its axis**, or a
+    /// ball's about the line through its centre along the plane's normal
     /// ([`round_a_closed_crossing_by_its_angle`]), which names no start either.
     /// A round bar of radius `12.8` notched by a block whose faces `x = 0.6 r`
     /// and `y = 0.8 r` meet on its wall has, on its top cap, the feet of the
@@ -11356,6 +11357,9 @@ impl<'f> Arrangement<'f> {
                                     &on, at, &partner,
                                 )
                             })
+                            .or_else(|| {
+                                Self::side_of_a_pipe_at_a_point_of_a_ball(&on, at, &partner)
+                            })
                             .unwrap_or(undecided)
                     }
                     (side, _) => side,
@@ -11393,6 +11397,66 @@ impl<'f> Arrangement<'f> {
             }
         }
         Ok(sides)
+    }
+
+    /// Which side of `partner`, a pipe, a point is that lies on a ball among
+    /// the surfaces it is `on`: `Pos` outside, `Neg` inside and `Zero` on it,
+    /// or `None` where `partner` is no pipe, `on` holds no ball, or the box
+    /// `at` does not tell.
+    ///
+    /// For the ball's centre `c` and radius `r`, the pipe's origin `o`,
+    /// direction `u` and radius `R`, and `e = c − o`, a point `p` of the ball,
+    /// with `q = p − c` and so `|q| = r`, has the pipe's own value
+    /// `|(p − o) × u|² − R²·|u|²` of
+    /// `(r² − R²)·|u|² − (q·u)² + 2·(q × u)·(e × u) + |e × u|²`, by Lagrange's
+    /// identity on `q × u`. Read straight off the box, the pipe's value takes
+    /// the box's width times the radius. Read this way, at a point level with
+    /// the centre along the axis, as a rim is, the width enters only squared
+    /// or times `e × u`, which is how far the centre is off the axis.
+    ///
+    /// It is sound because the point is on the ball: a node of a face is on
+    /// the face's surface, which is first in `on`, and on the partner of
+    /// every crossing through it, as the other readings
+    /// [`Arrangement::which_side_of_everything`] tries take it.
+    ///
+    /// The dome of `LED_D5.0mm-3.step` is a ball of its body pipe's radius,
+    /// its centre `2e-15` off the pipe's axis, and its rim is inside the pipe
+    /// by about `4e-16` where a box's side `y = 0.1` crosses it. Read off the
+    /// box there, the pipe's value spans `8.9e-15`, and every fuse of the LED
+    /// was refused (queue row Q2956).
+    fn side_of_a_pipe_at_a_point_of_a_ball(
+        on: &[Surface],
+        at: PredicatePoint,
+        partner: &Surface,
+    ) -> Option<Decision> {
+        let Surface::Cylinder(pipe) = partner else {
+            return None;
+        };
+        let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
+        let along = pipe.axis().direction().components().map(Interval::exactly);
+        let skin = Interval::exactly(pipe.radius());
+        let box_ = at.enclosure();
+        on.iter().find_map(|surface| {
+            let Surface::Sphere(ball) = surface else {
+                return None;
+            };
+            let centre = ball.centre().coordinates().map(Interval::exactly);
+            let radius = Interval::exactly(ball.radius());
+            let step = core::array::from_fn(|axis| box_[axis] - centre[axis]);
+            let off_the_axis = cross_of_intervals(
+                core::array::from_fn(|axis| centre[axis] - origin[axis]),
+                along,
+            );
+            let up = dot_of(step, along);
+            let leaning = dot_of(cross_of_intervals(step, along), off_the_axis);
+            let side = ((radius * radius - skin * skin) * dot_of(along, along) - up * up
+                + (leaning + leaning)
+                + dot_of(off_the_axis, off_the_axis))
+            .sign();
+            [Decision::Pos, Decision::Neg, Decision::Zero]
+                .contains(&side)
+                .then_some(side)
+        })
     }
 
     /// Which side of the plane the half ellipse `crossing` lies in `at` is:
@@ -15293,10 +15357,12 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
     (0..3).all(|axis| outer[axis].lo() <= inner[axis].lo() && inner[axis].hi() <= outer[axis].hi())
 }
 
-/// Which of two points comes first round the loop a plane cuts a pipe or a
-/// cone in, read as how far each is turned about the surface's axis from the
-/// start: `None` for every other pair, and wherever a sign it reads is not
-/// proved.
+/// Which of two points comes first round the loop a plane cuts a pipe, a cone
+/// or a ball in, read as how far each is turned from the start about the
+/// surface's axis, or about the line through the ball's centre along the
+/// plane's normal: `None` for every other pair, and wherever a sign it reads is
+/// not proved. Round the loop a ball crosses a pipe in it reads
+/// [`round_a_ball_crossing_a_pipe_of_its_radius`] instead.
 ///
 /// **Seen down the axis the loop goes round it once.** On a pipe it is the
 /// pipe's circle, each point of the loop over one point of the circle, since
@@ -15304,12 +15370,14 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
 /// ellipse, and the plane crosses each ruling of the nappe it lies on once: a
 /// plane along a ruling would cut a bend that runs off for ever. Seen down the
 /// axis each ruling of a nappe is a ray out from it, so the loop is over each
-/// ray once. Either way going round the
+/// ray once. On a ball the loop is a circle in the plane about the foot of the
+/// ball's centre, and seen down the plane's normal it is that circle itself,
+/// about the line through the centre. Each way going round the
 /// loop turns about the axis all the way round once, always the same way, and
 /// the points come in the order they are turned from the start. That way is
-/// the sign of `w·((from − c) × run)`, for `w` the axis,
-/// `c` its stored origin and `run` the way the loop runs at the start, `∇S ×
-/// ∇T`. A point `p` then lies in the half turn ahead of the start where
+/// the sign of `w·((from − c) × run)`, for `w` the axis, `c` its stored origin
+/// (for a ball, the plane's stored normal and the ball's stored centre) and
+/// `run` the way the loop runs at the start, `∇S × ∇T`. A point `p` then lies in the half turn ahead of the start where
 /// `w·((from − c) × (p − c))` has that sign, and in the half turn behind where
 /// it has the other. A point ahead comes before a point behind, and of two in
 /// one half turn the one the other is turned ahead of comes first. Where two
@@ -15322,7 +15390,9 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
 /// they are up the axis instead (`turned_as_far_apart_up_the_axis`). That
 /// reading takes the two as far from the axis as each other, which two points
 /// of a cone at different heights are not, so round a cone this stops before
-/// it. Nothing here forms the loop's centre: any point of the axis is as good
+/// it. Every point of a ball's loop is at one height up its axis, so up the
+/// axis parts none of them, and round a ball this stops before it too.
+/// Nothing here forms the loop's centre: any point of the axis is as good
 /// as `c`, and what lies along `w` drops out of each determinant.
 ///
 /// **Where the sweep cannot say, this can, for a point a rounding past the
@@ -15363,6 +15433,20 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
 /// parted them, so the union with the upright cone first was refused on them.
 /// Turned about `z` they are parted (Q2910).
 ///
+/// **Round a ball it parts two meets of a plane's circle a rounding apart.**
+/// The dome of `LED_D5.0mm-3.step`, a ball of radius `2.5` about `(2.54, 0,
+/// 9.1)`, has its rim where the plane `z = 9.1` cuts it, walked from `(2.54,
+/// −2.5, 9.1)`, and the plane `y = −0.2`, written twice a rounding apart by
+/// the file's faces, crosses that rim twice near `(5.032, −0.2, 9.1)`,
+/// `6.7e-16` apart. Their tighter boxes are apart along `y`, the way the rim
+/// runs there, and share `x` between two neighbouring `f64`. The sweep from
+/// the start, a quarter turn back, levers that ulp of `x` by the `2.3` between
+/// the start and the two along `y`, and straddles nought, so every fuse of the
+/// LED was refused on them. Turned about the line through the ball's centre
+/// along the plane's normal, that ulp is levered by the `0.2` the two are off
+/// the centre along `y`, and they are parted (Q2956,
+/// `tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs` in `rcad-step`).
+///
 /// **It is read only where the sweep cannot say**, and that is the reading
 /// this has to agree with. Where the start is on the loop the two count from
 /// one place and agree everywhere. Where it is a rounding off, as above, the
@@ -15374,26 +15458,41 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
 /// first. The square bar's corner is not between them: worked out exactly, the
 /// area the three sweep is positive, so the sweep would put the corner first
 /// as this does. The upright cone's rim above starts on the loop exactly; no
-/// cone's loop walked from a start a rounding off it has been checked so.
+/// cone's loop walked from a start a rounding off it has been checked so. The
+/// LED's rim starts `8.3e-16` off its plane and `1.7e-16` inside its ball, and
+/// its two nodes are a quarter turn from there, so neither is between the two
+/// starts: worked out exactly, the sweep puts the lower of the two along `y`
+/// first, as this does. No node of a ball's loop a rounding from a start off
+/// it has been checked so.
 fn round_a_closed_crossing_by_its_angle(
     pair: [&Surface; 2],
     from: PredicatePoint,
     one: PredicatePoint,
     other: PredicatePoint,
 ) -> Option<Decision> {
-    let (flat, axis, round_a_pipe) = if let [Surface::Plane(flat), Surface::Cylinder(pipe)]
-    | [Surface::Cylinder(pipe), Surface::Plane(flat)] = pair
+    if let [Surface::Sphere(ball), Surface::Cylinder(pipe)]
+    | [Surface::Cylinder(pipe), Surface::Sphere(ball)] = pair
     {
-        (flat, pipe.axis(), true)
-    } else if let [Surface::Plane(flat), Surface::Cone(cone)]
-    | [Surface::Cone(cone), Surface::Plane(flat)] = pair
-    {
-        (flat, cone.axis(), false)
-    } else {
-        return None;
-    };
-    let origin = axis.origin().coordinates().map(Interval::exactly);
-    let along = axis.direction().components().map(Interval::exactly);
+        return round_a_ball_crossing_a_pipe_of_its_radius(pair, ball, pipe, from, one, other);
+    }
+    let (flat, origin, along, round_a_pipe) =
+        if let [Surface::Plane(flat), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Plane(flat)] = pair
+        {
+            (flat, pipe.axis().origin(), pipe.axis().direction(), true)
+        } else if let [Surface::Plane(flat), Surface::Cone(cone)]
+        | [Surface::Cone(cone), Surface::Plane(flat)] = pair
+        {
+            (flat, cone.axis().origin(), cone.axis().direction(), false)
+        } else if let [Surface::Plane(flat), Surface::Sphere(ball)]
+        | [Surface::Sphere(ball), Surface::Plane(flat)] = pair
+        {
+            (flat, ball.centre(), flat.normal(), false)
+        } else {
+            return None;
+        };
+    let origin = origin.coordinates().map(Interval::exactly);
+    let along = along.components().map(Interval::exactly);
     let off_the_axis = |place: PredicatePoint| {
         let at = place.enclosure();
         [0, 1, 2].map(|axis| at[axis] - origin[axis])
@@ -15473,6 +15572,146 @@ fn turned_as_far_apart_up_the_axis(
     let both = [0, 1, 2].map(|axis| first[axis] + second[axis]);
     let climbs = -(dot_of(normal, along) * dot_of(step, along));
     climbs * dot_of(normal, cross_of_intervals(along, both))
+}
+
+/// Which of two points comes first round the loop a ball crosses a pipe of
+/// its radius in, read off which of the loop's two stretches each and the
+/// start are on, and how far each is turned about the pipe's axis: `None` for
+/// a ball and a pipe of two radii, and wherever a sign it reads is not proved.
+///
+/// **The loop has one stretch above the ball's centre and one below.** Take
+/// `w` the pipe's axis, `c` the ball's centre and `r` the radius, and for a
+/// point `p` write `q` for its step out from the axis square to `w`, `δ` for
+/// the centre's, and `h` for how far `p` is from `c` along `w`. On the pipe
+/// `|q|² = r²`, and on the ball `|q − δ|² + h² = r²`, so the loop is where
+/// `h² = 2q·δ − |δ|²`. Over each point of the pipe's circle on the side the
+/// ball leans to, `q·δ > |δ|²/2`, there is one point of the loop above the
+/// centre and one below, and the two meet where that side ends: one loop, the
+/// two stretches one after the other round it. A ball centred on the axis
+/// touches the pipe along one circle, every point of it at `h = 0`, on
+/// neither stretch, so this does not say there.
+///
+/// **Each stretch turns about the axis one way, and the two the other way to
+/// each other.** The loop runs along `∇S × ∇T`, and the ball's gradient is
+/// `p − c` and the pipe's `|w|²q` ([`gradient_at`]). With the ball first,
+/// `w·(q × ((p − c) × |w|²q))` is `|q|²·|w|²·w·(p − c)`, since every term
+/// with `q − δ` in both places is square to `w`; with the pipe first it is
+/// the negative. So it has the sign of `h`, or the other one, all along a
+/// stretch. Two points of the loop off the centre's height both have `q·δ >
+/// |δ|²/2 > 0`, so they lie on the half of the circle about `δ`, less than a
+/// half turn apart, and every point of the circle between them has `q·δ` at
+/// least the smaller of theirs: their stretch runs from one to the other over
+/// that short arc, turning the one way all along. So the one the other is
+/// turned ahead of, `w·(a × b)` for `a` and `b` the two taken from the axis,
+/// read against that way at either, comes first along it. Where that turn is
+/// not proved it is read again as `w·(a × (b − a))`, as
+/// [`round_a_closed_crossing_by_its_angle`] does.
+///
+/// **From the start, the loop runs on along the start's stretch to its end,
+/// all of the other stretch, and the rest of the start's stretch back.** So a
+/// point ahead of the start on its stretch comes before one on the other
+/// stretch, and that before one behind the start; of two the same of those
+/// three, the one ahead along their stretch comes first. A point of the
+/// start's stretch is ahead of it where `w·(s × p)`, for `s` and `p` the two
+/// taken from the axis, has the sign of the way the loop turns at the start,
+/// by the short arc again: the start too is a point of the loop off the
+/// centre's height.
+///
+/// **It parts two meets of one plane written twice a rounding apart.** The
+/// dome of `LED_D5.0mm-3.step` and the pipe of its body are both of radius
+/// `2.5`, and the file stores the ball's centre `2e-15` off the pipe's axis,
+/// so the two cross in a loop about `1e-7` tall round the `−y` half of the
+/// rim, walked from `(2.54, −2.5, 9.0999999075)`, `9.2e-8` below the centre,
+/// along `−x`. The plane `y = −0.2`, written by face 8 and by faces 12 and 15
+/// a rounding apart, crosses that loop four times near `(0.048, −0.2, 9.1)`:
+/// twice on each stretch, `2.8e-8` from the centre's height, `6.7e-16` apart
+/// along `y`. Swept round a line through the ball's centre, their tightened
+/// boxes leave that height times their step, `2e-23`, unproved: every fuse
+/// of the LED was refused on them, with an enclosure of `1.8e-29`. Turned
+/// about the pipe's axis the step is levered by the `2.49` they are out from
+/// it, and they are parted (Q2956,
+/// `tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs` in `rcad-step`).
+///
+/// **It reads the start where it is held, as the sweep does.** A start held a
+/// rounding off the loop stands for the points of the loop near it, and those
+/// are on the stretch of its own proved height wherever it is more than a
+/// rounding from the centre's height: the LED's is `9.2e-8` from it. A node a
+/// sweep from the start puts in another order is one between the start and
+/// those points, and the LED's four are a quarter turn from it.
+fn round_a_ball_crossing_a_pipe_of_its_radius(
+    pair: [&Surface; 2],
+    ball: &Sphere,
+    pipe: &Cylinder,
+    from: PredicatePoint,
+    one: PredicatePoint,
+    other: PredicatePoint,
+) -> Option<Decision> {
+    if ball.radius() != pipe.radius() {
+        return None;
+    }
+    let centre = ball.centre().coordinates().map(Interval::exactly);
+    let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
+    let along = pipe.axis().direction().components().map(Interval::exactly);
+    // Compared rather than matched: only proved signs are read, and every
+    // other answer leaves the pair to the policy (§40).
+    let proved = |sign: Decision| sign == Decision::Pos || sign == Decision::Neg;
+    let height = |place: PredicatePoint| {
+        let at = place.enclosure();
+        dot_of([0, 1, 2].map(|axis| at[axis] - centre[axis]), along).sign()
+    };
+    let off_the_axis = |place: PredicatePoint| {
+        let at = place.enclosure();
+        [0, 1, 2].map(|axis| at[axis] - origin[axis])
+    };
+    let turned = |first: [Interval; 3], second: [Interval; 3]| {
+        dot_of(cross_of_intervals(first, second), along)
+    };
+    let the_way_it_turns_at = |place: PredicatePoint| {
+        let run = cross_of(gradient_at(pair[0], place), gradient_at(pair[1], place));
+        turned(off_the_axis(place), run)
+    };
+    let start = height(from);
+    if !proved(start) {
+        return None;
+    }
+    let the_way_it_turns_at_the_start = the_way_it_turns_at(from);
+    // 0 ahead of the start on its stretch, 1 on the other, 2 behind the start.
+    let how_soon = |place: PredicatePoint| {
+        let its_height = height(place);
+        if !proved(its_height) {
+            return None;
+        }
+        if its_height != start {
+            return Some(1);
+        }
+        let ahead = (the_way_it_turns_at_the_start
+            * turned(off_the_axis(from), off_the_axis(place)))
+        .sign();
+        if ahead == Decision::Pos {
+            Some(0)
+        } else if ahead == Decision::Neg {
+            Some(2)
+        } else {
+            None
+        }
+    };
+    let (Some(one_soon), Some(other_soon)) = (how_soon(one), how_soon(other)) else {
+        return None;
+    };
+    match one_soon.cmp(&other_soon) {
+        Ordering::Less => return Some(Decision::Pos),
+        Ordering::Greater => return Some(Decision::Neg),
+        Ordering::Equal => {}
+    }
+    let [first, second] = [one, other].map(off_the_axis);
+    let the_way_it_turns = the_way_it_turns_at(one);
+    let other_past_one = (the_way_it_turns * turned(first, second)).sign();
+    if proved(other_past_one) {
+        return Some(other_past_one);
+    }
+    let step = [0, 1, 2].map(|axis| second[axis] - first[axis]);
+    let stepped_past_one = (the_way_it_turns * turned(first, step)).sign();
+    proved(stepped_past_one).then_some(stepped_past_one)
 }
 
 /// Which of two points comes first round the loop a plane cuts a pipe in, read
@@ -28929,5 +29168,299 @@ mod two_points_a_rounding_apart_on_a_cone_caps_rim {
                 [Some(Decision::Neg), Some(Decision::Pos)],
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod two_points_a_rounding_apart_on_a_balls_rim {
+    //! The rim of the dome of `LED_D5.0mm-3.step`, as every fuse of it in
+    //! `tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs` splits the dome:
+    //! the ball of radius `2.5` about `(2.54, −5.05e-15, 9.1)`, cut by the plane
+    //! `z = 9.1` as the file stores it, leaning `3.3e-16` along `y`, in a circle
+    //! walked from `(2.54, −2.500000000000005, 9.1)`. The plane `y = −0.2`,
+    //! written twice a rounding apart, crosses that rim twice near `(5.032,
+    //! −0.2, 9.1)`: `A` where face 8 writes it, with an `x` part of
+    //! `−7.8e-32` and offset `0.20000000000000168`, and `B` where faces 12 and
+    //! 15 write it, with no `x` part and offset `0.20000000000000234`.
+
+    use rcad_geom::{Plane, Point, Sphere, Surface, Vector};
+    use rcad_predicates::{Decision, Interval, Point as PredicatePoint};
+
+    use super::round_a_closed_crossing_by_its_angle;
+
+    /// Worked out exactly from the stored numbers, `A` is at `x =
+    /// 5.03198715887542324868`, `y = −0.19999999999999561462`, and `B` at `x =
+    /// 5.03198715887542319522`, `y = −0.19999999999999628075`, `6.7e-16`
+    /// apart. The rim runs along `+x` at the start, so `B` comes first, and `A`
+    /// is turned `1.67e-15` past it about the plane's normal. Their tightened
+    /// boxes, as the fuse reads them, share `x` between two neighbouring `f64`
+    /// and are apart in `y`. Swept from the start, the step of an `ulp` along
+    /// `x` is levered by the `2.3` between the start and the two along `y`, and
+    /// the sweep straddles nought. Before this read a ball's rim (Q2956) it
+    /// answered `None` for every plane and ball, and every fuse of the LED was
+    /// refused on these two.
+    #[test]
+    fn two_points_on_a_balls_rim_a_rounding_apart_come_in_the_order_they_turn_round_its_centre() {
+        let rim = Surface::Plane(
+            Plane::from_point_and_normal_as_written(
+                Point::new(0.0, 0.0, 9.1),
+                Vector::new(0.0, 3.330_669_073_875e-16, -1.0),
+            )
+            .expect("a normal of length one"),
+        );
+        let dome = Surface::Sphere(
+            Sphere::new(Point::new(2.54, -5.051_514_762_044e-15, 9.1), 2.5)
+                .expect("a positive radius"),
+        );
+        let from = PredicatePoint::Exact([2.54, -2.500_000_000_000_005, 9.1]);
+        let across = |lo: f64, hi: f64| Interval::new(lo, hi).expect("lo is below hi");
+        let x = across(5.031_987_158_875_423, 5.031_987_158_875_424);
+        let up = across(9.099_999_999_999_998, 9.1);
+        let a = PredicatePoint::Constructed([
+            x,
+            across(-0.199_999_999_999_995_63, -0.199_999_999_999_995_6),
+            up,
+        ]);
+        let b = PredicatePoint::Constructed([
+            x,
+            across(-0.199_999_999_999_996_3, -0.199_999_999_999_996_26),
+            up,
+        ]);
+        let read = |pair: [&Surface; 2]| {
+            [[b, a], [a, b]]
+                .map(|[one, other]| round_a_closed_crossing_by_its_angle(pair, from, one, other))
+        };
+        assert_eq!(
+            [read([&dome, &rim]), read([&rim, &dome])],
+            [
+                [Some(Decision::Pos), Some(Decision::Neg)],
+                [Some(Decision::Neg), Some(Decision::Pos)],
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod where_a_ball_crosses_a_pipe_of_its_radius {
+    //! A ball and a pipe of one radius, the ball's centre off the pipe's axis,
+    //! cross in one loop round the side of the pipe the ball leans to: over
+    //! each point of that side of the pipe's circle the loop has one point
+    //! above the ball's centre and one below, and the two meet where the side
+    //! ends.
+
+    use rcad_geom::{Axis, Cylinder, Point, Sphere, Surface, Vector};
+    use rcad_predicates::{Decision, Interval, Point as PredicatePoint};
+
+    use super::round_a_closed_crossing_by_its_angle;
+
+    fn in_both_orders(
+        ball: &Surface,
+        pipe: &Surface,
+        from: PredicatePoint,
+        [early, late]: [PredicatePoint; 2],
+    ) -> [[Option<Decision>; 2]; 2] {
+        [[ball, pipe], [pipe, ball]].map(|pair| {
+            [[early, late], [late, early]]
+                .map(|[one, other]| round_a_closed_crossing_by_its_angle(pair, from, one, other))
+        })
+    }
+
+    /// A pipe of radius 1 up `z` and a ball of radius 1 about `(0, −0.5, 0)`
+    /// cross where `y < −0.25`, at height `±√(−y − 0.25)`. Walked from
+    /// `(0, −1, −√0.75)` with the ball first, the loop runs along `−x` there,
+    /// below, to where the side ends at `y = −0.25`, comes back above along
+    /// `+x`, and below again along `−x` back to the start. So of two points
+    /// above, at `x = ∓sin 0.3`, the one at `−sin 0.3` comes first, and of two
+    /// below, at `x = −sin 0.3` and `−sin 0.6`, the one at `−sin 0.3`. Walked
+    /// from `(0, −1, √0.75)`, between the two above, it runs along `+x` there,
+    /// and the one at `+sin 0.3` comes first. With the pipe first each runs the
+    /// other way round, and the other of each two comes first.
+    #[test]
+    fn two_points_come_in_the_order_the_loop_is_walked_through_them_from_its_start() {
+        let ball = Surface::Sphere(Sphere::new(Point::new(0.0, -0.5, 0.0), 1.0).expect("a ball"));
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a pipe"));
+        let on_the_loop = |turned: f64, x_sign: f64, above: f64| {
+            let down = -turned.cos();
+            PredicatePoint::Exact([x_sign * turned.sin(), down, above * (-down - 0.25).sqrt()])
+        };
+        let above = [-1.0, 1.0].map(|x_sign| on_the_loop(0.3, x_sign, 1.0));
+        let below = [0.3, 0.6].map(|turned| on_the_loop(turned, -1.0, -1.0));
+        let start_below = on_the_loop(0.0, 1.0, -1.0);
+        let start_above = on_the_loop(0.0, 1.0, 1.0);
+        let first_comes_first = [
+            [Some(Decision::Pos), Some(Decision::Neg)],
+            [Some(Decision::Neg), Some(Decision::Pos)],
+        ];
+        let second_comes_first = [
+            [Some(Decision::Neg), Some(Decision::Pos)],
+            [Some(Decision::Pos), Some(Decision::Neg)],
+        ];
+        assert_eq!(
+            [
+                in_both_orders(&ball, &pipe, start_below, above),
+                in_both_orders(&ball, &pipe, start_below, below),
+                in_both_orders(&ball, &pipe, start_above, above),
+            ],
+            [first_comes_first, first_comes_first, second_comes_first]
+        );
+    }
+
+    /// The dome of `LED_D5.0mm-3.step` and the pipe of its body, both of radius
+    /// `2.5`, the ball's centre `2e-15` off the pipe's axis along `−y`, as
+    /// every fuse of it in `tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`
+    /// splits the dome. Their loop is about `1e-7` tall, round the `−y` half of
+    /// the rim, walked from `(2.54, −2.5, 9.0999999075)`, below the rim plane:
+    /// the pipe's axis runs down `z`, so along `−x` there. The plane `y = −0.2`,
+    /// written twice a rounding apart, crosses the loop above the rim plane near
+    /// `(0.048, −0.2, 9.10000002843)`, at `A` where face 8 writes it and at
+    /// `B` where faces 12 and 15 do. The loop comes back along `+x` above, so
+    /// `A`, nearer `y = 0`, comes first. Their tightened boxes, as the fuse
+    /// reads them, are `6.7e-16` apart along `y`, and the turn of one past the
+    /// other about a line through the ball's centre is about the loop's height
+    /// times that, `2e-23`, under what the boxes leave of it, so before this
+    /// read a ball and a pipe it answered `None` and every fuse of the LED was
+    /// refused on these two (Q2956).
+    #[test]
+    fn the_led_domes_two_meets_of_one_plane_written_twice_come_in_order() {
+        let ball = Surface::Sphere(
+            Sphere::new(Point::new(2.54, -5.051_514_762_044e-15, 9.1), 2.5)
+                .expect("a positive radius"),
+        );
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::as_written(
+                    Point::new(2.54, -3.030_908_857_227e-15, 9.1),
+                    Vector::new(0.0, 3.330_669_073_875e-16, -1.0),
+                )
+                .expect("a direction of length one"),
+                2.5,
+            )
+            .expect("a positive radius"),
+        );
+        let from = PredicatePoint::Exact([2.54, -2.500_000_000_000_003, 9.099_999_907_515_713]);
+        let across = |lo: f64, hi: f64| Interval::new(lo, hi).expect("lo is below hi");
+        let up = across(9.100_000_028_429_601, 9.100_000_028_429_603);
+        let a = PredicatePoint::Constructed([
+            across(0.048_012_841_124_576_98, 0.048_012_841_124_576_99),
+            across(-0.199_999_999_999_995_63, -0.199_999_999_999_995_6),
+            up,
+        ]);
+        let b = PredicatePoint::Constructed([
+            across(0.048_012_841_124_577_04, 0.048_012_841_124_577_044),
+            across(-0.199_999_999_999_996_3, -0.199_999_999_999_996_26),
+            up,
+        ]);
+        assert_eq!(
+            in_both_orders(&ball, &pipe, from, [a, b]),
+            [
+                [Some(Decision::Pos), Some(Decision::Neg)],
+                [Some(Decision::Neg), Some(Decision::Pos)],
+            ]
+        );
+    }
+}
+
+#[cfg(test)]
+mod the_side_of_a_pipe_at_a_point_of_a_ball {
+    //! A point on a ball is outside a pipe of its radius by twice its step out
+    //! from the pipe's axis dotted with the ball centre's, and so on: the box
+    //! a point is held in is levered by how far the centre is off the axis,
+    //! not by the radius.
+
+    use rcad_geom::{Axis, Cylinder, Point, Sphere, Surface, Vector};
+    use rcad_predicates::{Decision, Interval, Point as PredicatePoint};
+
+    use super::{Arrangement, side_of_surface};
+
+    /// A ball of radius 5 about `(0, 2, 0)` and a pipe of radius 5 up `z`. Of
+    /// the ball's points `(0, 7, 0)` and `(4, 5, 0)` are outside the pipe,
+    /// `(0, −3, 0)` and `(3, 2, 4)` inside, and `(0, 5, 4)` on it.
+    #[test]
+    fn points_of_a_ball_are_read_against_a_pipe_of_its_radius() {
+        let ball = Surface::Sphere(Sphere::new(Point::new(0.0, 2.0, 0.0), 5.0).expect("a ball"));
+        let pipe = Surface::Cylinder(Cylinder::new(Axis::z(), 5.0).expect("a pipe"));
+        let read = |at: [f64; 3]| {
+            Arrangement::side_of_a_pipe_at_a_point_of_a_ball(
+                &[ball],
+                PredicatePoint::Exact(at),
+                &pipe,
+            )
+        };
+        assert_eq!(
+            [
+                [0.0, 7.0, 0.0],
+                [4.0, 5.0, 0.0],
+                [0.0, -3.0, 0.0],
+                [3.0, 2.0, 4.0],
+                [0.0, 5.0, 4.0],
+            ]
+            .map(read),
+            [
+                Some(Decision::Pos),
+                Some(Decision::Pos),
+                Some(Decision::Neg),
+                Some(Decision::Neg),
+                Some(Decision::Zero),
+            ]
+        );
+        assert_eq!(
+            Arrangement::side_of_a_pipe_at_a_point_of_a_ball(
+                &[pipe],
+                PredicatePoint::Exact([0.0, 7.0, 0.0]),
+                &pipe,
+            ),
+            None,
+            "a point on no ball is left to the box"
+        );
+    }
+
+    /// The dome of `LED_D5.0mm-3.step` and the pipe of its body, both of
+    /// radius `2.5`, the ball's centre `2e-15` off the pipe's axis along `−y`.
+    /// The dome's rim `z = 9.1` is inside the pipe on the `+y` half: the
+    /// pipe's own value is about `−4e-16` where the side `y = 0.1` of a box
+    /// crosses it, at `(5.038, 0.1, 9.1)`, and `−8e-16` where the plane
+    /// `y = 0.2` does. Read over those points' boxes, as the fuse holds them,
+    /// that value spans `8.9e-15` and `3.6e-14`, and every fuse of the LED was
+    /// refused there (Q2956,
+    /// `tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs` in `rcad-step`).
+    #[test]
+    fn the_led_domes_rim_is_inside_its_pipe_where_the_ball_leans_away() {
+        let ball = Surface::Sphere(
+            Sphere::new(Point::new(2.54, -5.051_514_762_044e-15, 9.1), 2.5)
+                .expect("a positive radius"),
+        );
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                Axis::as_written(
+                    Point::new(2.54, -3.030_908_857_227e-15, 9.1),
+                    Vector::new(0.0, 3.330_669_073_875e-16, -1.0),
+                )
+                .expect("a direction of length one"),
+                2.5,
+            )
+            .expect("a positive radius"),
+        );
+        let across = |lo: f64, hi: f64| Interval::new(lo, hi).expect("lo is below hi");
+        let by_the_box = PredicatePoint::Constructed([
+            across(5.037_999_199_359_358_5, 5.037_999_199_359_359),
+            across(0.1, 0.1),
+            across(9.1, 9.100_000_000_000_001),
+        ]);
+        let by_the_far_plane = PredicatePoint::Constructed([
+            across(5.031_987_158_875_419_5, 5.031_987_158_875_426),
+            across(0.200_000_000_000_003_73, 0.200_000_000_000_003_8),
+            across(9.1, 9.100_000_000_000_005),
+        ]);
+        for at in [by_the_box, by_the_far_plane] {
+            assert!(
+                matches!(side_of_surface(&pipe, at), Decision::Undecidable { .. }),
+                "the box alone does not tell {at:?}"
+            );
+            assert_eq!(
+                Arrangement::side_of_a_pipe_at_a_point_of_a_ball(&[ball], at, &pipe),
+                Some(Decision::Neg),
+                "{at:?}"
+            );
+        }
     }
 }
