@@ -54,8 +54,8 @@ use rcad_geom::{
 };
 use rcad_predicates::{Interval, Policy, ProvenanceLog};
 use rcad_topo::{
-    DraftEdge, DraftFace, DraftStep, DraftWire, Error, Invalid, Model, ProfileBuilder, Result,
-    Rule, SolidBuilder, SolidKey,
+    DraftEdge, DraftFace, DraftStep, DraftWire, Error, Fused, Invalid, Model, ProfileBuilder,
+    Result, Rule, SolidBuilder, SolidKey,
 };
 
 const F: Orientation = Orientation::Forward;
@@ -177,10 +177,14 @@ fn the_sweep_refuses_the_tilted_half_disc_read_back_from_bytes() {
 /// the top 4. Whatever the fuse answers, the model is left holding the two
 /// solids it held, or every solid it made passes the sweep.
 ///
-/// Today none of them reaches that sweep: two planes apart meet nowhere, and
-/// the fuse draws the edge of a piece leaning off the lid where the two planes
-/// cross, so it refuses both leaning pieces by name, as
-/// `a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it` pins.
+/// Today none of them reaches that sweep. The fuse draws the edge round each
+/// piece along the pipe its run names, each face against the pipe on its own
+/// plane (Q2966): it refuses either disc as a face trimmed by a curve this
+/// cannot follow, the half disc above as a face that meets its neighbour
+/// nowhere, as two planes apart do, and the leaning half disc as an answer
+/// with an edge only one face runs along, as
+/// `a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it` pins for the
+/// two leaning pieces. Q2125 is where it goes next.
 #[test]
 fn a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model() {
     let above =
@@ -250,12 +254,17 @@ fn a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model() {
 
 /// The tall bars of `a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model`
 /// whose piece leans off the lid, each intersected with the block from
-/// `z = 0`. The fuse draws the edge round the piece where the lid's plane and
-/// the piece's cross, a straight line, and not along the pipe its run names.
-/// On that line the disc's circle is a closed edge on a crossing that does not
-/// close (Q1675), and the half disc's arc covers the one stretch its chord
-/// covers (Q1914). The fuse panicked on each, and refuses each by name now,
-/// until the edge is drawn along the pipe (Q2125).
+/// `z = 0`. The fuse drew the edge round the piece where the lid's plane and
+/// the piece's cross, a straight line: on it the disc's circle was a closed
+/// edge on a crossing that does not close (Q1675), and the half disc's arc
+/// covered the one stretch its chord covers (Q1914). It panicked on each, and
+/// then refused each as an edge not drawn along its own curve.
+///
+/// It draws that edge along the pipe its run names now, each face against the
+/// pipe on its own plane (Q2966), and still refuses both: the disc as a face
+/// trimmed by a curve this cannot follow, and the half disc as an answer with
+/// an edge only one face runs along. Each bar builds and passes the sweep, so
+/// each answer exists and each refusal is a gap; Q2125 is where it goes next.
 #[test]
 fn a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it() {
     let mut not_refused = Vec::new();
@@ -276,8 +285,11 @@ fn a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it() {
             );
 
             if !matches!(
-                fused,
-                Err(Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { .. })
+                (which, &fused),
+                (
+                    "disc",
+                    Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
+                ) | ("half disc", Err(Error::ResultIsNotManifold { count: 1 }))
             ) {
                 not_refused.push(format!(
                     "{which}, inner piece first {inner_first}: {fused:?}"
@@ -291,15 +303,22 @@ fn a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it() {
 /// The bar from `z = 0` whose disc leans a tenth through its corner, read back
 /// from bytes: the sweep refuses it, and a fuse does not sweep what it is
 /// handed. Fused every way with a cube of side 2 the fuse panicked (Q1675), and
-/// it refuses each now.
+/// it refuses each now, but for the intersection with a cube clear of the bar,
+/// which is nothing whatever the bar is.
 ///
-/// With the cube moved `(10, 10, 0)` clear of the bar, or `(−1.5, −1, −1)`
-/// through its floor, the refusal is by name: the disc's circle is drawn on the
-/// straight line the lid's plane and the disc's cross in, `x = 1, z = 4`, a
-/// closed edge on a crossing that does not close. With the cube at
-/// `(−1, −1, −1)` its side on `x = 1` holds that line, and the fuse refuses
-/// `Undecidable`: it cannot order two meets at `(1, 2√2, 4)`, where the line
-/// meets the bar's pipe of radius 3.
+/// With the cube at `(−1, −1, −1)` its side on `x = 1` holds the straight line
+/// the lid's plane and the disc's cross in, `x = 1, z = 4`, and the fuse
+/// refuses `Undecidable`: it cannot order two meets at `(1, 2√2, 4)`, where the
+/// line meets the bar's pipe of radius 3.
+///
+/// With the cube moved `(−1.5, −1, −1)` through the bar's floor, or
+/// `(10, 10, 0)` clear of it, the fuse drew the disc's circle on that line too,
+/// a closed edge on a crossing that does not close, and refused each as an edge
+/// not drawn along its own curve. It draws the circle along the pipe its run
+/// names now, each face against the pipe on its own plane (Q2966). Through the
+/// floor it refuses the disc as a face trimmed by a curve this cannot follow.
+/// Clear of the bar it refuses the union and the difference as an answer with
+/// an edge only one face runs along. Q2125 is where it goes next.
 ///
 /// Until Q2947 all of them were refused by name, by the check that the bar does
 /// not cross itself, which asked where the disc's plane crosses the bar's pipe.
@@ -311,14 +330,28 @@ fn a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it() {
 #[test]
 fn a_fuse_with_the_tilted_disc_read_back_from_bytes_is_refused_for_the_edge_round_it() {
     let mut not_refused = Vec::new();
+    let places: [(Vector, WhatItGivesNow); 3] = [
+        (Vector::new(-1.0, -1.0, -1.0), |_, fused| {
+            could_not_order_two_meets_where_the_line_meets_the_pipe(fused)
+        }),
+        (Vector::new(-1.5, -1.0, -1.0), |_, fused| {
+            matches!(
+                fused,
+                Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
+            )
+        }),
+        (Vector::new(10.0, 10.0, 0.0), |rule, fused| {
+            if matches!(rule, Rule::Intersection) {
+                matches!(fused, Ok(fused) if fused.solids().is_empty())
+            } else {
+                matches!(fused, Err(Error::ResultIsNotManifold { count: 1 }))
+            }
+        }),
+    ];
     for disc_first in [false, true] {
         let (model, built) = a_bar_with_its_lid_split_by_a_disc(pipe(1.0), the_lid(), disc_first);
         built.expect("the disc on the lid's own plane builds");
-        for (at, its_side_holds_the_line) in [
-            (Vector::new(-1.0, -1.0, -1.0), true),
-            (Vector::new(-1.5, -1.0, -1.0), false),
-            (Vector::new(10.0, 10.0, 0.0), false),
-        ] {
+        for (at, as_it_is_now) in places {
             for rule in [Rule::Union, Rule::Difference, Rule::Intersection] {
                 let mut tilted =
                     with_the_inner_plane_swapped(&model, disc_first, tilted_through_the_corner());
@@ -338,15 +371,7 @@ fn a_fuse_with_the_tilted_disc_read_back_from_bytes_is_refused_for_the_edge_roun
                     &mut ProvenanceLog::new(),
                 );
 
-                let refused = if its_side_holds_the_line {
-                    could_not_order_two_meets_where_the_line_meets_the_pipe(&fused)
-                } else {
-                    matches!(
-                        fused,
-                        Err(Error::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { .. })
-                    )
-                };
-                if !refused {
+                if !as_it_is_now(rule, &fused) {
                     not_refused.push(format!(
                         "disc first {disc_first}, the cube at {at:?}, {rule:?}: {fused:?}"
                     ));
@@ -356,6 +381,9 @@ fn a_fuse_with_the_tilted_disc_read_back_from_bytes_is_refused_for_the_edge_roun
     }
     assert!(not_refused.is_empty(), "{not_refused:#?}");
 }
+
+/// Whether a fuse under a rule gave what it gives now.
+type WhatItGivesNow = fn(Rule, &Result<Fused>) -> bool;
 
 /// Whether `fused` is refused `Undecidable` for one thing alone: the order
 /// along a crossing of two meets that are both at `(1, 2√2, 4)`, to `1e-12`.
