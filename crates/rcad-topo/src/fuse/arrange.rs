@@ -2752,7 +2752,7 @@ impl<'f> Arrangement<'f> {
             places.into_iter().map(as_exact_as_it_is).collect();
         let tight: SmallVec<[PredicatePoint; 2]> =
             tight.into_iter().map(as_exact_as_it_is).collect();
-        for (which, (&place, &boxed_tight)) in places.iter().zip(&tight).enumerate() {
+        for (which, &place) in places.iter().enumerate() {
             // Being *on* both surfaces is what the meet just worked out,
             // and asking a predicate to confirm it would be a second
             // opinion about a fact this line already holds — one that a
@@ -2767,10 +2767,9 @@ impl<'f> Arrangement<'f> {
             }
             let mut sorted = surfaces;
             sorted.sort_by_key(name_of_surface_bits);
+            let folded = self.the_corner_that_is_this_place(first, second, which, &places, &tight);
             let which = u8::try_from(which).expect("three surfaces meet at most twice");
-            if let Some(corner) =
-                self.the_corner_that_is_this_place(first, second, place, boxed_tight, &places)
-            {
+            if let Some(corner) = folded {
                 self.nodes[corner].stands_for_too((sorted, which));
                 folded_into_a_corner.extend(on);
                 continue;
@@ -2922,7 +2921,7 @@ impl<'f> Arrangement<'f> {
     ) {
         let named = where_two_halves_meet(&self.surface, &self.crossings[first].partner);
         if let Some(corner) =
-            self.the_corner_that_is_this_place(first, second, meet.at, meet.at, &[meet.at])
+            self.the_corner_that_is_this_place(first, second, 0, &[meet.at], &[meet.at])
         {
             self.nodes[corner].stands_for_too((named, 6));
         } else {
@@ -3047,7 +3046,7 @@ impl<'f> Arrangement<'f> {
                 && nothing_rules_the_point_out(self.crossings[second].picked_by(), apex),
             "each of the rulings a plane or a cone cuts through a cone's apex holds the apex"
         );
-        if let Some(corner) = self.the_corner_that_is_this_place(first, second, apex, apex, &[apex])
+        if let Some(corner) = self.the_corner_that_is_this_place(first, second, 0, &[apex], &[apex])
         {
             self.nodes[corner].stands_for_too((named, 0));
             return;
@@ -3155,14 +3154,14 @@ impl<'f> Arrangement<'f> {
         });
         let places = where_two_pipes_touch(middle, cross_of_intervals(one, two), lesser.radius());
         let named = where_two_halves_meet(&self.surface, &self.crossings[first].partner);
-        for place in places {
+        for (at, &place) in places.iter().enumerate() {
             assert!(
                 nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
                     && nothing_rules_the_point_out(self.crossings[second].picked_by(), place),
                 "each half ellipse holds both places the four halves meet at"
             );
             let which = which_place_two_pipes_touch_at(place, &lesser, &greater, log)?;
-            self.name_where_two_halves_meet(first, second, place, &places, (named, which));
+            self.name_where_two_halves_meet(first, second, at, &places, (named, which));
         }
         Ok(())
     }
@@ -3184,8 +3183,8 @@ impl<'f> Arrangement<'f> {
         arc: &ArcOfTwoCones,
     ) {
         let named = where_two_halves_meet(&self.surface, &self.crossings[first].partner);
-        for (which, place) in (0..).zip(arc.touches) {
-            self.name_where_two_halves_meet(first, second, place, &arc.touches, (named, which));
+        for (which, at) in (0..).zip(0..arc.touches.len()) {
+            self.name_where_two_halves_meet(first, second, at, &arc.touches, (named, which));
         }
     }
 
@@ -3311,22 +3310,22 @@ impl<'f> Arrangement<'f> {
         sorted.sort_by_key(|pipe| name_of_surface_bits(&Surface::Cylinder(*pipe)));
         let [lesser, greater] = sorted;
         let named = where_two_halves_meet(&one, &other);
-        for place in places {
+        for (at, &place) in places.iter().enumerate() {
             if !nothing_rules_the_point_out(self.crossings[first].picked_by(), place)
                 || !nothing_rules_the_point_out(self.crossings[second].picked_by(), place)
             {
                 continue;
             }
             let which = which_place_two_pipes_touch_at(place, &lesser, &greater, log)?;
-            self.name_where_two_halves_meet(first, second, place, &places, (named, which));
+            self.name_where_two_halves_meet(first, second, at, &places, (named, which));
         }
         Ok(true)
     }
 
-    /// The node named `name`, one of the two places four half ellipses meet
-    /// at, made a node of crossings `first` and `second` too: the corner of
-    /// the face that is the place, if one is, or the node placed at that place
-    /// already, or a new one.
+    /// The node named `name`, the place `at` of the two `places` four half
+    /// ellipses meet at, made a node of crossings `first` and `second` too: the
+    /// corner of the face that is the place, if one is, or the node placed at
+    /// that place already, or a new one.
     ///
     /// **The node placed already is found by the place and not by the name**
     /// ([`the_place_two_halves_meet_at`]), and takes `name` on beside its own
@@ -3339,16 +3338,16 @@ impl<'f> Arrangement<'f> {
         &mut self,
         first: usize,
         second: usize,
-        place: PredicatePoint,
+        at: usize,
         places: &[PredicatePoint],
         name: ([Surface; 3], u8),
     ) {
-        if let Some(corner) =
-            self.the_corner_that_is_this_place(first, second, place, place, places)
+        if let Some(corner) = self.the_corner_that_is_this_place(first, second, at, places, places)
         {
             self.nodes[corner].stands_for_too(name);
             return;
         }
+        let place = places[at];
         let the_place = the_place_two_halves_meet_at(name).expect(
             "a place four halves meet at is named [a, b, b] by two pipes or two cones, \
              with which 0 or 1",
@@ -3870,10 +3869,15 @@ impl<'f> Arrangement<'f> {
         &self,
         first: usize,
         second: usize,
-        place: PredicatePoint,
-        boxed_tight: PredicatePoint,
+        which: usize,
         places: &[PredicatePoint],
+        tight: &[PredicatePoint],
     ) -> Option<usize> {
+        assert_eq!(
+            places.len(),
+            tight.len(),
+            "each place of the meet has the tightest box known to hold it"
+        );
         self.node_of_corner
             .iter()
             .flatten()
@@ -3894,17 +3898,27 @@ impl<'f> Arrangement<'f> {
                 };
                 let allowed = super::bake::grown_by(node.point, room);
                 let reaches_the_room = |other: &PredicatePoint| boxes_overlap(allowed, *other);
-                let (meet, room) = (boxed_tight.enclosure(), allowed.enclosure());
-                let inside_the_room = (0..3).all(|axis| {
-                    room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
-                });
-                reaches_the_room(&place)
-                    && places
-                        .iter()
-                        .filter(|other| reaches_the_room(other))
-                        .count()
-                        == 1
-                    && inside_the_room
+                let room = allowed.enclosure();
+                let inside_the_room = |meet: &PredicatePoint| {
+                    let meet = meet.enclosure();
+                    (0..3).all(|axis| {
+                        room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
+                    })
+                };
+                let reaching: SmallVec<[usize; 2]> = (0..places.len())
+                    .filter(|&other| reaches_the_room(&places[other]))
+                    .collect();
+                let one_touch_at_the_corner = || {
+                    reaching.iter().all(|&one| {
+                        inside_the_room(&tight[one])
+                            && reaching
+                                .iter()
+                                .all(|&other| boxes_overlap(tight[one], tight[other]))
+                    })
+                };
+                reaches_the_room(&places[which])
+                    && inside_the_room(&tight[which])
+                    && (reaching.len() == 1 || one_touch_at_the_corner())
             })
     }
 
@@ -3915,11 +3929,11 @@ impl<'f> Arrangement<'f> {
         &self,
         first: usize,
         second: usize,
-        place: PredicatePoint,
-        boxed_tight: PredicatePoint,
+        which: usize,
         places: &[PredicatePoint],
+        tight: &[PredicatePoint],
     ) -> bool {
-        self.the_corner_that_is_this_place(first, second, place, boxed_tight, places)
+        self.the_corner_that_is_this_place(first, second, which, places, tight)
             .is_some()
     }
 
@@ -22413,7 +22427,7 @@ mod tests {
             "the room at a corner no bigger than one"
         );
         let folds = |place: PredicatePoint| {
-            arrangement.a_corner_is_this_place(wall, cut, place, place, &[place])
+            arrangement.a_corner_is_this_place(wall, cut, 0, &[place], &[place])
         };
         assert!(
             folds(reaching(room)),
@@ -22455,11 +22469,11 @@ mod tests {
         let far = 1000.0 * what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
         let place = reaching(far);
         assert!(
-            arrangement.a_corner_is_this_place(one_wall, other_wall, place, place, &[place]),
+            arrangement.a_corner_is_this_place(one_wall, other_wall, 0, &[place], &[place]),
             "the bottom and the two walls meet at the corner `bake` placed among them"
         );
         assert!(
-            !arrangement.a_corner_is_this_place(one_wall, cut, place, place, &[place]),
+            !arrangement.a_corner_is_this_place(one_wall, cut, 0, &[place], &[place]),
             "a meet with a cut in it is folded only as far as the rounding reaches"
         );
     }
@@ -22488,7 +22502,7 @@ mod tests {
         let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
         let place = from_to(room / 2.0, room);
         assert!(
-            arrangement.a_corner_is_this_place(wall, cut, place, place, &[place]),
+            arrangement.a_corner_is_this_place(wall, cut, 0, &[place], &[place]),
             "a place inside the corner's room is the corner written down another way, \
              whether or not its box touches the corner's"
         );
@@ -22516,7 +22530,7 @@ mod tests {
         let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
         let by_cramer = reaching(1000.0 * room);
         let folds = |boxed_tight: PredicatePoint| {
-            arrangement.a_corner_is_this_place(wall, cut, by_cramer, boxed_tight, &[by_cramer])
+            arrangement.a_corner_is_this_place(wall, cut, 0, &[by_cramer], &[boxed_tight])
         };
         assert!(
             !folds(by_cramer),
@@ -22565,7 +22579,7 @@ mod tests {
             "the room off a plane `validate` grants a unit cube, plus the rounding, is {room}"
         );
         let folds = |place: PredicatePoint| {
-            arrangement.a_corner_is_this_place(one_wall, other_wall, place, place, &[place])
+            arrangement.a_corner_is_this_place(one_wall, other_wall, 0, &[place], &[place])
         };
         assert!(
             folds(from_to(rounding.next_up(), room)),
@@ -23046,12 +23060,13 @@ mod tests {
         let places: Vec<PredicatePoint> = places.into_iter().map(as_exact_as_it_is).collect();
         let mut said: Vec<([f64; 3], bool)> = places
             .iter()
-            .map(|&place| {
+            .enumerate()
+            .map(|(which, place)| {
                 (
                     place
                         .exact_coordinates()
                         .expect("every place here lands on an f64"),
-                    arrangement.a_corner_is_this_place(first, second, place, place, &places),
+                    arrangement.a_corner_is_this_place(first, second, which, &places, &places),
                 )
             })
             .collect();
