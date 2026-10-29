@@ -5286,7 +5286,7 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::as_two_cuts_crossing_the_plane_in_parallel_lines_say`]),
     /// where a second plane cuts a plane's loop
     /// ([`Arrangement::as_a_flat_cut_through_the_loop_says`]) and where two
-    /// parallel planes cut it
+    /// planes cut it that cross its plane in parallel lines
     /// ([`Arrangement::as_two_parallel_cuts_through_the_loop_say`]) only where
     /// the boxes cannot say, because the boxes are cheaper and nearly always
     /// enough.
@@ -6551,25 +6551,36 @@ impl<'f> Arrangement<'f> {
     }
 
     /// Which of two nodes on the loop a plane cuts a ball, a pipe or a cone in
-    /// comes first, where each is exactly on one of two planes that face one
-    /// way number for number: read off the two planes' offsets and which way
-    /// the loop runs across them at each node. `None` everywhere else, and
-    /// wherever a sign it reads is not proved.
+    /// comes first, where each is exactly on one of two planes that cut the
+    /// loop's plane in parallel lines: read off where the two lines lie across
+    /// the loop's plane and which way the loop runs across them at each node.
+    /// `None` everywhere else, and wherever a sign it reads is not proved.
     ///
-    /// **Across a direction `n` the loop rises along one half and falls along
-    /// the other.** It is a circle or an ellipse, so `n · x` along it has one
+    /// **Across a direction `c` the loop rises along one half and falls along
+    /// the other.** It is a circle or an ellipse, so `c · x` along it has one
     /// highest point and one lowest, and climbs or falls without turning back
-    /// along each half between them. `n · x` is `d` at `first` and `e` at
-    /// `second`, for `d` and `e` the offsets of their planes along `n`. Where
-    /// the loop runs the same way across `n` at both, `n · (∇W₀ × ∇W₁)` proved
-    /// one sign over both boxes, the two are on one half, and the arc of that
-    /// half between them is the part of the loop in the strip between `d` and
-    /// `e`. From a start outside that strip the loop reaches the arc at the end
-    /// it runs into the strip by: the lower of `d` and `e` on the rising half,
-    /// and the higher on the falling one. So the answer is the sign of `e − d`
-    /// against the way the loop runs, and `f64`s compare exactly with nothing
-    /// divided. Where `d` and `e` are one number the two are one point, since a
-    /// half crosses a plane across it once.
+    /// along each half between them. Take `c` the normal of the plane through
+    /// `first`, so `c · x` is that plane's offset `k` there. The plane through
+    /// `second` is `c₂ · x = k₂`, and the loop's plane `n · x = e`. Where the two
+    /// cut the loop's plane in parallel lines `det(c, c₂, n)` is nought, so
+    /// `c₂ = α c + β n`, and on the loop's plane `c₂ · x = α (c · x) + β e`:
+    /// `second` is where `c · x` is `(k₂ − β e) / α`. With
+    /// `g = |n|² |c|² − (c · n)²`, above nought unless `c` lies along `n`,
+    /// `α g = |n|² (c · c₂) − (c · n)(c₂ · n)` and
+    /// `β g = |c|² (c₂ · n) − (c · c₂)(c · n)`, so that is
+    /// `(k₂ g − e β g) / (α g)`, and every sign of it is worked out exactly
+    /// with nothing divided. Two planes that face one way number for number
+    /// are `c₂ = ±c`, where `β` is nought and it is `±k₂`.
+    ///
+    /// Where the loop runs the same way across `c` at both,
+    /// `c · (∇W₀ × ∇W₁)` proved one sign over both boxes, the two are on one
+    /// half, and the arc of that half between them is the part of the loop in
+    /// the strip between the two lines. From a start outside that strip the
+    /// loop reaches the arc at the end it runs into the strip by: the lower of
+    /// the two on the rising half, and the higher on the falling one. So the
+    /// answer is which line is higher across `c` against the way the loop
+    /// runs. Where the two are one line the two nodes are one point, since a
+    /// half crosses a line across it once.
     ///
     /// Both starts are asked, as in [`the_lower_meet_first_round_the_loop`],
     /// because the walked start may be a rounding off the loop.
@@ -6587,6 +6598,17 @@ impl<'f> Arrangement<'f> {
     /// block's ends cut the bar's wall in meets the flat face and the block's
     /// face at two pairs of points a rounding apart, and every certified fuse
     /// of the two was refused on which of a pair comes first round its circle.
+    ///
+    /// `LED_D5.0mm-3.step` has a sloped plane with normal
+    /// `(−0.619, −3.5e−16, −0.786)` that cuts its body's pipe in an ellipse,
+    /// and on it the other slope, with normal `(−0.619, 3.5e−16, 0.786)`, and
+    /// the plane `x = 2.34` cut in parallel lines: `det` of the three normals
+    /// is nought exactly, and the two slopes cross on the first at
+    /// `x = 2.34 + 3.1e−16` all along. Their meets with the ellipse near
+    /// `(2.34, −2.492, 3.5)` are worked out into one box, and every fuse tried
+    /// of the LED was refused on their order while only two planes that face
+    /// one way number for number were read (Q2985,
+    /// `tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`).
     fn as_two_parallel_cuts_through_the_loop_say(
         &self,
         crossing: usize,
@@ -6608,28 +6630,47 @@ impl<'f> Arrangement<'f> {
                 Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
             )
         };
-        match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
-            (Some(_), None) if round(&wound_as[1]) => (),
-            (None, Some(_)) if round(&wound_as[0]) => (),
+        let flat = match (wound_as[0].as_plane(), wound_as[1].as_plane()) {
+            (Some(flat), None) if round(&wound_as[1]) => flat,
+            (None, Some(flat)) if round(&wound_as[0]) => flat,
             (Some(_) | None, Some(_) | None) => return None,
-        }
+        };
         let (mine, theirs) = (
             self.the_cut_through_the_loop_at(first, wound_as)?,
             self.the_cut_through_the_loop_at(second, wound_as)?,
         );
-        let across = mine.normal().components();
-        let theirs = [theirs, theirs.reversed()]
-            .into_iter()
-            .find(|one| one.normal().components() == across)?;
-        let (at_mine, at_theirs) = (mine.offset(), theirs.offset());
-        if !across
-            .iter()
-            .chain([&at_mine, &at_theirs])
-            .all(|number| number.is_finite())
-        {
+        let [c, c2, n] = [&mine, &theirs, flat].map(|plane| plane.normal().components());
+        if expansion_sign(&exactly_determinant([c, c2, n])?) != Decision::Zero {
             return None;
         }
-        let across = across.map(Interval::exactly);
+        let [cc, c_c2, cn, c2n, nn] = [(c, c), (c, c2), (c, n), (c2, n), (n, n)]
+            .map(|(one, other)| exactly_dotted(one, other));
+        let (cc, c_c2, cn, c2n, nn) = (cc?, c_c2?, cn?, c2n?, nn?);
+        let products_less = |one: [&[f64]; 2], other: [&[f64]; 2]| {
+            Some(packed(&exactly_added(
+                &exactly_multiplied(one[0], one[1])?,
+                &negated(&exactly_multiplied(other[0], other[1])?),
+            )))
+        };
+        let g = products_less([&nn, &cc], [&cn, &cn])?;
+        let alpha_g = products_less([&nn, &c_c2], [&cn, &c2n])?;
+        let beta_g = products_less([&cc, &c2n], [&c_c2, &cn])?;
+        // Compared rather than matched: only a proved sign is read (§40).
+        if expansion_sign(&g) != Decision::Pos {
+            return None;
+        }
+        let k2_g_less_e_beta_g = exactly_added(
+            &exactly_scaled(&g, theirs.offset())?,
+            &negated(&exactly_scaled(&beta_g, flat.offset())?),
+        );
+        // Theirs is where `c · x` is `above / under`, with `under` above nought.
+        let (above, under) = match expansion_sign(&alpha_g) {
+            Decision::Pos => (k2_g_less_e_beta_g, alpha_g),
+            Decision::Neg => (negated(&k2_g_less_e_beta_g), negated(&alpha_g)),
+            Decision::Zero | Decision::Undecidable { .. } | _ => return None,
+        };
+        let at_mine = mine.offset();
+        let across = c.map(Interval::exactly);
         let runs_at = |at: usize| {
             let place = self.nodes[at].point;
             let forward = cross_of_intervals(
@@ -6644,15 +6685,19 @@ impl<'f> Arrangement<'f> {
         if runs != runs_there || !(runs == Decision::Pos || runs == Decision::Neg) {
             return None;
         }
-        let theirs_is_higher = match at_mine.partial_cmp(&at_theirs)? {
-            Ordering::Equal => return Some(Decision::Zero),
-            Ordering::Less => Decision::Pos,
-            Ordering::Greater => Decision::Neg,
+        let theirs_is_higher = match expansion_sign(&exactly_added(
+            &above,
+            &negated(&exactly_scaled(&under, at_mine)?),
+        )) {
+            Decision::Zero => return Some(Decision::Zero),
+            higher @ (Decision::Pos | Decision::Neg) => higher,
+            Decision::Undecidable { .. } | _ => return None,
         };
+        let (above, under) = (held_as_an_interval(&above), held_as_an_interval(&under));
         let clear_of_the_strip = |start: PredicatePoint| {
             let along = dot_of(across, start.enclosure());
-            let [past_mine, past_theirs] =
-                [at_mine, at_theirs].map(|offset| (along - Interval::exactly(offset)).sign());
+            let past_mine = (along - Interval::exactly(at_mine)).sign();
+            let past_theirs = (along * under - above).sign();
             past_mine == past_theirs && (past_mine == Decision::Pos || past_mine == Decision::Neg)
         };
         if !(clear_of_the_strip(from) && clear_of_the_strip(named_the_start.unwrap_or(node))) {
