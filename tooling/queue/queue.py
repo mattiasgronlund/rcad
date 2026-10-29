@@ -294,8 +294,15 @@ class Claims:
             if event[0] == "take":
                 held[event[1]] = {"time": event[2], "tree": event[3], "branch": event[4], "write_set": event[5],
                                   "taken": event[5], "tier": event[6] if len(event) > 6 else None}
-            elif event[0] in ("narrow", "writes") and event[1] in held:
+            elif event[0] == "narrow" and event[1] in held:
                 held[event[1]]["write_set"] = event[4]
+            elif event[0] == "writes" and event[1] in held:
+                # `writes` sets the row's write set outright (§230.3), so it moves
+                # what the row was taken with too -- not only `narrow`'s bound to
+                # stay inside it (Q2670). `narrow` back to the old taken set would
+                # otherwise be the only way to reach entries `writes` just granted.
+                held[event[1]]["write_set"] = event[4]
+                held[event[1]]["taken"] = event[4]
             elif event[0] == "release":
                 held.pop(event[1], None)
         return held
@@ -412,16 +419,22 @@ def take_step(queue, claims, here, args, batch):
     # taken again for a new branch: that is a failed lane re-dispatched.
     if not row.state.startswith("lane:"):
         refuse_unless_ready(queue, row, branch)
-    entries = entries_of(row.write_set)
+    # A `writes` ahead of this row's first take already set a write set the
+    # column has not caught up to, since `writes` never touches
+    # docs/queue.md: a fresh take (no hold yet) reads that latest set rather
+    # than the stale column (Q2670). A re-take of a row this tree already
+    # holds still resets to the column, as before this fix.
+    written = row.write_set if hold else latest_writes(here.claims).get(row_id, row.write_set)
+    entries = entries_of(written)
     others = {other: theirs for other, theirs in claims.holds().items()
               if other != row_id and theirs["branch"] != branch}
     met = the_hold_it_meets(row_id, entries, others) if entries else ""
     if met:
-        raise Refused(f"nothing written: {row_id}'s write set {row.write_set} meets a running hold, "
+        raise Refused(f"nothing written: {row_id}'s write set {written} meets a running hold, "
                       f"as the fill says it:\n    {met}")
     queue.replace(row, row.with_state(f"lane:{branch}"))
     message = f"{row_id}: {row.state} -> lane:{branch}, held for {branch} until done, drop or park"
-    return queue, message, ("take", row_id, now(), here.top, branch, row.write_set, row.tier)
+    return queue, message, ("take", row_id, now(), here.top, branch, written, row.tier)
 
 
 def refuse_unless_ready(queue, row, branch):
