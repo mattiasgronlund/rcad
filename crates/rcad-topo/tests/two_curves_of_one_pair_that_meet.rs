@@ -719,10 +719,11 @@ fn a_thin_bar_up_the_inside_of_a_thick_one_opposite_its_seam_turned_near_a_quart
 /// - Every other fuse, `ACrossingThisCannotBeOrderedAlong`.
 ///   `where_a_closed_crossing_starts` finds no start on either loop of the
 ///   walls' crossing, either way round, and says
-///   `CannotWorkOutHowBigACrossingIs` (checked here). `how_a_crossing_runs`
-///   in `fuse/arrange.rs` refuses `ACrossingThisCannotBeOrderedAlong` where
-///   that call finds no start. That these fuses stop there is read and not
-///   traced; at `1e−7`, where it starts each loop at its far end
+///   `CannotWorkOutHowBigACrossingIs` (checked here). Each of these fuses
+///   stops in `how_a_crossing_runs` in `fuse/arrange.rs`, on the arm that
+///   turns that answer into `ACrossingThisCannotBeOrderedAlong`: run under
+///   gdb, that arm is reached once in each of these 30 fuses and in none of
+///   the other 18. At `1e−7`, where that call starts each loop at its far end
 ///   `(0, ±2, ∓2/lean)`, these fuses are refused `order along a crossing`
 ///   with that far end as one input, as Q2754 is at `1e−6`.
 ///
