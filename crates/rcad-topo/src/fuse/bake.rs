@@ -662,11 +662,12 @@ impl Bounds {
 /// planes and wires of the joined faces and drops every corner a lump of faces
 /// runs straight through, so that each corner left has three planes round it.
 ///
-/// **Any other solid is joined here, at the bake, and only on a ball, a pipe,
-/// a cone or a ring** ([`faces_baked_as_one`]). A curved solid can carry two
-/// faces on one ball, pipe or cone: a caller builds one, and a union whose
-/// pieces the joiner leaves apart writes one (rows Q575 and Q898,
-/// `docs/decisions.md` §231.5, §325.5). Those faces are baked as one face, and
+/// **Any other solid is joined here, at the bake** ([`faces_baked_as_one`]),
+/// on a ball, a pipe, a cone or a ring, and on a plane written one way. A
+/// curved solid can carry two faces on one ball, pipe or cone: a caller builds
+/// one, and a union whose pieces the joiner leaves apart writes one (rows Q575
+/// and Q898, `docs/decisions.md` §231.5, §325.5). A file can carry two on one
+/// plane (row Q2962). Those faces are baked as one face, and
 /// an edge between two of them is left out the way a seam is. Nothing has to be
 /// re-derived, because a corner with fewer than three surfaces round it is read
 /// out of the model rather than solved (§31.3), and every corner left keeps the
@@ -726,7 +727,8 @@ fn bake_one_solid(
 ///
 /// Two faces are in one group when an edge runs between them and they are one
 /// ball, pipe, cone or ring used one way round
-/// ([`one_curved_surface_used_one_way`]).
+/// ([`one_curved_surface_used_one_way`]), or one plane written and used one way
+/// ([`one_plane_written_and_used_one_way`]).
 /// Then the edge is not where the solid's skin stops but only where two faces
 /// of it were written apart, which is what a seam is too. Every other face is a
 /// group of one.
@@ -747,7 +749,8 @@ fn faces_baked_as_one<'model>(
         for wire in model.face_at(mine).wires() {
             for coedge in wire.coedges() {
                 if let Some(across) = face_across(model, mine, coedge.edge().key())
-                    && one_curved_surface_used_one_way(surfaces[&mine], surfaces[&across])
+                    && (one_curved_surface_used_one_way(surfaces[&mine], surfaces[&across])
+                        || one_plane_written_and_used_one_way(surfaces[&mine], surfaces[&across]))
                 {
                     one_face.join(at, position[&across]);
                 }
@@ -777,10 +780,9 @@ fn faces_baked_as_one<'model>(
 /// turning the axis round changes no sign. So the two faces face the same way
 /// exactly when the solid uses them the same way.
 ///
-/// **A plane is left to the joiner**, which runs on a wholly flat solid before
-/// this does. Two faces on one plane of a curved solid are not joined here: a
-/// plane does have two spellings that face opposite ways, and nothing here
-/// builds such a solid to try it on.
+/// **A plane is not one of these**: it has two spellings that face opposite
+/// ways, so `used` does not say the same thing for both, and
+/// [`one_plane_written_and_used_one_way`] asks it instead.
 ///
 /// **A cone was left apart until its corners were read whole** (row Q898).
 /// Joined without [`what_each_edge_left_out_ran_along`], the pieces of the cone
@@ -793,6 +795,28 @@ fn one_curved_surface_used_one_way(one: PlacedSurface, other: PlacedSurface) -> 
         Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_) | Surface::Torus(_)
     ) && one_surface(&one.placed, &other.placed)
         && one.used == other.used
+}
+
+/// Whether two faces are one plane, written the same way and used the same way
+/// round.
+///
+/// **A plane's two spellings face opposite ways**, `(n, d)` and `(−n, −d)`,
+/// and [`one_surface`] folds them together, so `used` alone does not say which
+/// way a face looks out: the same `used` on the two spellings is two faces back
+/// to back. Written the same way, the same `used` is the same way out. That is
+/// how a file or a builder leaves one flat face split in two: the flat of a
+/// KiCad LED's flange, `x = −0.23` in
+/// `LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step`, is two faces on one plane
+/// stored bit for bit the same, with an edge between them along `z = 2`
+/// (row Q2962).
+///
+/// **The two spellings used opposite ways are left apart**, though they too
+/// look out the same way. A group is baked on one spelling with the use of its
+/// first face ([`bake_one_face`]), which for a face written the other way is
+/// the wrong way out. They reach the arrangement and are refused there by
+/// name.
+fn one_plane_written_and_used_one_way(one: PlacedSurface, other: PlacedSurface) -> bool {
+    one.placed.as_plane().is_some() && one.placed == other.placed && one.used == other.used
 }
 
 /// Write the one spelling each group is baked on into every face of it, as
