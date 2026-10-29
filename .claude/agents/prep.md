@@ -34,15 +34,21 @@ so use them only for a file that diff does not name.
 Read each row with `mise exec -- just queue show <id>`, one id a call. A bundle,
 `queueId` `Q1,Q2,Q3` (§352.4), is one prep for all its rows. Report each row in
 `rows`: its id, its model column, its write-set column and its whole line, each
-exactly as the command prints it. `lanes.js` cannot read the queue file, so
-what you copy is what the lane is given, and what your answer is checked
-against.
+exactly as the command prints it — **unless** the same `show` also prints a
+line under the row naming a newer set: `narrowed to <set>, taken with <...>`
+on a row already held, or `` write set set to <set> by `writes`, <column> in
+docs/queue.md `` on one not yet held. Either line means a `writes` ran after
+the column was written (§230.3); report that printed set as the row's write
+set instead of the column, and check `needs` against it too, not the column.
+`lanes.js` cannot read the queue file, so what you copy is what the lane is
+given, and what your answer is checked against.
 
 ## The write set
 
 The lane's write set is the union of the rows' write sets, leaving out `-`,
-and nothing else; `lanes.js` builds that union itself from the `write_set`
-column you copy into `rows`, so you report no `writeSet` of your own. **You
+and nothing else; `lanes.js` builds that union itself from the write set you
+copy into `rows` above — the column, or the newer set a `writes` line
+replaces it with — so you report no `writeSet` of your own. **You
 never widen it or narrow it, not even when it is wrong**: that is a `needs`.
 Only `queue next` checks a write set against the rows already running, `take`
 does not, and two preps in one fill could widen two rows onto one file at once

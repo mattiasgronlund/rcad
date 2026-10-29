@@ -18285,7 +18285,17 @@ check-queue-api-selftest:
         || fail "next did not skip a row that meets the write-corrected held row"
     got=$(q "$writes_wt" show "$held_wrong" 2>&1) || fail "show failed after writes corrected a held row"
     grep -qxF "narrowed to docs/decisions.d/, taken with -" <<<"$got" \
-        || fail "show did not say what writes corrected the held row's write set to"
+        && fail "show still said the held row was narrowed, though writes moved what it was taken with too"
+
+    # Q2670: writes on a held row moves the set it was taken with, not only
+    # the write set itself, so a later narrow can reach what writes just
+    # granted, where before the fix it stayed refused outside the stale -.
+    got=$(q "$writes_wt" narrow "$held_wrong" docs/decisions.d/230-one-queue.md 2>&1) \
+        || fail "narrow was refused an entry writes had just moved the held row's taken set onto"
+    grep -qxF "$held_wrong: narrowed from docs/decisions.d/ to docs/decisions.d/230-one-queue.md, taken with docs/decisions.d/" <<<"$got" \
+        || fail "narrow did not report narrowing onto the entry writes granted"
+    got=$(q "$writes_wt" narrow "$held_wrong" docs/decisions.d/ 2>&1) \
+        || fail "narrow back to the full directory was refused"
 
     # writes refuses a write set that meets a running hold, the same guard
     # narrow runs before it widens a hold back (§424.7). held_wrong's own
@@ -18305,6 +18315,27 @@ check-queue-api-selftest:
         && fail "writes accepted a write set a row already carries"
     grep -qF "write set is docs/decisions.d/230-one-queue.md already" <<<"$got" \
         || fail "writes did not refuse a write set a row already carries"
+
+    # Q2670: a writes run ahead of a row's first take is no longer undone by
+    # it. take_step used to read row.write_set, the docs/queue.md column,
+    # straight off; it now reads the latest writes-given set when the row has
+    # no hold yet.
+    fresh_write=$(q "$writes_wt" add 2 opus - "from/- a row writes sets ahead of its first take §230") \
+        || fail "add for the fresh-write row failed"
+    g "$writes_wt" commit -qam "a row for writes ahead of a fresh take"
+    got=$(q "$writes_wt" writes "$fresh_write" docs/q2670-fresh.md 2>&1) \
+        || fail "writes refused to set the fresh-write row's write set"
+    got=$(q "$writes_wt" show "$fresh_write" 2>&1) || fail "show failed after writes set the fresh-write row's write set"
+    grep -qxF 'write set set to docs/q2670-fresh.md by `writes`, - in docs/queue.md' <<<"$got" \
+        || fail "show did not say what writes set ahead of the take"
+    got=$(q "$writes_wt" take "$fresh_write" lane-fresh-write 2>&1) \
+        || fail "take of the fresh-write row was refused"
+    got=$(awk -F '\t' -v id="$fresh_write" '$1 == "take" && $2 == id { print $6 }' "$claims_file")
+    [ "$got" = docs/q2670-fresh.md ] \
+        || fail "take wrote the stale docs/queue.md column, not the write set writes had just given"
+    got=$(q "$writes_wt" show "$fresh_write" 2>&1) || fail "show failed after taking the fresh-write row"
+    grep -qF "narrowed to" <<<"$got" \
+        && fail "show said the freshly taken row was narrowed, though its write set is what it was taken with"
 
     # Q252 (§263.3, §263.4): `give` releases a hold and restores the state
     # the take replaced, an after: list included since take's own claims event

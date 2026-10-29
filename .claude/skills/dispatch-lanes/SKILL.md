@@ -163,7 +163,11 @@ row prep finds wrong comes back not merged before any lane starts, with a
 `needs <file>: <why>` line for each file it is missing. When the write set is
 the only thing wrong, fix it in place with `just queue writes <id> <write
 set>` instead of re-filing (§230.3); any other finding still needs re-filing
-with those files, drop and add, then `queue next` (§396.4).
+with those files, drop and add, then `queue next` (§396.4). A `writes` run
+ahead of the row's first `take` is carried forward by it, and a `writes` run
+on a row already held moves the hold it was taken with too, so fixing the
+write set this way no longer depends on whether the row has been taken yet
+(§230.3, Q2670).
 
 **A row that adds a test file directly under `crates/rcad-topo/tests/`,
 `crates/rcad-geom/tests/` or `crates/rcad-step/tests/` holds one item of
