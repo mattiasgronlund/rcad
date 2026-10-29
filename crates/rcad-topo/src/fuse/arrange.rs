@@ -8489,6 +8489,7 @@ impl<'f> Arrangement<'f> {
             || self.are_two_halves_of_one_ruling(first.crossing, second.crossing)
             || self.are_two_halves_of_one_ellipse(first.crossing, second.crossing, policy, log)
             || self.meet_nowhere(first.crossing, second.crossing)
+            || self.stands_for_both_meets_of(node, first.crossing, second.crossing)
         {
             return Ok(Decision::Zero);
         }
@@ -8678,6 +8679,22 @@ impl<'f> Arrangement<'f> {
     fn meet_nowhere(&self, one: usize, other: usize) -> bool {
         self.meeting_nowhere
             .contains(&[one.min(other), one.max(other)])
+    }
+
+    fn stands_for_both_meets_of(&self, node: usize, one: usize, other: usize) -> bool {
+        let mut surfaces = [
+            self.surface,
+            self.crossings[one].partner,
+            self.crossings[other].partner,
+        ];
+        surfaces.sort_by_key(name_of_surface_bits);
+        let Node { made_of, also, .. } = &self.nodes[node];
+        [0, 1].into_iter().all(|which| {
+            made_of
+                .iter()
+                .chain(also)
+                .any(|&name| name == (surfaces, which))
+        })
     }
 
     /// Whether the two crossings are the two halves the apex cuts one ruling
