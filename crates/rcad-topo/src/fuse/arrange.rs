@@ -28816,3 +28816,72 @@ mod two_points_a_rounding_apart_on_a_cone_caps_rim {
         );
     }
 }
+
+#[cfg(test)]
+mod two_points_a_rounding_apart_on_a_balls_rim {
+    //! The rim of the dome of `LED_D5.0mm-3.step`, as every fuse of it in
+    //! `tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs` splits the dome:
+    //! the ball of radius `2.5` about `(2.54, −5.05e-15, 9.1)`, cut by the plane
+    //! `z = 9.1` as the file stores it, leaning `3.3e-16` along `y`, in a circle
+    //! walked from `(2.54, −2.500000000000005, 9.1)`. The plane `y = −0.2`,
+    //! written twice a rounding apart, crosses that rim twice near `(5.032,
+    //! −0.2, 9.1)`: `A` where face 8 writes it, with an `x` part of
+    //! `−7.8e-32` and offset `0.20000000000000168`, and `B` where faces 12 and
+    //! 15 write it, with no `x` part and offset `0.20000000000000234`.
+
+    use rcad_geom::{Plane, Point, Sphere, Surface, Vector};
+    use rcad_predicates::{Decision, Interval, Point as PredicatePoint};
+
+    use super::round_a_closed_crossing_by_its_angle;
+
+    /// Worked out exactly from the stored numbers, `A` is at `x =
+    /// 5.03198715887542324868`, `y = −0.19999999999999561462`, and `B` at `x =
+    /// 5.03198715887542319522`, `y = −0.19999999999999628075`, `6.7e-16`
+    /// apart. The rim runs along `+x` at the start, so `B` comes first, and `A`
+    /// is turned `1.67e-15` past it about the plane's normal. Their tightened
+    /// boxes, as the fuse reads them, share `x` between two neighbouring `f64`
+    /// and are apart in `y`. Swept from the start, the step of an `ulp` along
+    /// `x` is levered by the `2.3` between the start and the two along `y`, and
+    /// the sweep straddles nought. Before this read a ball's rim (Q2956) it
+    /// answered `None` for every plane and ball, and every fuse of the LED was
+    /// refused on these two.
+    #[test]
+    fn two_points_on_a_balls_rim_a_rounding_apart_come_in_the_order_they_turn_round_its_centre() {
+        let rim = Surface::Plane(
+            Plane::from_point_and_normal_as_written(
+                Point::new(0.0, 0.0, 9.1),
+                Vector::new(0.0, 3.330_669_073_875e-16, -1.0),
+            )
+            .expect("a normal of length one"),
+        );
+        let dome = Surface::Sphere(
+            Sphere::new(Point::new(2.54, -5.051_514_762_044e-15, 9.1), 2.5)
+                .expect("a positive radius"),
+        );
+        let from = PredicatePoint::Exact([2.54, -2.500_000_000_000_005, 9.1]);
+        let across = |lo: f64, hi: f64| Interval::new(lo, hi).expect("lo is below hi");
+        let x = across(5.031_987_158_875_423, 5.031_987_158_875_424);
+        let up = across(9.099_999_999_999_998, 9.1);
+        let a = PredicatePoint::Constructed([
+            x,
+            across(-0.199_999_999_999_995_63, -0.199_999_999_999_995_6),
+            up,
+        ]);
+        let b = PredicatePoint::Constructed([
+            x,
+            across(-0.199_999_999_999_996_3, -0.199_999_999_999_996_26),
+            up,
+        ]);
+        let read = |pair: [&Surface; 2]| {
+            [[b, a], [a, b]]
+                .map(|[one, other]| round_a_closed_crossing_by_its_angle(pair, from, one, other))
+        };
+        assert_eq!(
+            [read([&dome, &rim]), read([&rim, &dome])],
+            [
+                [Some(Decision::Pos), Some(Decision::Neg)],
+                [Some(Decision::Neg), Some(Decision::Pos)],
+            ]
+        );
+    }
+}
