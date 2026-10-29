@@ -3876,7 +3876,10 @@ impl<'f> Arrangement<'f> {
     /// crossing and every fuse refused (Q2959). Nothing here asks whether the
     /// line touches the circle or crosses it twice: either way every point of
     /// both boxes lies inside the corner's room, which is the same wobble one
-    /// place inside it is (§17.2).
+    /// place inside it is (§17.2). Either way, too, the line and the circle
+    /// stay on their own sides of each other through the corner, and that is
+    /// how [`Arrangement::turns_anticlockwise`] reads a node standing for two
+    /// places of one meet (Q2982).
     ///
     /// **Only the face's corners are looked through, not every node.** They
     /// are the first nodes, one per side of each wire
@@ -8578,6 +8581,19 @@ impl<'f> Arrangement<'f> {
     /// that corner the determinant was about `−8.7e-8`, certified, the four
     /// ways out sorted flat, circle, flat, circle, and the walks merged three
     /// cells into one, refused `CannotTellTheCellsOfAFaceApart` (Q2974).
+    ///
+    /// **So it is where the node stands for two places the two curves meet**
+    /// ([`Arrangement::stands_for_two_places_where_they_meet`]). Crossing
+    /// twice inside one point, each curve leaves it on the side of the other
+    /// it came in on, so their ways out cannot alternate round the node either.
+    /// The flange front of `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step` is the
+    /// shape: the line the flat `x = −1.23` cuts in it touches the circle of
+    /// radius `2.5` the body's pipe cuts in it at the corner
+    /// `(−1.23, −1.27, 15)`, and the corner stands for both places the two meet
+    /// ([`Arrangement::the_corner_that_is_this_place`]). Read off the corner,
+    /// the four ways out sorted flat, circle, flat, circle, a winding spread
+    /// out of range, and the front was refused `CannotTellTheCellsOfAFaceApart`
+    /// (Q2982).
     fn turns_anticlockwise(
         &self,
         node: usize,
@@ -8607,6 +8623,7 @@ impl<'f> Arrangement<'f> {
             || self.are_two_halves_of_one_ruling(first.crossing, second.crossing)
             || self.are_two_halves_of_one_ellipse(first.crossing, second.crossing, policy, log)
             || self.meet_nowhere(first.crossing, second.crossing)
+            || self.stands_for_two_places_where_they_meet(node, first.crossing, second.crossing)
         {
             return Ok(Decision::Zero);
         }
@@ -8796,6 +8813,41 @@ impl<'f> Arrangement<'f> {
     fn meet_nowhere(&self, one: usize, other: usize) -> bool {
         self.meeting_nowhere
             .contains(&[one.min(other), one.max(other)])
+    }
+
+    /// Whether `node` stands for two places where the crossings `one` and
+    /// `other` meet and for no third, with each of the two the only crossing
+    /// its partner draws on the face.
+    ///
+    /// A node's names say which meets of three surfaces it stands for, not
+    /// which crossings those meets are on. **Where each partner draws one
+    /// crossing, every place the face and the two partners meet is on both
+    /// crossings**, so two of them at the node are two places the curves
+    /// cross, folded into one point: through it, each curve comes out on the
+    /// side of the other it went in on. Where a partner draws two, as a plane
+    /// along a pipe cuts it in two lines, the two places can be one on each
+    /// line, and the third surface crosses each of them there once.
+    fn stands_for_two_places_where_they_meet(&self, node: usize, one: usize, other: usize) -> bool {
+        let partners = [one, other].map(|crossing| self.crossings[crossing].partner);
+        let is_the_only_crossing_of = |partner: Surface| {
+            self.crossings
+                .iter()
+                .filter(|crossing| crossing.partner == partner)
+                .count()
+                == 1
+        };
+        if !partners.into_iter().all(is_the_only_crossing_of) {
+            return false;
+        }
+        let mut surfaces = [self.surface, partners[0], partners[1]];
+        surfaces.sort_by_key(name_of_surface_bits);
+        let Node { made_of, also, .. } = &self.nodes[node];
+        made_of
+            .iter()
+            .chain(also)
+            .filter(|(named, _)| *named == surfaces)
+            .count()
+            == 2
     }
 
     /// Whether the two crossings are the two halves the apex cuts one ruling
@@ -20879,8 +20931,9 @@ mod tests {
     use super::{
         Arc, Arrangement, Boundary, CrossingsDrawn, Direction, HowItRuns, Node, Piece,
         as_exact_as_it_is, canonical_cut_surfaces, cross_of_intervals,
-        how_a_plane_through_a_cones_apex_meets_it, prove_the_hinted_order, split_a_face,
-        the_other_way, the_way_a_half_ruling_leaves_the_apex, three_planes_faced_the_one_way,
+        how_a_plane_through_a_cones_apex_meets_it, name_of_surface_bits,
+        nothing_rules_the_point_out, prove_the_hinted_order, split_a_face, the_other_way,
+        the_way_a_half_ruling_leaves_the_apex, three_planes_faced_the_one_way,
         where_the_crossing_starts,
     };
     use crate::fuse::bake::{BakedFace, BakedSolid, bake, what_writing_the_corner_down_cost};
@@ -22791,6 +22844,168 @@ mod tests {
             [false, false],
             "a second place that sticks out a step past the room leaves the first to the policy too"
         );
+    }
+
+    /// The circle of radius `1/2` about `(1/2, 1/2)` on the unit cube's bottom
+    /// touches the line of the wall `x = 0` at `(0, 1/2, 0)`. A node a few
+    /// roundings up the wall from there that stands for both places the two
+    /// meet is the KiCad LED's front corner, written down a rounding off the
+    /// touch (Q2959). Read off that point, the turn says the circle crosses the
+    /// wall there, so up the wall and down it the circle came out on opposite
+    /// sides of it. The two turn by nothing instead, and how they bend keeps
+    /// the circle on the side its centre is, up the wall and down it (Q2982).
+    #[test]
+    fn a_line_touching_a_circle_at_a_node_that_stands_for_both_places_they_meet_does_not_cross_it()
+    {
+        let (cube, _) = the_unit_cube_baked_and_the_plane_x_equals_y();
+        let up =
+            Axis::new(Point::new(0.5, 0.5, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("an axis up z");
+        let pipe = Surface::Cylinder(Cylinder::new(up, 0.5).expect("a positive radius"));
+        let mut bottom = the_face_facing(&cube, [0.0, 0.0, -1.0]);
+        bottom.cuts = vec![pipe];
+        let mut arrangement = drawn_up_to_its_corners(&bottom);
+        let wall = the_crossing_along(&arrangement, the_face_facing(&cube, [-1.0, 0.0, 0.0]));
+        let circle = the_one_crossing_of(&arrangement, pipe);
+        let node = a_node_standing_for_both_places(
+            &mut arrangement,
+            [0.0, 0.5 + f64::powi(2.0, -50), 0.0],
+            [wall, circle],
+        );
+
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let up_the_wall = Direction {
+            crossing: wall,
+            forward: true,
+        };
+        let along_the_circle = Direction {
+            crossing: circle,
+            forward: true,
+        };
+        let the_same_way = arrangement
+            .leaves_the_node_the_same_way(node, up_the_wall, along_the_circle, &policy, &mut log)
+            .expect("the circle leaves the node a little off along the wall");
+        let up_the_circle = Direction {
+            crossing: circle,
+            forward: the_same_way,
+        };
+        let back = |way: Direction| Direction {
+            crossing: way.crossing,
+            forward: !way.forward,
+        };
+        let [up, down] = [
+            (up_the_wall, up_the_circle),
+            (back(up_the_wall), back(up_the_circle)),
+        ]
+        .map(|(wall, circle)| {
+            arrangement
+                .turns_anticlockwise_or_bends(node, wall, circle, &policy, &mut log)
+                .expect("a straight line and a circle bend apart")
+        });
+        assert!(
+            matches!(up, Decision::Pos | Decision::Neg) && down == the_other_way(up),
+            "up the wall and down it, the circle stays on the side of the wall its centre is: \
+             {up:?} and {down:?}"
+        );
+        assert_eq!(
+            arrangement
+                .turns_anticlockwise(node, up_the_wall, up_the_circle, &policy, &mut log)
+                .expect("the turn is read off the node's names"),
+            Decision::Zero,
+            "the wall and the circle meet only at this node, so it is how they bend that \
+             parts them"
+        );
+        assert!(log.is_empty(), "nothing here needed a policy: {log:?}");
+    }
+
+    /// The pipe of radius `5/16` along `x` through `(0, 1/2, 3/16)` cuts the
+    /// unit cube's bottom in the two lines `y = 1/4` and `y = 3/4`, and the cut
+    /// `x = 1/2` crosses each once. A node on the lower line that stands for
+    /// both places the face, the pipe and the cut meet, one on each line, is
+    /// not where the lower line and the cut touch: they cross there, and the
+    /// turn between them is what the gradients say (Q2982).
+    #[test]
+    fn a_cut_across_the_two_lines_a_pipe_cuts_a_face_in_crosses_one_at_a_node_standing_for_both_places()
+     {
+        let (cube, _) = the_unit_cube_baked_and_the_plane_x_equals_y();
+        let along_x = Axis::new(Point::new(0.0, 0.5, 0.1875), Vector::new(1.0, 0.0, 0.0))
+            .expect("an axis along x");
+        let pipe = Surface::Cylinder(Cylinder::new(along_x, 0.3125).expect("a positive radius"));
+        let across =
+            Surface::Plane(Plane::from_coefficients([1.0, 0.0, 0.0, -0.5]).expect("a plane"));
+        let mut bottom = the_face_facing(&cube, [0.0, 0.0, -1.0]);
+        bottom.cuts = vec![pipe, across];
+        let mut arrangement = drawn_up_to_its_corners(&bottom);
+        let lines: Vec<usize> = (0..arrangement.crossings.len())
+            .filter(|&crossing| arrangement.crossings[crossing].partner == pipe)
+            .collect();
+        assert_eq!(lines.len(), 2, "the pipe cuts the bottom in two lines");
+        let cut = the_one_crossing_of(&arrangement, across);
+        let lower = *lines
+            .iter()
+            .find(|&&line| {
+                let on_it = PredicatePoint::from([0.5, 0.25, 0.0]);
+                nothing_rules_the_point_out(arrangement.crossings[line].picked_by(), on_it)
+            })
+            .expect("one of the two lines is y = 1/4");
+        let node =
+            a_node_standing_for_both_places(&mut arrangement, [0.5, 0.25, 0.0], [lower, cut]);
+
+        let turn = arrangement.turns_anticlockwise(
+            node,
+            Direction {
+                crossing: lower,
+                forward: true,
+            },
+            Direction {
+                crossing: cut,
+                forward: true,
+            },
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(
+            matches!(turn, Ok(Decision::Pos | Decision::Neg)),
+            "the cut crosses the lower line at the node: {turn:?}"
+        );
+    }
+
+    /// The one crossing of `arrangement` whose partner is `partner`.
+    fn the_one_crossing_of(arrangement: &Arrangement<'_>, partner: Surface) -> usize {
+        let drawn: Vec<usize> = (0..arrangement.crossings.len())
+            .filter(|&crossing| arrangement.crossings[crossing].partner == partner)
+            .collect();
+        let [crossing] = drawn[..] else {
+            panic!("{partner:?} cuts the face in one crossing, not {drawn:?}");
+        };
+        crossing
+    }
+
+    /// A node at `at` on the two crossings `on`, standing for both places the
+    /// face's surface and their partners meet, as a corner does once both are
+    /// folded into it ([`Arrangement::the_corner_that_is_this_place`]).
+    fn a_node_standing_for_both_places(
+        arrangement: &mut Arrangement<'_>,
+        at: [f64; 3],
+        on: [usize; 2],
+    ) -> usize {
+        let mut surfaces = [
+            arrangement.surface,
+            arrangement.crossings[on[0]].partner,
+            arrangement.crossings[on[1]].partner,
+        ];
+        surfaces.sort_by_key(name_of_surface_bits);
+        let mut crossings = on.to_vec();
+        crossings.sort_unstable();
+        arrangement.nodes.push(Node {
+            point: PredicatePoint::from(at),
+            vertex: None,
+            made_of: Some((surfaces, 0)),
+            also: vec![(surfaces, 1)],
+            half_way_round: false,
+            crossings,
+        });
+        arrangement.nodes.len() - 1
     }
 
     /// A ball of radius `13s` at `(3s, 4s, 12s)` runs through the corner of a
