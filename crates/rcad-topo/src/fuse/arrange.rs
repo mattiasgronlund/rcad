@@ -819,8 +819,9 @@ struct Arrangement<'f> {
     /// Each two crossings [`meet_of_three_surfaces`] answered
     /// [`MeetOfThree::Nowhere`] for in [`Arrangement::place_the_meets`]: the
     /// face's surface and their two partners share no point, so the two curves
-    /// never meet. [`Arrangement::side_of_a_round_curve_a_cut_misses`] reads
-    /// it.
+    /// never meet, each written lower crossing first.
+    /// [`Arrangement::side_of_a_round_curve_a_cut_misses`] and
+    /// [`Arrangement::turns_anticlockwise`] read it.
     meeting_nowhere: Vec<[usize; 2]>,
 }
 
@@ -8444,6 +8445,21 @@ impl<'f> Arrangement<'f> {
     /// loops leave forward along one line, on its two sides, so two ways out
     /// of the two loops that are both forward or both back lie on one line,
     /// opposite ways; every other two of the four turn by the X's angle.
+    ///
+    /// **Where [`meet_of_three_surfaces`] proved the two curves meet nowhere,
+    /// nothing is what the turn is.** Two curves that share no point cross
+    /// nowhere, so where both run through a node, a corner of the face's own
+    /// that sits a rounding from each, one stays on its side of the other and
+    /// their ways out cannot alternate round the node. A turn read off the
+    /// stored corner can still say they cross there, so it is read as nothing
+    /// and the order of the two is left to how they bend. The flange front of
+    /// `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step` is the shape: a disc of
+    /// radius `1.9` cut flat at `x = −0.23`, with a hole of radius `1.5` whose
+    /// circle the flat's line misses by `2.8e-17`, both running through the
+    /// corner the file stores `4.35e-8` below where they would touch. Read off
+    /// that corner the determinant was about `−8.7e-8`, certified, the four
+    /// ways out sorted flat, circle, flat, circle, and the walks merged three
+    /// cells into one, refused `CannotTellTheCellsOfAFaceApart` (Q2974).
     fn turns_anticlockwise(
         &self,
         node: usize,
