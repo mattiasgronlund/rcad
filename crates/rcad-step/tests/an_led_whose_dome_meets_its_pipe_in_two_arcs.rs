@@ -31,11 +31,17 @@
 //!   along the rim, had no road to where the three meet (Q2941). The road for
 //!   two conics kept the height, and each height holds two of the four
 //!   corners; it now asks again in the height plus `x` and answers four
-//!   corners or none (Q2955). Every fuse then stops refused `Undecidable` on
-//!   order along a crossing alone, between two nodes on the rim at
-//!   `x = 5.031987`, `z = 9.1`, whose boxes are `5.6e-16` apart in `y`: Q2956
-//!   reads them as where the plane `y = -0.2`, written twice a rounding apart
-//!   by face 8 and by faces 12 and 15, crosses the rim.
+//!   corners or none (Q2955). Every fuse then stopped refused `Undecidable` on
+//!   order along a crossing, between two nodes on the rim at `x = 5.031987`,
+//!   `z = 9.1`, whose boxes are `5.6e-16` apart in `y`: where the plane
+//!   `y = -0.2`, written twice a rounding apart by face 8 and by faces 12 and
+//!   15, crosses the rim. The order now turns them about the line through the
+//!   ball's centre along the rim plane's normal, and they are parted (Q2956).
+//!   Every fuse then stops refused on order along a crossing again, between
+//!   the two meets of those two planes with the ball and the pipe near
+//!   `(0.048, -0.2, 9.10000002843)`. The ball is stored `2e-15` off the
+//!   pipe's axis, so the two cross in a thin loop up to `1e-7` tall, round the
+//!   `-y` half of the rim.
 //! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
 //!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
 //!   rounding apart in direction. Q2938's road answers that triple, and the
@@ -73,17 +79,20 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
-fn a_d5_led_splits_its_dome_and_stops_ordering_two_nodes_on_its_rim() {
+fn a_d5_led_orders_its_dome_rim_and_stops_on_where_its_dome_crosses_its_pipe() {
     every_fuse_refuses(D5, &[[0.04, 0.0, 4.0], FAR_OFF], |error| {
-        matches!(
-            error,
-            Error::Undecidable { records }
-                if records
-                    .records()
-                    .iter()
-                    .map(|record| record.predicate())
-                    .eq(["order along a crossing"])
-        )
+        let Error::Undecidable { records } = error else {
+            return false;
+        };
+        let [record] = records.records() else {
+            return false;
+        };
+        record.predicate() == "order along a crossing"
+            && record.inputs().len() == 2
+            && record.inputs().iter().all(|node| {
+                let [x, _, z] = node.enclosure();
+                0.048 < x.lo() && x.hi() < 0.0481 && 9.100_000_02 < z.lo() && z.hi() < 9.100_000_03
+            })
     });
 }
 
