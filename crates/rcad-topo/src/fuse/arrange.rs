@@ -5534,8 +5534,9 @@ impl<'f> Arrangement<'f> {
     /// be one point. The node's own box has been asked by name already, and an
     /// undecided answer means neither node was the start.
     ///
-    /// **Where the sweep over them cannot say, round a plane's loop on a pipe
-    /// or a cone the tighter boxes are turned about its axis**
+    /// **Where the sweep over them cannot say, round a plane's loop on a pipe,
+    /// a cone or a ball the tighter boxes are turned about its axis**, or a
+    /// ball's about the line through its centre along the plane's normal
     /// ([`round_a_closed_crossing_by_its_angle`]), which names no start either.
     /// A round bar of radius `12.8` notched by a block whose faces `x = 0.6 r`
     /// and `y = 0.8 r` meet on its wall has, on its top cap, the feet of the
@@ -15238,10 +15239,11 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
     (0..3).all(|axis| outer[axis].lo() <= inner[axis].lo() && inner[axis].hi() <= outer[axis].hi())
 }
 
-/// Which of two points comes first round the loop a plane cuts a pipe or a
-/// cone in, read as how far each is turned about the surface's axis from the
-/// start: `None` for every other pair, and wherever a sign it reads is not
-/// proved.
+/// Which of two points comes first round the loop a plane cuts a pipe, a cone
+/// or a ball in, read as how far each is turned from the start about the
+/// surface's axis, or about the line through the ball's centre along the
+/// plane's normal: `None` for every other pair, and wherever a sign it reads is
+/// not proved.
 ///
 /// **Seen down the axis the loop goes round it once.** On a pipe it is the
 /// pipe's circle, each point of the loop over one point of the circle, since
@@ -15249,12 +15251,14 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
 /// ellipse, and the plane crosses each ruling of the nappe it lies on once: a
 /// plane along a ruling would cut a bend that runs off for ever. Seen down the
 /// axis each ruling of a nappe is a ray out from it, so the loop is over each
-/// ray once. Either way going round the
+/// ray once. On a ball the loop is a circle in the plane about the foot of the
+/// ball's centre, and seen down the plane's normal it is that circle itself,
+/// about the line through the centre. Each way going round the
 /// loop turns about the axis all the way round once, always the same way, and
 /// the points come in the order they are turned from the start. That way is
-/// the sign of `w·((from − c) × run)`, for `w` the axis,
-/// `c` its stored origin and `run` the way the loop runs at the start, `∇S ×
-/// ∇T`. A point `p` then lies in the half turn ahead of the start where
+/// the sign of `w·((from − c) × run)`, for `w` the axis, `c` its stored origin
+/// (for a ball, the plane's stored normal and the ball's stored centre) and
+/// `run` the way the loop runs at the start, `∇S × ∇T`. A point `p` then lies in the half turn ahead of the start where
 /// `w·((from − c) × (p − c))` has that sign, and in the half turn behind where
 /// it has the other. A point ahead comes before a point behind, and of two in
 /// one half turn the one the other is turned ahead of comes first. Where two
@@ -15267,7 +15271,9 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
 /// they are up the axis instead (`turned_as_far_apart_up_the_axis`). That
 /// reading takes the two as far from the axis as each other, which two points
 /// of a cone at different heights are not, so round a cone this stops before
-/// it. Nothing here forms the loop's centre: any point of the axis is as good
+/// it. Every point of a ball's loop is at one height up its axis, so up the
+/// axis parts none of them, and round a ball this stops before it too.
+/// Nothing here forms the loop's centre: any point of the axis is as good
 /// as `c`, and what lies along `w` drops out of each determinant.
 ///
 /// **Where the sweep cannot say, this can, for a point a rounding past the
@@ -15308,6 +15314,20 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
 /// parted them, so the union with the upright cone first was refused on them.
 /// Turned about `z` they are parted (Q2910).
 ///
+/// **Round a ball it parts two meets of a plane's circle a rounding apart.**
+/// The dome of `LED_D5.0mm-3.step`, a ball of radius `2.5` about `(2.54, 0,
+/// 9.1)`, has its rim where the plane `z = 9.1` cuts it, walked from `(2.54,
+/// −2.5, 9.1)`, and the plane `y = −0.2`, written twice a rounding apart by
+/// the file's faces, crosses that rim twice near `(5.032, −0.2, 9.1)`,
+/// `6.7e-16` apart. Their tighter boxes are apart along `y`, the way the rim
+/// runs there, and share `x` between two neighbouring `f64`. The sweep from
+/// the start, a quarter turn back, levers that ulp of `x` by the `2.3` between
+/// the start and the two along `y`, and straddles nought, so every fuse of the
+/// LED was refused on them. Turned about the line through the ball's centre
+/// along the plane's normal, that ulp is levered by the `0.2` the two are off
+/// the centre along `y`, and they are parted (Q2956,
+/// `tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs` in `rcad-step`).
+///
 /// **It is read only where the sweep cannot say**, and that is the reading
 /// this has to agree with. Where the start is on the loop the two count from
 /// one place and agree everywhere. Where it is a rounding off, as above, the
@@ -15319,26 +15339,36 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
 /// first. The square bar's corner is not between them: worked out exactly, the
 /// area the three sweep is positive, so the sweep would put the corner first
 /// as this does. The upright cone's rim above starts on the loop exactly; no
-/// cone's loop walked from a start a rounding off it has been checked so.
+/// cone's loop walked from a start a rounding off it has been checked so. The
+/// LED's rim starts `8.3e-16` off its plane and `1.7e-16` inside its ball, and
+/// its two nodes are a quarter turn from there, so neither is between the two
+/// starts: worked out exactly, the sweep puts the lower of the two along `y`
+/// first, as this does. No node of a ball's loop a rounding from a start off
+/// it has been checked so.
 fn round_a_closed_crossing_by_its_angle(
     pair: [&Surface; 2],
     from: PredicatePoint,
     one: PredicatePoint,
     other: PredicatePoint,
 ) -> Option<Decision> {
-    let (flat, axis, round_a_pipe) = if let [Surface::Plane(flat), Surface::Cylinder(pipe)]
-    | [Surface::Cylinder(pipe), Surface::Plane(flat)] = pair
-    {
-        (flat, pipe.axis(), true)
-    } else if let [Surface::Plane(flat), Surface::Cone(cone)]
-    | [Surface::Cone(cone), Surface::Plane(flat)] = pair
-    {
-        (flat, cone.axis(), false)
-    } else {
-        return None;
-    };
-    let origin = axis.origin().coordinates().map(Interval::exactly);
-    let along = axis.direction().components().map(Interval::exactly);
+    let (flat, origin, along, round_a_pipe) =
+        if let [Surface::Plane(flat), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Plane(flat)] = pair
+        {
+            (flat, pipe.axis().origin(), pipe.axis().direction(), true)
+        } else if let [Surface::Plane(flat), Surface::Cone(cone)]
+        | [Surface::Cone(cone), Surface::Plane(flat)] = pair
+        {
+            (flat, cone.axis().origin(), cone.axis().direction(), false)
+        } else if let [Surface::Plane(flat), Surface::Sphere(ball)]
+        | [Surface::Sphere(ball), Surface::Plane(flat)] = pair
+        {
+            (flat, ball.centre(), flat.normal(), false)
+        } else {
+            return None;
+        };
+    let origin = origin.coordinates().map(Interval::exactly);
+    let along = along.components().map(Interval::exactly);
     let off_the_axis = |place: PredicatePoint| {
         let at = place.enclosure();
         [0, 1, 2].map(|axis| at[axis] - origin[axis])
