@@ -8472,6 +8472,7 @@ impl<'f> Arrangement<'f> {
         if first.crossing == second.crossing
             || self.are_two_halves_of_one_ruling(first.crossing, second.crossing)
             || self.are_two_halves_of_one_ellipse(first.crossing, second.crossing, policy, log)
+            || self.meet_nowhere(first.crossing, second.crossing)
         {
             return Ok(Decision::Zero);
         }
@@ -8656,6 +8657,11 @@ impl<'f> Arrangement<'f> {
             policy,
             log,
         )
+    }
+
+    fn meet_nowhere(&self, one: usize, other: usize) -> bool {
+        self.meeting_nowhere
+            .contains(&[one.min(other), one.max(other)])
     }
 
     /// Whether the two crossings are the two halves the apex cuts one ruling
