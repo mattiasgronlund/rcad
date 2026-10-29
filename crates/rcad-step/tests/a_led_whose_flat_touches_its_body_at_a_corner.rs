@@ -104,10 +104,24 @@
 //! both lie inside the room writing the corner down cost, so nothing proves
 //! them two points, and the corner now stands for both (Q2959).
 //!
-//! Both LEDs stop now on the flange's front, face slot 8 in the `Z15.0` LED
-//! and slot 2 in the `D3.0` one, refused `CannotTellTheCellsOfAFaceApart` in
-//! the same check, where the windings of the front's cells are spread (Q2974).
-//! These tests pin both.
+//! Both LEDs stopped next on the flange's front, face slot 8 in the `Z15.0`
+//! LED and slot 2 in the `D3.0` one, refused `CannotTellTheCellsOfAFaceApart`
+//! in the same check, where the windings of the front's cells are spread. In
+//! the `D3.0` LED the front is the disc of radius 1.9 cut flat at `x = -0.23`,
+//! with a hole of radius 1.5 that touches the flat at the front corner. The
+//! flat's line misses the hole's circle by `2.8e-17`, so the arrangement knows
+//! the two meet nowhere, yet both run through the corner, which the file
+//! stores `4.35e-8` below where they would touch. Read off that point, the
+//! circle crossed the flat there, so the four ways out of the corner sorted
+//! wrong and the walks round the front's cells merged three of them into one.
+//! Two crossings that meet nowhere now turn by nothing at a node they both run
+//! through, so how they bend sorts them (Q2974). The `Z15.0` LED still stops
+//! there, and the test pins it.
+//!
+//! The `D3.0` LED stops now `Undecidable` with the one record `order along a
+//! crossing`, the far box included, between two points a rounding apart in
+//! `y` where the flange's rim crosses the front at `z = 5.7`, near
+//! `(3.146, -3.81, 5.7)`. The test pins it.
 
 use std::{env, fs, path::PathBuf};
 
@@ -119,6 +133,8 @@ use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 const Z3: &str = "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step";
 const Z15: &str = "LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step";
 const D3: &str = "LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step";
+
+const ALONG_A_CROSSING: &str = "order along a crossing";
 
 /// Half the side of the box put round each corner.
 const HALF: f64 = 0.1;
@@ -163,13 +179,15 @@ fn a_z15_led_gets_past_the_two_meets_at_its_front_corner_and_stops_telling_the_c
     );
 }
 
+/// The `D3.0` LED tells the cells of its front apart since Q2974, and stops
+/// on the order of two points on its flange's rim, the far box included.
 #[test]
-fn a_d3_led_gets_past_the_arcs_round_the_disc_and_stops_telling_the_cells_of_its_front_apart() {
-    let mut fuses = a_box_round_each_of(&[[-0.23, -3.81, 5.999999956464], [-0.23, -4.81, 6.0]]);
-    fuses.push((FAR_OFF, Rule::Intersection));
-    every_fuse_refuses(D3, &fuses, |model, error| {
-        the_cells_of_the_front_cannot_be_told_apart(model, error, -3.81)
-    });
+fn a_d3_led_tells_the_cells_of_its_front_apart_and_stops_on_the_order_of_two_points_on_its_rim() {
+    every_fuse_refuses(
+        D3,
+        &a_box_round_each_of(&[[-0.23, -3.81, 5.999999956464], [-0.23, -4.81, 6.0], FAR_OFF]),
+        the_order_of_two_points_on_the_rim_at_z_5_7_is_undecidable,
+    );
 }
 
 /// A box round each corner, to be fused with the LED under intersection and
@@ -222,6 +240,31 @@ fn the_side_of_a_pipe_is_undecidable(_: &Model, error: &Error) -> bool {
         .iter()
         .map(|record| record.predicate())
         .eq([SIDE_OF_CYLINDER])
+}
+
+/// Refused `Undecidable` with the one record `order along a crossing`, both
+/// its points within `1e-9` of where the flange's rim, the pipe of radius 1.9
+/// about `x = 1.27, z = 6`, crosses the front `y = -3.81` at `z = 5.7`.
+fn the_order_of_two_points_on_the_rim_at_z_5_7_is_undecidable(_: &Model, error: &Error) -> bool {
+    let Error::Undecidable { records } = error else {
+        return false;
+    };
+    let [record] = records.records() else {
+        return false;
+    };
+    let on_the_rim = [
+        1.27 + (1.9_f64.powi(2) - 0.3_f64.powi(2)).sqrt(),
+        -3.81,
+        5.7,
+    ];
+    record.predicate() == ALONG_A_CROSSING
+        && record.inputs().iter().all(|point| {
+            point
+                .enclosure()
+                .iter()
+                .zip(on_the_rim)
+                .all(|(side, at)| (side.lo() - at).abs() < 1e-9 && (side.hi() - at).abs() < 1e-9)
+        })
 }
 
 /// Refused `CannotTellTheCellsOfAFaceApart` on the flange's front, the face
