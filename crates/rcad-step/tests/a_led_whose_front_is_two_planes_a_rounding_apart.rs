@@ -36,16 +36,23 @@
 //! the rim's corner lies. The arrangement now draws such an arc where the
 //! face's plane crosses the pipe it runs along (Q2966).
 //!
-//! Each now stops `Undecidable` on side of cylinder at the front corner,
-//! where the circle round the disc touches the flange's flat: bake solves it
-//! from three planes, two of them a rounding apart, and the box it gets runs
-//! along the flat, `z` from `0.834` to `4.170` in this LED (Q2939). These
-//! tests pin it, in this LED and in the six others Q2929 found refusing as
-//! this one did.
+//! Each then stopped `Undecidable` on side of cylinder at the front corner,
+//! where the circle round the disc touches the flange's flat, against a box
+//! that ran along the flat, `z` from `0.834` to `4.170` in this LED. Bake
+//! solved that corner from three planes, the flat, the flange's front and the
+//! disc, the last two a rounding apart, so they meet anywhere along the flat's
+//! front edge. Bake now reads a corner in two fans of faces out of the model,
+//! as it already did when solving one refused (Q2939).
+//!
+//! Each stops now on the flange's front, face slot 2, the plane `y = -6.35`
+//! here, refused `CannotTellTheCellsOfAFaceApart`, the refusal Q2974 traces on
+//! `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step`, whose front corner was read
+//! out of the model since Q2928. These tests pin it, in this LED and in the
+//! six others Q2929 found refusing as this one did.
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::SIDE_OF_CYLINDER;
+use rcad_geom::Surface;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -53,35 +60,38 @@ use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 /// Where the box that misses the LED goes.
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
-/// The six other LED files that refused on their rim and front disc.
-const THE_OTHER_SIX: [&str; 6] = [
-    "LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step",
-    "LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step",
-    "LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step",
-    "LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step",
-    "LED_D5.0mm_Horizontal_O6.35mm_Z15.0mm.step",
-    "LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step",
+/// The six other LED files that refused on their rim and front disc, each with
+/// the `y` of its flange's front.
+const THE_OTHER_SIX: [(&str, f64); 6] = [
+    ("LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step", -3.81),
+    ("LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step", -6.35),
+    ("LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step", -6.35),
+    ("LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step", -3.81),
+    ("LED_D5.0mm_Horizontal_O6.35mm_Z15.0mm.step", -6.35),
+    ("LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step", -6.35),
 ];
 
 #[test]
-fn an_led_whose_disc_sits_inside_its_rim_gets_past_the_rims_corner_to_its_front_corner() {
-    every_fuse_stops_at_the_front_corner(
+fn an_led_whose_disc_sits_inside_its_rim_gets_past_its_front_corner_to_the_cells_of_its_front() {
+    every_fuse_stops_on_the_front(
         "LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step",
+        -6.35,
         &[FAR_OFF, [-1.23, -6.35, 3.0]],
     );
 }
 
 #[test]
-fn six_more_leds_get_past_the_rims_corner_and_stop_at_their_front_corner() {
-    for file in THE_OTHER_SIX {
-        every_fuse_stops_at_the_front_corner(file, &[FAR_OFF]);
+fn six_more_leds_get_past_their_front_corner_to_the_cells_of_their_front() {
+    for (file, front) in THE_OTHER_SIX {
+        every_fuse_stops_on_the_front(file, front, &[FAR_OFF]);
     }
 }
 
 /// The LED in `file` and a box of side 0.2 centred on each of `centres`, fused
-/// under intersection and under difference, each refused `Undecidable` on side
-/// of cylinder alone.
-fn every_fuse_stops_at_the_front_corner(file: &str, centres: &[[f64; 3]]) {
+/// under intersection and under difference, each refused
+/// `CannotTellTheCellsOfAFaceApart` on the LED's face on the plane
+/// `y = front`.
+fn every_fuse_stops_on_the_front(file: &str, front: f64, centres: &[[f64; 3]]) {
     let (led, solid) = the_led(file);
     for &centre in centres {
         for rule in [Rule::Intersection, Rule::Difference] {
@@ -94,15 +104,10 @@ fn every_fuse_stops_at_the_front_corner(file: &str, centres: &[[f64; 3]]) {
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             ) {
-                Err(Error::Undecidable { records })
-                    if records
-                        .records()
-                        .iter()
-                        .map(|record| record.predicate())
-                        .eq([SIDE_OF_CYLINDER]) => {}
-                Err(error) => panic!(
+                Err(error) => assert!(
+                    the_cells_of_the_front_cannot_be_told_apart(&model, &error, front),
                     "{file}: {rule:?} with a box round {centre:?} refused {error:?}, which is not \
-                     the refusal at the front corner this pins"
+                     the refusal on the front this pins"
                 ),
                 Ok(_) => panic!(
                     "{file}: {rule:?} with a box round {centre:?} answers: check its volume as \
@@ -111,6 +116,29 @@ fn every_fuse_stops_at_the_front_corner(file: &str, centres: &[[f64; 3]]) {
             }
         }
     }
+}
+
+/// Refused `CannotTellTheCellsOfAFaceApart` on the flange's front, the face
+/// of the LED on the plane `y = front`.
+fn the_cells_of_the_front_cannot_be_told_apart(model: &Model, error: &Error, front: f64) -> bool {
+    let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
+        return false;
+    };
+    let surface = model
+        .face(*face)
+        .expect("the refusal names a face of the LED")
+        .surface();
+    let Surface::Plane(plane) = surface else {
+        return false;
+    };
+    [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+        .into_iter()
+        .all(|[x, z]| {
+            plane
+                .signed_distance_to(rcad_geom::Point::new(x, front, z))
+                .abs()
+                < 1e-9
+        })
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {

@@ -46,11 +46,14 @@
 //!   curved surface, so `crossing_for` (fuse/arrange.rs) met the flat against
 //!   its own plane and refused `AFaceMeetsItsNeighbourOnItsOwnSurface`. Bake
 //!   now joins two faces on one plane written and used one way (Q2962), and
-//!   every fuse is refused `Undecidable` on side of cylinder alone, for a box
+//!   every fuse was refused `Undecidable` on side of cylinder alone, for a box
 //!   round the front corner `(-0.23, -6.35, 2)` from `z = -0.767` to `3.068`.
-//!   Q2967's trace has that corner solved from the flat, the flange's front and
-//!   the body's front disc, the last two one plane written twice a rounding
-//!   apart, which is Q2939's cause on the `D5.0` horizontal LED's front corner.
+//!   Bake solved that corner from the flat, the flange's front and the body's
+//!   front disc, the last two one plane written twice a rounding apart (Q2967).
+//!   It now reads a corner in two fans of faces out of the model (Q2939), and
+//!   every fuse stops on the flange's front, face slot 8, the plane
+//!   `y = -6.35`, refused `CannotTellTheCellsOfAFaceApart`, the refusal Q2974
+//!   traces.
 //!
 //! When either answers, its test turns into the volume check of commit
 //! `f179ca02a`: what the box and the LED share is the box's part inside the
@@ -58,7 +61,7 @@
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, SIDE_OF_CYLINDER, Vector};
+use rcad_geom::{Isometry, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -74,7 +77,7 @@ const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
 fn a_d5_led_splits_its_dome_and_stops_ordering_two_nodes_on_its_rim() {
-    every_fuse_refuses(D5, &[[0.04, 0.0, 4.0], FAR_OFF], |error| {
+    every_fuse_refuses(D5, &[[0.04, 0.0, 4.0], FAR_OFF], |_, error| {
         matches!(
             error,
             Error::Undecidable { records }
@@ -88,28 +91,22 @@ fn a_d5_led_splits_its_dome_and_stops_ordering_two_nodes_on_its_rim() {
 }
 
 #[test]
-fn a_d3_led_gets_past_its_flat_in_two_faces_and_stops_at_its_front_corner() {
+fn a_d3_led_gets_past_its_front_corner_to_the_cells_of_its_front() {
     every_fuse_refuses(
         D3,
         &[[-0.23, -6.35, 1.999999956464], [-0.23, -7.35, 2.0], FAR_OFF],
-        |error| {
-            matches!(
-                error,
-                Error::Undecidable { records }
-                    if records
-                        .records()
-                        .iter()
-                        .map(|record| record.predicate())
-                        .eq([SIDE_OF_CYLINDER])
-            )
-        },
+        |model, error| the_cells_of_the_front_cannot_be_told_apart(model, error, -6.35),
     );
 }
 
 /// The LED in `file` and a box of side `2 * HALF` centred on each of
 /// `centres`, fused under intersection and under difference, each refused as
-/// `the_refusal` takes.
-fn every_fuse_refuses(file: &str, centres: &[[f64; 3]], the_refusal: impl Fn(&Error) -> bool) {
+/// `the_refusal` takes, handed the model it was refused in.
+fn every_fuse_refuses(
+    file: &str,
+    centres: &[[f64; 3]],
+    the_refusal: impl Fn(&Model, &Error) -> bool,
+) {
     let (led, solid) = the_led(file);
     for &centre in centres {
         for rule in [Rule::Intersection, Rule::Difference] {
@@ -122,7 +119,7 @@ fn every_fuse_refuses(file: &str, centres: &[[f64; 3]], the_refusal: impl Fn(&Er
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             ) {
-                Err(error) if the_refusal(&error) => {}
+                Err(error) if the_refusal(&model, &error) => {}
                 Err(error) => panic!(
                     "{file}: {rule:?} with a box round {centre:?} refused {error:?}, which is not \
                      the refusal this pins"
@@ -134,6 +131,29 @@ fn every_fuse_refuses(file: &str, centres: &[[f64; 3]], the_refusal: impl Fn(&Er
             }
         }
     }
+}
+
+/// Refused `CannotTellTheCellsOfAFaceApart` on the flange's front, the face
+/// of the LED on the plane `y = front`.
+fn the_cells_of_the_front_cannot_be_told_apart(model: &Model, error: &Error, front: f64) -> bool {
+    let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
+        return false;
+    };
+    let surface = model
+        .face(*face)
+        .expect("the refusal names a face of the LED")
+        .surface();
+    let Surface::Plane(plane) = surface else {
+        return false;
+    };
+    [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
+        .into_iter()
+        .all(|[x, z]| {
+            plane
+                .signed_distance_to(rcad_geom::Point::new(x, front, z))
+                .abs()
+                < 1e-9
+        })
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
