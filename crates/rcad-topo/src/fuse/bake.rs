@@ -85,9 +85,7 @@ use crate::validate::{
     side_of_surface,
 };
 use crate::view::CoedgeView;
-use crate::{
-    EdgeKey, Error, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey,
-};
+use crate::{EdgeKey, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey};
 
 use super::arrange::ACornerReadAsOnePoint;
 use super::assemble::{InputFace, joined_faces_of_an_input, one_surface};
@@ -1305,9 +1303,9 @@ fn place_a_corner(
             outward,
             in_the_fuse: planes_in_the_fuse,
         });
-        let read_out_of_the_model_when_unsolved = distinct.len() == of_its_faces
+        let read_out_of_the_model = distinct.len() == of_its_faces
             && each_fan_round_it_has_fewer_than_three_surfaces(model, slot, surfaces);
-        if !read_out_of_the_model_when_unsolved {
+        if !read_out_of_the_model {
             return derive_a_corner(
                 vertex,
                 where_the_model_puts_it,
@@ -1318,33 +1316,19 @@ fn place_a_corner(
                 log,
             );
         }
-        let mut tried = ProvenanceLog::new();
-        match derive_a_corner(
-            vertex,
-            where_the_model_puts_it,
-            distinct.clone(),
-            validate_allows,
-            among,
-            policy,
-            &mut tried,
-        ) {
-            Err(Error::Undecidable { .. }) => {
-                return Ok(BakedCorner {
-                    seam_plane: the_seam_plane_a_corner_is_on(model, slot, &around),
-                    ..asked_at(
-                        vertex,
-                        where_the_model_puts_it,
-                        None,
-                        &distinct,
-                        validate_allows,
-                    )?
-                });
-            }
-            answered => {
-                tried.drain_into(log);
-                return answered;
-            }
-        }
+        // WIP (Q2939 relay): the doc comments above and in this module's
+        // header still say such a corner is solved first and read out only
+        // when solving refuses; that is no longer so.
+        return Ok(BakedCorner {
+            seam_plane: the_seam_plane_a_corner_is_on(model, slot, &around),
+            ..asked_at(
+                vertex,
+                where_the_model_puts_it,
+                None,
+                &distinct,
+                validate_allows,
+            )?
+        });
     }
     Ok(BakedCorner {
         vertex,
