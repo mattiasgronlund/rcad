@@ -5281,8 +5281,10 @@ impl<'f> Arrangement<'f> {
     /// meets with a ball or a pipe each is
     /// ([`Arrangement::as_the_two_meets_of_one_line_say`]), the same meet of
     /// a line with a ball or a pipe named by two pairs of planes through it
-    /// ([`Arrangement::as_three_planes_through_one_line_say`]), where a second
-    /// plane cuts a plane's loop
+    /// ([`Arrangement::as_three_planes_through_one_line_say`]), two meets of a
+    /// plane's line on a pipe with two planes that cross it in parallel lines
+    /// ([`Arrangement::as_two_cuts_crossing_the_plane_in_parallel_lines_say`]),
+    /// where a second plane cuts a plane's loop
     /// ([`Arrangement::as_a_flat_cut_through_the_loop_says`]) and where two
     /// parallel planes cut it
     /// ([`Arrangement::as_two_parallel_cuts_through_the_loop_say`]) only where
@@ -5398,6 +5400,12 @@ impl<'f> Arrangement<'f> {
         }
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) = self.as_three_planes_through_one_line_say(first, second)
+        {
+            decided = proved;
+        }
+        if matches!(decided, Decision::Undecidable { .. })
+            && let Some(proved) =
+                self.as_two_cuts_crossing_the_plane_in_parallel_lines_say(crossing, first, second)
         {
             decided = proved;
         }
@@ -6313,6 +6321,115 @@ impl<'f> Arrangement<'f> {
                 .all(|plane| holds_the_line_of(line, plane))
             && goes == goes_too)
             .then_some(Decision::Zero)
+    }
+
+    /// Which of two nodes on a line a plane cuts a pipe in comes first along
+    /// it, where each is that line's meet with one more plane and the two
+    /// more planes cross the first in parallel lines: `None` everywhere else.
+    ///
+    /// **Two cuts that cross a plane in parallel lines are as far apart along
+    /// every line of that plane that runs across them one way.** Write `F`
+    /// for the plane, `n` for its normal and `d` for its offset, `w` for the
+    /// pipe's axis direction, and `c`, `k` for a cut's normal and offset. The
+    /// plane lies along the axis, `n · w = 0`, or the crossing would not run
+    /// straight ([`a_pair_that_crosses_in_straight_lines`]), so its lines on
+    /// the pipe run along `w`. On the line `p + t w` of `F` through the point
+    /// `p = d n / |n|²`, a cut is met at
+    /// `t = (k |n|² − d (c · n)) / (|n|² (c · w))`. Moving to another line of
+    /// `F` along `w`, by a step `u` square to `n`, moves the meets of two cuts
+    /// apart by `(c₁ × c₂) · (u × w)` over `(c₁ · w)(c₂ · w)`, and `u × w`
+    /// lies along `n`, so the step is nothing where `det(c₁, c₂, n)` is. Then
+    /// the order on the line the crossing runs along is the order on that
+    /// line, which needs no root: every sign here is a sign of the stored
+    /// numbers, worked out exactly.
+    ///
+    /// `LED_D5.0mm-3.step` has a plane `x = 2.34` along its body's pipe, and
+    /// two sloped planes, with normals `(−0.619, ±3.5e−16, ±0.786)`, that
+    /// cross it in two lines `4.8e−16` apart along the pipe: in the stored
+    /// numbers the two slopes' offsets added, less `2.34` times their two
+    /// `x` parts, is `−3.8e−16`. Their meets with the plane's line on the pipe
+    /// near `(2.34, 2.492, 3.5)` are worked out into one box, and every fuse
+    /// tried of the LED was refused on their order (Q2984,
+    /// `tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`).
+    ///
+    /// Only a node that stands for one meet is read, as in
+    /// [`Arrangement::as_the_quadric_says`].
+    fn as_two_cuts_crossing_the_plane_in_parallel_lines_say(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::AlongAnAxis {
+            axis,
+            forward_climbs_the_axis,
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let partner = self.crossings[crossing].partner;
+        let ((Surface::Plane(flat), Surface::Cylinder(pipe))
+        | (Surface::Cylinder(pipe), Surface::Plane(flat))) = (&self.surface, &partner)
+        else {
+            return None;
+        };
+        let the_cut = |node: usize| {
+            let (surfaces, _) = self.the_one_meet_it_stands_for(node)?;
+            if !surfaces.contains(&self.surface) || !surfaces.contains(&partner) {
+                return None;
+            }
+            let mut others = surfaces
+                .iter()
+                .filter(|surface| **surface != self.surface && **surface != partner);
+            let (Some(cut), None) = (others.next(), others.next()) else {
+                return None;
+            };
+            cut.as_plane().copied()
+        };
+        let [mine, theirs] = [the_cut(first)?, the_cut(second)?];
+        let normal = |plane: &Plane| plane.normal().components();
+        if expansion_sign(&exactly_determinant([
+            normal(&mine),
+            normal(&theirs),
+            normal(flat),
+        ])?) != Decision::Zero
+        {
+            return None;
+        }
+        let along = pipe.axis().direction().components();
+        assert!(
+            along[axis] != 0.0,
+            "a line along a pipe's axis climbs an axis the pipe's direction does not"
+        );
+        let squared = exactly_dotted(normal(flat), normal(flat))?;
+        // Each cut's `t` above as its top and its bottom over `|n|²`.
+        let met_at = |cut: &Plane| {
+            let top = exactly_added(
+                &exactly_scaled(&squared, cut.offset())?,
+                &negated(&exactly_scaled(
+                    &exactly_dotted(normal(cut), normal(flat))?,
+                    flat.offset(),
+                )?),
+            );
+            Some((top, exactly_dotted(normal(cut), along)?))
+        };
+        let ((my_top, my_bottom), (their_top, their_bottom)) = (met_at(&mine)?, met_at(&theirs)?);
+        let [mine_runs, theirs_runs] =
+            [&my_bottom, &their_bottom].map(|bottom| expansion_sign(bottom));
+        if mine_runs == Decision::Zero || theirs_runs == Decision::Zero {
+            return None;
+        }
+        let apart = exactly_added(
+            &exactly_multiplied(&their_top, &my_bottom)?,
+            &negated(&exactly_multiplied(&my_top, &their_bottom)?),
+        );
+        let theirs_further_along_w =
+            signs_multiplied([expansion_sign(&apart), mine_runs, theirs_runs])?;
+        Some(if (along[axis] > 0.0) == forward_climbs_the_axis {
+            theirs_further_along_w
+        } else {
+            the_other_way(theirs_further_along_w)
+        })
     }
 
     /// Which of two nodes on the loop a plane cuts a ball, a pipe or a cone in
