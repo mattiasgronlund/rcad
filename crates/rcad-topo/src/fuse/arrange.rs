@@ -11302,6 +11302,9 @@ impl<'f> Arrangement<'f> {
                                     &on, at, &partner,
                                 )
                             })
+                            .or_else(|| {
+                                Self::side_of_a_pipe_at_a_point_of_a_ball(&on, at, &partner)
+                            })
                             .unwrap_or(undecided)
                     }
                     (side, _) => side,
@@ -11341,14 +11344,64 @@ impl<'f> Arrangement<'f> {
         Ok(sides)
     }
 
-    /// Which side of `partner`, a pipe, a point lies that is on a ball among
-    /// the surfaces it is `on`. Not read yet: `None` everywhere.
+    /// Which side of `partner`, a pipe, a point is that lies on a ball among
+    /// the surfaces it is `on`: `Pos` outside, `Neg` inside and `Zero` on it,
+    /// or `None` where `partner` is no pipe, `on` holds no ball, or the box
+    /// `at` does not tell.
+    ///
+    /// For the ball's centre `c` and radius `r`, the pipe's origin `o`,
+    /// direction `u` and radius `R`, and `e = c − o`, a point `p` of the ball,
+    /// with `q = p − c` and so `|q| = r`, has the pipe's own value
+    /// `|(p − o) × u|² − R²·|u|²` of
+    /// `(r² − R²)·|u|² − (q·u)² + 2·(q × u)·(e × u) + |e × u|²`, by Lagrange's
+    /// identity on `q × u`. Read straight off the box, the pipe's value takes
+    /// the box's width times the radius. Read this way, at a point level with
+    /// the centre along the axis, as a rim is, the width enters only squared
+    /// or times `e × u`, which is how far the centre is off the axis.
+    ///
+    /// It is sound because the point is on the ball: a node of a face is on
+    /// the face's surface, which is first in `on`, and on the partner of
+    /// every crossing through it, as the other readings
+    /// [`Arrangement::which_side_of_everything`] tries take it.
+    ///
+    /// The dome of `LED_D5.0mm-3.step` is a ball of its body pipe's radius,
+    /// its centre `2e-15` off the pipe's axis, and its rim is inside the pipe
+    /// by about `4e-16` where a box's side `y = 0.1` crosses it. Read off the
+    /// box there, the pipe's value spans `8.9e-15`, and every fuse of the LED
+    /// was refused (queue row Q2956).
     fn side_of_a_pipe_at_a_point_of_a_ball(
-        _on: &[Surface],
-        _at: PredicatePoint,
-        _partner: &Surface,
+        on: &[Surface],
+        at: PredicatePoint,
+        partner: &Surface,
     ) -> Option<Decision> {
-        None
+        let Surface::Cylinder(pipe) = partner else {
+            return None;
+        };
+        let origin = pipe.axis().origin().coordinates().map(Interval::exactly);
+        let along = pipe.axis().direction().components().map(Interval::exactly);
+        let skin = Interval::exactly(pipe.radius());
+        let box_ = at.enclosure();
+        on.iter().find_map(|surface| {
+            let Surface::Sphere(ball) = surface else {
+                return None;
+            };
+            let centre = ball.centre().coordinates().map(Interval::exactly);
+            let radius = Interval::exactly(ball.radius());
+            let step = core::array::from_fn(|axis| box_[axis] - centre[axis]);
+            let off_the_axis = cross_of_intervals(
+                core::array::from_fn(|axis| centre[axis] - origin[axis]),
+                along,
+            );
+            let up = dot_of(step, along);
+            let leaning = dot_of(cross_of_intervals(step, along), off_the_axis);
+            let side = ((radius * radius - skin * skin) * dot_of(along, along) - up * up
+                + (leaning + leaning)
+                + dot_of(off_the_axis, off_the_axis))
+            .sign();
+            [Decision::Pos, Decision::Neg, Decision::Zero]
+                .contains(&side)
+                .then_some(side)
+        })
     }
 
     /// Which side of the plane the half ellipse `crossing` lies in `at` is:
