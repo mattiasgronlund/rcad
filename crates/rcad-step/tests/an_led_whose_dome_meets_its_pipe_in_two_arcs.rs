@@ -25,10 +25,17 @@
 //!
 //! These tests pin where each stops now:
 //!
-//! - The `D5.0` LED stops where its dome is split, refused
+//! - The `D5.0` LED stopped where its dome is split, refused
 //!   `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`: the plane `y = 0.2` or
-//!   `y = -0.2`, the ball and the pipe, which touch along the rim, have no road
-//!   to where the three meet (Q2941).
+//!   `y = -0.2` as faces 8 and 10 store it, the ball and the pipe, which touch
+//!   along the rim, had no road to where the three meet (Q2941). The road for
+//!   two conics kept the height, and each height holds two of the four
+//!   corners; it now asks again in the height plus `x` and answers four
+//!   corners or none (Q2955). Every fuse then stops refused `Undecidable` on
+//!   order along a crossing alone, between two nodes on the rim at
+//!   `x = 5.031987`, `z = 9.1`, whose boxes are `5.6e-16` apart in `y`: Q2956
+//!   reads them as where the plane `y = -0.2`, written twice a rounding apart
+//!   by face 8 and by faces 12 and 15, crosses the rim.
 //! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
 //!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
 //!   rounding apart in direction. Q2938's road answers that triple, and the
@@ -66,11 +73,16 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
-fn a_d5_led_gets_past_its_dome_rim_and_stops_where_its_dome_is_split() {
+fn a_d5_led_splits_its_dome_and_stops_ordering_two_nodes_on_its_rim() {
     every_fuse_refuses(D5, &[[0.04, 0.0, 4.0], FAR_OFF], |error| {
         matches!(
             error,
-            Error::Geometry(rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+            Error::Undecidable { records }
+                if records
+                    .records()
+                    .iter()
+                    .map(|record| record.predicate())
+                    .eq(["order along a crossing"])
         )
     });
 }
