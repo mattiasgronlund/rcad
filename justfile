@@ -16531,6 +16531,39 @@ check-queue-selftest:
     [ "$got" = '0 families with no trace (§450.3)' ] \
         || fail "a trace naming two files joined by and did not cover the members it named on the second file too"
 
+    # Q2714: a trace clears a row off every test file the row's own write set
+    # names, not only the file the trace's own heading is on. On 2026-10-24,
+    # families listed two_meets_in_one_box_on_a_closed_crossing.rs as a family
+    # of Q908, Q2472 and Q2643, though Q2586, on
+    # a_tilted_wall_grazing_a_ball_sums_to_zero.rs, named Q908 and Q2472
+    # directly and filed Q2643 as was/Q2472; all three also write the first
+    # file.
+    fence familiessharedtopo <<'MD'
+    Q2586  1  done:abcdef0  opus  -  from/- Trace the family on crates/rcad-topo/tests/a_tilted_wall_grazing_a_ball_sums_to_zero.rs: Q908 and Q2472 §450
+    Q908  1  todo  opus  crates/rcad-topo/tests/a_tilted_wall_grazing_a_ball_sums_to_zero.rs,crates/rcad-topo/tests/two_meets_in_one_box_on_a_closed_crossing.rs  from/- named directly by the trace, also on the second file §450
+    Q2472  1  todo  opus  crates/rcad-topo/tests/a_tilted_wall_grazing_a_ball_sums_to_zero.rs,crates/rcad-topo/tests/two_meets_in_one_box_on_a_closed_crossing.rs  from/- a second row named directly, also on the second file §450
+    Q2643  1  todo  opus  crates/rcad-topo/tests/a_tilted_wall_grazing_a_ball_sums_to_zero.rs,crates/rcad-topo/tests/two_meets_in_one_box_on_a_closed_crossing.rs  was/Q2472 the row the trace re-filed, also on the second file §450
+    MD
+    drive familiessharedtopo families
+    [ "$got" = '0 families with no trace (§450.3)' ] \
+        || fail "a trace cleared its named rows off the traced file but left them a family on a second, untraced file they also write"
+
+    # The geom half of the same bug (Q2714): Q2685, on
+    # the_degeneracies_a_crossing_has_to_answer.rs, named Q1132, Q2666 and
+    # Q2667 directly and filed Q2686 as was/Q2667, with Q2667 itself closed;
+    # all four also write a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs,
+    # which must lose them too, reaching the trace through a closed row.
+    fence familiessharedgeom <<'MD'
+    Q2685  1  done:abcdef0  opus  -  from/- Trace the family on crates/rcad-geom/tests/the_degeneracies_a_crossing_has_to_answer.rs: Q1132, Q2666 and Q2667 §450
+    Q1132  1  todo  opus  crates/rcad-geom/tests/the_degeneracies_a_crossing_has_to_answer.rs,crates/rcad-geom/tests/a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs  from/- named directly by the trace, also on the second file §450
+    Q2666  1  todo  opus  crates/rcad-geom/tests/the_degeneracies_a_crossing_has_to_answer.rs,crates/rcad-geom/tests/a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs  from/- a second row named directly, also on the second file §450
+    Q2667  1  dropped:§450  opus  -  from/- the trace's third named row, re-filed as Q2686 §450
+    Q2686  1  todo  opus  crates/rcad-geom/tests/the_degeneracies_a_crossing_has_to_answer.rs,crates/rcad-geom/tests/a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs  was/Q2667 the row the trace re-filed, also on the second file §450
+    MD
+    drive familiessharedgeom families
+    [ "$got" = '0 families with no trace (§450.3)' ] \
+        || fail "a trace's named rows and the row it re-filed through a closed row stayed a family on a second, untraced file they also write"
+
     # §373.7 / Q2401: crates/rcad-topo/tests/merged.rs is the file every new
     # rcad-topo test file is declared in, whole or by item
     # (merged.rs#<module>), so it is never a shape's own test file. A row
