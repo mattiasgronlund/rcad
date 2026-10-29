@@ -1870,11 +1870,22 @@ def elsewhere(here, args):
     from whichever copy of `docs/queue.md` still has the row's text — this
     one or another dispatcher's — for §447.3's kept-Sonnet-slot rule to read
     (`heldelse`, `emodel` in the `queue` recipe's fill).
+
+    A worktree's lock, and so `is_lane`, is gone well before its row is
+    (§411.6): a verifier's or a dispatcher's unlock runs long before the
+    row is done, dropped or parked. So a lane tree past that point is read
+    here too, by `other_copies(lanes_too=False)`, as if it were another
+    dispatcher's — and its own copy of `docs/queue.md` is only ever its
+    base's, never updated since (§263.9). A `lane:` line it still carries
+    for some row is trusted only while the claims file, read fresh above,
+    still holds that row: once released, the claims file is the one place
+    that fact is current, and a stale copy's text must not outrank it.
     """
     queue = here.read()
     model_of = {row.id: row.model for row in queue.rows}
     held = {}
-    for row_id, hold in Claims(here.claims).holds().items():
+    holds = Claims(here.claims).holds()
+    for row_id, hold in holds.items():
         if hold["tree"] != here.top:
             narrowed_from = f", narrowed from {hold['taken']}" if hold["write_set"] != hold["taken"] else ""
             held[row_id] = (f"lane:{hold['branch']}", hold["write_set"], hold["tree"] + narrowed_from)
@@ -1883,7 +1894,8 @@ def elsewhere(here, args):
         for row in Queue(text).rows:
             model_of[row.id] = row.model
             if row.state.startswith("lane:"):
-                held.setdefault(row.id, (row.state, row.write_set, tree.path))
+                if row.id in holds:
+                    held.setdefault(row.id, (row.state, row.write_set, tree.path))
             elif row.is_closed():
                 closed.setdefault(row.id, (row.state, tree.path))
     sep = "\037"
