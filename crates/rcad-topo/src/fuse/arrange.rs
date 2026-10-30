@@ -23390,6 +23390,103 @@ mod tests {
         );
     }
 
+    /// The wall `x = 0` of the unit cube's bottom touches the circle of radius
+    /// `1/2` about `(1/2, 0)` at the corner at the origin. Written down `2⁻⁵⁴`
+    /// off touching, about `(1/2 − 2⁻⁵⁴, 0)`, the circle takes the corner
+    /// `2⁻⁵⁴` inside it, and the wall's line crosses it twice, about `2⁻²⁷`
+    /// either side of the corner: two places proved apart, each half a million
+    /// times further from the corner than the room writing it down cost. That
+    /// is the front corner of the KiCad LED `LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm`,
+    /// where the flange's flat, stored `1.2e-16` inside the circle it touches,
+    /// crosses it `1.9e-8` either side (Q3010). From the corner to each place
+    /// the line and the circle stay within `2⁻⁵⁴` of each other, so the corner
+    /// stands for both.
+    ///
+    /// The model says the LED's corner is on the circle, an edge along it
+    /// ends there, and `place_the_corners` takes that as read. The circle
+    /// here is a cut the corner knows nothing of, so the test puts the corner
+    /// on it.
+    #[test]
+    fn two_places_where_a_line_crosses_a_circle_it_touches_at_a_corner_are_both_folded_into_it() {
+        let (cube, _) = the_unit_cube_baked_and_the_plane_x_equals_y();
+        let up = Axis::new(
+            Point::new(0.5 - f64::powi(2.0, -54), 0.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+        )
+        .expect("an axis up z");
+        let pipe = Surface::Cylinder(Cylinder::new(up, 0.5).expect("a positive radius"));
+        let mut bottom = the_face_facing(&cube, [0.0, 0.0, -1.0]);
+        bottom.cuts = vec![pipe];
+        let mut arrangement = drawn_up_to_its_corners(&bottom);
+        let wall = the_crossing_along(&arrangement, the_face_facing(&cube, [-1.0, 0.0, 0.0]));
+        let circle = the_one_crossing_of(&arrangement, pipe);
+        let corner = arrangement
+            .nodes
+            .iter()
+            .position(|node| node.vertex.is_some() && node.point == PredicatePoint::from([0.0; 3]))
+            .expect("a corner of the face at the origin");
+        arrangement.nodes[corner].crossings.push(circle);
+
+        let said = what_the_fold_says_of_the_tightest_boxes(&arrangement, wall, circle);
+        let [(below, _), (above, _)] = said[..] else {
+            panic!("the wall's line crosses the circle twice: {said:?}");
+        };
+        let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
+        assert!(
+            below[1] < -1e5 * room && 1e5 * room < above[1],
+            "both places lie far outside the room writing the corner down cost: {said:?}"
+        );
+        assert_eq!(
+            said.map(|(_, folds)| folds),
+            [true, true],
+            "the line and the circle stay within a rounding of each other from the corner to \
+             each place, so the corner is the touch both places are"
+        );
+    }
+
+    /// What [`Arrangement::a_corner_is_this_place`] says of each place where
+    /// the face's own surface and the partners of `one` and `other` meet,
+    /// with each place's tightest box as `place_where_the_partners_meet` works
+    /// it out for a corner on both crossings, the places' middles sorted by
+    /// `y`.
+    fn what_the_fold_says_of_the_tightest_boxes(
+        arrangement: &Arrangement<'_>,
+        one: usize,
+        other: usize,
+    ) -> [([f64; 3], bool); 2] {
+        let (first, second) = (one.min(other), one.max(other));
+        let asked = three_planes_faced_the_one_way([
+            arrangement.surface,
+            arrangement.crossings[first].partner,
+            arrangement.crossings[second].partner,
+        ]);
+        let asked = [&asked[0], &asked[1], &asked[2]];
+        let mut log = ProvenanceLog::new();
+        let meet = meet_of_three_surfaces(asked, &Policy::certified(), &mut log)
+            .expect("two planes and a pipe meet where a certified policy can say");
+        assert!(log.is_empty(), "no policy was asked: {log:?}");
+        let (MeetOfThree::At(places), MeetOfThree::At(tight)) =
+            (meet.clone(), meet.boxed_tight(asked))
+        else {
+            panic!("the two crossings meet on the face's surface");
+        };
+        let places: Vec<PredicatePoint> = places.into_iter().map(as_exact_as_it_is).collect();
+        let tight: Vec<PredicatePoint> = tight.into_iter().map(as_exact_as_it_is).collect();
+        let mut said: Vec<([f64; 3], bool)> = (0..places.len())
+            .map(|which| {
+                (
+                    tight[which]
+                        .enclosure()
+                        .map(|range| (range.lo() + range.hi()) / 2.0),
+                    arrangement.a_corner_is_this_place(first, second, which, &places, &tight),
+                )
+            })
+            .collect();
+        said.sort_by(|one, other| one.0[1].total_cmp(&other.0[1]));
+        said.try_into()
+            .unwrap_or_else(|said| panic!("two places where a line crosses a circle: {said:?}"))
+    }
+
     /// The circle of radius `1/2` about `(1/2, 1/2)` on the unit cube's bottom
     /// touches the line of the wall `x = 0` at `(0, 1/2, 0)`. A node a few
     /// roundings up the wall from there that stands for both places the two
