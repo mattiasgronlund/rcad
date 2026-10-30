@@ -3889,6 +3889,18 @@ impl<'f> Arrangement<'f> {
     /// how [`Arrangement::turns_anticlockwise`] reads a node standing for two
     /// places of one meet (Q2982).
     ///
+    /// **Where no place of the meet reaches the room, a place further off is
+    /// the corner still when the touch at the corner is what rounding split**
+    /// ([`Arrangement::a_touch_the_rounding_split_reaches`]), the one place
+    /// outside the room this ever folds. A line written a rounding inside the
+    /// curve it touches at the corner crosses it far along them both from the
+    /// touch, while the two stay within the room of each other all the way. On
+    /// the flange's front of three KiCad LEDs, a flat stored `1.2e-16` inside
+    /// the hole's circle crosses it `1.9e-8` either side of a corner. Left two
+    /// nodes, with a sliver between them the line and the circle bound, they
+    /// made the face's cells refuse to come apart, and every fuse of the three
+    /// refused (Q3010).
+    ///
     /// **Only the face's corners are looked through, not every node.** They
     /// are the first nodes, one per side of each wire
     /// ([`Arrangement::place_the_corners`]), and every meet placed after them
