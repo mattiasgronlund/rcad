@@ -54,12 +54,12 @@
 //! crossing` between the front corner and a point `3.6e-15` across it, the
 //! shape the `Z15.0` LED met below, and gets past it as that one does (Q2959).
 //!
-//! It stops now `Undecidable` with the one record `order along a crossing`,
-//! between the flat's corner on the rim at the back, `(-1.23, -2.27, 1.53)`,
-//! and a point `2.6e31` back along `-y` where the lead's side `x = -0.3` meets
-//! the loop the flat cuts the rim in. The flat's normal is `3.6e-32` off `x`,
-//! so that loop is about `1.6e32` long, and it reaches `x = -0.3` only that
-//! far out (Q2990).
+//! It stopped next `Undecidable` with the one record `order along a
+//! crossing`, between the flat's corner on the rim at the back,
+//! `(-1.23, -2.27, 1.53)`, and a point `2.6e31` back along `-y` where the
+//! lead's side `x = -0.3` meets the loop the flat cuts the rim in. The flat's
+//! normal is `3.6e-32` off `x`, so that loop is about `1.6e32` long, and it
+//! reaches `x = -0.3` only that far out (Q2990).
 //!
 //! That point is where it says. The rim's axis is written `(0, 1, -1.1e-15)`,
 //! so `2.6e31` along it the rim is `2.9e16` up, and the meet at
@@ -75,6 +75,23 @@
 //! A meet off the face is still where two drawn crossings cross, and the
 //! cells are walked through it. So the loop has an order and the arithmetic
 //! does not find it: a gap, not a limit.
+//!
+//! An `f64` near `2.86e16` is spaced 4, so the point's box is 40 wide in `z`,
+//! and nothing read off it says which way the loop runs there. Which of the
+//! two meets of the line `x = -0.3` cuts the flat in it is says that instead.
+//! The loop is a closed curve on the flat, so `x = -0.3` has one highest and
+//! one lowest point on it, and counted from a start below both, the node on
+//! the half where the loop climbs across `x = -0.3` comes before the one on
+//! the half where it falls. The arrangement now reads the order so, with the
+//! plane of either node as the one climbed across (Q3019).
+//!
+//! The boxes round both corners stop now `Undecidable` with the one record
+//! `side of plane`, at the point where the plane of the box's floor `z = 2.9`
+//! meets the flange's rim on its front, near `(-1.628, -1.27, 2.9)`: the
+//! stop the `D3.0` LED met below, on its rim at the front (Q2995, Q3009). The
+//! far box stops on `order along a crossing` between the front corner and a
+//! point within `1.8e-15` of it, the shape Q2959 folds into the corner, not
+//! folded here (Q3015).
 //!
 //! These tests pin that. When it answers, each turns back
 //! into the volume check of commit `f179ca02a`: what the box and the LED share
@@ -201,24 +218,32 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
-fn a_box_round_the_back_corner_gets_past_the_order_of_a_meet_far_along_the_flat() {
+fn a_box_round_the_back_corner_gets_past_a_meet_far_along_the_flat_and_stops_on_the_side_of_a_point_on_its_rim()
+ {
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -2.27, 3.0]]),
-        |model, error| {
-            !the_order_of_the_back_corner_and_a_meet_far_along_the_flat_is_undecidable(model, error)
-        },
+        the_side_of_where_the_floor_meets_the_rim_at_the_front_is_undecidable,
     );
 }
 
 #[test]
-fn a_box_round_the_front_corner_gets_past_the_order_of_a_meet_far_along_the_flat() {
+fn a_box_round_the_front_corner_gets_past_a_meet_far_along_the_flat_and_stops_on_the_side_of_a_point_on_its_rim()
+ {
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -1.27, 3.0]]),
-        |model, error| {
-            !the_order_of_the_back_corner_and_a_meet_far_along_the_flat_is_undecidable(model, error)
-        },
+        the_side_of_where_the_floor_meets_the_rim_at_the_front_is_undecidable,
+    );
+}
+
+#[test]
+fn a_far_box_gets_past_a_meet_far_along_the_flat_and_stops_on_the_order_of_two_points_at_the_front_corner()
+ {
+    every_fuse_refuses(
+        Z3,
+        &a_box_round_each_of(&[FAR_OFF]),
+        the_order_of_the_front_corner_and_a_point_beside_it_is_undecidable,
     );
 }
 
@@ -298,11 +323,30 @@ fn every_fuse_refuses(
     }
 }
 
+/// Refused `Undecidable` with the one record `side of plane`, its one point
+/// within `1e-9` of where the plane of the box's floor, `z = 2.9`, meets the
+/// flange's rim on its front `y = -1.27`, the circle of radius 2.9 about
+/// `x = 1.27, z = 3`, on the flat's side of the axis.
+fn the_side_of_where_the_floor_meets_the_rim_at_the_front_is_undecidable(
+    _: &Model,
+    error: &Error,
+) -> bool {
+    let Error::Undecidable { records } = error else {
+        return false;
+    };
+    let [record] = records.records() else {
+        return false;
+    };
+    let [point] = record.inputs() else {
+        return false;
+    };
+    let on_the_flats_side = 1.27 - (2.9_f64.powi(2) - 0.1_f64.powi(2)).sqrt();
+    record.predicate() == SIDE_OF_PLANE && is_within_1e_9_of(point, [on_the_flats_side, -1.27, 2.9])
+}
+
 /// Refused `Undecidable` with the one record `order along a crossing`, its two
-/// points the flat's corner on the flange's rim at the back, below the axis,
-/// within `1e-9`, and a point on the lead's side `x = -0.3` more than `1e31`
-/// back along `-y`, where the loop the flat cuts the rim in reaches it.
-fn the_order_of_the_back_corner_and_a_meet_far_along_the_flat_is_undecidable(
+/// points within `1e-9` of the front corner `(-1.23, -1.27, 3)`.
+fn the_order_of_the_front_corner_and_a_point_beside_it_is_undecidable(
     _: &Model,
     error: &Error,
 ) -> bool {
@@ -315,15 +359,10 @@ fn the_order_of_the_back_corner_and_a_meet_far_along_the_flat_is_undecidable(
     let [one, other] = record.inputs() else {
         return false;
     };
-    let below_the_axis = 3.0 - (2.9_f64.powi(2) - 2.5_f64.powi(2)).sqrt();
-    let the_back_corner = [-1.23, -2.27, below_the_axis];
-    let is_far_back_on_the_lead = |point: &Point| {
-        let [x, y, _] = point.enclosure();
-        (x.lo() + 0.3).abs() < 1e-9 && (x.hi() + 0.3).abs() < 1e-9 && y.hi() < -1e31
-    };
+    let the_front_corner = [-1.23, -1.27, 3.0];
     record.predicate() == ALONG_A_CROSSING
-        && ((is_within_1e_9_of(one, the_back_corner) && is_far_back_on_the_lead(other))
-            || (is_within_1e_9_of(other, the_back_corner) && is_far_back_on_the_lead(one)))
+        && is_within_1e_9_of(one, the_front_corner)
+        && is_within_1e_9_of(other, the_front_corner)
 }
 
 /// Refused `Undecidable` with the one record `side of plane`, its one point
