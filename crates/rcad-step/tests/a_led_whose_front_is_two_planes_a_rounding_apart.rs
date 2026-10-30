@@ -62,11 +62,13 @@
 //! Q2929 found refusing as this one did, then stopped `Undecidable` with the
 //! one record side of plane, at the corner below the axis where the flat meets
 //! the rim: `(-1.23, -6.35, 1.5303)` here. That point is where the rim, the
-//! flat and the flange's front meet. It was read as where the line the two
-//! planes share crosses the rim at a corner bake solved so, but never at a
-//! node of a walk, and the reading gave up wherever a product of it would
-//! round, as one does when the two planes tilt a hair. A node is read so now,
-//! and the reading falls back on intervals where a product would round
+//! flat and the flange's front meet, and it can be read as where the line the
+//! two planes share crosses the rim. In the three D5 LEDs a node of a walk
+//! asked it, and only a corner bake solved so was read that way. In
+//! `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step`, whose flat's normal is
+//! `(-1, -2.1e-32, 2.6e-47)`, such a corner asked it, but a product in the
+//! pipe's value at the meet would round, and the reading gave up. A node is
+//! read so now, and a product that would round is read off an interval
 //! (Q3017).
 //!
 //! Past it, the far box of this LED, and of the two D5 LEDs whose axis is 15
