@@ -1591,6 +1591,90 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_cross_in_corners_
     }
 }
 
+/// The pitch cones of
+/// [`the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_cross_in_corners_too_close_for_a_certified_answer`]
+/// under a tolerant policy for the model's own working size of 100. Each near
+/// cap sees three meets of the two caps and the two cones round
+/// `(1 − ε, y₀, 1)`, within `1.2e−24` of one another, and each far cap the same
+/// twice as far out: the coincidence such a policy merges (§17.4). **The policy
+/// takes each pair of them along a cap's rim as one point, and every fuse is
+/// refused further on.**
+///
+/// At `d6ba161f` every fuse was refused on the order along a crossing round
+/// a cap's rim: the meet of that cap and both cones, whose own box is
+/// `3.65e−8` along `y`, against a meet of both caps and one cone `2.1e−8`
+/// away. Narrowed ([`rcad_geom::MeetOfThree::boxed_tight`]), the two boxes
+/// are one `f64` along `y` each and share an end, but the policy was asked of
+/// the step between the own boxes (Q2946). It is asked now how far apart a
+/// point of one narrowed box may be from a point of the other, at most
+/// `2.3e−16`.
+///
+/// With the upright frustum first, each fuse is then refused on which way the
+/// crossing of the two cones runs out of the apex they share. They cross in
+/// the half rulings out of it through `A` and its mirror below `y = 0`, which
+/// lie either side of the flat surface `y = 0` that tells them apart, and the
+/// enclosure of the way out of each reaches that surface. With the lying
+/// frustum first, each is refused `CannotTellTheCellsOfAFaceApart`.
+#[test]
+fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_on_each_cap_as_one_point_under_a_tolerant_policy()
+ {
+    let policy = Policy::tolerant(100.0);
+    for (rule, first_first) in six_fuses() {
+        let mut model = a_model();
+        let said = fuse_under(
+            &mut model,
+            the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation,
+            rule,
+            first_first,
+            &policy,
+        );
+        let what = format!("{rule:?} (first first: {first_first})");
+        if !first_first {
+            assert!(
+                matches!(
+                    said,
+                    Err(rcad_topo::Error::CannotTellTheCellsOfAFaceApart { .. })
+                ),
+                "{what}: {said:?}"
+            );
+            continue;
+        }
+        let Err(rcad_topo::Error::Undecidable { records }) = &said else {
+            panic!("{what}: should be refused Undecidable, and said {said:?}");
+        };
+        let (taken, refused): (Vec<&Record>, Vec<&Record>) = records
+            .records()
+            .iter()
+            .partition(|record| record.approximation().is_some());
+        assert!(!taken.is_empty(), "{what}: {records:#?}");
+        for record in taken {
+            assert_eq!(
+                record.predicate(),
+                "order along a crossing",
+                "{what}: {record:#?}"
+            );
+            assert_eq!(record.outcome(), Decision::Zero, "{what}: {record:#?}");
+            assert!(record.enclosure() <= 2.3e-16, "{what}: {record:#?}");
+        }
+        let [refused] = refused[..] else {
+            panic!("{what}: should be refused on one question: {refused:#?}");
+        };
+        assert_eq!(
+            refused.predicate(),
+            "which way a crossing runs",
+            "{what}: {refused:#?}"
+        );
+        let [apex] = refused.inputs() else {
+            panic!("{what}: should be asked of the apex alone: {refused:#?}");
+        };
+        assert_eq!(
+            how_far_a_box_reaches_from(*apex, [0.0, 0.0, 0.0]),
+            0.0,
+            "{what}: {refused:#?}"
+        );
+    }
+}
+
 fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
     for one in six_fuses() {
         the_fuse_answers(build, one, volumes, faces);
