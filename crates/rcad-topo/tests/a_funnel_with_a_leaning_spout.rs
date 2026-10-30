@@ -168,7 +168,10 @@ fn two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule() {
 fn two_pointed_cones_eight_high_a_quarter_turn_apart_answer_every_fuse() {
     every_fuse_answers_and_the_intersection_is_what_the_two_share(
         two_pointed_cones_a_quarter_turn_apart,
-        8.0,
+        (
+            what_two_cones_a_quarter_turn_apart_share(0.5, 8.0, 8.0),
+            0.01,
+        ),
     );
 }
 
@@ -180,16 +183,20 @@ fn two_pointed_cones_eight_high_a_quarter_turn_apart_answer_every_fuse() {
 fn two_pointed_cones_ten_high_a_quarter_turn_apart_answer_every_fuse() {
     every_fuse_answers_and_the_intersection_is_what_the_two_share(
         two_pointed_cones_ten_high_a_quarter_turn_apart,
-        10.0,
+        (
+            what_two_cones_a_quarter_turn_apart_share(0.5, 10.0, 10.0),
+            0.01,
+        ),
     );
 }
 
-/// Fails unless every fuse of the two cones `shape` builds `high` high a
-/// quarter turn apart answers, and the intersection measures what
-/// [`what_two_cones_a_quarter_turn_apart_share`] adds up.
+/// Fails unless every fuse of the two cones `shape` builds a quarter turn
+/// apart answers, and the intersection measures `shared`, what
+/// [`what_two_cones_a_quarter_turn_apart_share`] adds up and how far that sum
+/// can be from the volume.
 fn every_fuse_answers_and_the_intersection_is_what_the_two_share(
     shape: fn(&mut Model) -> (SolidKey, SolidKey),
-    high: f64,
+    shared: (f64, f64),
 ) {
     let fused = every_fuse_of(shape);
     assert_eq!(fused.refusals(), [[None; 2]; 3]);
@@ -198,39 +205,49 @@ fn every_fuse_answers_and_the_intersection_is_what_the_two_share(
     };
     about_the_same(
         intersection,
-        (what_two_cones_a_quarter_turn_apart_share(high), 0.01),
+        shared,
         "the intersection against what the two share",
     );
 }
 
-/// What the two pointed cones [`two_pointed_cones_this_high_a_quarter_turn_apart`]
-/// builds `high` high share, added up a slice at a time.
+/// What two pointed cones of `slope` a quarter turn apart share, the upright
+/// one `upright_high` high and the turned one `turned_high`, added up a slice
+/// at a time: [`two_pointed_cones_this_high_a_quarter_turn_apart`] builds them
+/// at slope a half, and [`two_steep_cones_a_quarter_turn_apart`] at slope two.
 ///
-/// The first holds `x² + y² ≤ (z/2)²` for `z` from nought to `high`, and the
-/// second is its mirror image across `y + z = 4`, which takes `(x, y, z)` to
-/// `(x, 4 − z, 4 − y)`. So at height `z` and across at `y` the two share the
-/// `x` with `x² ≤ (z/2)² − y²` and `x² ≤ ((4 − y)/2)² − (4 − z)²`, where
-/// `4 − y` is from nought to `high`. Taken at the middle of each of 1000 steps
-/// up and 1000 across, the sum is `46.2231`; it moves by `1.5e−3` from 500
-/// steps and by `4.8e−4` on to 2000, so it is within a hundredth of the
-/// volume.
-fn what_two_cones_a_quarter_turn_apart_share(high: f64) -> f64 {
+/// The first holds `x² + y² ≤ (s z)²` for `z` from nought to `upright_high`,
+/// and the second is its mirror image across `y + z = 4`, which takes
+/// `(x, y, z)` to `(x, 4 − z, 4 − y)`. So at height `z` and across at `y` the
+/// two share the `x` with `x² ≤ (s z)² − y²` and
+/// `x² ≤ (s (4 − y))² − (4 − z)²`, where `4 − y` is from nought to
+/// `turned_high`. Taken at the middle of each of 1000 steps up and 1000 across,
+/// the sum at slope a half, both eight high, is `46.2231`; it moves by
+/// `1.5e−3` from 500 steps and by `4.8e−4` on to 2000, so it is within a
+/// hundredth of the volume. At slope two, eight and ten high, it is `805.998`,
+/// and ten and eight high `805.957`, though the two are mirror images: each
+/// moves by about `0.03` from 500 steps and by `0.011` on to 2000, where the
+/// two are `0.019` apart, so each is within five hundredths of the volume.
+fn what_two_cones_a_quarter_turn_apart_share(
+    slope: f64,
+    upright_high: f64,
+    turned_high: f64,
+) -> f64 {
     const STEPS: u32 = 1000;
-    let up = high / f64::from(STEPS);
+    let up = upright_high / f64::from(STEPS);
     (0..STEPS)
         .map(|step_up| {
             let z = (f64::from(step_up) + 0.5) * up;
-            let radius = z / 2.0;
+            let radius = slope * z;
             let across = 2.0 * radius / f64::from(STEPS);
             (0..STEPS)
                 .map(|step_across| {
                     let y = -radius + (f64::from(step_across) + 0.5) * across;
                     let up_the_second = 4.0 - y;
-                    if !(0.0..=high).contains(&up_the_second) {
+                    if !(0.0..=turned_high).contains(&up_the_second) {
                         return 0.0;
                     }
                     let in_the_first = radius * radius - y * y;
-                    let in_the_second = (up_the_second / 2.0).powi(2) - (4.0 - z).powi(2);
+                    let in_the_second = (slope * up_the_second).powi(2) - (4.0 - z).powi(2);
                     2.0 * in_the_first.min(in_the_second).max(0.0).sqrt() * across * up
                 })
                 .sum::<f64>()
@@ -305,24 +322,55 @@ fn two_pointed_cones_of_two_slopes_crossing_in_a_loop_named_by_two_flats_answer_
 /// `intersect` names their crossing as the whole curves of two flat cuts held
 /// apart, `y + z = 4` and `y − z = 2.4`, both hyperbolas. Both caps' rims meet
 /// on the halfway cut at `(±√240, −4, 8)`.
+///
+/// **Every fuse is still refused there, on one sign.** Along the upright cap's
+/// rim the meet of the cap with both cones and the meet of both caps with the
+/// upright cone are the one point `(√240, −4, 8)`, where four surfaces meet:
+/// the line the two caps cross in lies in `y + z = 4`, on which both cones cut
+/// one curve. Nothing in `fuse/arrange.rs` proves two such meets one point,
+/// so they cannot be put in order along the rim. The row filed from Q2914
+/// carries it.
 #[test]
-fn two_pointed_cones_of_slope_two_eight_high_a_quarter_turn_apart_answer_every_fuse() {
+fn two_steep_cones_eight_high_a_quarter_turn_apart_are_refused_where_four_surfaces_meet() {
     assert_eq!(
         every_fuse_of(two_steep_cones_eight_high_a_quarter_turn_apart).refusals(),
-        [[None; 2]; 3]
+        [[Some(ONE_SIGN_NOT_SETTLED); 2]; 3]
     );
 }
 
 /// **The same two of slope two, the turned one ten high**, so only the
 /// upright one's cap meets the other solid, and the halfway cut runs from that
-/// cap's rim to its rim. Every fuse answers, either way round.
+/// cap's rim to its rim. Every fuse answers, either way round, and the
+/// intersection measures what the two share.
+///
+/// Before row Q2914 every fuse was refused as a crossing nothing could put
+/// points in order along. Ordered along each flat cut's curve as that flat's
+/// bend across the cone, every fuse was refused `ResultIsNotManifold`: the
+/// turned cone's piece between the halfway cut and the upright cap was placed
+/// by a point in the turned cone beyond the other flat cut, `y − z = 2.4`.
+/// `fuse/select.rs` now asks such a point to be on the piece's side of both
+/// flat cuts.
 #[test]
 fn two_pointed_cones_of_slope_two_eight_and_ten_high_a_quarter_turn_apart_answer_every_fuse() {
-    for shape in [
-        two_steep_cones_eight_and_ten_high_a_quarter_turn_apart as fn(&mut Model) -> _,
-        two_steep_cones_ten_and_eight_high_a_quarter_turn_apart,
+    for (shape, upright_high, turned_high) in [
+        (
+            two_steep_cones_eight_and_ten_high_a_quarter_turn_apart as fn(&mut Model) -> _,
+            8.0,
+            10.0,
+        ),
+        (
+            two_steep_cones_ten_and_eight_high_a_quarter_turn_apart,
+            10.0,
+            8.0,
+        ),
     ] {
-        assert_eq!(every_fuse_of(shape).refusals(), [[None; 2]; 3]);
+        every_fuse_answers_and_the_intersection_is_what_the_two_share(
+            shape,
+            (
+                what_two_cones_a_quarter_turn_apart_share(2.0, upright_high, turned_high),
+                0.05,
+            ),
+        );
     }
 }
 
