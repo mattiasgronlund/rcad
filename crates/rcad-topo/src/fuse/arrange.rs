@@ -2713,7 +2713,10 @@ impl<'f> Arrangement<'f> {
     /// `second` meet, unless what picks a crossing out rules the place off
     /// it, or a corner of the face already is that place
     /// ([`Arrangement::the_corner_that_is_this_place`]), which then stands for
-    /// it and is noted in `folded_into_a_corner`. None when `on` is empty.
+    /// it and is noted in `folded_into_a_corner`, or the place is farther off
+    /// the face than any corner of it could be
+    /// ([`Arrangement::is_farther_off_the_face_than_any_corner_could_be`]).
+    /// None when `on` is empty.
     fn place_where_the_partners_meet(
         &mut self,
         first: usize,
@@ -2775,6 +2778,9 @@ impl<'f> Arrangement<'f> {
                 folded_into_a_corner.extend(on);
                 continue;
             }
+            if self.is_farther_off_the_face_than_any_corner_could_be(place) {
+                continue;
+            }
             if on.len() < 2 {
                 self.kept_where_a_crossing_left_out_meets_it
                     .push((sorted, which));
@@ -2788,6 +2794,53 @@ impl<'f> Arrangement<'f> {
                 crossings: on.to_vec(),
             });
         }
+    }
+
+    /// Whether `place` lies off the box round the face by more than the room
+    /// bake asked a corner of the face with, so that
+    /// [`Arrangement::place_where_the_partners_meet`] places no node there.
+    /// `false` when the face has no box or no corner bake asked with a room.
+    ///
+    /// **A meet that far off is no point of the face.** The box holds the face
+    /// up to the rounding of its corners ([`Bounds`](super::bake::Bounds)), and
+    /// a corner is where `validate` reads it within the room it was asked with
+    /// ([`BakedCorner::room_its_planes_were_asked_with`](super::bake::BakedCorner)),
+    /// which the widest such room covers. A box clear of both holds no corner
+    /// of the face under any reading `validate` accepts, and no point of its
+    /// boundary or inside. The fold into a corner is asked first, so a meet
+    /// that is a corner is never dropped here. What is left is the case
+    /// [`Arrangement::leave_out_the_cuts_clear_of_the_face`] argues for a meet
+    /// with a cut left out: a point of the crossings through it outside the
+    /// box, where no piece ends. Placed, it only splits a stretch of each of
+    /// them off the face in two, and every cell round it is outside the face,
+    /// one the face's boundary winds round no times
+    /// ([`Arrangement::count_the_windings_inside_each_lump`]). Joining those
+    /// stretches again joins only walks of such cells, so no piece changes. It is the rule that settles a lump clear of the box, in
+    /// [`Arrangement::say_whether_the_face_holds_each_lump_of_closed_cuts`],
+    /// applied to one node.
+    ///
+    /// **Why it is needed.** The `Z3.0` KiCad LED's flange flat leans
+    /// `3.6e-32` off square to its rim's axis, and cuts the rim in a loop
+    /// `1.6e32` long. The lead's side `x = -0.3` meets that loop `2.6e31` out,
+    /// and that meet was placed on it. Nothing could order it against the
+    /// flat's corner on the rim, and every fuse of the LED was refused
+    /// `Undecidable` (Q2990,
+    /// `crates/rcad-step/tests/a_led_whose_flat_touches_its_body_at_a_corner.rs`).
+    fn is_farther_off_the_face_than_any_corner_could_be(&self, place: PredicatePoint) -> bool {
+        let Some(anywhere_on_the_face) = self.face.bounds.as_a_point_anywhere_inside() else {
+            return false;
+        };
+        let Some(room) = self
+            .face
+            .wires
+            .iter()
+            .flatten()
+            .filter_map(|edge| edge.start.room_its_planes_were_asked_with)
+            .reduce(f64::max)
+        else {
+            return false;
+        };
+        !boxes_overlap(super::bake::grown_by(anywhere_on_the_face, room), place)
     }
 
     /// Whether nothing rules `place` off `crossing`, where it is meet `which`
