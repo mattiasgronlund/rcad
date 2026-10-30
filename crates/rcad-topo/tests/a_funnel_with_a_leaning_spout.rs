@@ -298,6 +298,68 @@ fn two_pointed_cones_of_two_slopes_crossing_in_a_loop_named_by_two_flats_answer_
     );
 }
 
+/// **Two pointed cones of slope two, one a quarter turn off the other**, both
+/// eight high, the second turned a quarter about the `x` axis through
+/// `(0, 0, 4)`, row Q2914. Each apex is inside the other, so the two are
+/// mirror images across `y + z = 4` that touch nowhere, and since row Q2878
+/// `intersect` names their crossing as the whole curves of two flat cuts held
+/// apart, `y + z = 4` and `y − z = 2.4`, both hyperbolas. Both caps' rims meet
+/// on the halfway cut at `(±√240, −4, 8)`.
+#[test]
+fn two_pointed_cones_of_slope_two_eight_high_a_quarter_turn_apart_answer_every_fuse() {
+    assert_eq!(
+        every_fuse_of(two_steep_cones_eight_high_a_quarter_turn_apart).refusals(),
+        [[None; 2]; 3]
+    );
+}
+
+/// **The same two of slope two, the turned one ten high**, so only the
+/// upright one's cap meets the other solid, and the halfway cut runs from that
+/// cap's rim to its rim. Every fuse answers, either way round.
+#[test]
+fn two_pointed_cones_of_slope_two_eight_and_ten_high_a_quarter_turn_apart_answer_every_fuse() {
+    for shape in [
+        two_steep_cones_eight_and_ten_high_a_quarter_turn_apart as fn(&mut Model) -> _,
+        two_steep_cones_ten_and_eight_high_a_quarter_turn_apart,
+    ] {
+        assert_eq!(every_fuse_of(shape).refusals(), [[None; 2]; 3]);
+    }
+}
+
+fn two_steep_cones_eight_high_a_quarter_turn_apart(model: &mut Model) -> (SolidKey, SolidKey) {
+    two_steep_cones_a_quarter_turn_apart(model, 8.0, 8.0)
+}
+
+fn two_steep_cones_eight_and_ten_high_a_quarter_turn_apart(
+    model: &mut Model,
+) -> (SolidKey, SolidKey) {
+    two_steep_cones_a_quarter_turn_apart(model, 8.0, 10.0)
+}
+
+fn two_steep_cones_ten_and_eight_high_a_quarter_turn_apart(
+    model: &mut Model,
+) -> (SolidKey, SolidKey) {
+    two_steep_cones_a_quarter_turn_apart(model, 10.0, 8.0)
+}
+
+fn two_steep_cones_a_quarter_turn_apart(
+    model: &mut Model,
+    upright_high: f64,
+    turned_high: f64,
+) -> (SolidKey, SolidKey) {
+    let upright = a_pointed_cone(model, 2.0, upright_high);
+    let turned = a_pointed_cone(model, 2.0, turned_high);
+    let through =
+        Axis::new(Point::new(0.0, 0.0, 4.0), Vector::new(1.0, 0.0, 0.0)).expect("an axis");
+    model
+        .place_solid(
+            turned,
+            &Isometry::quarter_turns(&through, 1).expect("an axis along x"),
+        )
+        .expect("this model made the key");
+    (upright, turned)
+}
+
 fn funnel_and_spout(model: &mut Model) -> (SolidKey, SolidKey) {
     let funnel = a_frustum(model, 0.5, 2.0, 8.0);
     let spout = a_frustum(model, 0.125, 2.0, 12.0);
