@@ -427,6 +427,19 @@ with two departures, one gap closed, and one cost named.
   `not_merged_because`. Restart such a dispatcher's `claude` process once this
   is on `main`.
 
+**2026-10-30, since Q3012.** `LAND_WAIT`'s default moves from 540 s to 90 s,
+in `follow` and in `wait-for` alike. The haiku lander of Q1699 gave its
+`just land` call no `timeout`, so the Bash tool moved it to the background at
+its own 120 s default; the lander then watched the output with `Monitor`
+instead of `just land wait`, ended its turn with no `StructuredOutput`, and an
+Opus merger was spent finding the push already made, green at 09:25:11Z. Seven
+of 852 lander transcripts on this machine hold that same move, 2026-10-11 to
+2026-10-26. 90 s leaves comfortable room under 120 s for process startup and
+teardown, so a bare `just land` call — one given no `timeout` at all — now
+ends by itself on `land: still running` well before the Bash tool would
+otherwise reach for the background, and `just land wait` carries it on exactly
+as before. `lander.md` and the recipe's own doc comment now name the figure.
+
 ### 397.6 No cap on gates at once, yet (amends §372.13)
 
 What the load is made of:

@@ -20190,8 +20190,10 @@ check-ff-main-selftest:
 # fields and `stop`.
 #
 # **Landers share one gate** (§397.5). The first call starts one run in a
-# session of its own and follows its log for at most `LAND_WAIT` seconds, 540
-# by default, and while its last line says the run is still going, `just land
+# session of its own and follows its log for at most `LAND_WAIT` seconds, 90
+# by default — well under a shell tool's usual 120 s timeout, so the call ends
+# by itself rather than being moved to the background for want of an explicit
+# `timeout` — and while its last line says the run is still going, `just land
 # wait` follows it again, as `verify-lane` does (§385.2). The run writes its
 # lane's entry to a spool under `rcad-land/` in the git common directory and
 # waits on the `flock` beside it, which goes when the process does. Holding it,
@@ -20204,7 +20206,7 @@ check-ff-main-selftest:
 #
 # **A run outlives its lander**, so the Opus merger that `lanes.js` hands a stop
 # to runs `just land wait-for <lane branch>` from its own tree before it reads
-# `origin/main`. That waits, for the same 540 s and with the same exit 3, while
+# `origin/main`. That waits, for the same 90 s and with the same exit 3, while
 # a live run's entry names the lane or anyone holds the lock, and exits 0 once
 # neither is so.
 #
@@ -20909,7 +20911,7 @@ check-land-selftest:
     wait_for lander2
     [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the second lane did not land beside a spool entry with no answers"
     spool_empty
-    echo "land merges a clean lane and prints its JSON, stops by name on each of 9 stops, detaches to origin/main with the merge branch still holding the merge commit on a stop past it, names a stopped recipe's own reason rather than just's wrapper line, reads an added row's own tier back from docs/queue.md, lands two waiting lanes on one gate, falls back to its own lane on a red batch, never takes a dead entry, outlives a killed holder, outlives a killed follower, wait-for waits on a live entry and on a held lock, closes the open rows a lane answers in its queue apply and names the others, leaves a bundle's row it names undone open under the lane's hold and names it in needs_judgement, and lands a spool entry an older land.py wrote"
+    echo "land merges a clean lane and prints its JSON, stops by name on each of 9 stops, detaches to origin/main with the merge branch still holding the merge commit on a stop past it, names a stopped recipe's own reason rather than just's wrapper line, reads an added row's own tier back from docs/queue.md, lands two waiting lanes on one gate, falls back to its own lane on a red batch, never takes a dead entry, outlives a killed holder, outlives a killed follower, wait-for waits on a live entry and on a held lock, closes the open rows a lane answers in its queue apply and names the others, leaves a bundle's row it names undone open under the lane's hold and names it in needs_judgement, lands a spool entry an older land.py wrote, and its default follow ends well under the Bash tool's 120 s timeout, with lander.md naming the figure"
 
 # A verifier's fixed steps for one lane, run for it (§383.4 item 4, §385): unlock
 # the lane's tree, `git log` from the base to the branch, the files outside the

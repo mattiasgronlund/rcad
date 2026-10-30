@@ -25,9 +25,11 @@ for the result.
    pipe and no redirect. That form is what `.claude/settings.json` allows, so
    any other stops to ask, and nobody is there to answer. The recipe runs
    detached and waits its turn behind other lanes landing (§397.5), so a call
-   can end while it is still going. While the last line says
-   `land: still running`, run `mise exec -- just land wait` the same way, as
-   often as it takes.
+   can end while it is still going. It follows the run for at most 90 s, well
+   under the Bash tool's own 120 s default, so the call ends by itself even
+   given no `timeout` at all — never watch the run any other way, such as
+   with `Monitor`. While the last line says `land: still running`, run
+   `mise exec -- just land wait` the same way, as often as it takes.
 3. Its last line is then one line of JSON. Report every field of it exactly as
    it has it. If a call ended with no line of JSON and not still running,
    because the recipe is missing or the run ended without finishing, report
