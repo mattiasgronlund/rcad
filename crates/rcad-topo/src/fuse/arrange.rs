@@ -3929,6 +3929,17 @@ impl<'f> Arrangement<'f> {
                 };
                 let allowed = super::bake::grown_by(node.point, room);
                 let reaches_the_room = |other: &PredicatePoint| boxes_overlap(allowed, *other);
+                let reaching: SmallVec<[usize; 2]> = (0..places.len())
+                    .filter(|&other| reaches_the_room(&places[other]))
+                    .collect();
+                if reaching.is_empty() {
+                    return self.a_touch_the_rounding_split_reaches(
+                        node.point,
+                        [first, second],
+                        tight[which],
+                        room,
+                    );
+                }
                 let room = allowed.enclosure();
                 let inside_the_room = |meet: &PredicatePoint| {
                     let meet = meet.enclosure();
@@ -3936,9 +3947,6 @@ impl<'f> Arrangement<'f> {
                         room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
                     })
                 };
-                let reaching: SmallVec<[usize; 2]> = (0..places.len())
-                    .filter(|&other| reaches_the_room(&places[other]))
-                    .collect();
                 let one_touch_at_the_corner = || {
                     reaching.iter().all(|&one| {
                         inside_the_room(&tight[one])
@@ -4033,6 +4041,56 @@ impl<'f> Arrangement<'f> {
             .find(|edge| edge.start.vertex == vertex)
             .expect("every corner node is where an edge of this face starts")
             .start
+    }
+
+    /// Whether `place`, where the face's surface and the partners of the
+    /// crossings `on` meet, is the touch at `corner` that rounding split, for
+    /// a meet no place of which reaches the corner's `room`.
+    ///
+    /// **It is when the three are planes, balls and pipes, one of them at
+    /// least curved, and every point between the corner's box and `place`'s
+    /// lies within `room` of each of the three.** A line and a circle that
+    /// touch, written down a rounding off touching, cross at two places far
+    /// along them from the touch, since a circle of radius `r` leaves its
+    /// tangent by `room` only `√(2·r·room)` from the touch. On the front of a
+    /// KiCad LED, a flat stored `1.2e-16` inside the circle it touches crosses
+    /// it `1.9e-8` either side of the touch (Q3010). From the corner to each
+    /// place the two curves then stay within the room of each other, so the
+    /// corner and the place are one touch written down two ways: wobble, not
+    /// a decision anybody failed to prove (§17.2). A corner that is itself
+    /// a place, within its room, leaves the other place a node however close
+    /// the two curves stay (§288.4), so this is asked only where no place is.
+    ///
+    /// **No place further than `√(8·r·room)` from the corner is folded**, for
+    /// `r` the smallest radius of the three: twice that reach, the most the
+    /// corner and a place both within it can lie apart. A pipe can hold a
+    /// whole line, and two planes through that line then stay within the
+    /// room of all three along it, as far as rounding puts their meet; that
+    /// meet says nothing about the corner (§395.7).
+    fn a_touch_the_rounding_split_reaches(
+        &self,
+        corner: PredicatePoint,
+        on: [usize; 2],
+        place: PredicatePoint,
+        room: f64,
+    ) -> bool {
+        let three = [
+            self.surface,
+            self.crossings[on[0]].partner,
+            self.crossings[on[1]].partner,
+        ];
+        let Some(radius) = the_smallest_radius_of_a_curve_among(three) else {
+            return false;
+        };
+        let reach = (8.0 * radius * room).sqrt();
+        holds_every_point_of(super::bake::grown_by(corner, reach), place)
+            && three.iter().all(|surface| {
+                every_point_between_lies_within(
+                    surface,
+                    [corner.enclosure(), place.enclosure()],
+                    room,
+                )
+            })
     }
 
     /// A node where a cut surface touches the face's own at one point, when
@@ -15953,6 +16011,67 @@ fn the_start_is_a_rounding_off(
 fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
     let (outer, inner) = (outer.enclosure(), inner.enclosure());
     (0..3).all(|axis| outer[axis].lo() <= inner[axis].lo() && inner[axis].hi() <= outer[axis].hi())
+}
+
+/// The smallest radius among the balls and pipes of `three`, where the rest
+/// are planes. `None` where none is curved, or where one is a cone, a torus or
+/// any other surface.
+fn the_smallest_radius_of_a_curve_among(three: [Surface; 3]) -> Option<f64> {
+    let mut smallest: Option<f64> = None;
+    for surface in three {
+        let radius = if let Surface::Sphere(ball) = surface {
+            ball.radius()
+        } else if let Surface::Cylinder(pipe) = surface {
+            pipe.radius()
+        } else if surface.as_plane().is_some() {
+            continue;
+        } else {
+            return None;
+        };
+        smallest = Some(smallest.map_or(radius, |so_far| so_far.min(radius)));
+    }
+    smallest
+}
+
+/// Whether every point on every segment from a point of `ends[0]` to a point
+/// of `ends[1]` lies within `room` of `surface`, a plane, a ball or a pipe.
+///
+/// **A plane's value `n·x + d` runs straight along a segment**, so its
+/// largest and smallest are at the two ends. **A ball's `|x − c|²` and a
+/// pipe's `|(x − o) × w|²` are squares**, and part way along, a `t` of the
+/// way from `a` to `b`, either is `(1 − t)·q(a) + t·q(b) − t·(1 − t)·q₀(b −
+/// a)`, `q₀` the square alone. So it is never more than the larger end, and
+/// never less than the smaller by more than a quarter of `q₀(b − a)`. That is
+/// set against `(r ∓ room)²`, times `|w|²` for a pipe, and asks no division.
+fn every_point_between_lies_within(surface: &Surface, ends: [[Interval; 3]; 2], room: f64) -> bool {
+    if let Some(flat) = surface.as_plane() {
+        let [a, b, c, d] = flat.coefficients();
+        let normal = [a, b, c].map(Interval::exactly);
+        let [near, far] = ends.map(|end| dot_of(normal, end) + Interval::exactly(d));
+        return -room <= near.lo().min(far.lo()) && near.hi().max(far.hi()) <= room;
+    }
+    let (middle, along, radius) = if let Surface::Sphere(ball) = surface {
+        (ball.centre(), None, ball.radius())
+    } else if let Surface::Cylinder(pipe) = surface {
+        let along = pipe.axis().direction().components().map(Interval::exactly);
+        (pipe.axis().origin(), Some(along), pipe.radius())
+    } else {
+        panic!("only a plane, a ball or a pipe is asked how far a segment strays: {surface:?}");
+    };
+    let square = |step: [Interval; 3]| {
+        let across = along.map_or(step, |along| cross_of_intervals(step, along));
+        dot_of(across, across)
+    };
+    let middle = middle.coordinates().map(Interval::exactly);
+    let [near, far] = ends.map(|end| square([0, 1, 2].map(|axis| end[axis] - middle[axis])));
+    let span = square([0, 1, 2].map(|axis| ends[1][axis] - ends[0][axis]));
+    let lowest = Interval::exactly(near.lo().min(far.lo())) - span * Interval::exactly(0.25);
+    let scale = along.map_or(Interval::exactly(1.0), |along| dot_of(along, along));
+    let (radius, room) = (Interval::exactly(radius), Interval::exactly(room));
+    let (inner, outer) = (radius - room, radius + room);
+    inner.lo() > 0.0
+        && (inner * inner * scale).hi() <= lowest.lo()
+        && near.hi().max(far.hi()) <= (outer * outer * scale).lo()
 }
 
 /// Which of two points comes first round the loop a plane cuts a pipe, a cone
