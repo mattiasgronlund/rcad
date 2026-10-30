@@ -30,8 +30,11 @@ already is.
 
 Two correctness questions turned up, and both are filed rather than reserved,
 since §13 defers features and never correctness. In 21 files that import today,
-two pieces of skin touch at a single corner (§469.6). And six faces round one
-line, paired so that the pairs cross, pass `Model::validate` (§469.4).
+the faces round one corner fall into two groups that share no edge there
+(§469.6). And six faces round one line, paired so that the pairs cross, pass
+`Model::validate` (§469.4). A third was filed on 2026-10-30, when §469.3 was
+read against the standard's own text: the shape is not valid STEP written as
+two edges either, and rcad's writer writes it (Q3032).
 
 ### 469.1 The shape, and what refuses it today
 
@@ -99,38 +102,51 @@ holds curves rcad does not.
 
 ### 469.3 STEP forbids it inside a solid
 
-ISO 10303-42 is not on this machine and was not read. Its wording is quoted
-here from buildingSMART's IFC topology resource, whose `IfcClosedShell` and
-`IfcManifoldSolidBrep` say they are *"adapted from closed_shell [and
-manifold_solid_brep] defined in ISO 10303-42"* and carry the text *"according
-to ISO/CD 10303-42:1992"*. The informal propositions of `closed_shell`
-include:
+*Rewritten 2026-10-30 against the standard's own text. The first version said
+ISO 10303-42 could not be read here and quoted buildingSMART's IFC pages
+instead, which adapt it from its 1992 draft. The 2021 edition is public HTML on
+steptools.com, where §329.1 had read it already (§469.8 gives the pages). The
+current edition is 2025, and it was not read.*
 
-> 1. Every edge shall be referenced exactly twice by the loops of the face.
-> 2. Each oriented edge shall be unique.
-> 3. No edge shall be referenced by more than two faces.
-> ...
-> 8. The closed shell shall be an oriented arcwise connected 2-manifold.
+ISO 10303-42:2021 describes `closed_shell` (its §5.5.28) this way: *"The domain
+of a closed shell, if present, is a connected, closed, oriented 2-manifold"*,
+and *"Each edge in the shell is either used by exactly two face bounds or is
+used twice by one face bound."* Its informal propositions include:
 
-and `manifold_solid_brep` is *"a finite, arcwise connected volume bounded by
-one or more surfaces, each of which is a connected, oriented, finite, closed
-2-manifold"*, where *"each edge along the boundary of a face is shared by at
-most one other face in the assemblage."*
+> IP1: Every edge shall be referenced exactly twice by the face_bounds of the faces.
+> IP2: Each oriented_edge reference shall be unique.
+> IP3: No edge shall be referenced by more than two faces.
+> IP5: Distinct edges do not intersect, but may share vertices.
+> IP8: The closed_shell shall be an oriented arcwise connected-manifold.
 
-**That largely settles the STEP side.** A `MANIFOLD_SOLID_BREP` with an edge
-four faces share is not valid STEP, by propositions 1, 3 and 8 at once. The two
-files of §469.2 break the standard, and rcad refusing them is the standard's
-rule and not a gap in rcad. Reading them anyway, by splitting the edge as
-rcad-brep will, would mean repairing a file to mean something it does not say.
-That is §42.9's healing question, and the reader refuses rather than repairs.
-Neither corpus uses any of STEP's non-solid representations for such a shape:
-the keyword scan in §469.8 finds no `NON_MANIFOLD_SURFACE_SHAPE_REPRESENTATION`
-anywhere.
+IP8 is quoted as the page has it, with the "2" of "2-manifold" missing; the
+description above says the same thing in full. A `manifold_solid_brep` (§6.4.2)
+is *"a finite, arcwise connected volume bounded by one or more surfaces, each of
+which is a connected, oriented, finite, closed 2-manifold"*, in which *"Each
+edge along the boundary of a face is shared by at most one other face in the
+assemblage"* and *"The assemblage of edges in the B-rep do not intersect except
+at their boundaries (i.e., vertices)."*
 
-What the standard says of the other way of writing it was not settled here. Two
-edges on one line, each referenced by two faces, is what propositions 1 and 3
-ask for; whether proposition 8 takes a skin that touches itself along those two
-edges was not read, and rcad's STEP writer was not run on such a solid.
+**That settles the STEP side.** A `MANIFOLD_SOLID_BREP` with an edge four faces
+share is not valid STEP, by IP1, IP3 and IP8 at once. The two files of §469.2
+break the standard, and rcad refusing them is the standard's rule and not a gap
+in rcad. Reading them anyway, by splitting the edge as rcad-brep will, would
+mean repairing a file to mean something it does not say. That is §42.9's
+healing question, and the reader refuses rather than repairs. Neither corpus
+uses any of STEP's non-solid representations for such a shape: the keyword scan
+in §469.8 finds no `NON_MANIFOLD_SURFACE_SHAPE_REPRESENTATION` anywhere.
+
+**Written as two edges, it is not valid STEP either.** Two edges on one line,
+each referenced by two faces, is what IP1 and IP3 ask for. But the two edges lie
+on each other along their whole length, which IP5 and `manifold_solid_brep`'s
+sentence on edges forbid. And the skin still touches itself along the line,
+however the line is written, so it is not a 2-manifold there. So no
+`MANIFOLD_SOLID_BREP` holds the shape of §469.1. That does not move §469's
+verdict, which is about what rcad holds, not about what it writes. But the
+answer the fuse gives for a solid that touches itself along a line (§39.4) has
+no valid form as one STEP solid, and rcad's writer writes it all the same:
+§471.2 wrote §469.4's plate and read it back. What the writer should do about
+that is Q3032.
 
 ### 469.4 The same shape, written as two edges
 
@@ -201,20 +217,36 @@ not kept, so none is given here. The three places above were read at
 
 ### 469.6 rcad is looser than STEP at corners, and nothing has asked whether that is safe
 
+*Corrected 2026-10-30. The first version read every corner in two fans as two
+pieces of skin touching at one point, forbidden by `closed_shell`'s IP8. §471.1
+found the LED's corner is not that, and the 2021 text (§469.3) names the rule
+it does break.*
+
 The brief's last point is that a corner has the same problem: two blocks
 touching at one point. The script of §469.2 also counts, for every vertex, the
 corners of faces at it, joined wherever two of them share an edge that ends
-there. One group is one fan of faces round the vertex. Two groups is a corner
-where two pieces of skin touch at one point, which proposition 8 forbids.
+there. One group is one fan of faces round the vertex. Two groups is a corner in
+two fans.
 
-**48 KiCad solids have such a corner, in 48 files, and 21 of those files import
-today**, every one of them pinned in `KICAD_FILES_THAT_IMPORT`. In
+ISO 10303-42:2021 forbids both of the kinds of corner in two fans this section
+meets. Where a face's outline and one of its holes pass through the same vertex,
+the face breaks `face` (§5.5.19), whose description says *"the bounds shall be
+distinct and shall not intersect"*, and whose IP2 says *"Distinct face_bounds
+of the face shall have no common vertices."* Where two pieces of skin touch at
+the vertex, the skin is not a 2-manifold there, which `closed_shell`'s
+description and IP8 forbid (§469.3).
+
+**48 KiCad solids have a corner in two fans, in 48 files, and 21 of those files
+import today**, every one of them pinned in `KICAD_FILES_THAT_IMPORT`. In
 `LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step`, vertex `#74` at `(-1.23, -1.27,
 3.0)` is a corner of face `#59`'s outline, and the round hole in the same face
 (loop `#87`) passes through the same `VERTEX_POINT`: a hole touching the outline
-at one point. The reader makes one corner of one `VERTEX_POINT`
-(`describe_the_vertex`, `brep.rs`), so the imported `Model` holds one vertex
-with two fans of faces round it.
+at one point, which breaks `face`'s IP2. It is not two pieces of skin touching:
+the disc inside the hole lies on the same plane as `#59`, so the skin round
+`#74` is one sheet (§471.1). Which kind the other 20 files hold was not looked
+at. The reader makes one corner of one `VERTEX_POINT` (`describe_the_vertex`,
+`brep.rs`), so the imported `Model` holds one vertex with two fans of faces
+round it.
 
 `Model::validate` asks of a vertex only that its point is finite and that some
 edge ends there (`check_vertex`, `validate.rs`). The plate of §469.4 shows the
@@ -260,8 +292,12 @@ criteria are about answers.
   §469.2 comes from.
 - The 21 files: the 48 names the script flagged, intersected with the 165
   names in `KICAD_FILES_THAT_IMPORT`.
-- The STEP wording: buildingSMART's `IFC4.x-development` repository on GitHub,
-  `IfcClosedShell.md` and `IfcManifoldSolidBrep.md`, read 2026-10-27.
+- The STEP wording: ISO 10303-42:2021(E) as steptools.com serves it, under
+  `https://www.steptools.com/stds/smrl/data/resource_docs/geometric_and_topological_representation/sys/`:
+  `5_schema.htm` for `face` (§5.5.19) and `closed_shell` (§5.5.28), and
+  `6_schema.htm` for `manifold_solid_brep` (§6.4.2), read 2026-10-30. The first
+  version of §469.3 quoted buildingSMART's `IFC4.x-development` repository on
+  GitHub, `IfcClosedShell.md` and `IfcManifoldSolidBrep.md`, read 2026-10-27.
 - `mise exec -- just t -p rcad --test what_rcad_brep_asks_through_the_front_door`:
   the table of §469.4, three tests.
 - The six-face probe: a test file added to `rcad-topo`'s `merged` target, run
@@ -278,3 +314,6 @@ criteria are about answers.
   sound solid, and if not, what should refuse it (§469.4). Answered in §470: it
   answers as the other pairings do, and the fuse was found writing three faces
   through each other.
+- **Q3032**, tier 1, filed 2026-10-30: what the STEP writer should do with a
+  solid whose skin touches itself along a line, which no `MANIFOLD_SOLID_BREP`
+  holds (§469.3).
