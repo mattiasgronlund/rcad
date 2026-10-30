@@ -6279,7 +6279,12 @@ impl<'f> Arrangement<'f> {
     /// and the two boxes, `[16 − 2⁻⁴⁹, 16]` and `[16, 16 + 2⁻⁴⁸]` along `z`,
     /// both have their middle at `16`. Read here, every fuse of the two was
     /// refused as a curved face going too far round, or as faces that do not
-    /// agree which way they face (`a_block_edge_grazing_a_ball.rs`).
+    /// agree which way they face (`a_block_edge_grazing_a_ball.rs`). Since
+    /// Q3027 a pair round a loop that a certified policy refuses may still be
+    /// read after it, by [`Arrangement::as_the_side_of_one_cut_the_other_is_on_says`],
+    /// and this one is: every certified fuse of the two is then refused where
+    /// the answer writes the two at one corner,
+    /// `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`.
     fn as_the_two_meets_of_one_line_say(
         &self,
         crossing: usize,
@@ -6592,6 +6597,17 @@ impl<'f> Arrangement<'f> {
     /// point, so the order the loop was sorted in no longer held between those
     /// two neighbours and the fuse panicked
     /// (`tests/two_nodes_merged_on_a_closed_crossing_under_a_tolerant_policy.rs`).
+    ///
+    /// **Two meets whose boxes have one middle are read here too**, which
+    /// [`Arrangement::as_the_two_meets_of_one_line_say`] and
+    /// [`Arrangement::as_the_two_meets_of_one_cut_alone_on_the_loop_say`] do
+    /// not do. By the time this is asked a tolerant policy has folded them and
+    /// a certified one has refused their order, so reading it costs no answer
+    /// and moves the refusal on (Q3027). A block edge grazing a ball is then
+    /// refused by the limit's own name, where the answer writes the two at one
+    /// corner (`a_block_edge_grazing_a_ball.rs`); two places in one box, on
+    /// their order along the line their planes cross in
+    /// (`two_meets_in_one_box_on_a_closed_crossing.rs`).
     ///
     /// The LED of `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step` is the shape of
     /// the same way round (Q2988). Its flange's front, normal
@@ -7345,17 +7361,24 @@ impl<'f> Arrangement<'f> {
     /// [`Arrangement::as_the_two_meets_of_one_line_say`] does not read them:
     /// the answer writes both at that middle, one corner, and an order between
     /// them draws an arc from that corner back to itself. Read here, such a
-    /// pair was refused further on, and by less telling names. A ball of
-    /// radius `1 + 2⁻⁵¹` round `(0, 0, 16)` meets the block edge `x = −1,
-    /// y = 2⁻²⁵` at `z = 16 ± 2⁻⁵¹`, in boxes with their middle at `16`, and
-    /// the union with the ball first was refused
-    /// `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` at that middle
-    /// (`a_block_edge_grazing_a_ball.rs`). Two balls at `y = 16` round a
-    /// circle in `z = 1` were refused on `orient3d`
-    /// (`a_tilted_wall_grazing_a_ball_sums_to_zero.rs`). And the two places one
-    /// box holds in `two_meets_in_one_box_on_a_closed_crossing.rs` went on to
-    /// the line the two planes cross in, which does not read them either, and
-    /// were refused on a step along its axis, whose enclosure is the two
+    /// pair was refused further on, and by less telling names. Two balls at
+    /// `y = 16` round a circle in `z = 1` were refused on `orient3d`
+    /// (`a_tilted_wall_grazing_a_ball_sums_to_zero.rs`).
+    ///
+    /// **Since Q3027 two such pairs are read anyway, before this is asked**, by
+    /// [`Arrangement::as_the_side_of_one_cut_the_other_is_on_says`], which
+    /// reads which of the two meets of one line each node is where the loop
+    /// crosses the line one way at one and the other way at the other. Each
+    /// goes on to the refusal that reading it here foretold. A ball of radius
+    /// `1 + 2⁻⁵¹` round `(0, 0, 16)` meets the block edge `x = −1, y = 2⁻²⁵`
+    /// at `z = 16 ± 2⁻⁵¹`, in boxes with their middle at `16`. Read here, the
+    /// union with the ball first was refused
+    /// `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` at that middle; read
+    /// there, every certified fuse of the two is, the limit queue row Q2482
+    /// names (`a_block_edge_grazing_a_ball.rs`). And the two places one box
+    /// holds in `two_meets_in_one_box_on_a_closed_crossing.rs` go on to the
+    /// line the two planes cross in, which does not read them either,
+    /// and are refused on a step along its axis, whose enclosure is the two
     /// boxes' widths added, twice the box (Q2655).
     ///
     /// A round bar of radius `1/2` with its axis at `(1.5, 1)`, in the L plate

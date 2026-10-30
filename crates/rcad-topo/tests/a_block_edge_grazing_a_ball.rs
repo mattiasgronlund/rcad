@@ -23,10 +23,21 @@
 //! `Arrangement::turns_anticlockwise` over a box ending at the place (§317.1),
 //! and since Q914 it refuses on neither the turn nor the pair
 //! (`a_block_edge_grazing_a_ball_at_cx_16.rs`). An edge along `z` at `x = −1`
-//! grazes the ball at the equator, and a certified fuse refuses on the order of
-//! the two meets round the circles the block's two faces cut the ball in, with
-//! either solid first, before any turn there is asked. Q914 decides the order
-//! of two such meets along the edge itself, and not round a circle (§317.7).
+//! grazes the ball at the equator, and until Q3027 a certified fuse refused on
+//! the order of the two meets round the circles the block's two faces cut the
+//! ball in, with either solid first, before any turn there was asked. Q914
+//! decides the order of two such meets along the edge itself, and not round a
+//! circle (§317.7).
+//!
+//! Since Q3027 the order round the circles is read too, off which meet of the
+//! edge with the ball each place is, once the policy has refused it
+//! (`fuse/arrange.rs`, `as_the_side_of_one_cut_the_other_is_on_says`). Every
+//! certified fuse then goes on to the refusal the edge along `x` ends on:
+//! `Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`, here at
+//! `(−1, 2⁻²⁵, 16)`. The places are `16 ∓ 2⁻⁵¹`, and the doubles beside `16`
+//! are `2⁻⁴⁹` below it and `2⁻⁴⁸` above, so `16` is the nearest double to
+//! both and, written as doubles, the two are one point: the limit queue row
+//! Q2482 names at `cx = 16`.
 //!
 //! At `h = 0` both places are exact, `z = ±2⁻⁵¹`, and their boxes do not
 //! touch. At `h = 16` the last place of `16` is `2⁻⁴⁸` wide, so neither place is
