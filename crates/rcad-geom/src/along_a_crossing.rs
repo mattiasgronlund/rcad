@@ -167,7 +167,7 @@ use crate::intersect::{
     whether_two_cones_share_an_axis,
 };
 use crate::{
-    Cone, Cylinder, Error, HalfSpace, HalfSpaceThroughAPoint, Plane, Point, Result, Sphere,
+    Cone, Cylinder, Error, HalfSpace, HalfSpaceThroughAPoint, Picker, Plane, Point, Result, Sphere,
     Surface, Torus, Vector, WhereFollowingACrossingGaveUp,
 };
 
@@ -1427,27 +1427,16 @@ impl Cone {
         &self,
         other: &Self,
     ) -> Result<Option<(Plane, Self)>> {
-        if self.apex() == other.apex()
-            || whether_two_cones_share_an_axis(self, other) != Decision::Pos
-        {
-            return Ok(None);
-        }
-        match how_two_cones_off_one_axis_cross(
-            self,
-            other,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        ) {
-            Ok(HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { cone, flat }) => {
+        match self.how_it_crosses_a_cone_off_its_axis(other)? {
+            Some(HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { cone, flat }) => {
                 Ok(Some((flat, cone)))
             }
-            Ok(
+            Some(
                 HowTwoConesOffOneAxisCross::HeldApart(_)
                 | HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. }
                 | HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart { .. },
-            ) => Ok(None),
-            Err(undecided @ Error::Undecidable { .. }) => Err(undecided),
-            Err(_) => Ok(None),
+            )
+            | None => Ok(None),
         }
     }
 
@@ -1471,6 +1460,155 @@ impl Cone {
         &self,
         other: &Self,
     ) -> Result<Option<([HalfSpace; 2], Self, Self)>> {
+        match self.how_it_crosses_a_cone_off_its_axis(other)? {
+            Some(HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch {
+                cone,
+                other,
+                pickers,
+                ..
+            }) => Ok(Some((pickers, cone, other))),
+            Some(
+                HowTwoConesOffOneAxisCross::HeldApart(_)
+                | HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }
+                | HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart { .. },
+            )
+            | None => Ok(None),
+        }
+    }
+
+    /// Where this cone and `other` are of one slope, mirror images of each
+    /// other, and each apex is inside the other: the flat surface whose cut of
+    /// the cone handed back is the whole curve `picked_by` picks, and that
+    /// cone, the one of the two that sorts first.
+    ///
+    /// The two cross in two flat cuts of either cone that never meet, and
+    /// `intersect` names each whole curve of them by a corner of two flat
+    /// surfaces: the cut by the second flat surface in front of both or behind
+    /// both, and the cut by the flat surface halfway between the apexes in
+    /// front of one alone. `walk` marches each as that very flat surface's cut
+    /// of that very cone, so points along it go in the order they go in along
+    /// a flat surface's cut of a cone. The answer is the same whichever way
+    /// round the pair comes, since `intersect` sorts the pair first.
+    ///
+    /// Nothing where the two do not cross so, asked under a certified policy
+    /// as [`Cone::the_flat_surface_halfway_to_a_cone_beside_it`] asks it, and
+    /// where `picked_by` is not two flat half-spaces.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`] where how the two cross could not be settled.
+    ///
+    /// # Panics
+    ///
+    /// If `picked_by` is two flat half-spaces but not a corner of the two that
+    /// pick the curves apart, which is `intersect` naming a curve of the pair
+    /// it did not pick by them.
+    pub fn the_flat_cut_of_a_mirror_image_held_apart_from_it(
+        &self,
+        other: &Self,
+        picked_by: &[Picker],
+    ) -> Result<Option<(Plane, Self)>> {
+        let [Picker::InFrontOf(first), Picker::InFrontOf(second)] = picked_by[..] else {
+            return Ok(None);
+        };
+        let Some(TwoFlatCutsHeldApart {
+            cone,
+            flats,
+            pickers,
+        }) = self.the_two_flat_cuts_held_apart_from(other)?
+        else {
+            return Ok(None);
+        };
+        let picked = [first, second];
+        let in_front = [0, 1].map(|which| {
+            if picked[which] == pickers[which] {
+                true
+            } else if picked[which] == pickers[which].reversed() {
+                false
+            } else {
+                panic!(
+                    "a whole curve of two mirror images held apart is picked by a corner of \
+                     the two flat surfaces between the curves: {picked:?} against {pickers:?}"
+                )
+            }
+        });
+        let flat = if in_front[0] == in_front[1] {
+            flats[1]
+        } else {
+            flats[0]
+        };
+        Ok(Some((flat, cone)))
+    }
+
+    /// Where this cone and `other` are of one slope, mirror images of each
+    /// other, and each apex is inside the other: the two flat surfaces whose
+    /// cuts of either cone are all the two cross in, the one halfway between
+    /// the apexes first, as `intersect` stores them.
+    ///
+    /// On either cone the other's form is a multiple of the product of the two
+    /// flat surfaces' forms: `Q_second − Q_first = P·F/N²` in the working of
+    /// `two_flat_cuts_that_meet_where_they_touch` in `intersect.rs`, and the
+    /// first cone's form is nothing on it. So a point of one cone is inside the
+    /// other just where its two signs against the flat surfaces say so, and
+    /// two points on one side of the other cone can be on opposite sides of
+    /// both flat surfaces. The two cuts never meet.
+    ///
+    /// Each flat surface is stored rounded from exact numbers, as `intersect`
+    /// stores them for two mirror images that touch, so a point on one's cut
+    /// can read a rounding to one side of it.
+    ///
+    /// Nothing where the two do not cross so, asked under a certified policy
+    /// as [`Cone::the_flat_surface_halfway_to_a_cone_beside_it`] asks it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`] where how the two cross could not be settled.
+    pub fn the_two_flat_cuts_of_a_mirror_image_held_apart_from_it(
+        &self,
+        other: &Self,
+    ) -> Result<Option<[Plane; 2]>> {
+        Ok(self
+            .the_two_flat_cuts_held_apart_from(other)?
+            .map(|held_apart| held_apart.flats))
+    }
+
+    /// What `HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart` names, where
+    /// this cone and `other` cross so.
+    fn the_two_flat_cuts_held_apart_from(
+        &self,
+        other: &Self,
+    ) -> Result<Option<TwoFlatCutsHeldApart>> {
+        match self.how_it_crosses_a_cone_off_its_axis(other)? {
+            Some(HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart {
+                cone,
+                flats,
+                pickers,
+                ..
+            }) => Ok(Some(TwoFlatCutsHeldApart {
+                cone,
+                flats,
+                pickers,
+            })),
+            Some(
+                HowTwoConesOffOneAxisCross::HeldApart(_)
+                | HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }
+                | HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. },
+            )
+            | None => Ok(None),
+        }
+    }
+
+    /// How this cone and `other` cross, as `intersect` proves it under a
+    /// certified policy, or nothing where they share an apex, are not proved
+    /// off one axis, or are refused for anything but an unsettled sign.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`] where how the two cross could not be settled.
+    fn how_it_crosses_a_cone_off_its_axis(
+        &self,
+        other: &Self,
+    ) -> Result<Option<HowTwoConesOffOneAxisCross>> {
         if self.apex() == other.apex()
             || whether_two_cones_share_an_axis(self, other) != Decision::Pos
         {
@@ -1482,21 +1620,23 @@ impl Cone {
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         ) {
-            Ok(HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch {
-                cone,
-                other,
-                pickers,
-                ..
-            }) => Ok(Some((pickers, cone, other))),
-            Ok(
-                HowTwoConesOffOneAxisCross::HeldApart(_)
-                | HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }
-                | HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart { .. },
-            ) => Ok(None),
+            Ok(how) => Ok(Some(how)),
             Err(undecided @ Error::Undecidable { .. }) => Err(undecided),
             Err(_) => Ok(None),
         }
     }
+}
+
+/// The two flat cuts two mirror images of one slope cross in where each apex
+/// is inside the other, as `intersect` names them.
+struct TwoFlatCutsHeldApart {
+    /// The one of the two cones that sorts first.
+    cone: Cone,
+    /// The flat surface halfway between the apexes, then the other.
+    flats: [Plane; 2],
+    /// Two half-spaces, each of whose corners holds one whole curve of where
+    /// the two cross.
+    pickers: [HalfSpace; 2],
 }
 
 /// Which way one of the circles a ball on a cone's axis crosses it in runs, for
