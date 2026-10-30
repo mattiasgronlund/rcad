@@ -1110,9 +1110,8 @@ Then run this, as one plain Bash call in the foreground with timeout 600000:
 While its last line says the run is still going, run this the same way, as often as it takes:
   mise exec -- just verify-lane wait
 Its last line is then one line of JSON. Take every field it holds as it stands and do not run its steps again: skipped says what it skipped and why, for your notes, and left_to_you is what it could not decide, which is yours, beside the reading verifier.md names.${unsent}
-If your tree's just has no verify-lane recipe, do verifier.md's steps by hand.
-
-Lines that run -- just verify-lane runs this once, before it checks the branch out, and its JSON holds the command as lines_that_run_command and all it prints as lines_that_run. By hand, in step 1, before you check the branch out, run it once in your own tree, exactly as written, and report it the same way. It prints two sections, each capped at ten lines and followed by its own count: first the test code the branch takes out, ending test code lines removed: N, then the lines that could change what runs, ending lines that run: N -- at most 22 lines in all, and the last is always lines that run: N:
+If your tree's just has no verify-lane recipe, do verifier.md's steps by hand, Lines that run below included.
+Lines that run -- only when your tree's just has no verify-lane recipe. By hand, in step 1, before you check the branch out, run this once in your own tree, exactly as written, and report it the same way; when the recipe exists, its own JSON already holds the command as lines_that_run_command and all it prints as lines_that_run, so you never run this command yourself. It prints two sections, each capped at ten lines and followed by its own count: first the test code the branch takes out, ending test code lines removed: N, then the lines that could change what runs, ending lines that run: N -- at most 22 lines in all, and the last is always lines that run: N:
   ${linesThatRunCommand(lane)}
 When N is 0, nothing that runs changed (§375): skip the revert below, say so in notes, and report tests_fail_without_fix: false with no reproduced_mutation if your steps are the tests ones, or no tests_pass_without_change and no mutation_caught if they are the same behaviour ones.
 ${kind === 'same_behaviour' ? sameBehaviourProof() : revertProof()}
