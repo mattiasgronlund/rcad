@@ -511,9 +511,10 @@ function unproven(lane, kind, check) {
   const why = []
   if (check.files_outside_write_set && check.files_outside_write_set.length) why.push(`the branch touches ${check.files_outside_write_set.join(', ')}, outside the write set`)
   if (check.write_set_mismatch && check.write_set_mismatch.length) why.push(`the write set does not match just queue show at the base: ${check.write_set_mismatch.join(', ')}`)
-  const runs = linesThatRun(check.lines_that_run)
+  const runFields = linesThatRunFields(check)
+  const runs = linesThatRun(runFields.print)
   if (runs === null) why.push('the lines-that-run print the verifier reported does not end in its count, lines that run: N')
-  if (squeezed(check.lines_that_run_command) !== squeezed(linesThatRunCommand(lane))) why.push('the verifier ran another command than the lines-that-run command it was given')
+  if (squeezed(runFields.command) !== squeezed(linesThatRunCommand(lane))) why.push('the verifier ran another command than the lines-that-run command it was given')
   if (kind === 'tests') {
     if (check.tests_pass_on_branch !== true) why.push('the tests do not pass on the branch')
     const sources = sourcePathsOf(lane)
@@ -531,7 +532,7 @@ function unproven(lane, kind, check) {
       if (!mutationCaught(check.mutation_caught)) why.push('no mutation of the changed lines was seen to fail a test that reaches them')
     }
   } else if (runs) {
-    why.push(`the branch changes ${runs} lines that run and names no test that fails without them (a row that keeps what they compute goes again marked sameBehaviour, §399), starting with: ${firstRunLine(check.lines_that_run)}`)
+    why.push(`the branch changes ${runs} lines that run and names no test that fails without them (a row that keeps what they compute goes again marked sameBehaviour, §399), starting with: ${firstRunLine(runFields.print)}`)
   }
   return why
 }
@@ -553,6 +554,29 @@ function linesThatRun(print) {
   const last = print.trim().split('\n').pop().trim()
   const count = /^lines that run: ([0-9]+)$/.exec(last)
   return count ? Number(count[1]) : null
+}
+
+// `just verify-lane`'s own last line is one line of JSON that already holds
+// lines_that_run_command and lines_that_run paired, and the print already
+// ends in the count. The verifier copies that line whole into
+// verify_lane_json; reading the two fields from there, rather than from the
+// verifier's own hand-retyped copies, is what keeps a copy left short --
+// as Q2667's verifier's was, stopping mid count with no line it ended on --
+// from refusing a merge the recipe already proved (§375.4). Empty only when
+// the tree had no verify-lane recipe and the verifier did lines that run by
+// hand, where the hand-typed fields are read instead.
+function linesThatRunFields(check) {
+  if (typeof check.verify_lane_json !== 'string' || check.verify_lane_json.trim() === '') {
+    return { print: check.lines_that_run, command: check.lines_that_run_command }
+  }
+  let parsed = null
+  try {
+    parsed = JSON.parse(check.verify_lane_json)
+  } catch {
+    parsed = null
+  }
+  if (!parsed || typeof parsed !== 'object' || typeof parsed.lines_that_run !== 'string') return { print: null, command: null }
+  return { print: parsed.lines_that_run, command: parsed.lines_that_run_command }
 }
 
 function squeezed(s) {
@@ -1109,8 +1133,8 @@ Then run this, as one plain Bash call in the foreground with timeout 600000:
   mise exec -- just verify-lane target/verify-lane.txt
 While its last line says the run is still going, run this the same way, as often as it takes:
   mise exec -- just verify-lane wait
-Its last line is then one line of JSON. Take every field it holds as it stands and do not run its steps again: skipped says what it skipped and why, for your notes, and left_to_you is what it could not decide, which is yours, beside the reading verifier.md names.${unsent}
-If your tree's just has no verify-lane recipe, do verifier.md's steps by hand, Lines that run below included.
+Its last line is then one line of JSON. Copy that whole line into verify_lane_json, exactly as it printed -- never retype or summarize it, so a line you drop while retyping it elsewhere can never be the reason a merge is refused (§375.4). Take every field it holds as it stands for the rest of your own report too, and do not run its steps again: skipped says what it skipped and why, for your notes, and left_to_you is what it could not decide, which is yours, beside the reading verifier.md names.${unsent}
+If your tree's just has no verify-lane recipe, do verifier.md's steps by hand, Lines that run below included, and leave verify_lane_json empty.
 Lines that run -- only when your tree's just has no verify-lane recipe. By hand, in step 1, before you check the branch out, run this once in your own tree, exactly as written, and report it the same way; when the recipe exists, its own JSON already holds the command as lines_that_run_command and all it prints as lines_that_run, so you never run this command yourself. It prints two sections, each capped at ten lines and followed by its own count: first the test code the branch takes out, ending test code lines removed: N, then the lines that could change what runs, ending lines that run: N -- at most 22 lines in all, and the last is always lines that run: N:
   ${linesThatRunCommand(lane)}
 When N is 0, nothing that runs changed (§375): skip the revert below, say so in notes, and report tests_fail_without_fix: false with no reproduced_mutation if your steps are the tests ones, or no tests_pass_without_change and no mutation_caught if they are the same behaviour ones.
@@ -1431,6 +1455,7 @@ function verdictSchema(kind) {
     lines_that_run_command: { type: 'string', description: 'the lines-that-run command from your brief, exactly as you ran it' },
     lines_that_run: { type: 'string', description: 'everything that command printed, verbatim, down to its last line, lines that run: N -- never your own reading of the diff' },
     lines_that_run_note: { type: 'string', description: 'your own note about the print above, if any -- never folded into lines_that_run itself, which stays the command\'s output and nothing more' },
+    verify_lane_json: { type: 'string', description: 'the exact last line just verify-lane printed, the whole line of JSON, verbatim and unedited -- never retyped or summarized; empty only when your tree had no verify-lane recipe and you did lines that run by hand (§375.4)' },
     verdict: { type: 'string', enum: ['merge', 'fix_first', 'reject'] },
     notes: { type: 'string', description: 'at most five lines, for the merger: what it must act on and what no other field says -- never an account of the steps you ran, which the other fields already hold' },
     also_answers_confirmed: { type: 'array', items: { type: 'string' }, description: 'the ids from the lane\'s also_answers you ran again on the branch tip and saw answer, each open on origin/main, held by no lane, and sharing a tests/*.rs file with the lane\'s write set (verifier.md, Also answers); leave it out when the lane named none' },
@@ -1440,7 +1465,7 @@ function verdictSchema(kind) {
       items: { type: 'object', required: ['row', 'why'], properties: { row: { type: 'string' }, why: { type: 'string' } } },
     },
   }
-  const required = ['worktree_path', 'branch_ok', 'files_outside_write_set', 'write_set_mismatch', 'gate_summary', 'number_mismatches', 'unbacked_claims', 'fixes', 'lines_that_run_command', 'lines_that_run', 'verdict']
+  const required = ['worktree_path', 'branch_ok', 'files_outside_write_set', 'write_set_mismatch', 'gate_summary', 'number_mismatches', 'unbacked_claims', 'verify_lane_json', 'fixes', 'lines_that_run_command', 'lines_that_run', 'verdict']
   if (kind === 'tests') {
     properties.tests_pass_on_branch = { type: 'boolean', description: "from step 3's gate summary (served or fresh), not a separate run -- §370" }
     properties.tests_fail_without_fix = { type: 'boolean', description: 'false if you could not make them fail with the source reverted' }
