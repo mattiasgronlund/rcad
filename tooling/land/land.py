@@ -24,9 +24,12 @@ It ends with one line of JSON holding `mergedSchema`'s fields from `lanes.js`,
 and a `stop` naming the stop, empty when it merged.
 
 **Landers share one gate** (§397.5). `just land <arguments>` starts one run in
-a session of its own and follows its log for at most `LAND_WAIT` seconds, 540
-by default, and `just land wait` follows it again, as `just verify-lane` does
-(§385.2). The run writes its lane's entry to a spool in the git common
+a session of its own and follows its log for at most `LAND_WAIT` seconds, 90
+by default — well under a shell tool's usual 120 s timeout, so the call ends
+by itself, `land: still running` on its last line, rather than being moved to
+the background for want of an explicit `timeout` (§397.5) — and `just land
+wait` follows it again, as `just verify-lane` does (§385.2). The run writes
+its lane's entry to a spool in the git common
 directory and waits on a `flock` there. Holding it, a run whose lane an earlier
 holder landed reports that merge and ends. Any other run lands its own lane,
 then every lane waiting whose run is alive, oldest first, each with its own
@@ -56,7 +59,7 @@ from rows import Queue  # noqa: E402
 MERGE_ATTEMPTS = 3
 DOCS_CATCH_UPS = 5
 JUST = os.environ.get("LAND_JUST", "just")
-WAIT = float(os.environ.get("LAND_WAIT", "540"))
+WAIT = float(os.environ.get("LAND_WAIT", "90"))
 STATE = os.path.join("target", "land")
 ROW = re.compile(r"^[TDQ][0-9]+$")
 SHA = re.compile(r"^[0-9a-f]{7,40}$")
