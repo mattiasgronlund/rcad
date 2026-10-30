@@ -46,13 +46,23 @@
 //! line and not the circle the arcs run along. The arrangement now draws such
 //! an arc where the face's plane crosses the pipe it runs along (Q2966).
 //!
-//! It stops now `Undecidable` on side of cylinder at `#74`, the front corner:
-//! bake solves it from the front, the flat and the disc, three planes two of
-//! which are a rounding apart, and the box it gets runs along the flat, `z`
-//! from `2.50` to `3.27` (Q2939). These tests pin that. When it answers, each
-//! turns back into the volume check of commit `f179ca02a`: what the box and
-//! the LED share is the box's part inside the LED, and the intersection and
-//! the difference add up to the LED.
+//! It stopped next `Undecidable` on side of cylinder at `#74`, the front
+//! corner: bake solved it from the front, the flat and the disc, three planes
+//! two of which are a rounding apart, and the box it got ran along the flat,
+//! `z` from `2.50` to `3.27`. Bake now reads a corner in two fans out of the
+//! model and never solves it (Q2939). It then stopped on `order along a
+//! crossing` between the front corner and a point `3.6e-15` across it, the
+//! shape the `Z15.0` LED met below, and gets past it as that one does (Q2959).
+//!
+//! It stops now `Undecidable` with the one record `order along a crossing`,
+//! between the flat's corner on the rim at the back, `(-1.23, -2.27, 1.53)`,
+//! and a point `2.6e31` back along `-y` where the lead's side `x = -0.3` meets
+//! the loop the flat cuts the rim in. The flat's normal is `3.6e-32` off `x`,
+//! so that loop is about `1.6e32` long, and it reaches `x = -0.3` only that
+//! far out (Q2990). These tests pin that. When it answers, each turns back
+//! into the volume check of commit `f179ca02a`: what the box and the LED share
+//! is the box's part inside the LED, and the intersection and the difference
+//! add up to the LED.
 //!
 //! `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step` is the same LED with its axis
 //! at `z = 15`, and `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step` a smaller one,
@@ -145,7 +155,7 @@
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, SIDE_OF_CYLINDER, SIDE_OF_PLANE, Vector};
+use rcad_geom::{Isometry, SIDE_OF_PLANE, Vector};
 use rcad_predicates::{Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -163,20 +173,21 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
-fn a_box_round_the_back_corner_gets_past_the_arcs_round_the_disc_and_stops_at_the_front_corner() {
+fn a_box_round_the_back_corner_gets_past_the_front_corner_and_stops_on_the_order_of_a_meet_far_along_the_flat()
+ {
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -2.27, 3.0]]),
-        the_side_of_a_pipe_is_undecidable,
+        the_order_of_the_back_corner_and_a_meet_far_along_the_flat_is_undecidable,
     );
 }
 
 #[test]
-fn a_box_round_the_front_corner_gets_past_the_arcs_round_the_disc_and_stops_at_it() {
+fn a_box_round_the_front_corner_gets_past_it_and_stops_on_the_order_of_a_meet_far_along_the_flat() {
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -1.27, 3.0]]),
-        the_side_of_a_pipe_is_undecidable,
+        the_order_of_the_back_corner_and_a_meet_far_along_the_flat_is_undecidable,
     );
 }
 
@@ -255,15 +266,32 @@ fn every_fuse_refuses(
     }
 }
 
-fn the_side_of_a_pipe_is_undecidable(_: &Model, error: &Error) -> bool {
+/// Refused `Undecidable` with the one record `order along a crossing`, its two
+/// points the flat's corner on the flange's rim at the back, below the axis,
+/// within `1e-9`, and a point on the lead's side `x = -0.3` more than `1e31`
+/// back along `-y`, where the loop the flat cuts the rim in reaches it.
+fn the_order_of_the_back_corner_and_a_meet_far_along_the_flat_is_undecidable(
+    _: &Model,
+    error: &Error,
+) -> bool {
     let Error::Undecidable { records } = error else {
         return false;
     };
-    records
-        .records()
-        .iter()
-        .map(|record| record.predicate())
-        .eq([SIDE_OF_CYLINDER])
+    let [record] = records.records() else {
+        return false;
+    };
+    let [one, other] = record.inputs() else {
+        return false;
+    };
+    let below_the_axis = 3.0 - (2.9_f64.powi(2) - 2.5_f64.powi(2)).sqrt();
+    let the_back_corner = [-1.23, -2.27, below_the_axis];
+    let is_far_back_on_the_lead = |point: &Point| {
+        let [x, y, _] = point.enclosure();
+        (x.lo() + 0.3).abs() < 1e-9 && (x.hi() + 0.3).abs() < 1e-9 && y.hi() < -1e31
+    };
+    record.predicate() == ALONG_A_CROSSING
+        && ((is_within_1e_9_of(one, the_back_corner) && is_far_back_on_the_lead(other))
+            || (is_within_1e_9_of(other, the_back_corner) && is_far_back_on_the_lead(one)))
 }
 
 /// Refused `Undecidable` with the one record `side of plane`, its one point

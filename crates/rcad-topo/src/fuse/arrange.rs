@@ -3965,12 +3965,15 @@ impl<'f> Arrangement<'f> {
     /// solved from them or read out of the model.
     ///
     /// A corner with three or more surfaces round it is solved from three of
-    /// them when that succeeds (`derive_a_corner`), and read out of the model
-    /// and still asked when it does not (§471.3). Either way every surface
-    /// round it is asked about the corner grown by the room writing it down
-    /// cost plus the room `validate` allows a corner of its solid off that
-    /// surface (`Model::room_a_corner_of_this_solid_gets`, §368); one that
-    /// proves it off is a refusal
+    /// them (`derive_a_corner`), unless its faces fall into two fans that touch
+    /// there, each with fewer than three surfaces, and no edge left out adds
+    /// one: that corner is read out of the model, never solved, and still
+    /// asked (`place_a_corner`, §471.3).
+    /// Either way every surface round it is asked about the corner grown by
+    /// the room writing it down cost plus the room `validate` allows a corner
+    /// of its solid off that surface
+    /// (`Model::room_a_corner_of_this_solid_gets`, §368); one that proves it
+    /// off is a refusal
     /// ([`BakedCorner::around`](super::bake::BakedCorner)). So each of the
     /// three passes through the corner's box grown by that room.
     /// **That is a room across each plane**, which is where the room is a room
