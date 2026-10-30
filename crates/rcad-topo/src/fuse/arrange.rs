@@ -5287,9 +5287,7 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::as_three_planes_through_one_line_say`]), two meets of a
     /// plane's line on a pipe with two planes that cross it in parallel lines
     /// ([`Arrangement::as_two_cuts_crossing_the_plane_in_parallel_lines_say`]),
-    /// which side of one plane cutting a plane's loop a node on another lies
-    /// ([`Arrangement::as_the_side_of_one_cut_the_other_is_on_says`]), where a
-    /// second plane cuts a plane's loop
+    /// where a second plane cuts a plane's loop
     /// ([`Arrangement::as_a_flat_cut_through_the_loop_says`]) and where two
     /// parallel planes cut it
     /// ([`Arrangement::as_two_parallel_cuts_through_the_loop_say`]) only where
@@ -5302,6 +5300,8 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::as_a_corner_beside_a_flat_cut_through_the_loop_says`])
     /// or either side of one
     /// ([`Arrangement::as_a_corner_between_the_two_meets_of_one_cut_says`]),
+    /// and which side of one plane cutting a plane's loop a node on another
+    /// lies ([`Arrangement::as_the_side_of_one_cut_the_other_is_on_says`]),
     /// is asked only where the policy would refuse.** Asked before the policy,
     /// the second kept a tolerant fuse of a cube whose edges run through a
     /// frustum's far rim from answering: it put the corner and the meet a
@@ -5317,7 +5317,10 @@ impl<'f> Arrangement<'f> {
     /// `ResultIsNotManifold` by the union both ways round and by the bar less
     /// the block, and at radius `17.92` `CannotMeshAFace`, where read as one
     /// point every fuse answers with its volume
-    /// (`tests/a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`).
+    /// (`tests/a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`). The
+    /// last proves the two meets of a cube's corner on a ball a rounding
+    /// apart, which a tolerant policy reads as one point; its doc says what
+    /// that broke (Q2988).
     ///
     /// **A refusal is filed under what its enclosure measures.** Along an axis
     /// it is a step between two boxes, and across a bend the same step read
@@ -5411,12 +5414,6 @@ impl<'f> Arrangement<'f> {
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) =
                 self.as_two_cuts_crossing_the_plane_in_parallel_lines_say(crossing, first, second)
-        {
-            decided = proved;
-        }
-        if matches!(decided, Decision::Undecidable { .. })
-            && let Some(proved) =
-                self.as_the_side_of_one_cut_the_other_is_on_says(crossing, first, second)
         {
             decided = proved;
         }
@@ -5552,6 +5549,7 @@ impl<'f> Arrangement<'f> {
             .or_else(|| {
                 self.as_a_corner_between_the_two_meets_of_one_cut_says(crossing, first, second)
             })
+            .or_else(|| self.as_the_side_of_one_cut_the_other_is_on_says(crossing, first, second))
     }
 
     /// Which of two nodes on a crossing comes first along it, from their boxes
@@ -6470,6 +6468,19 @@ impl<'f> Arrangement<'f> {
     /// Only a node that stands for one meet is read, as in
     /// [`Arrangement::as_the_quadric_says`], and both starts are asked, as in
     /// [`the_lower_meet_first_round_the_loop`].
+    ///
+    /// **It is asked only where the policy would refuse**
+    /// ([`Arrangement::order_along`]). Which plane is `M`, and which range
+    /// the starts must be clear of, change with which node is first, so it
+    /// can prove a pair one way round and say nothing the other. A cube cut
+    /// by a ball through its corner has the corner's three planes meet a
+    /// rounding off the ball, and its two meets round the loop one face cuts
+    /// the ball in, a rounding apart, were proved in order one way. Asked
+    /// before the policy, the other way round was left to the tolerant
+    /// policy, which read the two as one point, so the order the loop was
+    /// sorted in no longer held between those two neighbours and the fuse
+    /// panicked
+    /// (`tests/two_nodes_merged_on_a_closed_crossing_under_a_tolerant_policy.rs`).
     ///
     /// The LED of `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step` is the shape
     /// (Q2988). Its flange's front, normal `(0, 1, −1.158e−15)` at offset
