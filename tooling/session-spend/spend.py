@@ -123,12 +123,18 @@ def load(root, repo, since, until, only=None):
     session that was warned on Sunday and went on spending on Monday is the
     whole subject of the `warnings` report, and dropping the warning would move
     that money into the bucket for sessions nothing ever told.
+
+    `only` is one substring, or several joined by commas, matched against a
+    transcript's own path — a lane's branch name, or a session id, so a chosen
+    set of sessions across several trees is one call rather than one scratch
+    script per audit (§396.1's own nine-vs-ten count needed exactly this).
     """
+    wanted = [o for o in (only or "").split(",") if o]
     responses = []
     results = {}
     warnings = collections.defaultdict(list)
     for path in transcript_files(root, repo):
-        if only and only not in path:
+        if wanted and not any(o in path for o in wanted):
             continue
         is_lane = "subagents" in path
         session = os.path.basename(path)[:8]
@@ -1497,7 +1503,7 @@ def main(argv):
     if len(argv) < 5:
         print(__doc__)
         print(f"usage: spend.py <transcript-root> <repo-key> <since> <until> "
-              f"[{'|'.join(REPORTS)}|all] [lane-substring]", file=sys.stderr)
+              f"[{'|'.join(REPORTS)}|all] [substring[,substring...]]", file=sys.stderr)
         return 2
     root, repo, since, until = argv[1:5]
     which = argv[5] if len(argv) > 5 else "all"
@@ -1512,7 +1518,7 @@ def main(argv):
         print("no transcripts in that window", file=sys.stderr)
         return 1
     if only:
-        print(f"lane filter: {only}")
+        print(f"filter: {only}")
     total = banner(responses, window)
 
     wanted = list(REPORTS) if which == "all" else [which]
