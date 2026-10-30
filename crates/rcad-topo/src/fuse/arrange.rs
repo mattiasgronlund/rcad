@@ -17120,6 +17120,34 @@ fn how_a_crossing_runs(
     {
         return how_an_endless_bend_runs(surface, partner, &flat, &cone, at, log);
     }
+    // Two mirror images of one slope with each apex inside the other cross in
+    // two flat cuts of either that never meet, and `walk` marches each whole
+    // curve as one of those flat surfaces' cut of the cone that sorts first,
+    // so a branch of a hyperbola, or a parabola, is ordered as that flat
+    // surface's endless bend across that cone.
+    if let (Surface::Cone(one), Surface::Cone(other)) = (surface, partner)
+        && let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run()
+        && let Some((flat, cone)) =
+            one.the_flat_cut_of_a_mirror_image_held_apart_from_it(other, picked_by)?
+    {
+        match how_a_plane_leans_against_a_cone(&flat, &cone) {
+            Decision::Zero | Decision::Neg => {
+                return how_an_endless_bend_runs(surface, partner, &flat, &cone, at, log);
+            }
+            Decision::Pos => {}
+            Decision::Undecidable { .. } | _ => {
+                return Err(gave_up(
+                    A_PLANE_AGAINST_A_CONE,
+                    &[
+                        PredicatePoint::from(flat.normal().components()),
+                        PredicatePoint::from(cone.axis().direction().components()),
+                    ],
+                    Measures::Length,
+                    log,
+                ));
+            }
+        }
+    }
     // Everything left is either a conic or a quartic. A conic is ordered by one
     // determinant: three points on a convex curve run round it in the order
     // they wind (§34.5). A quartic is ordered by one only where it runs once
@@ -19951,6 +19979,23 @@ fn a_plane_and_a_cone<'s>(one: &'s Surface, other: &'s Surface) -> Option<(&'s P
 /// Its part along `w` is `−2W·s²·(y·w)`, which a normal square to `flat` would
 /// make nothing, and that needs `y·w = 0`, which on the cone is the apex
 /// alone, and the apex is off `flat`.
+///
+/// It holds too for two mirror images of one slope with each apex inside the
+/// other, where `flat` is the one of their two flat cuts `walk` marches the
+/// run along and `cone` the cone that sorts first
+/// ([`Cone::the_flat_cut_of_a_mirror_image_held_apart_from_it`]). Such a run
+/// reaches here only as a parabola or a branch, so `n × w` is not nothing, as
+/// above. Write the first cone's form as `Q`, the flat surface halfway as `P`
+/// and the second flat surface as `F`, as `intersect` does, with `N` the
+/// square of the gap between the apexes: the other cone's form is
+/// `Q + P·F/N²`. On the cut by `P` its gradient is then `∇Q + F·∇P/N²`, and
+/// the two gradients' cross product is `(F/N²)(∇Q × ∇P)`. `F` is never
+/// nothing there, since the two cuts never meet, and `∇Q × ∇P` is nothing only
+/// where the halfway surface is tangent to the first cone, which needs that
+/// cone's apex on it, and the halfway surface holds neither apex. On the cut
+/// by `F` the same reads with `P` and `F` swapped, and the first apex is off
+/// `F` too: `F` there is `−N` times `Q` at the other apex, which is below zero
+/// with that apex inside the first.
 fn how_an_endless_bend_runs(
     surface: &Surface,
     partner: &Surface,
