@@ -22241,6 +22241,69 @@ mod tests {
         );
     }
 
+    /// The planes `x = 0` and `y = 0` of the test above, each tilted by a
+    /// hair and stored with the normals `(1, 2⁻²⁰⁰, 2⁻³⁰⁰)` and
+    /// `(2⁻²⁰⁰, 1, 2⁻²⁵⁰)`, share a line that crosses the same pipe within
+    /// `2⁻²⁴⁰` of `(0, 0, ±4)`. So a partner through `(0, 0, a)` for `|a|`
+    /// other than 4 puts each crossing on the side its own predicate puts
+    /// `(0, 0, ±4)`. The tilts leave tails on every exact quantity, and the
+    /// square of how far the meet is off the axis has products of two tails
+    /// below `2⁻⁹⁶⁹`, which no `f64` product holds exactly. The line a
+    /// flange's flat and its front share has such tails where it crosses the
+    /// rim of `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step`, and the far box of
+    /// that LED was refused `Undecidable` there (Q3017).
+    #[test]
+    fn a_plane_puts_each_place_a_line_of_two_tilted_planes_crosses_a_pipe_on_its_side() {
+        let pipe = Cylinder::new(
+            Axis::new(Point::new(-100.0, -1.0, -100.0), Vector::new(1.0, 0.0, 1.0))
+                .expect("an axis"),
+            3.0,
+        )
+        .expect("a positive radius");
+        let hair = |power: i32| 2f64.powi(power);
+        let [one, other] =
+            [[1.0, hair(-200), hair(-300)], [hair(-200), 1.0, hair(-250)]].map(|normal| {
+                Plane::from_point_and_normal_as_written(Point::origin(), Vector::from(normal))
+                    .expect("a plane")
+            });
+        assert_eq!(
+            one.normal().components(),
+            [1.0, hair(-200), hair(-300)],
+            "the tilt is stored as written"
+        );
+        let round = |z: f64| {
+            PredicatePoint::Constructed([
+                Interval::new(-1e-9, 1e-9).expect("an interval"),
+                Interval::new(-1e-9, 1e-9).expect("an interval"),
+                Interval::new(z - 1e-9, z + 1e-9).expect("an interval"),
+            ])
+        };
+        for a in [0.0, 2.0, -2.0, 8.0, -8.0] {
+            for [k, m] in [[0.0, 0.0], [3.0, 0.0], [0.0, 1.0], [-2.0, 5.0]] {
+                for facing in [1.0, -1.0] {
+                    let partner = Plane::from_point_and_normal(
+                        Point::from([0.0, 0.0, a]),
+                        Vector::new(facing * k, facing * m, facing),
+                    )
+                    .expect("a plane");
+                    for z in [4.0, -4.0] {
+                        assert_eq!(
+                            Arrangement::side_of_a_plane_where_a_line_crosses_a_pipe(
+                                &partner,
+                                &one,
+                                &other,
+                                &pipe,
+                                round(z),
+                            ),
+                            Some(partner.side_of_point(PredicatePoint::from([0.0, 0.0, z]))),
+                            "through (0, 0, {a}) facing ({facing}, {k}, {m}), at (0, 0, {z})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// The top of a cube a pyramid pokes up through is cut by the pyramid's
     /// four side faces, and each hands it the apex, a corner with four planes
     /// round it ([`BakedFace::corners_of_the_solids_cutting_it`]). Every node
