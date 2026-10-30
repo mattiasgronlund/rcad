@@ -4559,8 +4559,8 @@ impl<'f> Arrangement<'f> {
         }
     }
 
-    /// Count each loop a plane cuts a pipe in from the one node at the place
-    /// it starts, where no other node can lie between the two: the
+    /// Count each loop a plane cuts a pipe or a ball in from the one node at
+    /// the place it starts, where no other node can lie between the two: the
     /// `named_the_start` of [`HowItRuns::RoundAClosedCurve`]. That is the one
     /// node whose box holds the walked start, or, where no node's box holds
     /// it, the one whose box lies inside `node`, the box the start is held as.
@@ -4611,18 +4611,35 @@ impl<'f> Arrangement<'f> {
     /// pipe of radius `r` in is an ellipse whose half axes are `r` and
     /// `r / cos θ`, for `θ` the angle between the plane's normal and the
     /// pipe's axis, so it turns most sharply at the ends of its long axis, on
-    /// a radius of `r cos θ`. Where that radius is proved to be `4d` or more
+    /// a radius of `r cos θ`. The loop a plane cuts a ball of radius `R` in is
+    /// a circle of radius `√(R² − h²)`, for `h` the plane's distance from the
+    /// ball's centre, and it turns on that radius everywhere. Where that radius
+    /// is proved to be `4d` or more
     /// ([`turns_on_four_times_the_diagonal_at_least`]), the stretch leaves the
     /// line by `d/16` at most, which is under the widest side. A node whose box
     /// is clear of the grown box is not on the stretch.
     ///
-    /// **Only a plane and a pipe**, since that radius is worked out for them
-    /// alone. A plane leaning against a pipe by a rounding cuts an ellipse
-    /// `1e16` long, whose ends turn on a radius near `1e-15`, far under a box
-    /// hundreds wide out there, and there the radius is not proved.
+    /// **Only a plane and a pipe or a ball**, since that radius is worked out
+    /// for them alone. A plane leaning against a pipe by a rounding cuts an
+    /// ellipse `1e16` long, whose ends turn on a radius near `1e-15`, far under
+    /// a box hundreds wide out there, and there the radius is not proved. A
+    /// plane that grazes a ball cuts a circle as small, and there it is not
+    /// proved either.
     ///
-    /// **Or where both boxes lie on one half of the loop**, either side of its
-    /// long axis. Going along a half moves steadily along that axis, so the
+    /// The dome of `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step`, the ball of
+    /// radius `2.5` about `(1.27, −7.37, 15)`, is the shape for a ball (Q2989).
+    /// The side of a lead, `x = −0.3`, cuts it in a circle of radius `1.9455`
+    /// walked from `(−0.30000000000000004, −7.37, 13.054466654102274)`, a
+    /// rounding off its lowest point, and the plane of the dome's rim, `y =
+    /// −7.37`, written leaning `5.55e-17` along `x`, crosses the circle there in
+    /// a box one rounding tall that misses the start. Every fuse of the LED was
+    /// refused on the order of that node against the one at the top. The ball
+    /// cut by those two planes and `z = 14.7` alone was refused on its order
+    /// against one where `z = 14.7` crosses the circle
+    /// (`a_ball_cut_by_two_planes_that_cross_where_its_circle_starts`).
+    ///
+    /// **Or where both boxes lie on one half of a pipe's loop**, either side of
+    /// its long axis. Going along a half moves steadily along that axis, so the
     /// stretch between two points of one half reaches along the axis no
     /// further than they do, and a node on the other half, or one whose box
     /// reads clear of both along the axis, is not on it
@@ -4696,11 +4713,7 @@ impl<'f> Arrangement<'f> {
         else {
             return None;
         };
-        let ([Surface::Plane(flat), Surface::Cylinder(pipe)]
-        | [Surface::Cylinder(pipe), Surface::Plane(flat)]) = &**wound_as
-        else {
-            return None;
-        };
+        let cut = ALoopAPlaneCuts::of(wound_as)?;
         let place = |each: usize| self.nodes[each].point;
         if on_it
             .iter()
@@ -4736,13 +4749,16 @@ impl<'f> Arrangement<'f> {
                 .filter(move |&&each| each != held)
                 .map(|&each| place(each))
         };
-        let clear_of_the_grown_box = turns_on_four_times_the_diagonal_at_least(flat, pipe, near)
-            && {
-                let reach = grown_by_its_widest_side(near);
-                others().all(|other| !boxes_overlap(other, reach))
+        let clear_of_the_grown_box = turns_on_four_times_the_diagonal_at_least(cut, near) && {
+            let reach = grown_by_its_widest_side(near);
+            others().all(|other| !boxes_overlap(other, reach))
+        };
+        let clear_along_one_half = || {
+            let ALoopAPlaneCuts::Ellipse { flat, pipe } = cut else {
+                return false;
             };
-        let clear_along_one_half =
-            || others().all(|other| off_the_stretch_along_one_half(flat, pipe, near, other));
+            others().all(|other| off_the_stretch_along_one_half(flat, pipe, near, other))
+        };
         (clear_of_the_grown_box || clear_along_one_half()).then_some(place(held))
     }
 
@@ -15283,32 +15299,74 @@ fn grown_by_its_widest_side(place: PredicatePoint) -> PredicatePoint {
     PredicatePoint::Constructed(sides.map(|side| side + reach))
 }
 
-/// Whether the loop `flat` cuts `pipe` in is proved to turn on no radius
-/// under four times the diagonal of `near`.
+/// A loop a plane cuts a curved surface in, where how sharply the loop turns
+/// is worked out ([`turns_on_four_times_the_diagonal_at_least`]).
+#[derive(Clone, Copy)]
+enum ALoopAPlaneCuts<'s> {
+    /// The ellipse a plane cuts a pipe in.
+    Ellipse { flat: &'s Plane, pipe: &'s Cylinder },
+    /// The circle a plane cuts a ball in.
+    Circle { flat: &'s Plane, ball: &'s Sphere },
+}
+
+impl<'s> ALoopAPlaneCuts<'s> {
+    /// The loop the pair is a plane and a pipe, or a plane and a ball, cut in,
+    /// in either order. `None` for every other pair.
+    fn of(pair: &'s [Surface; 2]) -> Option<Self> {
+        if let [Surface::Plane(flat), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Plane(flat)] = pair
+        {
+            return Some(ALoopAPlaneCuts::Ellipse { flat, pipe });
+        }
+        let ([Surface::Plane(flat), Surface::Sphere(ball)]
+        | [Surface::Sphere(ball), Surface::Plane(flat)]) = pair
+        else {
+            return None;
+        };
+        Some(ALoopAPlaneCuts::Circle { flat, ball })
+    }
+}
+
+/// Whether `cut` is proved to turn on no radius under four times the diagonal
+/// of `near`, `d`, whose square is the sum of the squares of `near`'s widths.
 ///
-/// That loop turns most sharply on a radius of `r cos θ`, for `r` the pipe's
-/// radius and `θ` the angle between the plane's normal `n` and the pipe's axis
-/// `w` ([`Arrangement::count_each_loop_from_the_node_round_its_start`]), so
-/// this asks whether `r²(n·w)² − 16d²|n|²|w|²` is above nought, for `d²` the
-/// sum of the squares of `near`'s widths. Squared, so that nothing is divided
-/// and no root is taken.
-fn turns_on_four_times_the_diagonal_at_least(
-    flat: &Plane,
-    pipe: &Cylinder,
-    near: PredicatePoint,
-) -> bool {
-    let normal = flat.normal().components().map(Interval::exactly);
-    let along = pipe.axis().direction().components().map(Interval::exactly);
-    let leans = dot_of(normal, along);
-    let radius = Interval::exactly(pipe.radius());
+/// The ellipse a plane cuts a pipe in turns most sharply on a radius of
+/// `r cos θ`, for `r` the pipe's radius and `θ` the angle between the plane's
+/// normal `n` and the pipe's axis `w`
+/// ([`Arrangement::count_each_loop_from_the_node_round_its_start`]), so this
+/// asks whether `r²(n·w)² − 16d²|n|²|w|²` is above nought.
+///
+/// The circle a plane cuts a ball of radius `R` about `c` in turns on its own
+/// radius everywhere, and the square of that is `R² − h²`, for
+/// `h = (n·c − k)/|n|` the plane's distance from `c`, where the plane is
+/// `n·x = k`. So this asks whether `R²|n|² − (n·c − k)² − 16d²|n|²` is above
+/// nought.
+///
+/// Squared and multiplied through by `|n|²`, so that nothing is divided and
+/// no root is taken.
+fn turns_on_four_times_the_diagonal_at_least(cut: ALoopAPlaneCuts, near: PredicatePoint) -> bool {
     let widths = near
         .enclosure()
         .map(|side| Interval::exactly(side.hi()) - Interval::exactly(side.lo()));
-    let room = radius * radius * leans * leans
-        - Interval::exactly(16.0)
-            * dot_of(widths, widths)
-            * dot_of(normal, normal)
-            * dot_of(along, along);
+    let sixteen_d_squared = Interval::exactly(16.0) * dot_of(widths, widths);
+    let room = match cut {
+        ALoopAPlaneCuts::Ellipse { flat, pipe } => {
+            let normal = flat.normal().components().map(Interval::exactly);
+            let along = pipe.axis().direction().components().map(Interval::exactly);
+            let leans = dot_of(normal, along);
+            let radius = Interval::exactly(pipe.radius());
+            radius * radius * leans * leans
+                - sixteen_d_squared * dot_of(normal, normal) * dot_of(along, along)
+        }
+        ALoopAPlaneCuts::Circle { flat, ball } => {
+            let normal = flat.normal().components().map(Interval::exactly);
+            let centre = ball.centre().coordinates().map(Interval::exactly);
+            let off = dot_of(normal, centre) - Interval::exactly(flat.offset());
+            let radius = Interval::exactly(ball.radius());
+            let squared = dot_of(normal, normal);
+            radius * radius * squared - off * off - sixteen_d_squared * squared
+        }
+    };
     room.sign() == Decision::Pos
 }
 
@@ -30249,5 +30307,74 @@ mod the_side_of_a_ball_at_a_point_of_a_pipe {
                 "{at:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod a_ball_cut_by_two_planes_that_cross_where_its_circle_starts {
+    //! The dome of `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step` in `rcad-step`,
+    //! the ball of radius `2.5` about `(1.27, −7.37, 15)`, cut by the side of a
+    //! lead, `x = −0.3`, written with its normal along `−x` as the file writes
+    //! it, by the plane of its rim through the ball's centre, `y = −7.37`,
+    //! leaning `5.55e-17` along `x` as the file writes it, and by a side of the
+    //! body's box, `z = 14.7` (Q2989).
+
+    use rcad_geom::{Isometry, Plane, Scale, Surface, Vector};
+    use rcad_predicates::{Policy, ProvenanceLog};
+
+    use super::super::bake::bake;
+    use super::split_a_face;
+    use crate::Model;
+
+    /// `x = −0.3` cuts the ball in a circle of radius `√(2.5² − 1.57²)`, about
+    /// `1.9455`, walked from its lowest point `(−0.30000000000000004, −7.37,
+    /// 13.054466654102274)`, a rounding off it. `y = −7.37` crosses that circle
+    /// there, in the box `[−0.3, −0.3] × [−7.37, −7.369999999999999] ×
+    /// [13.054466654102272, 13.054466654102274]`, which misses the start, and
+    /// at its top, and `z = 14.7` crosses it twice between. The sweep from the
+    /// start straddles nought for the node at the bottom whichever node it is
+    /// asked against. Before the node at a loop's start was named for a plane
+    /// and a ball as for a plane and a pipe, the face was refused on the order
+    /// along that crossing, of that node against the one at `(−0.3, −5.4477,
+    /// 14.7)`. Three circles each crossing the other two twice cut the ball
+    /// into eight pieces, each a disc.
+    #[test]
+    fn a_ball_cut_by_a_side_where_its_rim_crosses_the_sides_circle_falls_into_eight_pieces() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let ball = model
+            .add_ball(
+                2.5,
+                &Isometry::translation(Vector::new(1.27, -7.37, 15.0)).expect("a shift"),
+            )
+            .expect("a ball");
+        let mut skin = bake(
+            &model,
+            &[ball],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .expect("it bakes")
+        .swap_remove(0)
+        .faces
+        .swap_remove(0);
+        skin.cuts = [
+            [-1.0, 0.0, 0.0, -0.3],
+            [5.551_115_123_126e-17, 1.0, 0.0, 7.37],
+            [0.0, 0.0, 1.0, -14.7],
+        ]
+        .map(|coefficients| {
+            Surface::Plane(Plane::from_coefficients(coefficients).expect("a plane"))
+        })
+        .to_vec();
+        let pieces = split_a_face(&skin, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("three circles each crossing the other two twice split the ball")
+            .pieces;
+        assert_eq!(
+            pieces
+                .iter()
+                .map(|piece| piece.wires.len())
+                .collect::<Vec<_>>(),
+            [1; 8]
+        );
     }
 }
