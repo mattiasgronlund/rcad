@@ -63,11 +63,21 @@
 //!   slope and with `x = 2.34`. The two slopes cross in a line `3.1e-16` off
 //!   that plane and along it, so on the slope the two cut in parallel lines a
 //!   rounding apart, and the order now reads which of the two lines is
-//!   higher across the slope, from the stored numbers (Q2985). Every fuse now
-//!   stops refused `Undecidable` on side of sphere alone, for the points of
-//!   the rim whose side of the pipe Q2956 reads with the ball's equation:
+//!   higher across the slope, from the stored numbers (Q2985). Every fuse then
+//!   stopped refused `Undecidable` on side of sphere alone, for the points of
+//!   the rim whose side of the pipe Q2956 reads with the ball's equation, now
+//!   asked on the pipe's face which side of the ball they are on:
 //!   `(5.038, 0.1, 9.1)` for the box round the flat's corner, and
-//!   `(5.032, 0.2, 9.1)` for the box that misses the LED.
+//!   `(5.032, 0.2, 9.1)` for the box that misses the LED. They are outside it
+//!   by `4e-16` and `8e-16`, and the ball's side of a point of the pipe is now
+//!   read with the pipe's own equation, the same way turned round (Q2992).
+//!   Every fuse now stops refused `Undecidable` on side of plane, on the
+//!   body's pipe, at a node `1.8e15` up it, near `(1.07, 1.415, 1.8e15)`.
+//!   There the line the plane `x = 1.07` cuts the pipe in meets the line the
+//!   plane `y = 0.2` does, as one face writes it, normal
+//!   `(0, 1, −6.7e-16)`: two lines along the pipe that lean apart by a
+//!   rounding. It is asked against `y = 0.2` as another face writes it,
+//!   normal `(7.8e-32, 1, −6.7e-16)`, its offset `6.7e-16` from the first's.
 //! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
 //!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
 //!   rounding apart in direction. Q2938's road answers that triple, and the
@@ -90,7 +100,7 @@
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, SIDE_OF_CYLINDER, SIDE_OF_SPHERE, Vector};
+use rcad_geom::{Isometry, SIDE_OF_CYLINDER, SIDE_OF_PLANE, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -105,7 +115,8 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
-fn a_d5_led_gets_past_round_a_slope_and_stops_on_the_balls_side_of_its_rim() {
+fn a_d5_led_gets_past_the_balls_side_of_its_rim_and_stops_where_two_lines_on_its_pipe_meet_far_up()
+{
     every_fuse_refuses(D5, &[[0.04, 0.0, 4.0], FAR_OFF], |error| {
         let Error::Undecidable { records } = error else {
             return false;
@@ -117,13 +128,13 @@ fn a_d5_led_gets_past_round_a_slope_and_stops_on_the_balls_side_of_its_rim() {
             return false;
         };
         let [x, y, z] = at.enclosure();
-        let on_the_rim_where_y_is_a_tenth_or_a_fifth = 5.03 < x.lo()
-            && x.hi() < 5.04
-            && 0.09 < y.lo()
-            && y.hi() < 0.21
-            && 9.1 <= z.lo()
-            && z.hi() < 9.1001;
-        record.predicate() == SIDE_OF_SPHERE && on_the_rim_where_y_is_a_tenth_or_a_fifth
+        let where_x_is_1_07_and_y_is_a_fifth_meet_far_up_the_pipe = 1.06 < x.lo()
+            && x.hi() < 1.08
+            && 1.41 < y.lo()
+            && y.hi() < 1.42
+            && 1.8e15 < z.lo()
+            && z.hi() < 1.9e15;
+        record.predicate() == SIDE_OF_PLANE && where_x_is_1_07_and_y_is_a_fifth_meet_far_up_the_pipe
     });
 }
 
