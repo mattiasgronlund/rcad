@@ -18476,6 +18476,46 @@ check-queue-api-selftest:
     grep -qxF "$second_of_two: todo -> lane:lane-bundle-later, held for lane-bundle-later until done, drop or park" <<<"$got" \
         || fail "the second take onto the branch its own bundle already holds did not report the usual take message"
 
+    # Q2884: `take_step` left out of its met check only holds on the branch
+    # being taken onto, so a bundle's rows, still sharing the branch they
+    # were first taken onto, met each other's hold when one was taken again
+    # alone onto a new branch.
+    retake_wt="$root/rcad-worktrees/retake"
+    g "$hub" worktree add -q -b retake "$retake_wt" main
+    retake_first=$(q "$retake_wt" add 2 opus docs/c.md "from/- the first row of a bundle, retaken alone onto a new branch §230") \
+        || fail "add for the first row of the retake pair failed"
+    retake_second=$(q "$retake_wt" add 2 opus docs/c.md "from/- the second row of that bundle, left on the old branch §230") \
+        || fail "add for the second row of the retake pair failed"
+    g "$retake_wt" commit -qam "two rows sharing docs/c.md for the retake test"
+    got=$(q "$retake_wt" apply take "$retake_first" lane-retake-old + take "$retake_second" lane-retake-old 2>&1) \
+        || fail "the first bundle take, in one apply, was refused"
+    got=$(q "$retake_wt" take "$retake_first" lane-retake-new 2>&1) \
+        || fail "taking one row of a bundle alone onto a new branch was refused by its partner's hold on the bundle's old branch"
+    grep -qxF "$retake_first: lane:lane-retake-old -> lane:lane-retake-new, held for lane-retake-new until done, drop or park" <<<"$got" \
+        || fail "the solo re-take did not report the usual take message"
+    [ "$(awk -v id="$retake_second" '$1 == id { print $3 }' "$retake_wt/docs/queue.md")" = "lane:lane-retake-old" ] \
+        || fail "the partner left on the old branch changed state"
+
+    # Q2884: the same bundle, both rows still held together on their old
+    # branch, taken again onto a new branch in one apply -- the second
+    # step's meets check used to read only the claims file, which does not
+    # yet carry the first step's own take within the same apply.
+    rebundle_wt="$root/rcad-worktrees/rebundle"
+    g "$hub" worktree add -q -b rebundle "$rebundle_wt" main
+    rebundle_first=$(q "$rebundle_wt" add 2 opus docs/d.md "from/- the first row of a two-row bundle, retaken together §230") \
+        || fail "add for the first row of the rebundle failed"
+    rebundle_second=$(q "$rebundle_wt" add 2 opus docs/d.md "from/- the second row of that bundle, retaken together §230") \
+        || fail "add for the second row of the rebundle failed"
+    g "$rebundle_wt" commit -qam "two rows sharing docs/d.md for the rebundle test"
+    got=$(q "$rebundle_wt" apply take "$rebundle_first" lane-rebundle-old + take "$rebundle_second" lane-rebundle-old 2>&1) \
+        || fail "the first bundle take, in one apply, was refused"
+    got=$(q "$rebundle_wt" apply take "$rebundle_first" lane-rebundle-new + take "$rebundle_second" lane-rebundle-new 2>&1) \
+        || fail "taking the bundle again, in one apply, onto a new branch was refused"
+    [ "$(awk -v id="$rebundle_first" '$1 == id { print $3 }' "$rebundle_wt/docs/queue.md")" = "lane:lane-rebundle-new" ] \
+        || fail "the first row of the rebundle did not land on the new branch"
+    [ "$(awk -v id="$rebundle_second" '$1 == id { print $3 }' "$rebundle_wt/docs/queue.md")" = "lane:lane-rebundle-new" ] \
+        || fail "the second row of the rebundle did not land on the new branch"
+
     # Q2640 (was/Q293, §230.3, §263, §424.7): `writes` sets a row's write set
     # in place, on a todo row or a held one, where `narrow` cannot reach it
     # because the new set is not inside the one the row was taken with. The
