@@ -5322,6 +5322,24 @@ impl<'f> Arrangement<'f> {
     /// apart, which a tolerant policy reads as one point; its doc says what
     /// that broke (Q2988).
     ///
+    /// **Where the policy refuses the own boxes' answer, a length, it is asked
+    /// how far apart a point of one tighter box may be from a point of the
+    /// other, where the two overlap**
+    /// ([`Arrangement::how_far_apart_the_narrowed_boxes_may_be`]). Each tighter
+    /// box holds the node's point, so that bounds the step between the two
+    /// points as well, and how far a merge of them moves a point. The record of
+    /// a merge taken on it names the tighter boxes, which its enclosure is
+    /// measured from. The pitch cones of a pair of mitre gears turned by
+    /// [`rcad_geom::Isometry::rotation`] have, on each near cap, the meet of
+    /// that cap and both cones in a box `3.65e-8` along `y`, and a meet of both
+    /// caps and one cone `2.1e-8` from one end of it. Narrowed, the two share
+    /// an end and may be `1.1e-16` apart. Asked of the own boxes alone, a
+    /// tolerant policy at working size `100` refused every fuse of the two
+    /// (Q2946). Asked in place of the own boxes, it changed the figure of
+    /// merges the own boxes' answer already covers, which
+    /// `tests/two_nodes_merged_on_a_closed_crossing_under_a_tolerant_policy.rs`
+    /// reads against how far apart the own boxes may be.
+    ///
     /// **A refusal is filed under what its enclosure measures.** Along an axis
     /// it is a step between two boxes, and across a bend the same step read
     /// against `n × w`, the plane's normal and the cone's axis, both of length
@@ -5355,6 +5373,21 @@ impl<'f> Arrangement<'f> {
             read_as_one_point.drain_into(log);
             return Ok(settled);
         }
+        if measures == Measures::Length
+            && let Some((tight, apart)) =
+                self.how_far_apart_the_narrowed_boxes_may_be(first, second)
+            && let Ok(settled) = must_decide(
+                Decision::Undecidable { enclosure: apart },
+                ALONG_A_CROSSING,
+                &tight,
+                Measures::Length,
+                policy,
+                &mut read_as_one_point,
+            )
+        {
+            read_as_one_point.drain_into(log);
+            return Ok(settled);
+        }
         if let Some(proved) = self
             .as_a_reading_asked_after_the_policy_says(crossing, first, second)
             .or_else(|| {
@@ -5364,6 +5397,23 @@ impl<'f> Arrangement<'f> {
             return Ok(proved);
         }
         must_decide(decided, ALONG_A_CROSSING, &nodes, measures, policy, log)
+    }
+
+    /// The two nodes' tighter boxes ([`Arrangement::narrowed_box_of`]), and
+    /// how far apart a point of one may be from a point of the other, where
+    /// either is tighter than the node's own and the two overlap.
+    fn how_far_apart_the_narrowed_boxes_may_be(
+        &self,
+        first: usize,
+        second: usize,
+    ) -> Option<([PredicatePoint; 2], f64)> {
+        let tight = [first, second].map(|node| self.narrowed_box_of(node));
+        if tight == [first, second].map(|node| self.nodes[node].point)
+            || !boxes_overlap(tight[0], tight[1])
+        {
+            return None;
+        }
+        Some((tight, how_far_apart_two_boxes_may_be(tight[0], tight[1])))
     }
 
     /// Which of two nodes on a crossing comes first along it, by every reading
@@ -5556,9 +5606,8 @@ impl<'f> Arrangement<'f> {
     /// and without asking a policy.
     ///
     /// **Where their own boxes cannot say, their tighter boxes are asked**
-    /// ([`Arrangement::narrowed_box_of`]), and a proved [`Decision::Pos`] or
-    /// [`Decision::Neg`] is taken from them, or how far apart they may be where
-    /// they overlap (below). Each tighter box holds the same
+    /// ([`Arrangement::narrowed_box_of`]), and only a proved [`Decision::Pos`]
+    /// or [`Decision::Neg`] is taken from them. Each tighter box holds the same
     /// point as the node's own, so a sign proved over the two of them is the
     /// order of those two points. A node's own box is what every other
     /// question here reads, and what the record of a refusal names.
@@ -5602,19 +5651,6 @@ impl<'f> Arrangement<'f> {
     /// and the leaning cone's cap plane cross the rim `4.15e-16` apart, and the
     /// union with the upright cone first was refused on those two until a
     /// cone's loop was turned too (Q2910).
-    ///
-    /// **Where the tighter boxes overlap and say nothing either, how far apart
-    /// a point of one may be from a point of the other is handed back**, a
-    /// length, where the own boxes' answer is a length too and this is less.
-    /// It bounds the step between the two points as that answer does, and it
-    /// is how far a merge of them moves a point (§417.7). The record still
-    /// names the own boxes. The pitch cones of a pair of mitre gears turned by
-    /// [`rcad_geom::Isometry::rotation`] have, on each near cap, the meet of
-    /// that cap and both cones in a box `3.65e-8` along `y`, and a meet of both
-    /// caps and one cone `2.1e-8` from one end of it. Narrowed, the two share
-    /// an end and may be `1.1e-16` apart. Asked of the own boxes instead, a
-    /// tolerant policy at working size `100` refused every fuse of the two
-    /// (Q2946).
     ///
     /// **Hands back what an undecided answer's enclosure measures, alongside
     /// the answer**, so [`Arrangement::order_along`] does not ask
@@ -5668,15 +5704,6 @@ impl<'f> Arrangement<'f> {
             )
         {
             return Ok((turned, measures));
-        }
-        if let Decision::Undecidable { enclosure } = decided
-            && measures == Measures::Length
-            && boxes_overlap(tight[0], tight[1])
-        {
-            let apart = how_far_apart_two_boxes_may_be(tight[0], tight[1]);
-            if apart < enclosure {
-                return Ok((Decision::Undecidable { enclosure: apart }, Measures::Length));
-            }
         }
         Ok((decided, measures))
     }
