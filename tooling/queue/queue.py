@@ -316,10 +316,14 @@ def now():
 
 
 class Batch:
-    """The ids this batch's own `add` steps have handed out, for `@1`, `@2`, ... to resolve against."""
+    """The ids this batch's own `add` steps have handed out, for `@1`, `@2`, ... to resolve against,
+    and the holds this batch's own `take` steps have written so far, in the shape `claims.holds()`
+    returns, for a later `take` step in the same apply to read: `apply` only appends its events to the
+    claims file after every step has run, so `claims.holds()` alone never sees them (§424.10)."""
 
     def __init__(self):
         self.added_ids = []
+        self.takes = {}
 
 
 def apply(here, args):
@@ -426,15 +430,28 @@ def take_step(queue, claims, here, args, batch):
     # holds still resets to the column, as before this fix.
     written = row.write_set if hold else latest_writes(here.claims).get(row_id, row.write_set)
     entries = entries_of(written)
-    others = {other: theirs for other, theirs in claims.holds().items()
-              if other != row_id and theirs["branch"] != branch}
+    # Holds on the branch being taken onto are left out (Q1840, §424.10), and
+    # so are holds on the branch the row is held on *now*: a bundle's rows
+    # share that branch too, so each one's own current hold would otherwise
+    # trip every partner's meets check when the bundle is taken again onto a
+    # new branch (Q2884). `batch.takes` overlays this same apply's own
+    # earlier `take` steps, since `apply` only appends its events to the
+    # claims file after every step has run, so a later step in the same
+    # batch cannot otherwise see an earlier one's take (§424.10).
+    merged = {**claims.holds(), **batch.takes}
+    others = {other: theirs for other, theirs in merged.items()
+              if other != row_id and theirs["branch"] != branch
+              and not (hold and theirs["branch"] == hold["branch"])}
     met = the_hold_it_meets(row_id, entries, others) if entries else ""
     if met:
         raise Refused(f"nothing written: {row_id}'s write set {written} meets a running hold, "
                       f"as the fill says it:\n    {met}")
     queue.replace(row, row.with_state(f"lane:{branch}"))
     message = f"{row_id}: {row.state} -> lane:{branch}, held for {branch} until done, drop or park"
-    return queue, message, ("take", row_id, now(), here.top, branch, written, row.tier)
+    event = ("take", row_id, now(), here.top, branch, written, row.tier)
+    batch.takes[row_id] = {"time": event[2], "tree": event[3], "branch": event[4], "write_set": event[5],
+                            "taken": event[5], "tier": event[6]}
+    return queue, message, event
 
 
 def refuse_unless_ready(queue, row, branch):
