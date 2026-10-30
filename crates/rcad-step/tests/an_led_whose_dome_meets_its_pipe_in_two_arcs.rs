@@ -92,10 +92,12 @@
 //!   round the front corner `(-0.23, -6.35, 2)` from `z = -0.767` to `3.068`.
 //!   Bake solved that corner from the flat, the flange's front and the body's
 //!   front disc, the last two one plane written twice a rounding apart (Q2967).
-//!   It now reads a corner in two fans of faces out of the model (Q2939), and
-//!   every fuse stops on the flange's front, face slot 8, the plane
-//!   `y = -6.35`, refused `CannotTellTheCellsOfAFaceApart`, the refusal Q2974
-//!   traces.
+//!   It now reads a corner in two fans of faces out of the model and never
+//!   solves it (Q2939), and every fuse stops on the flange's front, face slot
+//!   8, the plane `y = -6.35`, refused `CannotTellTheCellsOfAFaceApart`: the
+//!   refusal Q2974 and Q2982 cleared from the fronts of two LEDs of
+//!   `a_led_whose_flat_touches_its_body_at_a_corner.rs`, but not from this
+//!   one's.
 //!
 //! When either answers, its test turns into the volume check of commit
 //! `f179ca02a`: what the box and the LED share is the box's part inside the
