@@ -121,6 +121,15 @@ runs `pre-gate`'s few seconds first, and then `gate-lane` refuses.
   and the run crossed 2026-10-25 into 2026-10-26 local time while `test` alone
   ran 931.7s, so a date-boundary flake is one live hypothesis and an unrelated
   regression is another; neither is checked here. Filed as a follow-up.
+
+  **Q2820 ruled the date out.** On this machine at `e57b051af`, all four pass.
+  `gate-fresh` on the same commit, run from 13:16 to 13:49 UTC on 2026-10-30,
+  failed on the same four again, and on `check-queue` too. So the date is not
+  the cause. The run is far from midnight, and the code of these recipes is
+  unchanged since `11b049277`. Quiet mode printed only the first failure's text.
+  It is `check-status-selftest` saying a row that names a crash file's full
+  40-digit hash did not name the group, which is about a fixture, not a date.
+  What the container has or lacks that breaks them is Q3011's to trace.
 - **The gate's own selftests run nested gates.** `check-gate-verdicts-selftest`
   already ran its gates in a scratch repository, with `GIT_DIR` and
   `GIT_WORK_TREE`. `check-gate-summary-selftest` now does the same. Its gates
