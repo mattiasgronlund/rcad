@@ -13392,7 +13392,7 @@ impl<'f> Arrangement<'f> {
     /// the point where its `seam` plane crosses the circle the two meet in, the
     /// crossing whose box is `at` ([`BakedCorner::seam_plane`], §294.9).
     /// `None` where it is not that shape, where the box does not say which of
-    /// the two crossings it is, or where a product would round.
+    /// the two crossings it is, or where the arithmetic cannot tell.
     ///
     /// A round bar of radius `1/2` with its axis at `(1.5, 1)`, in the L plate
     /// whose inner side lies along `x = 2`, both turned `π/2` about `z`, has
@@ -13436,9 +13436,10 @@ impl<'f> Arrangement<'f> {
 
     /// The side of `partner` at the point whose box is `at` where the line
     /// `cap` and `through` share crosses `pipe`; `None` where the box does not
-    /// say which of the two crossings it is, `partner` runs along the line, or
-    /// a product would round. The box must hold the crossing it is asked
-    /// about.
+    /// say which of the two crossings it is, `partner` runs along the line, a
+    /// product would round before the meet is worked out, or a sign after it
+    /// is too near nought for an interval to tell. The box must hold the
+    /// crossing it is asked about.
     ///
     /// **The corner is `Y + t·e` for the `t` the pipe and the box say.** Let
     /// the cap be `n_c·p = d_c`, `through` `n_s·p = d_s` and `partner`
@@ -13476,6 +13477,19 @@ impl<'f> Arrangement<'f> {
     /// **A line that slants across the pipe is read too** (Q3001). The cap's
     /// circle was all this read before, and the root it took was the sign of
     /// `e·(p − o)`, which is `g·(p − o)` only where `e·w` is nought.
+    ///
+    /// **Where a product in `C·D²` or `B·D` would round, its sign is read off
+    /// an interval round each exact factor** (Q3017). Planes stored with
+    /// components far below a rounding of one leave each exact quantity a
+    /// tail of tiny entries, and squaring `(Y − o) × w` multiplies two of them
+    /// below `2⁻⁹⁶⁹`, under which no product of two `f64` is held exactly. The
+    /// interval rounds outward, so a sign it gives is the exact one, and it is
+    /// a few roundings of the terms wide, so it says nothing only where `C`
+    /// or `B` is within those of nought.
+    /// The far box of `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step` has the
+    /// line its flange's flat `(−1, −2.1e−32, 2.6e−47)` and its front share
+    /// meet its disc's plane inside the rim, and was refused `Undecidable`
+    /// "side of plane" at the corner below the axis for want of `C·D²`.
     fn side_of_a_plane_where_a_line_crosses_a_pipe(
         partner: &Plane,
         cap: &Plane,
@@ -13526,18 +13540,37 @@ impl<'f> Arrangement<'f> {
             &exactly_scaled_across(&exact(origin), &negated(&along_the_line))?,
         );
         let square_to_the_axis = exactly_crossed(&off_the_axis, &along)?;
-        let radius_squared = exactly_scaled(&[pipe.radius()], pipe.radius())?;
-        let pipe_at_the_meet = expansion_sign(&exactly_added(
-            &exactly_dotted_across(&square_to_the_axis, &square_to_the_axis)?,
-            &negated(&exactly_multiplied(
-                &exactly_multiplied(&radius_squared, &exactly_dotted_across(&along, &along)?)?,
-                &exactly_multiplied(&along_the_line, &along_the_line)?,
-            )?),
-        ));
-        let lean = expansion_sign(&exactly_dotted_across(
-            &square_to_the_axis,
-            &exactly_crossed(&line, &along)?,
-        )?);
+        let held = |vector: &[Vec<f64>; 3]| {
+            vector
+                .each_ref()
+                .map(|component| held_as_an_interval(component))
+        };
+        let pipe_at_the_meet = sign_exactly_or_of_its_box(
+            || {
+                let radius_squared = exactly_scaled(&[pipe.radius()], pipe.radius())?;
+                Some(exactly_added(
+                    &exactly_dotted_across(&square_to_the_axis, &square_to_the_axis)?,
+                    &negated(&exactly_multiplied(
+                        &exactly_multiplied(
+                            &radius_squared,
+                            &exactly_dotted_across(&along, &along)?,
+                        )?,
+                        &exactly_multiplied(&along_the_line, &along_the_line)?,
+                    )?),
+                ))
+            },
+            || {
+                let (square, radius) =
+                    (held(&square_to_the_axis), Interval::exactly(pipe.radius()));
+                let along_the_line = held_as_an_interval(&along_the_line);
+                dot_of(square, square)
+                    - radius
+                        * radius
+                        * dot_of(held(&along), held(&along))
+                        * along_the_line
+                        * along_the_line
+            },
+        );
         let times = |one: Decision, other: Decision| {
             if one == other {
                 Decision::Pos
@@ -13548,9 +13581,19 @@ impl<'f> Arrangement<'f> {
         if pipe_at_the_meet == Decision::Neg {
             return Some(times(which_root, way));
         }
-        if !matches!(pipe_at_the_meet, Decision::Pos | Decision::Zero)
-            || !matches!(lean, Decision::Pos | Decision::Neg)
-        {
+        if !matches!(pipe_at_the_meet, Decision::Pos | Decision::Zero) {
+            return None;
+        }
+        let lean = sign_exactly_or_of_its_box(
+            || exactly_dotted_across(&square_to_the_axis, &exactly_crossed(&line, &along)?),
+            || {
+                dot_of(
+                    held(&square_to_the_axis),
+                    cross_of_intervals(held(&line), held(&along)),
+                )
+            },
+        );
+        if !matches!(lean, Decision::Pos | Decision::Neg) {
             return None;
         }
         let the_meet_is_the_corner =
@@ -18403,6 +18446,20 @@ fn held_as_an_interval(expansion: &[f64]) -> Interval {
         .fold(Interval::exactly(0.0), |so_far, &entry| {
             so_far + Interval::exactly(entry)
         })
+}
+
+/// The sign of one value, worked out `exactly`, or, where a product in that
+/// would round, the sign of the interval `held` puts round the same value,
+/// which is `Undecidable` where the interval holds nought. The interval
+/// rounds outward, so a sign it gives is the value's own.
+fn sign_exactly_or_of_its_box(
+    exactly: impl FnOnce() -> Option<Vec<f64>>,
+    held: impl FnOnce() -> Interval,
+) -> Decision {
+    match exactly() {
+        Some(value) => expansion_sign(&value),
+        None => held().sign(),
+    }
 }
 
 /// The three surfaces the two nodes where four half ellipses meet are named
