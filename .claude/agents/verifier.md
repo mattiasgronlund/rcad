@@ -52,9 +52,12 @@ checkout, step 2's checkout, step 3's gate, step 6's one run of a named recipe
 the gate does not run and of a named test that reaches the slow tier, step 7's
 revert, test run and restore, and step 4's
 numbers. Its last line is one line of JSON holding every verdict field it could
-fill. Take those as they stand and do not run its steps again. `skipped` says
-what it skipped and why, for `notes`. `left_to_you` is what it could not
-decide, and each item of it is yours.
+fill. Copy that whole line into `verify_lane_json`, exactly as it printed --
+never retype or summarize it, so a line you drop while retyping it elsewhere
+can never be the reason a merge is refused (§375.4). Take every field it holds
+as it stands for the rest of your own report too, and do not run its steps
+again. `skipped` says what it skipped and why, for `notes`. `left_to_you` is
+what it could not decide, and each item of it is yours.
 
 The reading is yours whatever it printed:
 
@@ -69,7 +72,8 @@ The reading is yours whatever it printed:
 - the rows.
 
 If `just` has no `verify-lane` recipe in your tree, do every step by hand,
-starting with `git worktree unlock <the lane's worktree>`. The lane is
+starting with `git worktree unlock <the lane's worktree>`, and leave
+`verify_lane_json` empty. The lane is
 finished, and a locked tree holds a slot that `just queue next` counts
 (§263.4). "is not locked" means someone did it already, and is fine.
 
@@ -352,3 +356,11 @@ to its last line. A note of your own about that print -- that you ran it by
 hand in your own tree, that it matches another run -- goes in
 `lines_that_run_note`, never after the count inside `lines_that_run` itself,
 where it would stop that line reading `lines that run: N` (§375.4).
+
+`verify_lane_json` is the whole last line `just verify-lane` printed, copied
+rather than retyped: `lanes.js` reads `lines_that_run_command` and
+`lines_that_run` from that copy when it is there, not from the fields above,
+so a hand-retyped copy that drops a line can no longer refuse a merge the
+recipe already proved. Leave it empty only when your tree had no
+`verify-lane` recipe and you filled `lines_that_run_command` and
+`lines_that_run` by hand instead (§375.4).
