@@ -59,7 +59,24 @@
 //! and a point `2.6e31` back along `-y` where the lead's side `x = -0.3` meets
 //! the loop the flat cuts the rim in. The flat's normal is `3.6e-32` off `x`,
 //! so that loop is about `1.6e32` long, and it reaches `x = -0.3` only that
-//! far out (Q2990). These tests pin that. When it answers, each turns back
+//! far out (Q2990).
+//!
+//! That point is where it says. The rim's axis is written `(0, 1, -1.1e-15)`,
+//! so `2.6e31` along it the rim is `2.9e16` up, and the meet at
+//! `(-0.3, -2.58e31, 2.86e16)` is on the rim, the flat and the lead's side as
+//! they are written. Nor can it be left off the loop. Q2990's first lane left
+//! out every meet off the face's box, grown by the room its corners were
+//! asked with, and 18 tests of `rcad-topo` and `rcad-step` broke, all of a
+//! cone or an LED's dome, most on `ResultIsNotManifold`. One is the
+//! wall `x = 1` of a block beside a cone's apex
+//! (`a_block_face_through_a_cones_apex.rs`): the drop left out where the
+//! hyperbola it cuts in the cone meets its own edge lines `y = 6` and
+//! `y = -6`, at `z = 12.17` and `-12.17`, off a wall that stops at `z = 10`.
+//! A meet off the face is still where two drawn crossings cross, and the
+//! cells are walked through it. So the loop has an order and the arithmetic
+//! does not find it: a gap, not a limit.
+//!
+//! These tests pin that. When it answers, each turns back
 //! into the volume check of commit `f179ca02a`: what the box and the LED share
 //! is the box's part inside the LED, and the intersection and the difference
 //! add up to the LED.
