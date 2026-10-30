@@ -194,10 +194,11 @@ reading or still investigating. **426 of 878 (49%) relayed having made zero
 commits.** That is a direct count against `lane.md`'s "commit the failing
 test first, on its own, then the fix" and against §416.1's own finding ("a
 lane stopped at 150k had nothing committed") — half of all relays still hand
-the next lane an empty branch to start from, which is exactly the costly case
-§416.2 measured (R of 60k to 105k, against 14k to 26k after a first lane that
-had committed). §416's own fix (commit before relaying) is landed; this count
-says it is not followed every time, not that it is missing.
+the next lane an empty branch to start from. §416.2 once called that the
+costly case; Q2816 withdrew it, finding R much the same after a first lane that
+had committed (median 84550) as after one that had not (median 67307). §416's
+own fix (commit before relaying) is landed; this count says it is not followed
+every time, not that it is missing.
 
 ### 461.5 What ran this
 

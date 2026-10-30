@@ -73,15 +73,27 @@ cut. One cut each:
 | at the first edit | 20k | 0.70 | 175 |
 | at the first edit | 60k | 0.89 | 264 |
 
-As run, 283 lanes passed 150k. R was measured on rows that went out twice:
-Q712-2 re-read 14k before its first edit, Q753-2 25k and Q649-2 26k, each after
-a first lane that had committed code. Q1287 re-read 60k and Q1268 105k after a
-first lane that committed nothing and whose findings were written into the
-brief. Five rows is few, but the gap is a factor of three or more.
+As run, 283 lanes passed 150k. R was first measured on five rows that went out
+twice: Q712-2 re-read 14k before its first edit, Q753-2 25k and Q649-2 26k,
+each after a first lane that had committed code. Q1287 re-read 60k and Q1268
+105k after a first lane that committed nothing and whose findings were written
+into the brief. Five rows is few, and the next paragraph says the two-bucket
+split it suggested does not hold.
 
-So the cut is at the warning, and a commit is what keeps R small. A cut between
-investigating and fixing saves less, and leaves the fixing half past 150k for
-most lanes.
+*Q2816 withdrew the two-bucket split on 2026-10-30. The same measure — cache
+read plus cache write plus input tokens on the turn before the first `Edit` or
+`Write` outside the scratchpad — taken over every relay-then-edit hop found in
+the `clean-up-dead-sessions` project's workflow transcripts gives 1060 hops
+across 568 rows and sub-rows, R from 44876 to 174208, median 84451. 1053 of the
+1060 followed a predecessor that had committed code, median 84550; the other 7
+followed one that had not, median 67307. Neither group comes near 14k-26k, and
+the two medians are close to each other, not three times apart. The five-row
+sample's split was noise: a commit does not keep R small.*
+
+So the cut stays at the warning, since that is where a lane already knows to
+commit before stopping (§416.3), not because it buys a small R — it does not.
+A cut between investigating and fixing saves less, and leaves the fixing half
+past 150k for most lanes.
 
 ### 416.3 What is built
 
