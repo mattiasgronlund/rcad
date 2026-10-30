@@ -59,23 +59,38 @@
 //! on the side `passes_through` reads it (Q3001).
 //!
 //! The box far off this LED, and the far boxes of three of the six others
-//! Q2929 found refusing as this one did, stop now `Undecidable` with the one
-//! record side of plane, at the corner below the axis: `(-1.23, -6.35,
-//! 1.5303)` here. Which step asks it is not traced. A box on this LED's flat,
-//! and the far box of `LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step`, stop on the
-//! order along the loop a plane `x = c` cuts the rim in, between where the
-//! disc's plane and the flange's front cross it a rounding apart: the box's
-//! side `x = -1.33` here, a lead's side `x = -0.3` in the D3. The last two,
+//! Q2929 found refusing as this one did, then stopped `Undecidable` with the
+//! one record side of plane, at the corner below the axis where the flat meets
+//! the rim: `(-1.23, -6.35, 1.5303)` here. That point is where the rim, the
+//! flat and the flange's front meet. It was read as where the line the two
+//! planes share crosses the rim at a corner bake solved so, but never at a
+//! node of a walk, and the reading gave up wherever a product of it would
+//! round, as one does when the two planes tilt a hair. A node is read so now,
+//! and the reading falls back on intervals where a product would round
+//! (Q3017).
+//!
+//! Past it, the far box of this LED, and of the two D5 LEDs whose axis is 15
+//! up, stop on the order along a crossing of two points `2e-15` apart, where
+//! the side of a lead, the plane `x = -0.3`, meets the body's pipe on the
+//! flange's front below the axis. The far box of
+//! `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step` stops on the order along a
+//! crossing of two points on the side of its other lead, `x = 2.24`, `1.2e32`
+//! out along `-y`: a meet as far out as the one Q3019 orders. A box on
+//! this LED's flat, and the far box of
+//! `LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step`, stop on the order along the
+//! loop a plane `x = c` cuts the rim in, between where the disc's plane and
+//! the flange's front cross it a rounding apart: the box's side `x = -1.33`
+//! here, a lead's side `x = -0.3` in the D3. The last two,
 //! `LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step` and
 //! `LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step`, stop on the flange's front,
 //! face slot 2, the plane `y = -6.35`, refused
 //! `CannotTellTheCellsOfAFaceApart`: the refusal Q2974 and Q2982 cleared from
 //! the fronts of two LEDs of `a_led_whose_flat_touches_its_body_at_a_corner.rs`.
-//! These tests pin all three.
+//! These tests pin all four.
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{SIDE_OF_PLANE, Surface};
+use rcad_geom::Surface;
 use rcad_predicates::{Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -89,50 +104,53 @@ const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 /// The LED this file is about.
 const THIS_ONE: Led = Led {
     file: "LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step",
-    flat: -1.23,
     front: -6.35,
     rim: 2.9,
+    body: 2.5,
     axis: 3.0,
 };
+
+/// The side of a lead nearer the flange's flat in a D5 LED, the plane `x =
+/// -0.3`.
+const A_D5_LEADS_SIDE: f64 = -0.3;
+
+/// The two other D5 LED files that refused on their rim and front disc and
+/// stop where [`A_D5_LEADS_SIDE`] meets their body's pipe below the axis, as
+/// this one does.
+const TWO_D5S: [Led; 2] = [
+    Led {
+        file: "LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step",
+        front: -3.81,
+        rim: 2.9,
+        body: 2.5,
+        axis: 15.0,
+    },
+    Led {
+        file: "LED_D5.0mm_Horizontal_O6.35mm_Z15.0mm.step",
+        front: -6.35,
+        rim: 2.9,
+        body: 2.5,
+        axis: 15.0,
+    },
+];
 
 /// Where the box on this LED's flat goes, and the plane its side nearer the
 /// flat's back lies in, `x = -1.33`.
 const ON_THE_FLAT: ([f64; 3], f64) = ([-1.23, -6.35, 3.0], -1.33);
 
-/// The three other LED files that refused on their rim and front disc and stop
-/// where their flat meets their rim below the axis, as this one does.
-const THREE_MORE: [Led; 3] = [
-    Led {
-        file: "LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step",
-        flat: -0.23,
-        front: -3.81,
-        rim: 1.9,
-        axis: 2.0,
-    },
-    Led {
-        file: "LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step",
-        flat: -1.23,
-        front: -3.81,
-        rim: 2.9,
-        axis: 15.0,
-    },
-    Led {
-        file: "LED_D5.0mm_Horizontal_O6.35mm_Z15.0mm.step",
-        flat: -1.23,
-        front: -6.35,
-        rim: 2.9,
-        axis: 15.0,
-    },
-];
+/// The D3 LED file that refused on its rim and front disc and stops on two
+/// points far out on the side of its lead further from its flat, the plane `x =
+/// 2.24`.
+const FAR_ALONG_A_LEAD: (&str, f64) = ("LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step", 2.24);
 
 /// The LED file whose far box stops where the side of a lead, the plane `x =
 /// -0.3`, meets its rim on its flange's front.
 const BY_A_LEAD: (Led, f64) = (
     Led {
         file: "LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step",
-        flat: -0.23,
         front: -6.35,
         rim: 1.9,
+        body: 1.5,
         axis: 6.0,
     },
     -0.3,
@@ -145,38 +163,42 @@ const TWO_MORE: [(&str, f64); 2] = [
     ("LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step", -6.35),
 ];
 
-/// An LED lying along `-y`, with its flange's flat `x = flat`, its flange's
-/// front `y = front`, and its flange's rim, a pipe of radius `rim` about the
-/// line `x = 1.27, z = axis`.
+/// An LED lying along `-y`, with its flange's front `y = front`, its flange's
+/// rim a pipe of radius `rim` and its body a pipe of radius `body`, both about
+/// the line `x = 1.27, z = axis`.
 struct Led {
     file: &'static str,
-    flat: f64,
     front: f64,
     rim: f64,
+    body: f64,
     axis: f64,
 }
 
 impl Led {
-    /// The corner on the flange's front where its flat meets its rim below the
-    /// axis.
-    fn where_the_flat_meets_the_rim_below_the_axis(&self) -> [f64; 3] {
-        let [_, below] = self.where_a_plane_across_meets_the_rim(self.flat);
-        below
-    }
-
     /// The two places on the flange's front where the plane `x = across` meets
     /// its rim, above the axis and below it.
     fn where_a_plane_across_meets_the_rim(&self, across: f64) -> [[f64; 3]; 2] {
-        let up = (self.rim.powi(2) - (1.27 - across).powi(2)).sqrt();
+        self.where_a_plane_across_meets_a_pipe(self.rim, across)
+    }
+
+    /// The two places on the flange's front where the plane `x = across` meets
+    /// the body's pipe, above the axis and below it.
+    fn where_a_plane_across_meets_the_body(&self, across: f64) -> [[f64; 3]; 2] {
+        self.where_a_plane_across_meets_a_pipe(self.body, across)
+    }
+
+    fn where_a_plane_across_meets_a_pipe(&self, radius: f64, across: f64) -> [[f64; 3]; 2] {
+        let up = (radius.powi(2) - (1.27 - across).powi(2)).sqrt();
         [self.axis + up, self.axis - up].map(|z| [across, self.front, z])
     }
 }
 
 #[test]
-fn an_led_whose_disc_sits_inside_its_rim_gets_past_its_front_corner_and_stops_where_its_flat_meets_its_rim()
+fn an_led_whose_disc_sits_inside_its_rim_gets_past_where_its_flat_meets_its_rim_and_stops_where_a_leads_side_meets_its_body()
  {
     every_fuse_refuses(THIS_ONE.file, &[FAR_OFF], |_, error| {
-        the_side_of_where_the_flat_meets_the_rim_is_undecidable(&THIS_ONE, error)
+        let [_, below] = THIS_ONE.where_a_plane_across_meets_the_body(A_D5_LEADS_SIDE);
+        the_order_of_two_points_at_is_undecidable(below, error)
     });
 }
 
@@ -184,24 +206,37 @@ fn an_led_whose_disc_sits_inside_its_rim_gets_past_its_front_corner_and_stops_wh
 fn a_box_on_the_flat_stops_where_its_side_meets_the_rim_on_the_two_front_planes() {
     let (centre, side) = ON_THE_FLAT;
     every_fuse_refuses(THIS_ONE.file, &[centre], |_, error| {
-        the_order_where_a_plane_across_meets_the_rim_is_undecidable(&THIS_ONE, side, error)
+        let [above, _] = THIS_ONE.where_a_plane_across_meets_the_rim(side);
+        the_order_of_two_points_at_is_undecidable(above, error)
     });
 }
 
 #[test]
-fn three_more_leds_get_past_their_front_corner_and_stop_where_their_flat_meets_their_rim() {
-    for led in &THREE_MORE {
+fn two_more_d5_leds_get_past_where_their_flat_meets_their_rim_and_stop_where_a_leads_side_meets_their_body()
+ {
+    for led in &TWO_D5S {
         every_fuse_refuses(led.file, &[FAR_OFF], |_, error| {
-            the_side_of_where_the_flat_meets_the_rim_is_undecidable(led, error)
+            let [_, below] = led.where_a_plane_across_meets_the_body(A_D5_LEADS_SIDE);
+            the_order_of_two_points_at_is_undecidable(below, error)
         });
     }
+}
+
+#[test]
+fn a_d3_led_gets_past_where_its_flat_meets_its_rim_and_stops_on_two_points_far_along_a_leads_side()
+{
+    let (file, side) = FAR_ALONG_A_LEAD;
+    every_fuse_refuses(file, &[FAR_OFF], |_, error| {
+        the_order_of_two_points_far_out_on_a_plane_across_is_undecidable(side, error)
+    });
 }
 
 #[test]
 fn a_d3_led_gets_past_its_front_corner_and_stops_where_a_leads_side_meets_its_rim() {
     let (led, side) = &BY_A_LEAD;
     every_fuse_refuses(led.file, &[FAR_OFF], |_, error| {
-        the_order_where_a_plane_across_meets_the_rim_is_undecidable(led, *side, error)
+        let [above, _] = led.where_a_plane_across_meets_the_rim(*side);
+        the_order_of_two_points_at_is_undecidable(above, error)
     });
 }
 
@@ -248,44 +283,41 @@ fn every_fuse_refuses(
     }
 }
 
-/// Refused `Undecidable` with the one record `side of plane`, its one point
-/// within `1e-9` of the corner on the LED's flange's front where its flat meets
-/// its rim below the axis.
-fn the_side_of_where_the_flat_meets_the_rim_is_undecidable(led: &Led, error: &Error) -> bool {
-    let Error::Undecidable { records } = error else {
-        return false;
-    };
-    let [record] = records.records() else {
-        return false;
-    };
-    let [point] = record.inputs() else {
-        return false;
-    };
-    record.predicate() == SIDE_OF_PLANE
-        && is_within_1e_9_of(point, led.where_the_flat_meets_the_rim_below_the_axis())
+/// Refused `Undecidable` with the one record `order along a crossing`, both its
+/// points within `1e-9` of `at`.
+fn the_order_of_two_points_at_is_undecidable(at: [f64; 3], error: &Error) -> bool {
+    the_two_points_that_could_not_be_ordered(error)
+        .is_some_and(|points| points.iter().all(|point| is_within_1e_9_of(point, at)))
 }
 
 /// Refused `Undecidable` with the one record `order along a crossing`, both its
-/// points within `1e-9` of where the plane `x = across` meets the LED's rim on
-/// its flange's front above the axis.
-fn the_order_where_a_plane_across_meets_the_rim_is_undecidable(
-    led: &Led,
+/// points within `1e-9` of the plane `x = across` and more than `1e30` out
+/// along `-y`.
+fn the_order_of_two_points_far_out_on_a_plane_across_is_undecidable(
     across: f64,
     error: &Error,
 ) -> bool {
+    the_two_points_that_could_not_be_ordered(error).is_some_and(|points| {
+        points.iter().all(|point| {
+            let [x, y, _] = point.enclosure();
+            (x.lo() - across).abs() < 1e-9 && (x.hi() - across).abs() < 1e-9 && y.hi() < -1e30
+        })
+    })
+}
+
+/// The two points of the one record `order along a crossing` of an
+/// `Undecidable` refusal, or `None` for any other refusal.
+fn the_two_points_that_could_not_be_ordered(error: &Error) -> Option<[Point; 2]> {
     let Error::Undecidable { records } = error else {
-        return false;
+        return None;
     };
     let [record] = records.records() else {
-        return false;
+        return None;
     };
     let [one, other] = record.inputs() else {
-        return false;
+        return None;
     };
-    let [above, _] = led.where_a_plane_across_meets_the_rim(across);
-    record.predicate() == ALONG_A_CROSSING
-        && is_within_1e_9_of(one, above)
-        && is_within_1e_9_of(other, above)
+    (record.predicate() == ALONG_A_CROSSING).then_some([*one, *other])
 }
 
 fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
