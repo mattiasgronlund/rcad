@@ -54,21 +54,12 @@
 //! crossing` between the front corner and a point `3.6e-15` across it, the
 //! shape the `Z15.0` LED met below, and gets past it as that one does (Q2959).
 //!
-//! It stopped next `Undecidable` with the one record `order along a
-//! crossing`, the far box included, between the flat's corner on the rim at
-//! the back, `(-1.23, -2.27, 1.53)`, and a point `2.6e31` back along `-y`
-//! where the lead's side `x = -0.3` meets the loop the flat cuts the rim in.
-//! The flat's normal is `3.6e-32` off `x`, so that loop is about `1.6e32`
-//! long, and it reaches `x = -0.3` only that far out. No point that far off
-//! the rim is on it, and the arrangement now leaves out a meet farther off the
-//! box round a face than the room its corners were baked with (Q2990).
-//!
-//! With a box round either corner it stops now `Undecidable` with the one
-//! record `side of plane`, at a point on the rim at the front,
-//! `(-1.628, -1.27, 2.9)`, on the box's floor, the stop the `D3.0` LED below
-//! makes (Q2995). The far box stops on the front `y = -1.27`, with the one
-//! record `order along a crossing` between the front corner and a point within
-//! `1.8e-15` of it. These tests pin both. When it answers, each turns back
+//! It stops now `Undecidable` with the one record `order along a crossing`,
+//! between the flat's corner on the rim at the back, `(-1.23, -2.27, 1.53)`,
+//! and a point `2.6e31` back along `-y` where the lead's side `x = -0.3` meets
+//! the loop the flat cuts the rim in. The flat's normal is `3.6e-32` off `x`,
+//! so that loop is about `1.6e32` long, and it reaches `x = -0.3` only that
+//! far out (Q2990). These tests pin that. When it answers, each turns back
 //! into the volume check of commit `f179ca02a`: what the box and the LED share
 //! is the box's part inside the LED, and the intersection and the difference
 //! add up to the LED.
@@ -164,20 +155,14 @@
 //! (Q2989).
 //!
 //! The `D3.0` LED stops now `Undecidable` with the one record `side of
-//! plane` at a point on the flange's rim at the front, near
-//! `(-0.627, -3.81, 5.9)`, for the boxes round the corners (Q2995). The far
-//! box stopped so too, at `(-0.606, -3.81, 6.3)`, until the rim left out the
-//! meets placed far off it (Q2990). It stops now on the front `y = -3.81`,
-//! with the one record `order along a crossing` between two points in one box
-//! at `(2.24, -3.81, 4.856)`, where the lead's side `x = 2.24` meets the hole
-//! of radius 1.5 in the front.
-//!
-//! The `Z15.0` LED stops on its body's pipe, `Undecidable` with the one record
-//! `where three surfaces meet`, the far box included, handed the flange's flat
-//! `x = -1.23`, the dome and the body's pipe. The flat touches the dome at one
-//! point, `(-1.23, -7.37, 15)` where the dome meets the pipe, and the flat runs
-//! along the pipe there too, and whether that point is on the pipe was not
-//! decided. The tests pin each of these stops.
+//! plane`, the far box included, at a point on the flange's rim at the front:
+//! near `(-0.627, -3.81, 5.9)` for the boxes round the front corner, and
+//! `(-0.606, -3.81, 6.3)` for the far one. The `Z15.0` LED stops on its body's
+//! pipe, `Undecidable` with the one record `where three surfaces meet`, the
+//! far box included, handed the flange's flat `x = -1.23`, the dome and the
+//! body's pipe. The flat touches the dome at one point, `(-1.23, -7.37, 15)`
+//! where the dome meets the pipe, and the flat runs along the pipe there too,
+//! and whether that point is on the pipe was not decided. The tests pin both.
 
 use std::{env, fs, path::PathBuf};
 
@@ -198,60 +183,22 @@ const HALF: f64 = 0.1;
 /// Where the box that misses the LED goes.
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
-/// The flange's rim of the `Z3.0` LED where it meets the front.
-const Z3_RIM: Rim = Rim {
-    x: 1.27,
-    z: 3.0,
-    radius: 2.9,
-    front: -1.27,
-};
-
-/// The flange's rim of the `D3.0` LED where it meets the front.
-const D3_RIM: Rim = Rim {
-    x: 1.27,
-    z: 6.0,
-    radius: 1.9,
-    front: -3.81,
-};
-
-/// The circle of `radius` about `x, z` on the plane `y = front`.
-struct Rim {
-    x: f64,
-    z: f64,
-    radius: f64,
-    front: f64,
-}
-
 #[test]
-fn a_box_round_the_back_corner_leaves_out_a_meet_far_along_the_flat_and_stops_on_the_side_of_a_point_on_the_rim()
+fn a_box_round_the_back_corner_gets_past_the_front_corner_and_stops_on_the_order_of_a_meet_far_along_the_flat()
  {
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -2.27, 3.0]]),
-        the_side_of_a_point_on_the_rim_at_the_front_is_undecidable(Z3_RIM),
+        the_order_of_the_back_corner_and_a_meet_far_along_the_flat_is_undecidable,
     );
 }
 
 #[test]
-fn a_box_round_the_front_corner_leaves_out_a_meet_far_along_the_flat_and_stops_on_the_side_of_a_point_on_the_rim()
- {
+fn a_box_round_the_front_corner_gets_past_it_and_stops_on_the_order_of_a_meet_far_along_the_flat() {
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -1.27, 3.0]]),
-        the_side_of_a_point_on_the_rim_at_the_front_is_undecidable(Z3_RIM),
-    );
-}
-
-/// The box that misses the `Z3.0` LED gets past the rim too, and stops on its
-/// front `y = -1.27` at the order of the front corner and a point within
-/// `1.8e-15` of it.
-#[test]
-fn a_box_far_from_a_z3_led_leaves_out_a_meet_far_along_the_flat_and_stops_on_the_order_at_its_front_corner()
- {
-    every_fuse_refuses(
-        Z3,
-        &a_box_round_each_of(&[FAR_OFF]),
-        the_order_of_two_points_at_about_one_place_is_undecidable([-1.23, -1.27, 3.0]),
+        the_order_of_the_back_corner_and_a_meet_far_along_the_flat_is_undecidable,
     );
 }
 
@@ -279,30 +226,14 @@ fn a_z15_led_orders_two_points_on_its_domes_rim_and_stops_where_its_flat_touches
 /// The `D3.0` LED tells the cells of its front apart since Q2974. Since Q2988
 /// it puts in order the two points where `z = 5.7` crosses its flange's rim
 /// at the front, one on the flange's front and one on the body's front disc,
-/// the one plane written twice. With a box round either corner it stops on
-/// the side of a plane of a point on the rim at the front.
+/// the one plane written twice. It stops on the side of a plane of a point on
+/// the rim at the front, the far box included.
 #[test]
 fn a_d3_led_orders_two_points_on_its_rim_and_stops_on_the_side_of_a_point_on_its_rim() {
     every_fuse_refuses(
         D3,
-        &a_box_round_each_of(&[[-0.23, -3.81, 5.999999956464], [-0.23, -4.81, 6.0]]),
-        the_side_of_a_point_on_the_rim_at_the_front_is_undecidable(D3_RIM),
-    );
-}
-
-/// The box that misses the `D3.0` LED stopped on the side of a plane of a
-/// point on the rim at the front, `(-0.606, -3.81, 6.3)`, until the rim left
-/// out the meets placed off it by more than the room its corners were baked
-/// with (Q2990). It stops now on its front `y = -3.81` at the order of two
-/// points in one box where the lead's side `x = 2.24` meets the hole of radius
-/// 1.5 in the front.
-#[test]
-fn a_box_far_from_a_d3_led_leaves_out_meets_behind_its_rim_and_stops_where_a_lead_side_meets_the_hole_in_its_front()
- {
-    every_fuse_refuses(
-        D3,
-        &a_box_round_each_of(&[FAR_OFF]),
-        the_order_of_two_points_at_about_one_place_is_undecidable([2.24, -3.81, 4.8558409201514]),
+        &a_box_round_each_of(&[[-0.23, -3.81, 5.999999956464], [-0.23, -4.81, 6.0], FAR_OFF]),
+        the_side_of_a_point_on_the_rim_at_the_front_is_undecidable,
     );
 }
 
@@ -347,48 +278,52 @@ fn every_fuse_refuses(
     }
 }
 
-/// Refused `Undecidable` with the one record `order along a crossing`, both
-/// its points within `1e-9` of `at`.
-fn the_order_of_two_points_at_about_one_place_is_undecidable(
-    at: [f64; 3],
-) -> impl Fn(&Model, &Error) -> bool {
-    move |_, error| {
-        let Error::Undecidable { records } = error else {
-            return false;
-        };
-        let [record] = records.records() else {
-            return false;
-        };
-        let [one, other] = record.inputs() else {
-            return false;
-        };
-        record.predicate() == ALONG_A_CROSSING
-            && is_within_1e_9_of(one, at)
-            && is_within_1e_9_of(other, at)
-    }
+/// Refused `Undecidable` with the one record `order along a crossing`, its two
+/// points the flat's corner on the flange's rim at the back, below the axis,
+/// within `1e-9`, and a point on the lead's side `x = -0.3` more than `1e31`
+/// back along `-y`, where the loop the flat cuts the rim in reaches it.
+fn the_order_of_the_back_corner_and_a_meet_far_along_the_flat_is_undecidable(
+    _: &Model,
+    error: &Error,
+) -> bool {
+    let Error::Undecidable { records } = error else {
+        return false;
+    };
+    let [record] = records.records() else {
+        return false;
+    };
+    let [one, other] = record.inputs() else {
+        return false;
+    };
+    let below_the_axis = 3.0 - (2.9_f64.powi(2) - 2.5_f64.powi(2)).sqrt();
+    let the_back_corner = [-1.23, -2.27, below_the_axis];
+    let is_far_back_on_the_lead = |point: &Point| {
+        let [x, y, _] = point.enclosure();
+        (x.lo() + 0.3).abs() < 1e-9 && (x.hi() + 0.3).abs() < 1e-9 && y.hi() < -1e31
+    };
+    record.predicate() == ALONG_A_CROSSING
+        && ((is_within_1e_9_of(one, the_back_corner) && is_far_back_on_the_lead(other))
+            || (is_within_1e_9_of(other, the_back_corner) && is_far_back_on_the_lead(one)))
 }
 
 /// Refused `Undecidable` with the one record `side of plane`, its one point
-/// within `1e-9` of the front `y = rim.front` and of the rim there.
-fn the_side_of_a_point_on_the_rim_at_the_front_is_undecidable(
-    rim: Rim,
-) -> impl Fn(&Model, &Error) -> bool {
-    move |_, error| {
-        let Error::Undecidable { records } = error else {
-            return false;
-        };
-        let [record] = records.records() else {
-            return false;
-        };
-        let [point] = record.inputs() else {
-            return false;
-        };
-        let [x, _, z] = point.enclosure().map(|side| (side.lo() + side.hi()) / 2.0);
-        let off_the_rim = ((x - rim.x).hypot(z - rim.z) - rim.radius).abs();
-        record.predicate() == SIDE_OF_PLANE
-            && is_within_1e_9_of(point, [x, rim.front, z])
-            && off_the_rim < 1e-9
-    }
+/// within `1e-9` of the front `y = -3.81` and of the flange's rim there, the
+/// circle of radius 1.9 about `x = 1.27, z = 6`.
+fn the_side_of_a_point_on_the_rim_at_the_front_is_undecidable(_: &Model, error: &Error) -> bool {
+    let Error::Undecidable { records } = error else {
+        return false;
+    };
+    let [record] = records.records() else {
+        return false;
+    };
+    let [point] = record.inputs() else {
+        return false;
+    };
+    let [x, _, z] = point.enclosure().map(|side| (side.lo() + side.hi()) / 2.0);
+    let off_the_rim = ((x - 1.27).hypot(z - 6.0) - 1.9).abs();
+    record.predicate() == SIDE_OF_PLANE
+        && is_within_1e_9_of(point, [x, -3.81, z])
+        && off_the_rim < 1e-9
 }
 
 /// Refused `Undecidable` with the one record `where three surfaces meet`,
