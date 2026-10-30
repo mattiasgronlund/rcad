@@ -20379,6 +20379,11 @@ check-land-selftest:
         || { echo "the lander's brief in .claude/workflows/lanes.js no longer follows just land with just land wait"; exit 1; }
     grep -qF 'mise exec -- just land wait' .claude/agents/lander.md \
         || { echo ".claude/agents/lander.md no longer follows just land with just land wait"; exit 1; }
+    default_wait=$(python3 -c "import importlib.util as u; s = u.spec_from_file_location('land', 'tooling/land/land.py'); m = u.module_from_spec(s); s.loader.exec_module(m); print(int(m.WAIT))")
+    [ -n "$default_wait" ] && [ "$default_wait" -lt 120 ] \
+        || { echo "land.py's default LAND_WAIT ($default_wait s) is not well under the Bash tool's 120 s timeout, so a lander whose just land call carries no explicit timeout would be moved to the background before the call ends on its own"; exit 1; }
+    grep -qF "${default_wait} s" .claude/agents/lander.md \
+        || { echo ".claude/agents/lander.md does not name land.py's default LAND_WAIT (${default_wait} s), so a lander reading it has no reason to expect a bare just land call to end by itself under the Bash tool's 120 s timeout"; exit 1; }
     waits_at=$(grep -m1 -nxF '  mise exec -- just land wait-for ${branchOf(lane)}' .claude/workflows/lanes.js | cut -d: -f1 || true)
     checks_at=$(grep -m1 -nxF '  git merge-base --is-ancestor ${branchOf(lane)} origin/main' .claude/workflows/lanes.js | cut -d: -f1 || true)
     [ -n "$waits_at" ] && [ -n "$checks_at" ] && [ "$waits_at" -lt "$checks_at" ] \
