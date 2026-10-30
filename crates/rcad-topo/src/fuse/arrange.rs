@@ -13343,37 +13343,10 @@ impl<'f> Arrangement<'f> {
     /// `Undecidable` "side of plane" (Q2655).
     ///
     /// **The corner is where the line the cap and the seam plane share crosses
-    /// the circle.** Let the cap be `n_c·p = d_c`, the seam plane
-    /// `n_s·p = d_s` and `partner` `n·p = d`, and let the axis run through `o`
-    /// along `w`. The line runs along `e = n_c × n_s`, and `e·w` is exactly
-    /// nought, since `n_c` lies along `w`. Let `Y` be where the line meets
-    /// `partner`, so `Y` is the meet of the three planes, and `D = n·e`, which
-    /// is not nought or the line never meets `partner`. A point `Y + t·e` of
-    /// the line is `t·D` off `partner`, so the side is the sign of `t·D` at the
-    /// corner.
-    ///
-    /// - **The pipe along the line** is `f(t) = |b|²·t² + 2·B·t + C`, for
-    ///   `b = e × w`, `B = ((Y − o) × w)·b` and `C = |(Y − o) × w|² − r²·|w|²`,
-    ///   since `e` is square to `w`. Its two roots are the two crossings.
-    /// - **The box says which root the corner is**: `e·(p − o)` is nought at
-    ///   the middle of the chord and grows along `e`, so its sign over the box
-    ///   is `Pos` at the root with the larger `t` and `Neg` at the other. The
-    ///   middle of the chord is the foot of the circle's centre on the line,
-    ///   and `e·(c − o)` is nought for every point `c` of the axis.
-    /// - **Where `C < 0`**, `Y` is inside the pipe, so the two roots lie either
-    ///   side of `t = 0` and the corner's `t` has the box's sign.
-    /// - **Where `C > 0`**, both roots lie on the side of `t = 0` that `−B`
-    ///   points to.
-    /// - **Where `C = 0`**, `Y` is a root, the larger one where `B > 0`. If it
-    ///   is the corner, the corner is on `partner`; if not, the corner is on
-    ///   the side `−B` points to.
-    ///
-    /// Every quantity is worked out exactly and never divided: `Y` as
-    /// `D·Y = d_c·(n_s × n) + d_s·(n × n_c) + d·(n_c × n_s)`, then `C` times
-    /// `D²`, which keeps the sign of `C`, and `B` times `D`, which does not keep
-    /// the sign of `B`. So the side where `C > 0` is the sign of `−B·D`, which
-    /// is the sign of `t·D` there, and where `C = 0` the larger root is `Y`
-    /// where `B·D` and `D` have one sign.
+    /// the pipe**, so this is
+    /// [`Arrangement::side_of_a_plane_where_a_line_crosses_a_pipe`], which says
+    /// how. The box asked there is the stored corner's, which the seam plane
+    /// holds exactly as stored ([`BakedCorner::seam_plane`]).
     fn side_of_a_plane_at_a_seam_corner(
         on: &[Surface],
         at: PredicatePoint,
@@ -13394,19 +13367,54 @@ impl<'f> Arrangement<'f> {
                 ) {
                     return None;
                 }
-                Self::side_of_a_plane_where_a_line_crosses_a_cap_circle(
-                    partner, cap, seam, pipe, at,
-                )
+                Self::side_of_a_plane_where_a_line_crosses_a_pipe(partner, cap, seam, pipe, at)
             })
         })
     }
 
     /// The side of `partner` at the point whose box is `at` where the line
-    /// `cap` and `through` share crosses the circle `cap` meets `pipe` in, for
-    /// a `cap` square to the pipe's axis; `None` where the box does not say
-    /// which crossing, `partner` runs along the line, or a product would round
-    /// ([`Arrangement::side_of_a_plane_at_a_seam_corner`] says how).
-    fn side_of_a_plane_where_a_line_crosses_a_cap_circle(
+    /// `cap` and `through` share crosses `pipe`; `None` where the box does not
+    /// say which of the two crossings it is, `partner` runs along the line, or
+    /// a product would round. The box must hold the crossing it is asked
+    /// about.
+    ///
+    /// **The corner is `Y + t·e` for the `t` the pipe and the box say.** Let
+    /// the cap be `n_c·p = d_c`, `through` `n_s·p = d_s` and `partner`
+    /// `n·p = d`, and let the axis run through `o` along `w`. The line runs
+    /// along `e = n_c × n_s`. Let `Y` be where the line meets `partner`, so `Y`
+    /// is the meet of the three planes, and `D = n·e`, which is not nought or
+    /// the line never meets `partner`. A point `Y + t·e` of the line is `t·D`
+    /// off `partner`, so the side is the sign of `t·D` at the corner.
+    ///
+    /// - **The pipe along the line** is `f(t) = |b|²·t² + 2·B·t + C`, for
+    ///   `b = e × w`, `B = ((Y − o) × w)·b` and `C = |(Y − o) × w|² − r²·|w|²`.
+    ///   Its two roots are the two crossings.
+    /// - **The box says which root the corner is**: half of `f`'s slope at a
+    ///   point `p` of the line is `((p − o) × w)·b`, which is `g·(p − o)` for
+    ///   `g = |w|²·e − (e·w)·w`, so the sign of `g·(p − o)` over the box is
+    ///   `Pos` at the root with the larger `t` and `Neg` at the other. One sign
+    ///   over the whole box also keeps the other root out of it. For a cap
+    ///   square to the axis, `e·w` is nought and that is the sign of
+    ///   `e·(p − o)`, nought at the middle of the chord.
+    /// - **Where `C < 0`**, `Y` is inside the pipe, so the two roots lie either
+    ///   side of `t = 0` and the corner's `t` has the box's sign.
+    /// - **Where `C > 0`**, both roots lie on the side of `t = 0` that `−B`
+    ///   points to.
+    /// - **Where `C = 0`**, `Y` is a root, the larger one where `B > 0`. If it
+    ///   is the corner, the corner is on `partner`; if not, the corner is on
+    ///   the side `−B` points to.
+    ///
+    /// Every quantity is worked out exactly and never divided: `Y` as
+    /// `D·Y = d_c·(n_s × n) + d_s·(n × n_c) + d·(n_c × n_s)`, then `C` times
+    /// `D²`, which keeps the sign of `C`, and `B` times `D`, which does not keep
+    /// the sign of `B`. So the side where `C > 0` is the sign of `−B·D`, which
+    /// is the sign of `t·D` there, and where `C = 0` the larger root is `Y`
+    /// where `B·D` and `D` have one sign.
+    ///
+    /// **A line that slants across the pipe is read too** (Q3001). The cap's
+    /// circle was all this read before, and the root it took was the sign of
+    /// `e·(p − o)`, which is `g·(p − o)` only where `e·w` is nought.
+    fn side_of_a_plane_where_a_line_crosses_a_pipe(
         partner: &Plane,
         cap: &Plane,
         through: &Plane,
@@ -13421,9 +13429,14 @@ impl<'f> Arrangement<'f> {
             exact(pipe.axis().direction().components()),
         );
         let line = exactly_crossed(&cap_normal, &its_normal)?;
+        let up_the_slope = exactly_added_across(
+            &exactly_scaled_across(&line, &exactly_dotted_across(&along, &along)?)?,
+            &exactly_scaled_across(&along, &negated(&exactly_dotted_across(&line, &along)?))?,
+        );
         let box_ = at.enclosure();
         let which_root = dot_of(
-            line.each_ref()
+            up_the_slope
+                .each_ref()
                 .map(|component| held_as_an_interval(component)),
             core::array::from_fn(|axis| box_[axis] - Interval::exactly(origin[axis])),
         )
@@ -22057,7 +22070,7 @@ mod tests {
             ])
         };
         let side = |partner: &Plane, at: PredicatePoint| {
-            Arrangement::side_of_a_plane_where_a_line_crosses_a_cap_circle(
+            Arrangement::side_of_a_plane_where_a_line_crosses_a_pipe(
                 partner, &cap, &through, &pipe, at,
             )
         };
@@ -22127,7 +22140,7 @@ mod tests {
             ])
         };
         let side = |partner: &Plane, at: PredicatePoint| {
-            Arrangement::side_of_a_plane_where_a_line_crosses_a_cap_circle(
+            Arrangement::side_of_a_plane_where_a_line_crosses_a_pipe(
                 partner, &one, &other, &pipe, at,
             )
         };
