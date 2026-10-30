@@ -145,17 +145,28 @@
 //! twice. Which side of the first's plane the second is on is now read
 //! exactly, along the line the second lies on, and so is the order (Q2988).
 //!
+//! The `Z15.0` LED stopped next `Undecidable` with the one record `order along
+//! a crossing`, the far box included, between the two points where the lead's
+//! side `x = -0.3` meets the dome's rim `y = -7.37`, `3.9` apart in `z`. The
+//! dome is the ball of radius 2.5 about `(1.27, -7.37, 15)`, `x = -0.3` cuts
+//! it in a circle walked from its lowest point, and the rim's plane, through
+//! the ball's centre, crosses that circle right there. A loop is counted from
+//! the node at its start for a plane and a ball now, as for a plane and a pipe
+//! (Q2989).
+//!
 //! The `D3.0` LED stops now `Undecidable` with the one record `side of
 //! plane`, the far box included, at a point on the flange's rim at the front:
 //! near `(-0.627, -3.81, 5.9)` for the boxes round the front corner, and
-//! `(-0.606, -3.81, 6.3)` for the far one. The `Z15.0` LED stops with the one
-//! record `order along a crossing`, between the two points where the plane
-//! `x = -0.3` meets its body's pipe at `y = -7.37`, `3.9` apart in `z`. The
-//! tests pin both.
+//! `(-0.606, -3.81, 6.3)` for the far one. The `Z15.0` LED stops on its body's
+//! pipe, `Undecidable` with the one record `where three surfaces meet`, the
+//! far box included, handed the flange's flat `x = -1.23`, the dome and the
+//! body's pipe. The flat touches the dome at one point, `(-1.23, -7.37, 15)`
+//! where the dome meets the pipe, and the flat runs along the pipe there too,
+//! and whether that point is on the pipe was not decided. The tests pin both.
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, SIDE_OF_PLANE, Vector};
+use rcad_geom::{Isometry, SIDE_OF_PLANE, Vector, WHERE_THREE_SURFACES_MEET};
 use rcad_predicates::{Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -199,15 +210,16 @@ fn a_box_round_the_front_corner_gets_past_it_and_stops_on_the_order_of_a_meet_fa
 /// the disc as. Since Q2959 the two places where the flat's line on the front
 /// meets the disc's circle, both within `1e-14` of the front corner and not
 /// proved apart, are the corner. Since Q2982 the flat's line and the circle
-/// turn by nothing at that corner, so it tells the cells of its front apart,
-/// and it stops on the order of two points where `x = -0.3` meets the body's
-/// pipe at `y = -7.37`, the far box included.
+/// turn by nothing at that corner, so it tells the cells of its front apart.
+/// Since Q2989 it puts in order the two points where `x = -0.3` meets the
+/// dome's rim at `y = -7.37`, and it stops where the flange's flat, the dome
+/// and the body's pipe meet, the far box included.
 #[test]
-fn a_z15_led_tells_the_cells_of_its_front_apart_and_stops_on_the_order_of_two_points_on_its_pipe() {
+fn a_z15_led_orders_two_points_on_its_domes_rim_and_stops_where_its_flat_touches_its_dome() {
     every_fuse_refuses(
         Z15,
         &a_box_round_each_of(&[[-1.23, -1.27, 15.0], [-1.23, -2.27, 15.0], FAR_OFF]),
-        the_order_of_two_points_on_the_pipe_at_y_minus_7_37_is_undecidable,
+        where_the_flat_the_dome_and_the_body_pipe_meet_is_undecidable,
     );
 }
 
@@ -314,28 +326,29 @@ fn the_side_of_a_point_on_the_rim_at_the_front_is_undecidable(_: &Model, error: 
         && off_the_rim < 1e-9
 }
 
-/// Refused `Undecidable` with the one record `order along a crossing`, its two
-/// points within `1e-9` of the two places where the plane `x = -0.3` meets the
-/// body's pipe, of radius 2.5 about `x = 1.27, z = 15`, at `y = -7.37`: one
-/// above the axis and one below it.
-fn the_order_of_two_points_on_the_pipe_at_y_minus_7_37_is_undecidable(
-    _: &Model,
-    error: &Error,
-) -> bool {
+/// Refused `Undecidable` with the one record `where three surfaces meet`,
+/// handed the three surfaces by a point of each: the flange's flat
+/// `x = -1.23` by `(-1.23, 0, 0)`, the dome by its centre `(1.27, -7.37, 15)`
+/// and the body's pipe by its axis's origin `(1.27, -1.27, 15)`.
+fn where_the_flat_the_dome_and_the_body_pipe_meet_is_undecidable(_: &Model, error: &Error) -> bool {
     let Error::Undecidable { records } = error else {
         return false;
     };
     let [record] = records.records() else {
         return false;
     };
-    let [one, other] = record.inputs() else {
+    let [_, _, _] = record.inputs() else {
         return false;
     };
-    let off_the_axis = (2.5_f64.powi(2) - (1.27_f64 + 0.3).powi(2)).sqrt();
-    let [above, below] = [15.0 + off_the_axis, 15.0 - off_the_axis].map(|z| [-0.3, -7.37, z]);
-    record.predicate() == ALONG_A_CROSSING
-        && ((is_within_1e_9_of(one, above) && is_within_1e_9_of(other, below))
-            || (is_within_1e_9_of(one, below) && is_within_1e_9_of(other, above)))
+    record.predicate() == WHERE_THREE_SURFACES_MEET
+        && [[-1.23, 0.0, 0.0], [1.27, -7.37, 15.0], [1.27, -1.27, 15.0]]
+            .iter()
+            .all(|&at| {
+                record
+                    .inputs()
+                    .iter()
+                    .any(|input| is_within_1e_9_of(input, at))
+            })
 }
 
 fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
