@@ -201,21 +201,24 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
-fn a_box_round_the_back_corner_gets_past_the_front_corner_and_stops_on_the_order_of_a_meet_far_along_the_flat()
- {
+fn a_box_round_the_back_corner_gets_past_the_order_of_a_meet_far_along_the_flat() {
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -2.27, 3.0]]),
-        the_order_of_the_back_corner_and_a_meet_far_along_the_flat_is_undecidable,
+        |model, error| {
+            !the_order_of_the_back_corner_and_a_meet_far_along_the_flat_is_undecidable(model, error)
+        },
     );
 }
 
 #[test]
-fn a_box_round_the_front_corner_gets_past_it_and_stops_on_the_order_of_a_meet_far_along_the_flat() {
+fn a_box_round_the_front_corner_gets_past_the_order_of_a_meet_far_along_the_flat() {
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[[-1.23, -1.27, 3.0]]),
-        the_order_of_the_back_corner_and_a_meet_far_along_the_flat_is_undecidable,
+        |model, error| {
+            !the_order_of_the_back_corner_and_a_meet_far_along_the_flat_is_undecidable(model, error)
+        },
     );
 }
 
