@@ -6607,7 +6607,13 @@ impl<'f> Arrangement<'f> {
             };
             Some(*cut)
         };
-        let (mine, theirs) = (the_cut_at(first)?, the_cut_at(second)?);
+        let ([one, other], mine) = match the_cut_at(first) {
+            Some(mine) => ([first, second], mine),
+            None => ([second, first], the_cut_at(second)?),
+        };
+        // Compared rather than matched: only a proved sign is read, and every
+        // other answer leaves the pair to the policy (§40).
+        let proved = |sign: Decision| sign == Decision::Pos || sign == Decision::Neg;
         let across = mine.normal().components().map(Interval::exactly);
         let runs_at = |at: usize| {
             let place = self.nodes[at].point;
@@ -6615,46 +6621,83 @@ impl<'f> Arrangement<'f> {
                 gradient_at(&wound_as[0], place).enclosure(),
                 gradient_at(&wound_as[1], place).enclosure(),
             );
-            dot_of(across, forward).sign()
-        };
-        let (runs, runs_there) = (runs_at(first), runs_at(second));
-        // Compared rather than matched: only one proved way is read, and every
-        // other answer leaves the pair to the policy (§40).
-        if runs != runs_there || !(runs == Decision::Pos || runs == Decision::Neg) {
-            return None;
-        }
-        let held = self.narrowed_box_of(second).enclosure();
-        let side_where_the_line_crosses = |axis: usize, at: f64| {
-            let mut square = [0.0; 4];
-            square[axis] = 1.0;
-            square[3] = -at;
-            rcad_predicates::side_of_a_plane_where_three_planes_meet(
-                [flat.coefficients(), theirs.coefficients(), square],
-                mine.coefficients(),
-            )
-            .ok()
-        };
-        let theirs_past_mine = (0..3).find_map(|axis| {
-            let [lo, hi] = [held[axis].lo(), held[axis].hi()];
-            if !(lo.is_finite() && hi.is_finite()) {
-                return None;
+            let read = dot_of(across, forward).sign();
+            if proved(read) {
+                return read;
             }
-            let at_lo = side_where_the_line_crosses(axis, lo)?;
-            let at_hi = side_where_the_line_crosses(axis, hi)?;
-            // Compared rather than matched: only one proved sign at both ends
-            // is read (§40).
-            (at_lo == at_hi && (at_lo == Decision::Pos || at_lo == Decision::Neg)).then_some(at_lo)
-        })?;
-        let [at_mine, at_theirs] = [Interval::exactly(mine.offset()), dot_of(across, held)];
-        let clear_of_the_arc = |start: PredicatePoint| {
-            let along = dot_of(across, start.enclosure());
-            let [past_mine, past_theirs] = [at_mine, at_theirs].map(|at| (along - at).sign());
-            past_mine == past_theirs && (past_mine == Decision::Pos || past_mine == Decision::Neg)
+            the_cut_at(at)
+                .and_then(|own| {
+                    let turn = self.the_turn_at_one_of_two_meets_of_a_line(
+                        at,
+                        [&wound_as[0], &wound_as[1], &Surface::Plane(own)],
+                    )?;
+                    let [facing, cut_facing] = [own, mine].map(|plane| plane.normal().components());
+                    if facing == cut_facing {
+                        Some(turn)
+                    } else if facing == cut_facing.map(|component| -component) {
+                        Some(the_other_way(turn))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(read)
         };
-        if !(clear_of_the_arc(from) && clear_of_the_arc(named_the_start.unwrap_or(node))) {
+        let (runs, runs_there) = (runs_at(one), runs_at(other));
+        if !(proved(runs) && proved(runs_there)) {
             return None;
         }
-        Some(if theirs_past_mine == runs {
+        let held = self.narrowed_box_of(other).enclosure();
+        let [at_mine, at_theirs] = [Interval::exactly(mine.offset()), dot_of(across, held)];
+        let side_of_the_arc = |along: Interval| {
+            let [past_mine, past_theirs] = [at_mine, at_theirs].map(|at| (along - at).sign());
+            (past_mine == past_theirs && proved(past_mine)).then_some(past_mine)
+        };
+        let slide =
+            Interval::exactly(mine.normal().dot(flat.normal()) / flat.normal().dot(flat.normal()));
+        let flat_normal = flat.normal().components().map(Interval::exactly);
+        let slid = [0, 1, 2].map(|axis| across[axis] - slide * flat_normal[axis]);
+        let on_the_flat = |start: PredicatePoint| {
+            let along = dot_of(across, start.enclosure());
+            if proved((along - at_mine).sign()) && proved((along - at_theirs).sign()) {
+                return along;
+            }
+            dot_of(slid, start.enclosure()) + slide * Interval::exactly(flat.offset())
+        };
+        let side = side_of_the_arc(dot_of(across, from.enclosure()))?;
+        if side_of_the_arc(on_the_flat(named_the_start.unwrap_or(node))) != Some(side) {
+            return None;
+        }
+        let one_comes_first = if runs == runs_there {
+            let past = (at_theirs - at_mine).sign();
+            if proved(past) {
+                past == runs
+            } else {
+                let theirs = the_cut_at(other)?;
+                let side_where_the_line_crosses = |axis: usize, at: f64| {
+                    let mut square = [0.0; 4];
+                    square[axis] = 1.0;
+                    square[3] = -at;
+                    rcad_predicates::side_of_a_plane_where_three_planes_meet(
+                        [flat.coefficients(), theirs.coefficients(), square],
+                        mine.coefficients(),
+                    )
+                    .ok()
+                };
+                let theirs_past_mine = (0..3).find_map(|axis| {
+                    let [lo, hi] = [held[axis].lo(), held[axis].hi()];
+                    if !(lo.is_finite() && hi.is_finite()) {
+                        return None;
+                    }
+                    let at_lo = side_where_the_line_crosses(axis, lo)?;
+                    let at_hi = side_where_the_line_crosses(axis, hi)?;
+                    (at_lo == at_hi && proved(at_lo)).then_some(at_lo)
+                })?;
+                theirs_past_mine == runs
+            }
+        } else {
+            runs != side
+        };
+        Some(if one_comes_first == (one == first) {
             Decision::Pos
         } else {
             Decision::Neg
