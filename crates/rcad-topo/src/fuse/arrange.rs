@@ -17120,6 +17120,34 @@ fn how_a_crossing_runs(
     {
         return how_an_endless_bend_runs(surface, partner, &flat, &cone, at, log);
     }
+    // Two mirror images of one slope with each apex inside the other cross in
+    // two flat cuts of either that never meet, and `walk` marches each whole
+    // curve as one of those flat surfaces' cut of the cone that sorts first,
+    // so a branch of a hyperbola, or a parabola, is ordered as that flat
+    // surface's endless bend across that cone.
+    if let (Surface::Cone(one), Surface::Cone(other)) = (surface, partner)
+        && let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run()
+        && let Some((flat, cone)) =
+            one.the_flat_cut_of_a_mirror_image_held_apart_from_it(other, picked_by)?
+    {
+        match how_a_plane_leans_against_a_cone(&flat, &cone) {
+            Decision::Zero | Decision::Neg => {
+                return how_an_endless_bend_runs(surface, partner, &flat, &cone, at, log);
+            }
+            Decision::Pos => {}
+            Decision::Undecidable { .. } | _ => {
+                return Err(gave_up(
+                    A_PLANE_AGAINST_A_CONE,
+                    &[
+                        PredicatePoint::from(flat.normal().components()),
+                        PredicatePoint::from(cone.axis().direction().components()),
+                    ],
+                    Measures::Length,
+                    log,
+                ));
+            }
+        }
+    }
     // Everything left is either a conic or a quartic. A conic is ordered by one
     // determinant: three points on a convex curve run round it in the order
     // they wind (§34.5). A quartic is ordered by one only where it runs once
