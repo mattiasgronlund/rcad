@@ -21739,7 +21739,9 @@ check-hub-align-selftest:
 #
 # `just spend` covers the last seven days and prints every report. A window and
 # one report narrow it: `just spend 2026-09-12 2026-09-20 ritual`, and a sixth
-# argument keeps only the lanes whose path contains it.
+# argument is a list of session ids or path substrings, joined by commas —
+# a lane's branch name works too — and keeps only what one of them matches:
+# `just spend 2026-09-12 2026-09-20 all aec37d77,8a5234d9`. §396.5.
 #
 # The reports are `summary` (token classes, batching, context, the cost of
 # finding), `finding` (which of that a lookup lane could take, and what handing
