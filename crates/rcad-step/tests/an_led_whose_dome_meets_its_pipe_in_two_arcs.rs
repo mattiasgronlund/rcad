@@ -93,11 +93,18 @@
 //!   Bake solved that corner from the flat, the flange's front and the body's
 //!   front disc, the last two one plane written twice a rounding apart (Q2967).
 //!   It now reads a corner in two fans of faces out of the model and never
-//!   solves it (Q2939), and every fuse stops on the flange's front, face slot
-//!   8, the plane `y = -6.35`, refused `CannotTellTheCellsOfAFaceApart`: the
-//!   refusal Q2974 and Q2982 cleared from the fronts of two LEDs of
+//!   solves it (Q2939), and every fuse stopped on the flange's front, face
+//!   slot 8, the plane `y = -6.35`, refused `CannotTellTheCellsOfAFaceApart`:
+//!   the refusal Q2974 and Q2982 cleared from the fronts of two LEDs of
 //!   `a_led_whose_flat_touches_its_body_at_a_corner.rs`, but not from this
-//!   one's.
+//!   one's. The flat is stored `1.2e-16` inside the hole's circle on the
+//!   front, so its line crosses the circle at `z = 2 ∓ 1.9e-8`, near the front
+//!   corner, and the arrangement kept both places as nodes of their own, with
+//!   a sliver between them. Each is now folded into the corner when the line
+//!   and the circle stay within a rounding of each other all the way from it
+//!   to the corner (Q3010). Every fuse now stops refused `Undecidable` on
+//!   which way two tangent curves bend, at the back corner
+//!   `(-0.23, -7.35, 2)`.
 //!
 //! When either answers, its test turns into the volume check of commit
 //! `f179ca02a`: what the box and the LED share is the box's part inside the
@@ -105,13 +112,21 @@
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, SIDE_OF_PLANE, Surface, Vector};
+use rcad_geom::{Isometry, SIDE_OF_PLANE, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
 const D5: &str = "LED_D5.0mm-3.step";
 const D3: &str = "LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step";
+
+/// What a refusal on which way two curves that touch bend away from each other
+/// names.
+const HOW_TWO_TANGENT_CURVES_BEND: &str = "which way two tangent curves bend";
+
+/// The D3 LED's corner in two fans of faces on its flange's back, where its
+/// flat touches its body's pipe.
+const THE_BACK_CORNER: [f64; 3] = [-0.23, -7.35, 2.0];
 
 /// Half the side of the box put round each corner.
 const HALF: f64 = 0.1;
@@ -122,7 +137,7 @@ const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 #[test]
 fn a_d5_led_gets_past_the_balls_side_of_its_rim_and_stops_where_two_lines_on_its_pipe_meet_far_up()
 {
-    every_fuse_refuses(D5, &[[0.04, 0.0, 4.0], FAR_OFF], |_, error| {
+    every_fuse_refuses(D5, &[[0.04, 0.0, 4.0], FAR_OFF], |error| {
         let Error::Undecidable { records } = error else {
             return false;
         };
@@ -144,22 +159,31 @@ fn a_d5_led_gets_past_the_balls_side_of_its_rim_and_stops_where_two_lines_on_its
 }
 
 #[test]
-fn a_d3_led_gets_past_its_front_corner_to_the_cells_of_its_front() {
+fn a_d3_led_gets_past_the_cells_of_its_front_and_stops_on_how_two_tangent_curves_bend_at_its_back_corner()
+ {
     every_fuse_refuses(
         D3,
-        &[[-0.23, -6.35, 1.999999956464], [-0.23, -7.35, 2.0], FAR_OFF],
-        |model, error| the_cells_of_the_front_cannot_be_told_apart(model, error, -6.35),
+        &[[-0.23, -6.35, 1.999999956464], THE_BACK_CORNER, FAR_OFF],
+        |error| {
+            let Error::Undecidable { records } = error else {
+                return false;
+            };
+            let [record] = records.records() else {
+                return false;
+            };
+            let [at, ..] = record.inputs() else {
+                return false;
+            };
+            record.predicate() == HOW_TWO_TANGENT_CURVES_BEND
+                && at.exact_coordinates() == Some(THE_BACK_CORNER)
+        },
     );
 }
 
 /// The LED in `file` and a box of side `2 * HALF` centred on each of
 /// `centres`, fused under intersection and under difference, each refused as
-/// `the_refusal` takes, handed the model it was refused in.
-fn every_fuse_refuses(
-    file: &str,
-    centres: &[[f64; 3]],
-    the_refusal: impl Fn(&Model, &Error) -> bool,
-) {
+/// `the_refusal` takes.
+fn every_fuse_refuses(file: &str, centres: &[[f64; 3]], the_refusal: impl Fn(&Error) -> bool) {
     let (led, solid) = the_led(file);
     for &centre in centres {
         for rule in [Rule::Intersection, Rule::Difference] {
@@ -172,7 +196,7 @@ fn every_fuse_refuses(
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             ) {
-                Err(error) if the_refusal(&model, &error) => {}
+                Err(error) if the_refusal(&error) => {}
                 Err(error) => panic!(
                     "{file}: {rule:?} with a box round {centre:?} refused {error:?}, which is not \
                      the refusal this pins"
@@ -184,29 +208,6 @@ fn every_fuse_refuses(
             }
         }
     }
-}
-
-/// Refused `CannotTellTheCellsOfAFaceApart` on the flange's front, the face
-/// of the LED on the plane `y = front`.
-fn the_cells_of_the_front_cannot_be_told_apart(model: &Model, error: &Error, front: f64) -> bool {
-    let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
-        return false;
-    };
-    let surface = model
-        .face(*face)
-        .expect("the refusal names a face of the LED")
-        .surface();
-    let Surface::Plane(plane) = surface else {
-        return false;
-    };
-    [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
-        .into_iter()
-        .all(|[x, z]| {
-            plane
-                .signed_distance_to(rcad_geom::Point::new(x, front, z))
-                .abs()
-                < 1e-9
-        })
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {

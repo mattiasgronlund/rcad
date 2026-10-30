@@ -3889,6 +3889,18 @@ impl<'f> Arrangement<'f> {
     /// how [`Arrangement::turns_anticlockwise`] reads a node standing for two
     /// places of one meet (Q2982).
     ///
+    /// **Where no place of the meet reaches the room, a place further off is
+    /// the corner still when the touch at the corner is what rounding split**
+    /// ([`Arrangement::a_touch_the_rounding_split_reaches`]), the one place
+    /// outside the room this ever folds. A line written a rounding inside the
+    /// curve it touches at the corner crosses it far along them both from the
+    /// touch, while the two stay within the room of each other all the way. On
+    /// the flange's front of three KiCad LEDs, a flat stored `1.2e-16` inside
+    /// the hole's circle crosses it `1.9e-8` either side of a corner. Left two
+    /// nodes, with a sliver between them the line and the circle bound, they
+    /// made the face's cells refuse to come apart, and every fuse of the three
+    /// refused (Q3010).
+    ///
     /// **Only the face's corners are looked through, not every node.** They
     /// are the first nodes, one per side of each wire
     /// ([`Arrangement::place_the_corners`]), and every meet placed after them
@@ -3929,6 +3941,17 @@ impl<'f> Arrangement<'f> {
                 };
                 let allowed = super::bake::grown_by(node.point, room);
                 let reaches_the_room = |other: &PredicatePoint| boxes_overlap(allowed, *other);
+                let reaching: SmallVec<[usize; 2]> = (0..places.len())
+                    .filter(|&other| reaches_the_room(&places[other]))
+                    .collect();
+                if reaching.is_empty() {
+                    return self.a_touch_the_rounding_split_reaches(
+                        node.point,
+                        [first, second],
+                        tight[which],
+                        room,
+                    );
+                }
                 let room = allowed.enclosure();
                 let inside_the_room = |meet: &PredicatePoint| {
                     let meet = meet.enclosure();
@@ -3936,9 +3959,6 @@ impl<'f> Arrangement<'f> {
                         room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
                     })
                 };
-                let reaching: SmallVec<[usize; 2]> = (0..places.len())
-                    .filter(|&other| reaches_the_room(&places[other]))
-                    .collect();
                 let one_touch_at_the_corner = || {
                     reaching.iter().all(|&one| {
                         inside_the_room(&tight[one])
@@ -4033,6 +4053,56 @@ impl<'f> Arrangement<'f> {
             .find(|edge| edge.start.vertex == vertex)
             .expect("every corner node is where an edge of this face starts")
             .start
+    }
+
+    /// Whether `place`, where the face's surface and the partners of the
+    /// crossings `on` meet, is the touch at `corner` that rounding split, for
+    /// a meet no place of which reaches the corner's `room`.
+    ///
+    /// **It is when the three are planes, balls and pipes, one of them at
+    /// least curved, and every point between the corner's box and `place`'s
+    /// lies within `room` of each of the three.** A line and a circle that
+    /// touch, written down a rounding off touching, cross at two places far
+    /// along them from the touch, since a circle of radius `r` leaves its
+    /// tangent by `room` only `√(2·r·room)` from the touch. On the front of a
+    /// KiCad LED, a flat stored `1.2e-16` inside the circle it touches crosses
+    /// it `1.9e-8` either side of the touch (Q3010). From the corner to each
+    /// place the two curves then stay within the room of each other, so the
+    /// corner and the place are one touch written down two ways: wobble, not
+    /// a decision anybody failed to prove (§17.2). A corner that is itself
+    /// a place, within its room, leaves the other place a node however close
+    /// the two curves stay (§288.4), so this is asked only where no place is.
+    ///
+    /// **No place further than `√(8·r·room)` from the corner is folded**, for
+    /// `r` the smallest radius of the three: twice that reach, the most the
+    /// corner and a place both within it can lie apart. A pipe can hold a
+    /// whole line, and two planes through that line then stay within the
+    /// room of all three along it, as far as rounding puts their meet; that
+    /// meet says nothing about the corner (§395.7).
+    fn a_touch_the_rounding_split_reaches(
+        &self,
+        corner: PredicatePoint,
+        on: [usize; 2],
+        place: PredicatePoint,
+        room: f64,
+    ) -> bool {
+        let three = [
+            self.surface,
+            self.crossings[on[0]].partner,
+            self.crossings[on[1]].partner,
+        ];
+        let Some(radius) = the_smallest_radius_of_a_curve_among(three) else {
+            return false;
+        };
+        let reach = (8.0 * radius * room).sqrt();
+        holds_every_point_of(super::bake::grown_by(corner, reach), place)
+            && three.iter().all(|surface| {
+                every_point_between_lies_within(
+                    surface,
+                    [corner.enclosure(), place.enclosure()],
+                    room,
+                )
+            })
     }
 
     /// A node where a cut surface touches the face's own at one point, when
@@ -15955,6 +16025,67 @@ fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
     (0..3).all(|axis| outer[axis].lo() <= inner[axis].lo() && inner[axis].hi() <= outer[axis].hi())
 }
 
+/// The smallest radius among the balls and pipes of `three`, where the rest
+/// are planes. `None` where none is curved, or where one is a cone, a torus or
+/// any other surface.
+fn the_smallest_radius_of_a_curve_among(three: [Surface; 3]) -> Option<f64> {
+    let mut smallest: Option<f64> = None;
+    for surface in three {
+        let radius = if let Surface::Sphere(ball) = surface {
+            ball.radius()
+        } else if let Surface::Cylinder(pipe) = surface {
+            pipe.radius()
+        } else if surface.as_plane().is_some() {
+            continue;
+        } else {
+            return None;
+        };
+        smallest = Some(smallest.map_or(radius, |so_far| so_far.min(radius)));
+    }
+    smallest
+}
+
+/// Whether every point on every segment from a point of `ends[0]` to a point
+/// of `ends[1]` lies within `room` of `surface`, a plane, a ball or a pipe.
+///
+/// **A plane's value `n·x + d` runs straight along a segment**, so its
+/// largest and smallest are at the two ends. **A ball's `|x − c|²` and a
+/// pipe's `|(x − o) × w|²` are squares**, and part way along, a `t` of the
+/// way from `a` to `b`, either is `(1 − t)·q(a) + t·q(b) − t·(1 − t)·q₀(b −
+/// a)`, `q₀` the square alone. So it is never more than the larger end, and
+/// never less than the smaller by more than a quarter of `q₀(b − a)`. That is
+/// set against `(r ∓ room)²`, times `|w|²` for a pipe, and asks no division.
+fn every_point_between_lies_within(surface: &Surface, ends: [[Interval; 3]; 2], room: f64) -> bool {
+    if let Some(flat) = surface.as_plane() {
+        let [a, b, c, d] = flat.coefficients();
+        let normal = [a, b, c].map(Interval::exactly);
+        let [near, far] = ends.map(|end| dot_of(normal, end) + Interval::exactly(d));
+        return -room <= near.lo().min(far.lo()) && near.hi().max(far.hi()) <= room;
+    }
+    let (middle, along, radius) = if let Surface::Sphere(ball) = surface {
+        (ball.centre(), None, ball.radius())
+    } else if let Surface::Cylinder(pipe) = surface {
+        let along = pipe.axis().direction().components().map(Interval::exactly);
+        (pipe.axis().origin(), Some(along), pipe.radius())
+    } else {
+        panic!("only a plane, a ball or a pipe is asked how far a segment strays: {surface:?}");
+    };
+    let square = |step: [Interval; 3]| {
+        let across = along.map_or(step, |along| cross_of_intervals(step, along));
+        dot_of(across, across)
+    };
+    let middle = middle.coordinates().map(Interval::exactly);
+    let [near, far] = ends.map(|end| square([0, 1, 2].map(|axis| end[axis] - middle[axis])));
+    let span = square([0, 1, 2].map(|axis| ends[1][axis] - ends[0][axis]));
+    let lowest = Interval::exactly(near.lo().min(far.lo())) - span * Interval::exactly(0.25);
+    let scale = along.map_or(Interval::exactly(1.0), |along| dot_of(along, along));
+    let (radius, room) = (Interval::exactly(radius), Interval::exactly(room));
+    let (inner, outer) = (radius - room, radius + room);
+    inner.lo() > 0.0
+        && (inner * inner * scale).hi() <= lowest.lo()
+        && near.hi().max(far.hi()) <= (outer * outer * scale).lo()
+}
+
 /// Which of two points comes first round the loop a plane cuts a pipe, a cone
 /// or a ball in, read as how far each is turned from the start about the
 /// surface's axis, or about the line through the ball's centre along the
@@ -23387,6 +23518,146 @@ mod tests {
             folds(past, past),
             [false, false],
             "a second place that sticks out a step past the room leaves the first to the policy too"
+        );
+    }
+
+    /// The wall `x = 0` of the unit cube's bottom touches the circle of radius
+    /// `1/2` about `(1/2, 0)` at the corner at the origin. Written down `2⁻⁵⁴`
+    /// off touching, about `(1/2 − 2⁻⁵⁴, 0)`, the circle takes the corner
+    /// `2⁻⁵⁴` inside it, and the wall's line crosses it twice, about `2⁻²⁷`
+    /// either side of the corner: two places proved apart, each half a million
+    /// times further from the corner than the room writing it down cost. That
+    /// is the front corner of the KiCad LED `LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm`,
+    /// where the flange's flat, stored `1.2e-16` inside the circle it touches,
+    /// crosses it `1.9e-8` either side (Q3010). From the corner to each place
+    /// the line and the circle stay within `2⁻⁵⁴` of each other, so the corner
+    /// stands for both.
+    ///
+    /// The model says the LED's corner is on the circle, an edge along it
+    /// ends there, and `place_the_corners` takes that as read. The circle
+    /// here is a cut the corner knows nothing of, so the test puts the corner
+    /// on it.
+    #[test]
+    fn two_places_where_a_line_crosses_a_circle_it_touches_at_a_corner_are_both_folded_into_it() {
+        let (cube, _) = the_unit_cube_baked_and_the_plane_x_equals_y();
+        let up = Axis::new(
+            Point::new(0.5 - f64::powi(2.0, -54), 0.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+        )
+        .expect("an axis up z");
+        let pipe = Surface::Cylinder(Cylinder::new(up, 0.5).expect("a positive radius"));
+        let mut bottom = the_face_facing(&cube, [0.0, 0.0, -1.0]);
+        bottom.cuts = vec![pipe];
+        let mut arrangement = drawn_up_to_its_corners(&bottom);
+        let wall = the_crossing_along(&arrangement, the_face_facing(&cube, [-1.0, 0.0, 0.0]));
+        let circle = the_one_crossing_of(&arrangement, pipe);
+        let corner = arrangement
+            .nodes
+            .iter()
+            .position(|node| node.vertex.is_some() && node.point == PredicatePoint::from([0.0; 3]))
+            .expect("a corner of the face at the origin");
+        arrangement.nodes[corner].crossings.push(circle);
+
+        let said = what_the_fold_says_of_the_tightest_boxes(&arrangement, wall, circle);
+        let [(below, _), (above, _)] = said[..] else {
+            panic!("the wall's line crosses the circle twice: {said:?}");
+        };
+        let room = what_writing_the_corner_down_cost([Interval::exactly(0.0); 3]);
+        assert!(
+            below[1] < -1e5 * room && 1e5 * room < above[1],
+            "both places lie far outside the room writing the corner down cost: {said:?}"
+        );
+        assert_eq!(
+            said.map(|(_, folds)| folds),
+            [true, true],
+            "the line and the circle stay within a rounding of each other from the corner to \
+             each place, so the corner is the touch both places are"
+        );
+    }
+
+    /// What [`Arrangement::a_corner_is_this_place`] says of each place where
+    /// the face's own surface and the partners of `one` and `other` meet,
+    /// with each place's tightest box as `place_where_the_partners_meet` works
+    /// it out for a corner on both crossings, the places' middles sorted by
+    /// `y`.
+    fn what_the_fold_says_of_the_tightest_boxes(
+        arrangement: &Arrangement<'_>,
+        one: usize,
+        other: usize,
+    ) -> [([f64; 3], bool); 2] {
+        let (first, second) = (one.min(other), one.max(other));
+        let asked = three_planes_faced_the_one_way([
+            arrangement.surface,
+            arrangement.crossings[first].partner,
+            arrangement.crossings[second].partner,
+        ]);
+        let asked = [&asked[0], &asked[1], &asked[2]];
+        let mut log = ProvenanceLog::new();
+        let meet = meet_of_three_surfaces(asked, &Policy::certified(), &mut log)
+            .expect("two planes and a pipe meet where a certified policy can say");
+        assert!(log.is_empty(), "no policy was asked: {log:?}");
+        let (MeetOfThree::At(places), MeetOfThree::At(tight)) =
+            (meet.clone(), meet.boxed_tight(asked))
+        else {
+            panic!("the two crossings meet on the face's surface");
+        };
+        let places: Vec<PredicatePoint> = places.into_iter().map(as_exact_as_it_is).collect();
+        let tight: Vec<PredicatePoint> = tight.into_iter().map(as_exact_as_it_is).collect();
+        let mut said: Vec<([f64; 3], bool)> = (0..places.len())
+            .map(|which| {
+                (
+                    tight[which]
+                        .enclosure()
+                        .map(|range| (range.lo() + range.hi()) / 2.0),
+                    arrangement.a_corner_is_this_place(first, second, which, &places, &tight),
+                )
+            })
+            .collect();
+        said.sort_by(|one, other| one.0[1].total_cmp(&other.0[1]));
+        said.try_into()
+            .unwrap_or_else(|said| panic!("two places where a line crosses a circle: {said:?}"))
+    }
+
+    /// The bottom `z = 0` of the unit cube, its wall `x = 0`, and a pipe of
+    /// radius `1/2` about the line through `(1/2, 0, 0)` along `y` all hold the
+    /// line `x = z = 0`, the foot of the wall. Rounding can put where three
+    /// such surfaces meet anywhere along that line, and every point from the
+    /// corner at the origin to there lies on all three (§395.7). A place `2⁻¹⁰`
+    /// along it is no touch that rounding split, and only the reach
+    /// `√(8·r·room)`, `2.4e-7` here, keeps it from being folded into the
+    /// corner. A place `2⁻²⁴` along it, a quarter of that reach, is folded.
+    ///
+    /// The bottom's side along `y = 0` stands in for a crossing with the pipe,
+    /// which no cut could draw along the bottom's own edge.
+    #[test]
+    fn a_place_on_a_line_two_planes_and_a_pipe_share_is_folded_only_within_the_reach_of_a_touch() {
+        let (cube, _) = the_unit_cube_baked_and_the_plane_x_equals_y();
+        let bottom = the_face_facing(&cube, [0.0, 0.0, -1.0]);
+        let mut arrangement = drawn_up_to_its_corners(&bottom);
+        let wall = the_crossing_along(&arrangement, the_face_facing(&cube, [-1.0, 0.0, 0.0]));
+        let front = the_crossing_along(&arrangement, the_face_facing(&cube, [0.0, -1.0, 0.0]));
+        assert!(
+            is_a_corner_on_both(&arrangement, [0.0; 3], wall, front),
+            "the fold is only asked about a corner on both crossings"
+        );
+        let along_y =
+            Axis::new(Point::new(0.5, 0.0, 0.0), Vector::new(0.0, 1.0, 0.0)).expect("an axis");
+        arrangement.crossings[front].partner =
+            Surface::Cylinder(Cylinder::new(along_y, 0.5).expect("a positive radius"));
+
+        let folds = |y: f64| {
+            let place = [PredicatePoint::from([0.0, y, 0.0])];
+            arrangement.a_corner_is_this_place(wall, front, 0, &place, &place)
+        };
+        assert!(
+            folds(f64::powi(2.0, -24)),
+            "a place a quarter of a touch's reach along the line is that touch written down \
+             another way"
+        );
+        assert!(
+            !folds(f64::powi(2.0, -10)),
+            "a place further along the line than any touch rounding split could reach says \
+             nothing about the corner"
         );
     }
 

@@ -65,17 +65,28 @@
 //! and the far box of `LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step`, stop on the
 //! order along the loop a plane `x = c` cuts the rim in, between where the
 //! disc's plane and the flange's front cross it a rounding apart: the box's
-//! side `x = -1.33` here, a lead's side `x = -0.3` in the D3. The last two,
-//! `LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step` and
-//! `LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step`, stop on the flange's front,
+//! side `x = -1.33` here, a lead's side `x = -0.3` in the D3.
+//!
+//! The last two, `LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step` and
+//! `LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step`, stopped on the flange's front,
 //! face slot 2, the plane `y = -6.35`, refused
 //! `CannotTellTheCellsOfAFaceApart`: the refusal Q2974 and Q2982 cleared from
 //! the fronts of two LEDs of `a_led_whose_flat_touches_its_body_at_a_corner.rs`.
-//! These tests pin all three.
+//! The flat that the file has touch the hole's circle on the front, at a corner
+//! in two fans of faces, is stored a rounding inside it, so its line crosses
+//! the circle at two places about `1e-8` either side of the corner, and the
+//! arrangement kept them as nodes of their own, with a sliver between them.
+//! Each place is now folded into the corner when the line and the circle stay
+//! within a rounding of each other all the way from it to the corner (Q3010).
+//! The far box of the D3 now stops on the order along a crossing where its
+//! lead's side `x = -0.3` meets the rim below the axis, and the D5's on side
+//! of plane where its flat meets its rim above the axis.
+//!
+//! These tests pin all four stops.
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{SIDE_OF_PLANE, Surface};
+use rcad_geom::SIDE_OF_PLANE;
 use rcad_predicates::{Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -138,12 +149,29 @@ const BY_A_LEAD: (Led, f64) = (
     -0.3,
 );
 
-/// The two other LED files that refused on their rim and front disc and stop
-/// on the cells of their flange's front, each with the `y` of that front.
-const TWO_MORE: [(&str, f64); 2] = [
-    ("LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step", -6.35),
-    ("LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step", -6.35),
-];
+/// The D3 LED file whose far box gets past the cells of its flange's front and
+/// stops where the side of a lead, the plane `x = -0.3`, meets its rim on its
+/// flange's front below the axis.
+const BY_A_LEAD_BELOW_THE_AXIS: (Led, f64) = (
+    Led {
+        file: "LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step",
+        flat: -0.23,
+        front: -6.35,
+        rim: 1.9,
+        axis: 10.0,
+    },
+    -0.3,
+);
+
+/// The D5 LED file whose far box gets past the cells of its flange's front and
+/// stops where its flat meets its rim above the axis.
+const FLAT_AND_RIM_ABOVE_THE_AXIS: Led = Led {
+    file: "LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step",
+    flat: -1.23,
+    front: -6.35,
+    rim: 2.9,
+    axis: 9.0,
+};
 
 /// An LED lying along `-y`, with its flange's flat `x = flat`, its flange's
 /// front `y = front`, and its flange's rim, a pipe of radius `rim` about the
@@ -175,7 +203,7 @@ impl Led {
 #[test]
 fn an_led_whose_disc_sits_inside_its_rim_gets_past_its_front_corner_and_stops_where_its_flat_meets_its_rim()
  {
-    every_fuse_refuses(THIS_ONE.file, &[FAR_OFF], |_, error| {
+    every_fuse_refuses(THIS_ONE.file, &[FAR_OFF], |error| {
         the_side_of_where_the_flat_meets_the_rim_is_undecidable(&THIS_ONE, error)
     });
 }
@@ -183,7 +211,7 @@ fn an_led_whose_disc_sits_inside_its_rim_gets_past_its_front_corner_and_stops_wh
 #[test]
 fn a_box_on_the_flat_stops_where_its_side_meets_the_rim_on_the_two_front_planes() {
     let (centre, side) = ON_THE_FLAT;
-    every_fuse_refuses(THIS_ONE.file, &[centre], |_, error| {
+    every_fuse_refuses(THIS_ONE.file, &[centre], |error| {
         the_order_where_a_plane_across_meets_the_rim_is_undecidable(&THIS_ONE, side, error)
     });
 }
@@ -191,7 +219,7 @@ fn a_box_on_the_flat_stops_where_its_side_meets_the_rim_on_the_two_front_planes(
 #[test]
 fn three_more_leds_get_past_their_front_corner_and_stop_where_their_flat_meets_their_rim() {
     for led in &THREE_MORE {
-        every_fuse_refuses(led.file, &[FAR_OFF], |_, error| {
+        every_fuse_refuses(led.file, &[FAR_OFF], |error| {
             the_side_of_where_the_flat_meets_the_rim_is_undecidable(led, error)
         });
     }
@@ -200,28 +228,35 @@ fn three_more_leds_get_past_their_front_corner_and_stop_where_their_flat_meets_t
 #[test]
 fn a_d3_led_gets_past_its_front_corner_and_stops_where_a_leads_side_meets_its_rim() {
     let (led, side) = &BY_A_LEAD;
-    every_fuse_refuses(led.file, &[FAR_OFF], |_, error| {
+    every_fuse_refuses(led.file, &[FAR_OFF], |error| {
         the_order_where_a_plane_across_meets_the_rim_is_undecidable(led, *side, error)
     });
 }
 
 #[test]
-fn two_more_leds_get_past_their_front_corner_to_the_cells_of_their_front() {
-    for (file, front) in TWO_MORE {
-        every_fuse_refuses(file, &[FAR_OFF], |model, error| {
-            the_cells_of_the_front_cannot_be_told_apart(model, error, front)
-        });
-    }
+fn a_d3_led_gets_past_the_cells_of_its_front_and_stops_where_a_leads_side_meets_its_rim_below_the_axis()
+ {
+    let (led, side) = &BY_A_LEAD_BELOW_THE_AXIS;
+    let [_, below] = led.where_a_plane_across_meets_the_rim(*side);
+    every_fuse_refuses(led.file, &[FAR_OFF], |error| {
+        the_one_record_is_undecidable_at(ALONG_A_CROSSING, below, error)
+    });
+}
+
+#[test]
+fn a_d5_led_gets_past_the_cells_of_its_front_and_stops_where_its_flat_meets_its_rim_above_the_axis()
+{
+    let led = &FLAT_AND_RIM_ABOVE_THE_AXIS;
+    let [above, _] = led.where_a_plane_across_meets_the_rim(led.flat);
+    every_fuse_refuses(led.file, &[FAR_OFF], |error| {
+        the_one_record_is_undecidable_at(SIDE_OF_PLANE, above, error)
+    });
 }
 
 /// The LED in `file` and a box of side 0.2 centred on each of `centres`, fused
 /// under intersection and under difference, each refused as `the_refusal`
-/// takes, handed the model it was refused in.
-fn every_fuse_refuses(
-    file: &str,
-    centres: &[[f64; 3]],
-    the_refusal: impl Fn(&Model, &Error) -> bool,
-) {
+/// takes.
+fn every_fuse_refuses(file: &str, centres: &[[f64; 3]], the_refusal: impl Fn(&Error) -> bool) {
     let (led, solid) = the_led(file);
     for &centre in centres {
         for rule in [Rule::Intersection, Rule::Difference] {
@@ -235,7 +270,7 @@ fn every_fuse_refuses(
                 &mut ProvenanceLog::new(),
             ) {
                 Err(error) => assert!(
-                    the_refusal(&model, &error),
+                    the_refusal(&error),
                     "{file}: {rule:?} with a box round {centre:?} refused {error:?}, which is not \
                      the refusal this pins"
                 ),
@@ -252,17 +287,10 @@ fn every_fuse_refuses(
 /// within `1e-9` of the corner on the LED's flange's front where its flat meets
 /// its rim below the axis.
 fn the_side_of_where_the_flat_meets_the_rim_is_undecidable(led: &Led, error: &Error) -> bool {
-    let Error::Undecidable { records } = error else {
+    let [point] = the_points_of_the_one_record(SIDE_OF_PLANE, error) else {
         return false;
     };
-    let [record] = records.records() else {
-        return false;
-    };
-    let [point] = record.inputs() else {
-        return false;
-    };
-    record.predicate() == SIDE_OF_PLANE
-        && is_within_1e_9_of(point, led.where_the_flat_meets_the_rim_below_the_axis())
+    is_within_1e_9_of(point, led.where_the_flat_meets_the_rim_below_the_axis())
 }
 
 /// Refused `Undecidable` with the one record `order along a crossing`, both its
@@ -273,19 +301,27 @@ fn the_order_where_a_plane_across_meets_the_rim_is_undecidable(
     across: f64,
     error: &Error,
 ) -> bool {
-    let Error::Undecidable { records } = error else {
-        return false;
-    };
-    let [record] = records.records() else {
-        return false;
-    };
-    let [one, other] = record.inputs() else {
-        return false;
-    };
     let [above, _] = led.where_a_plane_across_meets_the_rim(across);
-    record.predicate() == ALONG_A_CROSSING
-        && is_within_1e_9_of(one, above)
-        && is_within_1e_9_of(other, above)
+    the_one_record_is_undecidable_at(ALONG_A_CROSSING, above, error)
+}
+
+/// Refused `Undecidable` with the one record `predicate`, every one of its
+/// points within `1e-9` of `at`.
+fn the_one_record_is_undecidable_at(predicate: &str, at: [f64; 3], error: &Error) -> bool {
+    let points = the_points_of_the_one_record(predicate, error);
+    !points.is_empty() && points.iter().all(|point| is_within_1e_9_of(point, at))
+}
+
+/// The points of the one record of an `Undecidable` refusal, when it is one
+/// on `predicate`, and none otherwise.
+fn the_points_of_the_one_record<'a>(predicate: &str, error: &'a Error) -> &'a [Point] {
+    let Error::Undecidable { records } = error else {
+        return &[];
+    };
+    match records.records() {
+        [record] if record.predicate() == predicate => record.inputs(),
+        _ => &[],
+    }
 }
 
 fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
@@ -294,29 +330,6 @@ fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
         .iter()
         .zip(at)
         .all(|(side, at)| (side.lo() - at).abs() < 1e-9 && (side.hi() - at).abs() < 1e-9)
-}
-
-/// Refused `CannotTellTheCellsOfAFaceApart` on the flange's front, the face
-/// of the LED on the plane `y = front`.
-fn the_cells_of_the_front_cannot_be_told_apart(model: &Model, error: &Error, front: f64) -> bool {
-    let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
-        return false;
-    };
-    let surface = model
-        .face(*face)
-        .expect("the refusal names a face of the LED")
-        .surface();
-    let Surface::Plane(plane) = surface else {
-        return false;
-    };
-    [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]
-        .into_iter()
-        .all(|[x, z]| {
-            plane
-                .signed_distance_to(rcad_geom::Point::new(x, front, z))
-                .abs()
-                < 1e-9
-        })
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
