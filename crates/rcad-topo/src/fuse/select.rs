@@ -2929,6 +2929,11 @@ fn the_piece_holds(
         {
             return Some(false);
         }
+        if let Surface::Cone(cone) = &piece.surface
+            && !is_on_the_sides_of_two_flat_cuts_the_piece_is_on(piece, cone, point)?
+        {
+            return Some(false);
+        }
         for side in piece.wires.iter().flatten() {
             let found = match side.carried_by[1].as_plane() {
                 Some(flat) => side_of_a_flat_face(flat, point),
@@ -3259,6 +3264,89 @@ fn how_far_up_the_axis(cone: &Cone, point: PredicatePoint) -> Decision {
         .map(|axis| (at[axis] - Interval::exactly(apex[axis])) * Interval::exactly(up[axis]))
         .fold(Interval::exactly(0.0), |so_far, term| so_far + term)
         .sign()
+}
+
+/// Whether `point`, taken as being on `cone`, is on the piece's side of each
+/// flat surface whose cut of `cone` is part of where it crosses a partner that
+/// is a mirror image held apart from it, or `None` when nothing here can say.
+///
+/// **Two mirror images of one slope with each apex inside the other cross in
+/// two flat cuts of either that never meet**
+/// ([`Cone::the_two_flat_cuts_of_a_mirror_image_held_apart_from_it`]). On
+/// `cone` the partner's form is a multiple of the product of the two flat
+/// surfaces' forms, so the partner's side of a point is the product of its
+/// sides of the two, and two points on one side of the partner can be on
+/// opposite sides of both. The arrangement draws all of where the two cross
+/// inside the face, the parts outside the partner's face too, so each piece is
+/// wholly on one side of each flat surface, and the partner's side does not
+/// say which. Two pointed cones of slope two, eight and ten high, the second a
+/// quarter turn about `x` through `(0, 0, 4)`: the turned cone's piece round
+/// its apex, between the halfway cut `y + z = 4` and the upright cone's cap, is
+/// inside the upright cone, and so is `(0, −4, −12)`, on the turned cone beyond
+/// the other cut, `y − z = 2.4`. That point passed every side, the piece was
+/// placed outside the upright cone, and every fuse was refused
+/// (`tests/a_funnel_with_a_leaning_spout.rs`, row Q2914).
+///
+/// Which side the piece is on is read off its corners, as
+/// [`is_on_the_nappe_the_piece_is_on`] reads its half, and a corner that reads
+/// a flat surface as nothing or undecided says nothing of it. The flat
+/// surfaces are stored rounded, so a corner on one's cut can read a rounding to
+/// one side of it, and the piece is then read on the wrong side of that one.
+/// That costs points and holds none it should not. The corner is off the other
+/// cut, since the two never meet, and reads the other flat surface the right
+/// way; the piece has a side along the partner, which asks the point the
+/// partner's side; and a point of `cone` on the piece's side of the partner and
+/// of one flat surface is on the piece's side of the other as well, so asked
+/// the other side, it is held nowhere. Since this only ever adds a question, it
+/// holds no point the sides alone did not.
+fn is_on_the_sides_of_two_flat_cuts_the_piece_is_on(
+    piece: &Piece,
+    cone: &Cone,
+    point: PredicatePoint,
+) -> Option<bool> {
+    let mut asked: Vec<&Cone> = Vec::new();
+    for side in piece.wires.iter().flatten() {
+        let Surface::Cone(partner) = &side.carried_by[1] else {
+            continue;
+        };
+        if asked.contains(&partner) {
+            continue;
+        }
+        asked.push(partner);
+        let Some(flats) = cone
+            .the_two_flat_cuts_of_a_mirror_image_held_apart_from_it(partner)
+            .ok()?
+        else {
+            continue;
+        };
+        for flat in &flats {
+            let mut pieces_side = None;
+            for corner in piece
+                .wires
+                .iter()
+                .flatten()
+                .map(|side| side.ends[0].point())
+            {
+                let found @ (Decision::Pos | Decision::Neg) = side_of_a_flat_face(flat, corner)
+                else {
+                    continue;
+                };
+                if pieces_side.is_some_and(|already| already != found) {
+                    return None;
+                }
+                pieces_side = Some(found);
+            }
+            let Some(pieces_side) = pieces_side else {
+                continue;
+            };
+            match side_of_a_flat_face(flat, point) {
+                found @ (Decision::Pos | Decision::Neg) if found == pieces_side => (),
+                Decision::Pos | Decision::Neg | Decision::Zero => return Some(false),
+                Decision::Undecidable { .. } | _ => return None,
+            }
+        }
+    }
+    Some(true)
 }
 
 /// What a side of a curved piece asks a point besides which side of its

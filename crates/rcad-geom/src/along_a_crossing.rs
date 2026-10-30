@@ -1427,27 +1427,16 @@ impl Cone {
         &self,
         other: &Self,
     ) -> Result<Option<(Plane, Self)>> {
-        if self.apex() == other.apex()
-            || whether_two_cones_share_an_axis(self, other) != Decision::Pos
-        {
-            return Ok(None);
-        }
-        match how_two_cones_off_one_axis_cross(
-            self,
-            other,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        ) {
-            Ok(HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { cone, flat }) => {
+        match self.how_it_crosses_a_cone_off_its_axis(other)? {
+            Some(HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { cone, flat }) => {
                 Ok(Some((flat, cone)))
             }
-            Ok(
+            Some(
                 HowTwoConesOffOneAxisCross::HeldApart(_)
                 | HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. }
                 | HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart { .. },
-            ) => Ok(None),
-            Err(undecided @ Error::Undecidable { .. }) => Err(undecided),
-            Err(_) => Ok(None),
+            )
+            | None => Ok(None),
         }
     }
 
@@ -1471,30 +1460,19 @@ impl Cone {
         &self,
         other: &Self,
     ) -> Result<Option<([HalfSpace; 2], Self, Self)>> {
-        if self.apex() == other.apex()
-            || whether_two_cones_share_an_axis(self, other) != Decision::Pos
-        {
-            return Ok(None);
-        }
-        match how_two_cones_off_one_axis_cross(
-            self,
-            other,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        ) {
-            Ok(HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch {
+        match self.how_it_crosses_a_cone_off_its_axis(other)? {
+            Some(HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch {
                 cone,
                 other,
                 pickers,
                 ..
             }) => Ok(Some((pickers, cone, other))),
-            Ok(
+            Some(
                 HowTwoConesOffOneAxisCross::HeldApart(_)
                 | HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }
                 | HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart { .. },
-            ) => Ok(None),
-            Err(undecided @ Error::Undecidable { .. }) => Err(undecided),
-            Err(_) => Ok(None),
+            )
+            | None => Ok(None),
         }
     }
 
@@ -1533,30 +1511,8 @@ impl Cone {
         let [Picker::InFrontOf(first), Picker::InFrontOf(second)] = picked_by[..] else {
             return Ok(None);
         };
-        if self.apex() == other.apex()
-            || whether_two_cones_share_an_axis(self, other) != Decision::Pos
-        {
+        let Some((cone, flats, pickers)) = self.the_two_flat_cuts_held_apart_from(other)? else {
             return Ok(None);
-        }
-        let (cone, flats, pickers) = match how_two_cones_off_one_axis_cross(
-            self,
-            other,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        ) {
-            Ok(HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart {
-                cone,
-                flats,
-                pickers,
-                ..
-            }) => (cone, flats, pickers),
-            Ok(
-                HowTwoConesOffOneAxisCross::HeldApart(_)
-                | HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }
-                | HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. },
-            ) => return Ok(None),
-            Err(undecided @ Error::Undecidable { .. }) => return Err(undecided),
-            Err(_) => return Ok(None),
         };
         let picked = [first, second];
         let in_front = [0, 1].map(|which| {
@@ -1577,6 +1533,89 @@ impl Cone {
             flats[0]
         };
         Ok(Some((flat, cone)))
+    }
+
+    /// Where this cone and `other` are of one slope, mirror images of each
+    /// other, and each apex is inside the other: the two flat surfaces whose
+    /// cuts of either cone are all the two cross in, the one halfway between
+    /// the apexes first, as `intersect` stores them.
+    ///
+    /// On either cone the other's form is a multiple of the product of the two
+    /// flat surfaces' forms: `Q_second − Q_first = P·F/N²` in the working of
+    /// `two_flat_cuts_that_meet_where_they_touch` in `intersect.rs`, and the
+    /// first cone's form is nothing on it. So a point of one cone is inside the
+    /// other just where its two signs against the flat surfaces say so, and
+    /// two points on one side of the other cone can be on opposite sides of
+    /// both flat surfaces. The two cuts never meet.
+    ///
+    /// Each flat surface is stored rounded from exact numbers, as `intersect`
+    /// stores them for two mirror images that touch, so a point on one's cut
+    /// can read a rounding to one side of it.
+    ///
+    /// Nothing where the two do not cross so, asked under a certified policy
+    /// as [`Cone::the_flat_surface_halfway_to_a_cone_beside_it`] asks it.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`] where how the two cross could not be settled.
+    pub fn the_two_flat_cuts_of_a_mirror_image_held_apart_from_it(
+        &self,
+        other: &Self,
+    ) -> Result<Option<[Plane; 2]>> {
+        Ok(self
+            .the_two_flat_cuts_held_apart_from(other)?
+            .map(|(_, flats, _)| flats))
+    }
+
+    /// The cone that sorts first, the two flat surfaces and their pickers of
+    /// `HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart`, where this cone
+    /// and `other` cross so.
+    fn the_two_flat_cuts_held_apart_from(
+        &self,
+        other: &Self,
+    ) -> Result<Option<(Self, [Plane; 2], [HalfSpace; 2])>> {
+        match self.how_it_crosses_a_cone_off_its_axis(other)? {
+            Some(HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart {
+                cone,
+                flats,
+                pickers,
+                ..
+            }) => Ok(Some((cone, flats, pickers))),
+            Some(
+                HowTwoConesOffOneAxisCross::HeldApart(_)
+                | HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }
+                | HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. },
+            )
+            | None => Ok(None),
+        }
+    }
+
+    /// How this cone and `other` cross, as `intersect` proves it under a
+    /// certified policy, or nothing where they share an apex, are not proved
+    /// off one axis, or are refused for anything but an unsettled sign.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`] where how the two cross could not be settled.
+    fn how_it_crosses_a_cone_off_its_axis(
+        &self,
+        other: &Self,
+    ) -> Result<Option<HowTwoConesOffOneAxisCross>> {
+        if self.apex() == other.apex()
+            || whether_two_cones_share_an_axis(self, other) != Decision::Pos
+        {
+            return Ok(None);
+        }
+        match how_two_cones_off_one_axis_cross(
+            self,
+            other,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) {
+            Ok(how) => Ok(Some(how)),
+            Err(undecided @ Error::Undecidable { .. }) => Err(undecided),
+            Err(_) => Ok(None),
+        }
     }
 }
 
