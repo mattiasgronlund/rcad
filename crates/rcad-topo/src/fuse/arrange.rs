@@ -23618,6 +23618,49 @@ mod tests {
             .unwrap_or_else(|said| panic!("two places where a line crosses a circle: {said:?}"))
     }
 
+    /// The bottom `z = 0` of the unit cube, its wall `x = 0`, and a pipe of
+    /// radius `1/2` about the line through `(1/2, 0, 0)` along `y` all hold the
+    /// line `x = z = 0`, the foot of the wall. Rounding can put where three
+    /// such surfaces meet anywhere along that line, and every point from the
+    /// corner at the origin to there lies on all three (§395.7). A place `2⁻¹⁰`
+    /// along it is no touch that rounding split, and only the reach
+    /// `√(8·r·room)`, `2.4e-7` here, keeps it from being folded into the
+    /// corner. A place `2⁻²⁴` along it, a quarter of that reach, is folded.
+    ///
+    /// The bottom's side along `y = 0` stands in for a crossing with the pipe,
+    /// which no cut could draw along the bottom's own edge.
+    #[test]
+    fn a_place_on_a_line_two_planes_and_a_pipe_share_is_folded_only_within_the_reach_of_a_touch() {
+        let (cube, _) = the_unit_cube_baked_and_the_plane_x_equals_y();
+        let bottom = the_face_facing(&cube, [0.0, 0.0, -1.0]);
+        let mut arrangement = drawn_up_to_its_corners(&bottom);
+        let wall = the_crossing_along(&arrangement, the_face_facing(&cube, [-1.0, 0.0, 0.0]));
+        let front = the_crossing_along(&arrangement, the_face_facing(&cube, [0.0, -1.0, 0.0]));
+        assert!(
+            is_a_corner_on_both(&arrangement, [0.0; 3], wall, front),
+            "the fold is only asked about a corner on both crossings"
+        );
+        let along_y =
+            Axis::new(Point::new(0.5, 0.0, 0.0), Vector::new(0.0, 1.0, 0.0)).expect("an axis");
+        arrangement.crossings[front].partner =
+            Surface::Cylinder(Cylinder::new(along_y, 0.5).expect("a positive radius"));
+
+        let folds = |y: f64| {
+            let place = [PredicatePoint::from([0.0, y, 0.0])];
+            arrangement.a_corner_is_this_place(wall, front, 0, &place, &place)
+        };
+        assert!(
+            folds(f64::powi(2.0, -24)),
+            "a place a quarter of a touch's reach along the line is that touch written down \
+             another way"
+        );
+        assert!(
+            !folds(f64::powi(2.0, -10)),
+            "a place further along the line than any touch rounding split could reach says \
+             nothing about the corner"
+        );
+    }
+
     /// The circle of radius `1/2` about `(1/2, 1/2)` on the unit cube's bottom
     /// touches the line of the wall `x = 0` at `(0, 1/2, 0)`. A node a few
     /// roundings up the wall from there that stands for both places the two
