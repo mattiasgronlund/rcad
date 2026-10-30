@@ -512,6 +512,50 @@ def check_load():
         shutil.rmtree(tmp)
 
 
+def check_only_list():
+    """`only` takes several substrings, joined by commas, not just one.
+
+    §396.1's nine-vs-ten count needed a chosen set of sessions picked out of
+    several trees in one call; one substring can name a lane's branch but not
+    a list of session ids, so this is the case that fails without the split.
+    Three sessions, one repo dir; asking for two by a comma-joined pair of
+    their ids must return exactly those two, in both orders of the pair.
+    """
+    tmp = tempfile.mkdtemp()
+    try:
+        repo_dir = os.path.join(tmp, "rcad")
+        os.makedirs(repo_dir)
+        for session in ("aaa11111", "bbb22222", "ccc33333"):
+            line = json.dumps({
+                "type": "assistant",
+                "requestId": "req-" + session,
+                "timestamp": "2026-10-07T12:00:00.000Z",
+                "cwd": "/repo",
+                "message": {
+                    "id": "msg-" + session,
+                    "model": "claude-sonnet-5",
+                    "usage": {"output_tokens": 10, "input_tokens": 1},
+                    "content": [{"type": "text", "text": "hi"}],
+                },
+            })
+            with open(os.path.join(repo_dir, session + ".jsonl"), "w") as f:
+                f.write(line + "\n")
+
+        since = datetime.datetime(2026, 10, 7, tzinfo=datetime.timezone.utc)
+        until = datetime.datetime(2026, 10, 8, tzinfo=datetime.timezone.utc)
+        failed = 0
+        for only in ("aaa11111,bbb22222", "bbb22222,aaa11111"):
+            responses, _, _ = load(tmp, "rcad", since, until, only)
+            got = sorted(r["session"] for r in responses)
+            if got != ["aaa11111", "bbb22222"]:
+                print("load(only=%r) wanted ['aaa11111', 'bbb22222'], got %r"
+                      % (only, got))
+                failed += 1
+        return failed
+    finally:
+        shutil.rmtree(tmp)
+
+
 def main():
     failed = 0
     for why, tools, want in CASES:
@@ -558,6 +602,7 @@ def main():
     failed += check_delegation()
     failed += check_pairs()
     failed += check_load()
+    failed += check_only_list()
 
     for why, is_lane, want in THRESHOLD_CASES:
         got = wait_threshold(is_lane)
@@ -601,7 +646,7 @@ def main():
             failed += 1
 
     every = (len(CASES) + len(PURPOSE_CASES) + len(LOOKUPS) + len(RUNS) + 3 + len(SAYINGS)
-             + len(BUCKETS) + PAIR_CASES + 1
+             + len(BUCKETS) + PAIR_CASES + 1 + 2
              + len(THRESHOLD_CASES) + len(REWROTE_CASES) + len(EXTRA_CASES)
              + len(WAIT_CAUSE_CASES) + len(LENGTH_BUCKET_CASES) + 1)
     if failed:
