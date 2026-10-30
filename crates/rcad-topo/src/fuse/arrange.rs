@@ -2216,6 +2216,13 @@ impl<'f> Arrangement<'f> {
                                     Self::side_of_a_plane_at_a_seam_corner(&on, point, &seam, plane)
                                 })
                             })
+                            .or_else(|| {
+                                corner.solved_from.and_then(|three| {
+                                    Self::side_of_a_plane_at_a_corner_solved_on_a_pipe(
+                                        &three, point, plane,
+                                    )
+                                })
+                            })
                             .unwrap_or(undecided)
                     }
                 }
@@ -13323,6 +13330,40 @@ impl<'f> Arrangement<'f> {
             &exactly_multiplied(&off_the_cap, &along_the_axis)?,
         );
         Some([k, a])
+    }
+
+    /// Which side of `partner` a corner bake solved from a pipe and two planes
+    /// lies, read as the point where the line the two planes share crosses the
+    /// pipe, the crossing whose box is `at`
+    /// ([`Arrangement::side_of_a_plane_where_a_line_crosses_a_pipe`]). `None`
+    /// where those are not the three it was `solved_from`, where the box does
+    /// not say which of the two crossings it is, or where a product would
+    /// round. The box holds where exactly those three meet
+    /// ([`BakedCorner::solved_from`]).
+    ///
+    /// `LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step` has its flange's front and
+    /// the disc inside it in two planes a rounding apart, and bake solved the
+    /// corner where the flange's flat meets its rim, `(−1.23, −6.35, 4.4697)`,
+    /// from the rim, the front and the flat. The line the flat and the front
+    /// share is square to the rim's axis only give or take a rounding, so the
+    /// reading of a cap's circle does not apply. Every fuse of the LED asked
+    /// which side of the disc's plane the corner is on, which its box could
+    /// not say, and was refused `Undecidable` "side of plane" (Q3001).
+    fn side_of_a_plane_at_a_corner_solved_on_a_pipe(
+        solved_from: &[Surface; 3],
+        at: PredicatePoint,
+        partner: &Plane,
+    ) -> Option<Decision> {
+        let mut planes = solved_from.iter().filter_map(Surface::as_plane);
+        let mut pipes = solved_from.iter().filter_map(|surface| match surface {
+            Surface::Cylinder(pipe) => Some(pipe),
+            Surface::Plane(_) | Surface::Sphere(_) | Surface::Cone(_) | _ => None,
+        });
+        let (Some(one), Some(other), Some(pipe)) = (planes.next(), planes.next(), pipes.next())
+        else {
+            return None;
+        };
+        Self::side_of_a_plane_where_a_line_crosses_a_pipe(partner, one, other, pipe, at)
     }
 
     /// Which side of `partner` a seam corner lies, on a pipe and on a plane
