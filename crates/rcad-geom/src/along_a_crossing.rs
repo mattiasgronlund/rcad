@@ -1511,7 +1511,12 @@ impl Cone {
         let [Picker::InFrontOf(first), Picker::InFrontOf(second)] = picked_by[..] else {
             return Ok(None);
         };
-        let Some((cone, flats, pickers)) = self.the_two_flat_cuts_held_apart_from(other)? else {
+        let Some(TwoFlatCutsHeldApart {
+            cone,
+            flats,
+            pickers,
+        }) = self.the_two_flat_cuts_held_apart_from(other)?
+        else {
             return Ok(None);
         };
         let picked = [first, second];
@@ -1564,23 +1569,26 @@ impl Cone {
     ) -> Result<Option<[Plane; 2]>> {
         Ok(self
             .the_two_flat_cuts_held_apart_from(other)?
-            .map(|(_, flats, _)| flats))
+            .map(|held_apart| held_apart.flats))
     }
 
-    /// The cone that sorts first, the two flat surfaces and their pickers of
-    /// `HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart`, where this cone
-    /// and `other` cross so.
+    /// What `HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart` names, where
+    /// this cone and `other` cross so.
     fn the_two_flat_cuts_held_apart_from(
         &self,
         other: &Self,
-    ) -> Result<Option<(Self, [Plane; 2], [HalfSpace; 2])>> {
+    ) -> Result<Option<TwoFlatCutsHeldApart>> {
         match self.how_it_crosses_a_cone_off_its_axis(other)? {
             Some(HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart {
                 cone,
                 flats,
                 pickers,
                 ..
-            }) => Ok(Some((cone, flats, pickers))),
+            }) => Ok(Some(TwoFlatCutsHeldApart {
+                cone,
+                flats,
+                pickers,
+            })),
             Some(
                 HowTwoConesOffOneAxisCross::HeldApart(_)
                 | HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }
@@ -1617,6 +1625,18 @@ impl Cone {
             Err(_) => Ok(None),
         }
     }
+}
+
+/// The two flat cuts two mirror images of one slope cross in where each apex
+/// is inside the other, as `intersect` names them.
+struct TwoFlatCutsHeldApart {
+    /// The one of the two cones that sorts first.
+    cone: Cone,
+    /// The flat surface halfway between the apexes, then the other.
+    flats: [Plane; 2],
+    /// Two half-spaces, each of whose corners holds one whole curve of where
+    /// the two cross.
+    pickers: [HalfSpace; 2],
 }
 
 /// Which way one of the circles a ball on a cone's axis crosses it in runs, for
