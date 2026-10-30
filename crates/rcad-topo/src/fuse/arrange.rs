@@ -4696,11 +4696,7 @@ impl<'f> Arrangement<'f> {
         else {
             return None;
         };
-        let ([Surface::Plane(flat), Surface::Cylinder(pipe)]
-        | [Surface::Cylinder(pipe), Surface::Plane(flat)]) = &**wound_as
-        else {
-            return None;
-        };
+        let cut = ALoopAPlaneCuts::of(wound_as)?;
         let place = |each: usize| self.nodes[each].point;
         if on_it
             .iter()
@@ -4736,13 +4732,16 @@ impl<'f> Arrangement<'f> {
                 .filter(move |&&each| each != held)
                 .map(|&each| place(each))
         };
-        let clear_of_the_grown_box = turns_on_four_times_the_diagonal_at_least(flat, pipe, near)
-            && {
-                let reach = grown_by_its_widest_side(near);
-                others().all(|other| !boxes_overlap(other, reach))
+        let clear_of_the_grown_box = turns_on_four_times_the_diagonal_at_least(cut, near) && {
+            let reach = grown_by_its_widest_side(near);
+            others().all(|other| !boxes_overlap(other, reach))
+        };
+        let clear_along_one_half = || {
+            let ALoopAPlaneCuts::Ellipse { flat, pipe } = cut else {
+                return false;
             };
-        let clear_along_one_half =
-            || others().all(|other| off_the_stretch_along_one_half(flat, pipe, near, other));
+            others().all(|other| off_the_stretch_along_one_half(flat, pipe, near, other))
+        };
         (clear_of_the_grown_box || clear_along_one_half()).then_some(place(held))
     }
 
@@ -15233,32 +15232,74 @@ fn grown_by_its_widest_side(place: PredicatePoint) -> PredicatePoint {
     PredicatePoint::Constructed(sides.map(|side| side + reach))
 }
 
-/// Whether the loop `flat` cuts `pipe` in is proved to turn on no radius
-/// under four times the diagonal of `near`.
+/// A loop a plane cuts a curved surface in, where how sharply the loop turns
+/// is worked out ([`turns_on_four_times_the_diagonal_at_least`]).
+#[derive(Clone, Copy)]
+enum ALoopAPlaneCuts<'s> {
+    /// The ellipse a plane cuts a pipe in.
+    Ellipse { flat: &'s Plane, pipe: &'s Cylinder },
+    /// The circle a plane cuts a ball in.
+    Circle { flat: &'s Plane, ball: &'s Sphere },
+}
+
+impl<'s> ALoopAPlaneCuts<'s> {
+    /// The loop the pair is a plane and a pipe, or a plane and a ball, cut in,
+    /// in either order. `None` for every other pair.
+    fn of(pair: &'s [Surface; 2]) -> Option<Self> {
+        if let [Surface::Plane(flat), Surface::Cylinder(pipe)]
+        | [Surface::Cylinder(pipe), Surface::Plane(flat)] = pair
+        {
+            return Some(ALoopAPlaneCuts::Ellipse { flat, pipe });
+        }
+        let ([Surface::Plane(flat), Surface::Sphere(ball)]
+        | [Surface::Sphere(ball), Surface::Plane(flat)]) = pair
+        else {
+            return None;
+        };
+        Some(ALoopAPlaneCuts::Circle { flat, ball })
+    }
+}
+
+/// Whether `cut` is proved to turn on no radius under four times the diagonal
+/// of `near`, `d`, whose square is the sum of the squares of `near`'s widths.
 ///
-/// That loop turns most sharply on a radius of `r cos θ`, for `r` the pipe's
-/// radius and `θ` the angle between the plane's normal `n` and the pipe's axis
-/// `w` ([`Arrangement::count_each_loop_from_the_node_round_its_start`]), so
-/// this asks whether `r²(n·w)² − 16d²|n|²|w|²` is above nought, for `d²` the
-/// sum of the squares of `near`'s widths. Squared, so that nothing is divided
-/// and no root is taken.
-fn turns_on_four_times_the_diagonal_at_least(
-    flat: &Plane,
-    pipe: &Cylinder,
-    near: PredicatePoint,
-) -> bool {
-    let normal = flat.normal().components().map(Interval::exactly);
-    let along = pipe.axis().direction().components().map(Interval::exactly);
-    let leans = dot_of(normal, along);
-    let radius = Interval::exactly(pipe.radius());
+/// The ellipse a plane cuts a pipe in turns most sharply on a radius of
+/// `r cos θ`, for `r` the pipe's radius and `θ` the angle between the plane's
+/// normal `n` and the pipe's axis `w`
+/// ([`Arrangement::count_each_loop_from_the_node_round_its_start`]), so this
+/// asks whether `r²(n·w)² − 16d²|n|²|w|²` is above nought.
+///
+/// The circle a plane cuts a ball of radius `R` about `c` in turns on its own
+/// radius everywhere, and the square of that is `R² − h²`, for
+/// `h = (n·c − k)/|n|` the plane's distance from `c`, where the plane is
+/// `n·x = k`. So this asks whether `R²|n|² − (n·c − k)² − 16d²|n|²` is above
+/// nought.
+///
+/// Squared and multiplied through by `|n|²`, so that nothing is divided and
+/// no root is taken.
+fn turns_on_four_times_the_diagonal_at_least(cut: ALoopAPlaneCuts, near: PredicatePoint) -> bool {
     let widths = near
         .enclosure()
         .map(|side| Interval::exactly(side.hi()) - Interval::exactly(side.lo()));
-    let room = radius * radius * leans * leans
-        - Interval::exactly(16.0)
-            * dot_of(widths, widths)
-            * dot_of(normal, normal)
-            * dot_of(along, along);
+    let sixteen_d_squared = Interval::exactly(16.0) * dot_of(widths, widths);
+    let room = match cut {
+        ALoopAPlaneCuts::Ellipse { flat, pipe } => {
+            let normal = flat.normal().components().map(Interval::exactly);
+            let along = pipe.axis().direction().components().map(Interval::exactly);
+            let leans = dot_of(normal, along);
+            let radius = Interval::exactly(pipe.radius());
+            radius * radius * leans * leans
+                - sixteen_d_squared * dot_of(normal, normal) * dot_of(along, along)
+        }
+        ALoopAPlaneCuts::Circle { flat, ball } => {
+            let normal = flat.normal().components().map(Interval::exactly);
+            let centre = ball.centre().coordinates().map(Interval::exactly);
+            let off = dot_of(normal, centre) - Interval::exactly(flat.offset());
+            let radius = Interval::exactly(ball.radius());
+            let squared = dot_of(normal, normal);
+            radius * radius * squared - off * off - sixteen_d_squared * squared
+        }
+    };
     room.sign() == Decision::Pos
 }
 
