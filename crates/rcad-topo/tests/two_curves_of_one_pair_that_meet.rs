@@ -1591,6 +1591,40 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_cross_in_corners_
     }
 }
 
+/// The pitch cones of
+/// [`the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_cross_in_corners_too_close_for_a_certified_answer`]
+/// under a tolerant policy for the model's own working size of 100: every
+/// fuse answers, and the answer validates. Each near cap sees three meets of
+/// the two caps and the two cones round `(1 − ε, y₀, 1)`, within `1.2e−24`
+/// of one another, and that is the coincidence such a policy merges (§17.4).
+///
+/// At `d6ba161f` every fuse was refused on the order along a crossing round
+/// a cap's rim: the meet of that cap and both cones, whose own box is
+/// `3.65e−8` along `y`, against a meet of both caps and one cone `2.1e−8`
+/// away. Narrowed ([`rcad_geom::MeetOfThree::boxed_tight`]), the two boxes
+/// are one `f64` along `y` each and share an end, but the policy was asked of
+/// the step between the wide boxes (Q2946).
+#[test]
+fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_answer_every_fuse_under_a_tolerant_policy()
+ {
+    let policy = Policy::tolerant(100.0);
+    for (rule, first_first) in six_fuses() {
+        let mut model = a_model();
+        let said = fuse_under(
+            &mut model,
+            the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation,
+            rule,
+            first_first,
+            &policy,
+        );
+        let what = format!("{rule:?} (first first: {first_first})");
+        said.unwrap_or_else(|why| panic!("{what}: refused: {why:?}"));
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| panic!("{what}: the answer does not validate: {why:?}"));
+    }
+}
+
 fn every_fuse_answers(build: Pair, volumes: [f64; 3], faces: [&[usize]; 4]) {
     for one in six_fuses() {
         the_fuse_answers(build, one, volumes, faces);
