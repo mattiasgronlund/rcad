@@ -22096,6 +22096,76 @@ mod tests {
         );
     }
 
+    /// The `z` axis, where the planes `x = 0` and `y = 0` meet, crosses the
+    /// pipe of radius 3 about the line through `(−100, −1, −100)` along
+    /// `(1, 0, 1)` at `(0, 0, 4)` and `(0, 0, −4)`, both `f64` points, as
+    /// `2·(y + 1)² + (z − x)² = 18` says, so the stored partner's own
+    /// predicate says which side of it each crossing is on. The line slants
+    /// across the pipe, as the line a flange's flat and its front share
+    /// slants across the rim of `LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step`,
+    /// and the middle of the chord is nowhere near where the axis's origin is
+    /// square to the line. Each partner runs through `(0, 0, a)` exactly,
+    /// leaning a different way each time and turned round too: inside the
+    /// pipe for `|a| < 4`, outside it for `|a| > 4`, and on it for
+    /// `|a| = 4`, where the crossing at the meet is on the partner. A box
+    /// holding both crossings, and a partner along the line, say nothing.
+    #[test]
+    fn a_plane_puts_each_place_a_slanting_line_crosses_a_pipe_on_the_side_its_own_sign_says() {
+        let pipe = Cylinder::new(
+            Axis::new(Point::new(-100.0, -1.0, -100.0), Vector::new(1.0, 0.0, 1.0))
+                .expect("an axis"),
+            3.0,
+        )
+        .expect("a positive radius");
+        let one = Plane::from_coefficients([1.0, 0.0, 0.0, 0.0]).expect("a normal");
+        let other = Plane::from_coefficients([0.0, 1.0, 0.0, 0.0]).expect("a normal");
+        let round = |z: f64, width: f64| {
+            PredicatePoint::Constructed([
+                Interval::new(-1e-9, 1e-9).expect("an interval"),
+                Interval::new(-1e-9, 1e-9).expect("an interval"),
+                Interval::new(z - width, z + width).expect("an interval"),
+            ])
+        };
+        let side = |partner: &Plane, at: PredicatePoint| {
+            Arrangement::side_of_a_plane_where_a_line_crosses_a_cap_circle(
+                partner, &one, &other, &pipe, at,
+            )
+        };
+        let mut on_the_partner = 0;
+        for a in [0.0, 2.0, -2.0, 8.0, -8.0, 4.0, -4.0] {
+            for [k, m] in [[0.0, 0.0], [3.0, 0.0], [0.0, 1.0], [-2.0, 5.0]] {
+                for facing in [1.0, -1.0] {
+                    let partner = Plane::from_point_and_normal(
+                        Point::from([0.0, 0.0, a]),
+                        Vector::new(facing * k, facing * m, facing),
+                    )
+                    .expect("a plane");
+                    for z in [4.0, -4.0] {
+                        let truly = partner.side_of_point(PredicatePoint::from([0.0, 0.0, z]));
+                        on_the_partner += usize::from(truly == Decision::Zero);
+                        assert_eq!(
+                            side(&partner, round(z, 1e-9)),
+                            Some(truly),
+                            "through (0, 0, {a}) facing ({facing}, {k}, {m}), at (0, 0, {z})"
+                        );
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            on_the_partner, 16,
+            "every partner through (0, 0, ±4) holds that crossing exactly"
+        );
+        let partner = Plane::from_coefficients([0.0, 0.0, 1.0, -1.0]).expect("a normal");
+        assert_eq!(side(&partner, round(0.0, 5.0)), None, "a box holding both");
+        let along = Plane::from_coefficients([1.0, 1.0, 0.0, 0.0]).expect("a normal");
+        assert_eq!(
+            side(&along, round(4.0, 1e-9)),
+            None,
+            "a partner along the line"
+        );
+    }
+
     /// The top of a cube a pyramid pokes up through is cut by the pyramid's
     /// four side faces, and each hands it the apex, a corner with four planes
     /// round it ([`BakedFace::corners_of_the_solids_cutting_it`]). Every node
