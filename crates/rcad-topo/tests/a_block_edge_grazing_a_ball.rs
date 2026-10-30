@@ -23,10 +23,21 @@
 //! `Arrangement::turns_anticlockwise` over a box ending at the place (§317.1),
 //! and since Q914 it refuses on neither the turn nor the pair
 //! (`a_block_edge_grazing_a_ball_at_cx_16.rs`). An edge along `z` at `x = −1`
-//! grazes the ball at the equator, and a certified fuse refuses on the order of
-//! the two meets round the circles the block's two faces cut the ball in, with
-//! either solid first, before any turn there is asked. Q914 decides the order
-//! of two such meets along the edge itself, and not round a circle (§317.7).
+//! grazes the ball at the equator, and until Q3027 a certified fuse refused on
+//! the order of the two meets round the circles the block's two faces cut the
+//! ball in, with either solid first, before any turn there was asked. Q914
+//! decides the order of two such meets along the edge itself, and not round a
+//! circle (§317.7).
+//!
+//! Since Q3027 the order round the circles is read too, off which meet of the
+//! edge with the ball each place is, once the policy has refused it
+//! (`fuse/arrange.rs`, `as_the_side_of_one_cut_the_other_is_on_says`). Every
+//! certified fuse then goes on to the refusal the edge along `x` ends on:
+//! `Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`, here at
+//! `(−1, 2⁻²⁵, 16)`. The places are `16 ∓ 2⁻⁵¹`, and the doubles beside `16`
+//! are `2⁻⁴⁹` below it and `2⁻⁴⁸` above, so `16` is the nearest double to
+//! both and, written as doubles, the two are one point: the limit queue row
+//! Q2482 names at `cx = 16`.
 //!
 //! At `h = 0` both places are exact, `z = ±2⁻⁵¹`, and their boxes do not
 //! touch. At `h = 16` the last place of `16` is `2⁻⁴⁸` wide, so neither place is
@@ -34,7 +45,7 @@
 //! `[16, 16.000000000000004]`, and they share the point `16`.
 
 use rcad_geom::{Isometry, Point, Scale, Vector};
-use rcad_predicates::{Decision, Level, Point as PredicatePoint, Policy, ProvenanceLog, Record};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, Record};
 use rcad_topo::{Containment, Error, Fused, Invalid, Model, ProfileBuilder, Rule};
 
 /// The name `order_along` records a refusal under.
@@ -47,32 +58,40 @@ const EVERY_RULE: [Rule; 3] = [Rule::Union, Rule::Intersection, Rule::Difference
 ///
 /// Without the fix the second meet was dropped, and the one that was kept went
 /// on to a later refusal with no second point in it.
+///
+/// **Since Q3027 the refusal is that the two round to one point.** Their order
+/// round the circles the block's faces cut the ball in is read off which root
+/// of the edge line each is, once the policy has refused it, and each fuse is
+/// refused writing the answer, with nothing in its log: an edge of the ball's
+/// face runs between the two meets, and each is written at the middle of its
+/// box, `16` for both. An edge needs two ends of two names, so the second
+/// meet is still kept. Until Q3027 each fuse was refused on that order, with
+/// the two meets as its one record.
 #[test]
 fn two_meets_whose_boxes_touch_are_what_a_certified_fuse_refuses_on() {
+    let both_middles = Point::new(-1.0, f64::powi(2.0, -25), 16.0);
     for rule in EVERY_RULE {
         for ball_first in [true, false] {
-            let records = what_it_recorded(16.0, rule, &Policy::certified(), ball_first);
-            assert_eq!(
-                records.len(),
-                1,
-                "{rule:?}, ball first {ball_first}: a certified refusal carries the one \
-                 decision it could not take, and this carried {records:#?}"
+            let mut log = ProvenanceLog::new();
+            let fused = fuse_a_block_edge_grazing_a_ball(
+                16.0,
+                rule,
+                &Policy::certified(),
+                ball_first,
+                &mut log,
             );
-            let refused = &records[0];
-            assert_eq!(
-                refused.predicate(),
-                ALONG_A_CROSSING,
-                "{rule:?}, ball first {ball_first}: {refused:#?}"
-            );
-            assert_eq!(
-                refused.level(),
-                Level::Interval,
-                "{rule:?}, ball first {ball_first}"
-            );
+            let Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { at, .. }) = fused
+            else {
+                panic!(
+                    "{rule:?}, ball first {ball_first}: {:?}",
+                    fused.map(|_: Fused| "an answer")
+                );
+            };
+            assert_eq!(at, both_middles, "{rule:?}, ball first {ball_first}");
             assert!(
-                is_the_two_meets(refused),
-                "{rule:?}, ball first {ball_first}: the pair it refused on is not the two \
-                 meets: {refused:#?}"
+                log.is_empty(),
+                "{rule:?}, ball first {ball_first}: a certified fuse takes no decision a policy \
+                 could have refused, and this recorded {log:#?}"
             );
         }
     }
