@@ -11808,9 +11808,19 @@ impl<'f> Arrangement<'f> {
                             .collect();
                         plane
                             .and_then(|plane| {
-                                Self::side_of_a_plane_holding_a_rings_axis(&on, at, plane).or_else(
-                                    || Self::side_of_a_plane_clear_of_a_cap_circle(&on, plane),
-                                )
+                                Self::side_of_a_plane_holding_a_rings_axis(&on, at, plane)
+                                    .or_else(|| {
+                                        Self::side_of_a_plane_clear_of_a_cap_circle(&on, plane)
+                                    })
+                                    .or_else(|| {
+                                        node.made_of.iter().chain(&node.also).find_map(
+                                            |(three, _)| {
+                                                Self::side_of_a_plane_at_a_corner_solved_on_a_pipe(
+                                                    three, at, plane,
+                                                )
+                                            },
+                                        )
+                                    })
                             })
                             .or_else(|| {
                                 Self::side_of_one_of_a_plane_a_pipe_and_a_cone_on_one_axis(
@@ -13353,14 +13363,15 @@ impl<'f> Arrangement<'f> {
         Some([k, a])
     }
 
-    /// Which side of `partner` a corner bake solved from a pipe and two planes
+    /// Which side of `partner` a point placed where a pipe and two planes meet
     /// lies, read as the point where the line the two planes share crosses the
     /// pipe, the crossing whose box is `at`
     /// ([`Arrangement::side_of_a_plane_where_a_line_crosses_a_pipe`]). `None`
     /// where those are not the three it was `solved_from`, where the box does
-    /// not say which of the two crossings it is, or where a product would
-    /// round. The box holds where exactly those three meet
-    /// ([`BakedCorner::solved_from`]).
+    /// not say which of the two crossings it is, or where the arithmetic
+    /// cannot tell. The box must hold where exactly those three meet: a corner
+    /// bake solved from them ([`BakedCorner::solved_from`]), or a node they
+    /// are a name of ([`Node::made_of`], [`Node::also`]).
     ///
     /// `LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step` has its flange's front and
     /// the disc inside it in two planes a rounding apart, and bake solved the
