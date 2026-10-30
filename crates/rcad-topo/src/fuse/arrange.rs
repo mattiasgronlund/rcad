@@ -5556,8 +5556,9 @@ impl<'f> Arrangement<'f> {
     /// and without asking a policy.
     ///
     /// **Where their own boxes cannot say, their tighter boxes are asked**
-    /// ([`Arrangement::narrowed_box_of`]), and only a proved [`Decision::Pos`]
-    /// or [`Decision::Neg`] is taken from them. Each tighter box holds the same
+    /// ([`Arrangement::narrowed_box_of`]), and a proved [`Decision::Pos`] or
+    /// [`Decision::Neg`] is taken from them, or how far apart they may be where
+    /// they overlap (below). Each tighter box holds the same
     /// point as the node's own, so a sign proved over the two of them is the
     /// order of those two points. A node's own box is what every other
     /// question here reads, and what the record of a refusal names.
@@ -5601,6 +5602,19 @@ impl<'f> Arrangement<'f> {
     /// and the leaning cone's cap plane cross the rim `4.15e-16` apart, and the
     /// union with the upright cone first was refused on those two until a
     /// cone's loop was turned too (Q2910).
+    ///
+    /// **Where the tighter boxes overlap and say nothing either, how far apart
+    /// a point of one may be from a point of the other is handed back**, a
+    /// length, where the own boxes' answer is a length too and this is less.
+    /// It bounds the step between the two points as that answer does, and it
+    /// is how far a merge of them moves a point (§417.7). The record still
+    /// names the own boxes. The pitch cones of a pair of mitre gears turned by
+    /// [`rcad_geom::Isometry::rotation`] have, on each near cap, the meet of
+    /// that cap and both cones in a box `3.65e-8` along `y`, and a meet of both
+    /// caps and one cone `2.1e-8` from one end of it. Narrowed, the two share
+    /// an end and may be `1.1e-16` apart. Asked of the own boxes instead, a
+    /// tolerant policy at working size `100` refused every fuse of the two
+    /// (Q2946).
     ///
     /// **Hands back what an undecided answer's enclosure measures, alongside
     /// the answer**, so [`Arrangement::order_along`] does not ask
@@ -5654,6 +5668,15 @@ impl<'f> Arrangement<'f> {
             )
         {
             return Ok((turned, measures));
+        }
+        if let Decision::Undecidable { enclosure } = decided
+            && measures == Measures::Length
+            && boxes_overlap(tight[0], tight[1])
+        {
+            let apart = how_far_apart_two_boxes_may_be(tight[0], tight[1]);
+            if apart < enclosure {
+                return Ok((Decision::Undecidable { enclosure: apart }, Measures::Length));
+            }
         }
         Ok((decided, measures))
     }
