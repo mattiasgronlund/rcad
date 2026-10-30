@@ -2162,10 +2162,11 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::side_of_a_pipe_at_a_seam_corner`]).
     ///
     /// **Kept apart so that the one reading is asked wherever the side is**:
-    /// [`Arrangement::as_a_corner_between_the_two_meets_of_one_cut_says`]
-    /// orders the corner round a loop by this side, so the face that keeps the
-    /// corner off `partner` and the order that puts it beside the two places
-    /// `partner` cuts the loop cannot disagree.
+    /// [`Arrangement::as_a_corner_between_the_two_meets_of_one_cut_says`] and
+    /// [`Arrangement::as_a_corner_beside_a_flat_cut_through_the_loop_says`]
+    /// order the corner round a loop by this side, so the face that keeps the
+    /// corner off `partner` and the order that puts it beside where `partner`
+    /// cuts the loop cannot disagree.
     fn side_of_a_corner(&self, corner: &BakedCorner, partner: &Surface) -> Decision {
         let point = corner.point;
         match (side_of_surface(partner, point), partner.as_plane()) {
@@ -6939,10 +6940,12 @@ impl<'f> Arrangement<'f> {
     }
 
     /// Which of two nodes on the loop a plane cuts a ball, a pipe or a cone in
-    /// comes first, where one is a corner of the face at an exact point `a`
-    /// and the other is where a plane `C` cuts the loop: read off which side of
-    /// `C` the corner is on and which way the loop runs across `C` at each.
-    /// `None` everywhere else, and wherever a sign it reads is not proved.
+    /// comes first, where one is a corner `a` of the face and the other is
+    /// where a plane `C` cuts the loop: read off which side of `C` the corner
+    /// is on and which way the loop runs across `C` at each. The corner is the
+    /// one of the two at an exact point where one is, and otherwise the one
+    /// that is a corner at all. `None` everywhere else, and wherever a sign it
+    /// reads is not proved.
     ///
     /// **It is [`Arrangement::as_two_parallel_cuts_through_the_loop_say`] with
     /// the corner on the plane through it that faces as `C` does.** Across
@@ -6950,25 +6953,30 @@ impl<'f> Arrangement<'f> {
     /// meet, so where it runs the same way across `n_C` at both, and both
     /// starts are clear of the strip between the two, the lower comes first on
     /// the rising half and the higher on the falling one. Which is higher is
-    /// the side of `C` the corner is on, asked of its own coordinates and so
-    /// exact. On `C`, the two are one point, since a half crosses a plane
-    /// across it once.
+    /// the side of `C` the corner is on. On `C`, the two are one point, since
+    /// a half crosses a plane across it once.
+    ///
+    /// **The corner's side of `C` is the one [`Arrangement::passes_through`]
+    /// reads** ([`Arrangement::side_of_a_corner`]): for a corner at an exact
+    /// point, the exact side of that point, and for one bake solved, which is
+    /// a box, the exact readings of what it was solved from. So a face that
+    /// keeps the corner off `C` and a face that puts it in order along the
+    /// loop cannot disagree. A solved corner's box stands where its
+    /// coordinates would in the way the loop runs at it and in the strip, so
+    /// both are proved for every point the box holds, the corner among them.
     ///
     /// **The corner is on the loop by the model's word**, as every corner of
     /// the face a crossing runs through is ([`BakedCorner::around`]), and that
-    /// is the place it stands for. It is off `C` exactly where
-    /// [`Arrangement::passes_through`] reads it off, on the side read here, so
-    /// a face that keeps the corner off `C` and a face that puts it in order
-    /// along the loop cannot disagree. **That word is checked against the
-    /// loop's plane**, since a corner read out of the model with two surfaces
-    /// round it was asked about neither (§286): one that plane proves off by
-    /// more than writing the corner down costs
-    /// ([`what_writing_the_corner_down_cost`](super::bake::what_writing_the_corner_down_cost))
-    /// is not on the loop, and the pair is left to the policy. A bar's top
-    /// corner moved `1` above its cap, cut by a block whose face runs along
-    /// the bar's seam, was read on `C` and so as the meet itself, and the
-    /// fuse refused `TwoCurvesTouchWithoutCrossing` where it is refused
-    /// `Undecidable` (`tests/a_broken_two_surface_corner_read_back_from_bytes.rs`).
+    /// is the place it stands for. **That word is checked against the loop's
+    /// plane** ([`Arrangement::is_proved_off_the_loops_plane`]), since a
+    /// corner read out of the model with two surfaces round it was asked about
+    /// neither (§286): one that plane proves off by more than writing the
+    /// corner down costs is not on the loop, and the pair is left to the
+    /// policy. A bar's top corner moved `1` above its cap, cut by a block
+    /// whose face runs along the bar's seam, was read on `C` and so as the
+    /// meet itself, and the fuse refused `TwoCurvesTouchWithoutCrossing` where
+    /// it is refused `Undecidable`
+    /// (`tests/a_broken_two_surface_corner_read_back_from_bytes.rs`).
     ///
     /// A plate of the square `[0, 10]²` and a round tab of radius 3 at
     /// `(10, 10)`, turned `0.05` about `z`, has the tab's seam corner, at
@@ -6980,6 +6988,19 @@ impl<'f> Arrangement<'f> {
     /// meet's box, and every certified fuse of the plate with a block on it was
     /// refused on which comes first (Q2359,
     /// `tests/a_plate_with_a_round_corner_tab_turned.rs`).
+    ///
+    /// `LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step` has its flange's front and
+    /// the disc inside it in two planes a rounding apart. The corner where the
+    /// flange's flat meets its rim below the axis, `(−1.23, −6.35, 1.5303)`,
+    /// was solved from the rim, the flat and the front, so it is a box and no
+    /// exact point, and the disc's plane crosses the loop the flat cuts the
+    /// rim in `2.1e−15` from it. The loop's start is `2.4e16` off that plane,
+    /// on the corner's side, so
+    /// [`Arrangement::as_a_corner_between_the_two_meets_of_one_cut_says`] does
+    /// not apply. While this read only a corner at an exact point, every
+    /// certified fuse of the LED with a box on its flat or far off it was
+    /// refused on which of the two comes first (Q3001,
+    /// `tests/a_led_whose_front_is_two_planes_a_rounding_apart.rs`).
     fn as_a_corner_beside_a_flat_cut_through_the_loop_says(
         &self,
         crossing: usize,
