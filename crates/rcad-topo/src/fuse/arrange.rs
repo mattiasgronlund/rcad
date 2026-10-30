@@ -2775,6 +2775,9 @@ impl<'f> Arrangement<'f> {
                 folded_into_a_corner.extend(on);
                 continue;
             }
+            if self.is_farther_off_the_face_than_any_corner_could_be(place) {
+                continue;
+            }
             if on.len() < 2 {
                 self.kept_where_a_crossing_left_out_meets_it
                     .push((sorted, which));
@@ -2788,6 +2791,25 @@ impl<'f> Arrangement<'f> {
                 crossings: on.to_vec(),
             });
         }
+    }
+
+    /// Whether `place` lies off the box round the face by more than the room
+    /// bake asked a corner of the face with.
+    fn is_farther_off_the_face_than_any_corner_could_be(&self, place: PredicatePoint) -> bool {
+        let Some(anywhere_on_the_face) = self.face.bounds.as_a_point_anywhere_inside() else {
+            return false;
+        };
+        let Some(room) = self
+            .face
+            .wires
+            .iter()
+            .flatten()
+            .filter_map(|edge| edge.start.room_its_planes_were_asked_with)
+            .reduce(f64::max)
+        else {
+            return false;
+        };
+        !boxes_overlap(super::bake::grown_by(anywhere_on_the_face, room), place)
     }
 
     /// Whether nothing rules `place` off `crossing`, where it is meet `which`
