@@ -7006,22 +7006,18 @@ impl<'f> Arrangement<'f> {
             (None, Some(flat)) if round(&wound_as[0]) => flat,
             (Some(_) | None, Some(_) | None) => return None,
         };
-        let an_exact_corner = |at: usize| {
-            self.nodes[at]
-                .vertex
-                .and(self.nodes[at].point.exact_coordinates())
+        let a_corner = |at: usize| self.nodes[at].vertex.is_some();
+        let an_exact_corner =
+            |at: usize| a_corner(at) && self.nodes[at].point.exact_coordinates().is_some();
+        let (corner, meet, corner_is_first) = match (
+            [first, second].map(an_exact_corner),
+            [first, second].map(a_corner),
+        ) {
+            ([true, false], _) | ([false, false], [true, false]) => (first, second, true),
+            ([false, true], _) | ([false, false], [false, true]) => (second, first, false),
+            ([true, true], _) | ([false, false], [true, true] | [false, false]) => return None,
         };
-        let (corner, meet, corner_is_first) = match [first, second].map(an_exact_corner) {
-            [Some(corner), None] => (corner, second, true),
-            [None, Some(corner)] => (corner, first, false),
-            [Some(_), Some(_)] | [None, None] => return None,
-        };
-        let as_written = PredicatePoint::Exact(corner);
-        let off_the_loops_plane = flat.side_of_point(super::bake::grown_by(
-            as_written,
-            super::bake::what_writing_the_corner_down_cost(as_written.enclosure()),
-        ));
-        if off_the_loops_plane == Decision::Pos || off_the_loops_plane == Decision::Neg {
+        if self.is_proved_off_the_loops_plane(corner, flat) {
             return None;
         }
         let cut = self.the_cut_through_the_loop_at(meet, wound_as)?;
@@ -7044,24 +7040,28 @@ impl<'f> Arrangement<'f> {
         let runs = runs_at(self.nodes[meet].point);
         // Compared rather than matched: only one proved way is read, and every
         // other answer leaves the pair to the policy (§40).
-        if runs != runs_at(PredicatePoint::Exact(corner))
+        if runs != runs_at(self.nodes[corner].point)
             || !(runs == Decision::Pos || runs == Decision::Neg)
         {
             return None;
         }
-        let corner_is_higher = cut.side_of_point(PredicatePoint::Exact(corner));
+        let corner_is_higher = self.side_of_a_corner(
+            self.the_baked_corner_of(&self.nodes[corner]),
+            &Surface::Plane(cut),
+        );
         if corner_is_higher == Decision::Zero {
             return Some(Decision::Zero);
         }
         if !(corner_is_higher == Decision::Pos || corner_is_higher == Decision::Neg) {
             return None;
         }
+        let at_the_corner = self.nodes[corner].point.enclosure();
         let clear_of_the_strip = |start: PredicatePoint| {
             let start = start.enclosure();
             let past_the_cut = (dot_of(across, start) - Interval::exactly(cut.offset())).sign();
             let past_the_corner = dot_of(
                 across,
-                [0, 1, 2].map(|axis| start[axis] - Interval::exactly(corner[axis])),
+                [0, 1, 2].map(|axis| start[axis] - at_the_corner[axis]),
             )
             .sign();
             past_the_cut == past_the_corner
