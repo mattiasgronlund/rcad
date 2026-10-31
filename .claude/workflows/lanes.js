@@ -611,11 +611,17 @@ function sourcePathsOf(lane) {
 // crates/rcad-fuzz-explain/, was verified merge and still refused for having
 // no source directory to revert (Q2547). Every crate under crates/ has a src/,
 // and the workflow has no way to look.
+//
+// A write set naming a justfile entry, whole or one recipe (`justfile#name`),
+// holds the whole justfile too, the same way: Q2892's lane, on justfile
+// recipes, a skill and a section, was verified merge and still refused for
+// the same reason (Q2899). The justfile has no src/ of its own to point at.
 function sourceDirOf(entry) {
   const cut = `${entry}/`.indexOf('/src/')
   if (cut >= 0) return entry.slice(0, cut + 4)
   const crate = /^(crates\/[^/]+)\/?$/.exec(entry)
-  return crate ? `${crate[1]}/src` : null
+  if (crate) return `${crate[1]}/src`
+  return /^justfile(#.+)?$/.test(entry) ? 'justfile' : null
 }
 
 // Merges inside one run wait for one another, so they never race each other;

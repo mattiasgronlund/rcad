@@ -101,7 +101,19 @@ recipe checks.
 A write set naming a crate whole, `crates/<c>/`, defaults to `crates/<c>/src`,
 so such a row needs no `sourcePaths` (Q2547); before that, Q1770's lane, on
 `crates/rcad-fuzz-explain/` with `sourcePaths` empty, was refused for having
-nothing to revert.
+nothing to revert. A write set naming a justfile entry, whole or one recipe
+(`justfile#name`), defaults the same way, to `justfile` (Q2899); before that,
+Q2892's lane, on justfile recipes a skill and a section, was refused for the
+same reason.
+
+A row whose fix and whose test both live inside the justfile the revert
+defaults to — a `check-*` recipe's own body is test code a change there never
+counts as a line that runs (§375.2), so the lane that adds or changes an arm
+of one is naming its own test inside the file `sourcePaths` reverts — gives
+`for_the_verifier` the commands that lay the selftest lines it moved back in
+once the justfile is reverted to the base, and what the test then prints: a
+plain revert of `justfile` whole would take the new arm out along with the
+fix, and the verifier would have nothing left to watch fail.
 
 A row whose `lines-that-run` print will end `lines that run: 0` — `.md` files,
 comments, test code — needs no mark. It names no failing test, and its verifier
