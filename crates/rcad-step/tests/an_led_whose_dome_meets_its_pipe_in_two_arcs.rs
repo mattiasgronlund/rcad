@@ -102,9 +102,22 @@
 //!   corner, and the arrangement kept both places as nodes of their own, with
 //!   a sliver between them. Each is now folded into the corner when the line
 //!   and the circle stay within a rounding of each other all the way from it
-//!   to the corner (Q3010). Every fuse now stops refused `Undecidable` on
+//!   to the corner (Q3010). Every fuse then stopped refused `Undecidable` on
 //!   which way two tangent curves bend, at the back corner
-//!   `(-0.23, -7.35, 2)`.
+//!   `(-0.23, -7.35, 2)`, on the body's pipe. The flat leans `1.0e-16` off
+//!   square to the pipe's axis, so it cuts the pipe in a long thin ellipse,
+//!   whose two sides cross the circle of the flange's back `7.8e-9` either side
+//!   of the corner and are folded into it the same way. How far the ellipse
+//!   bends was read with a dot product of terms that cancel, and its way out
+//!   at the corner is under `4.6e-16` long, so the sum straddled nothing. It is
+//!   now read as the square of that way out (Q3028). The boxes round the front
+//!   corner and far off now stop refused `Undecidable` on order along a
+//!   crossing, where the box's side `x = -0.33` or a lead's side `x = -0.3`
+//!   meets the flange's rim on its front below the axis: Q3029's stop in the
+//!   `Z10.0` LED, `8` lower, which Q3034 traces to the flange's front and the
+//!   body's front disc, one plane written twice a rounding apart. The box
+//!   round the back corner stops refused `CannotTellTheCellsOfAFaceApart` on
+//!   the body's pipe, face slot 2.
 //!
 //! When either answers, its test turns into the volume check of commit
 //! `f179ca02a`: what the box and the LED share is the box's part inside the
@@ -112,21 +125,33 @@
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, SIDE_OF_PLANE, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_geom::{Isometry, SIDE_OF_PLANE, Surface, Vector};
+use rcad_predicates::{Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
 const D5: &str = "LED_D5.0mm-3.step";
 const D3: &str = "LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step";
 
-/// What a refusal on which way two curves that touch bend away from each other
-/// names.
-const HOW_TWO_TANGENT_CURVES_BEND: &str = "which way two tangent curves bend";
+/// What a refusal on the order of two places along one crossing names.
+const ALONG_A_CROSSING: &str = "order along a crossing";
+
+/// Where the box round the D3 LED's corner in two fans of faces on its
+/// flange's front goes, `4.4e-8` below the corner `(-0.23, -6.35, 2)`.
+const THE_FRONT_CORNER: [f64; 3] = [-0.23, -6.35, 1.999999956464];
 
 /// The D3 LED's corner in two fans of faces on its flange's back, where its
 /// flat touches its body's pipe.
 const THE_BACK_CORNER: [f64; 3] = [-0.23, -7.35, 2.0];
+
+/// The radius of the D3 LED's body's pipe, about `x = 1.27, z = 2`.
+const THE_BODY_PIPES_RADIUS: f64 = 1.5;
+
+/// The radius of the D3 LED's flange's rim, a pipe about the same line.
+const THE_RIMS_RADIUS: f64 = 1.9;
+
+/// The plane one side of one of the D3 LED's leads lies in.
+const A_LEADS_SIDE: f64 = -0.3;
 
 /// Half the side of the box put round each corner.
 const HALF: f64 = 0.1;
@@ -137,7 +162,7 @@ const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 #[test]
 fn a_d5_led_gets_past_the_balls_side_of_its_rim_and_stops_where_two_lines_on_its_pipe_meet_far_up()
 {
-    every_fuse_refuses(D5, &[[0.04, 0.0, 4.0], FAR_OFF], |error| {
+    every_fuse_refuses(D5, &[[0.04, 0.0, 4.0], FAR_OFF], |_, error| {
         let Error::Undecidable { records } = error else {
             return false;
         };
@@ -159,31 +184,64 @@ fn a_d5_led_gets_past_the_balls_side_of_its_rim_and_stops_where_two_lines_on_its
 }
 
 #[test]
-fn a_d3_led_gets_past_the_cells_of_its_front_and_stops_on_how_two_tangent_curves_bend_at_its_back_corner()
+fn a_d3_led_gets_past_how_two_curves_bend_at_its_back_corner_and_stops_on_the_cells_of_its_body_pipe()
  {
-    every_fuse_refuses(
-        D3,
-        &[[-0.23, -6.35, 1.999999956464], THE_BACK_CORNER, FAR_OFF],
-        |error| {
+    every_fuse_refuses(D3, &[THE_BACK_CORNER], |led, error| {
+        let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
+            return false;
+        };
+        let face = led.face(*face).expect("the face is the LED's own");
+        matches!(face.surface(), Surface::Cylinder(pipe) if pipe.radius() == THE_BODY_PIPES_RADIUS)
+    });
+}
+
+#[test]
+fn a_d3_led_gets_past_its_back_corner_and_stops_where_a_plane_across_meets_its_rim_below_the_axis()
+{
+    for (centre, across) in [
+        (THE_FRONT_CORNER, THE_FRONT_CORNER[0] - HALF),
+        (FAR_OFF, A_LEADS_SIDE),
+    ] {
+        every_fuse_refuses(D3, &[centre], |_, error| {
             let Error::Undecidable { records } = error else {
                 return false;
             };
             let [record] = records.records() else {
                 return false;
             };
-            let [at, ..] = record.inputs() else {
-                return false;
-            };
-            record.predicate() == HOW_TWO_TANGENT_CURVES_BEND
-                && at.exact_coordinates() == Some(THE_BACK_CORNER)
-        },
-    );
+            let below = where_a_plane_across_meets_the_rim_below_the_axis(across);
+            record.predicate() == ALONG_A_CROSSING
+                && record
+                    .inputs()
+                    .iter()
+                    .all(|point| is_within_1e_9_of(point, below))
+        });
+    }
+}
+
+/// Where the plane `x = across` meets the D3 LED's flange's rim on the
+/// flange's front, below the axis.
+fn where_a_plane_across_meets_the_rim_below_the_axis(across: f64) -> [f64; 3] {
+    let down = (THE_RIMS_RADIUS.powi(2) - (1.27 - across).powi(2)).sqrt();
+    [across, -6.35, 2.0 - down]
+}
+
+fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
+    point
+        .enclosure()
+        .iter()
+        .zip(at)
+        .all(|(side, at)| (side.lo() - at).abs() < 1e-9 && (side.hi() - at).abs() < 1e-9)
 }
 
 /// The LED in `file` and a box of side `2 * HALF` centred on each of
 /// `centres`, fused under intersection and under difference, each refused as
-/// `the_refusal` takes.
-fn every_fuse_refuses(file: &str, centres: &[[f64; 3]], the_refusal: impl Fn(&Error) -> bool) {
+/// `the_refusal` takes, which is handed the LED before the fuse as well.
+fn every_fuse_refuses(
+    file: &str,
+    centres: &[[f64; 3]],
+    the_refusal: impl Fn(&Model, &Error) -> bool,
+) {
     let (led, solid) = the_led(file);
     for &centre in centres {
         for rule in [Rule::Intersection, Rule::Difference] {
@@ -196,7 +254,7 @@ fn every_fuse_refuses(file: &str, centres: &[[f64; 3]], the_refusal: impl Fn(&Er
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             ) {
-                Err(error) if the_refusal(&error) => {}
+                Err(error) if the_refusal(&led, &error) => {}
                 Err(error) => panic!(
                     "{file}: {rule:?} with a box round {centre:?} refused {error:?}, which is not \
                      the refusal this pins"
