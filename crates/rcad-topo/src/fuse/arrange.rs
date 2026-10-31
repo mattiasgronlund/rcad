@@ -9592,13 +9592,30 @@ impl<'f> Arrangement<'f> {
     /// the whole value carries `|t|⁵` as a positive factor and nothing but the
     /// magnitude depends on it: the unit tangent is never formed.
     ///
-    /// Working `B` out, `∇Q·(∇S × t) = −c·|∇S × ∇Q|²` for a positive `c`, using
-    /// that `t` is along `∇S × ∇Q` for *both* curves here — which is the
+    /// Working `B` out, `∇Q·(∇S × t) = −c·|∇S × ∇Q|²` for `t = c·(∇S × ∇Q)`,
+    /// using that `t` is along `∇S × ∇Q` for *both* curves here — which is the
     /// tangency and holds only because of it. So `B` is nothing at all exactly
     /// when `∇Q` is along `∇S`, which is the two *surfaces* tangent rather than
     /// the two curves. Then the whole value is nothing at all and the caller
     /// refuses, which is right: this says nothing about a crossing that has no
     /// direction to begin with.
+    ///
+    /// **The first curve's `B` is read as `∓|t|²`**, wherever its way out is
+    /// the plain cross product rather than one of its own
+    /// ([`Arrangement::has_a_way_of_its_own`]): there `t` is `±(∇S × ∇Q₁)`, so
+    /// `c` is `±1` and the identity above is exact, `−|t|²` where `first` runs
+    /// forward and `+|t|²` where it runs back. As a dot product `B` is a sum of
+    /// terms of both signs that cancel to `|t|²` only because `t` is
+    /// `∇S × ∇Q₁`, and the arithmetic forgets that. Where `t` is known only to
+    /// within its own size, as where two surfaces nearly touch, the sum
+    /// straddles nothing; a sum of squares cannot. At the back corner of the D3
+    /// LED (`LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step`), whose flat leans
+    /// 1.0e-16 off square to the body pipe it rests on, `t` along the flat's
+    /// curve is under 4.6e-16 long, the dot product put `B` in
+    /// `[−9.8e-32, 2.1e-31]`, and every pinned fuse of the solid refused
+    /// (Q3028). Both enclose the same number at every point, so the square only
+    /// decides what the dot product could not and never turns a sign, and the
+    /// two ranges always meet, which is asserted.
     ///
     /// **Eighteen lengths**, counting a gradient as one the way the determinant
     /// above does: `t` is two, `A` is six, `B` is four, and the value multiplies
@@ -9626,7 +9643,24 @@ impl<'f> Arrangement<'f> {
                 dot_of(partner.enclosure(), sideways),
             )
         };
-        let (mine, over_mine) = lean(first);
+        let (mine, over_mine_as_a_dot_product) = lean(first);
+        let over_mine = if self.has_a_way_of_its_own(node, first.crossing) {
+            over_mine_as_a_dot_product
+        } else {
+            let along_squared = dot_of(along, along);
+            let over_mine = if first.forward {
+                -along_squared
+            } else {
+                along_squared
+            };
+            assert!(
+                over_mine.lo() <= over_mine_as_a_dot_product.hi()
+                    && over_mine_as_a_dot_product.lo() <= over_mine.hi(),
+                "∇Q·(∇S × t) is ∓|t|² for t = ±(∇S × ∇Q), so both readings hold one number, \
+                 yet they are {over_mine:?} and {over_mine_as_a_dot_product:?}"
+            );
+            over_mine
+        };
         let (theirs, over_theirs) = lean(second);
         let value = (theirs * over_mine - mine * over_theirs) * over_mine * over_theirs;
         must_decide(
