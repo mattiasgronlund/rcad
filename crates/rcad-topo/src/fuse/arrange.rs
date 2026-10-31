@@ -5397,9 +5397,11 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::as_a_corner_beside_a_flat_cut_through_the_loop_says`])
     /// or either side of one
     /// ([`Arrangement::as_a_corner_between_the_two_meets_of_one_cut_says`]),
-    /// and which side of one plane cutting a plane's loop a node on another
-    /// lies ([`Arrangement::as_the_side_of_one_cut_the_other_is_on_says`]),
-    /// is asked only where the policy would refuse.** Asked before the policy,
+    /// and where a plane of its own cuts a plane's loop at either node, read
+    /// off which side of that plane the other node and the start lie and which
+    /// way the loop runs across it at each
+    /// ([`Arrangement::as_the_side_of_one_cut_the_other_is_on_says`]), is
+    /// asked only where the policy would refuse.** Asked before the policy,
     /// the second kept a tolerant fuse of a cube whose edges run through a
     /// frustum's far rim from answering: it put the corner and the meet a
     /// rounding apart where the policy reads them as one point, and the fuse
@@ -6347,7 +6349,12 @@ impl<'f> Arrangement<'f> {
     /// and the two boxes, `[16 − 2⁻⁴⁹, 16]` and `[16, 16 + 2⁻⁴⁸]` along `z`,
     /// both have their middle at `16`. Read here, every fuse of the two was
     /// refused as a curved face going too far round, or as faces that do not
-    /// agree which way they face (`a_block_edge_grazing_a_ball.rs`).
+    /// agree which way they face (`a_block_edge_grazing_a_ball.rs`). Since
+    /// Q3027 a pair round a loop that a certified policy refuses may still be
+    /// read after it, by [`Arrangement::as_the_side_of_one_cut_the_other_is_on_says`],
+    /// and this one is: every certified fuse of the two is then refused where
+    /// the answer writes the two at one corner,
+    /// `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`.
     fn as_the_two_meets_of_one_line_say(
         &self,
         crossing: usize,
@@ -6589,61 +6596,139 @@ impl<'f> Arrangement<'f> {
     }
 
     /// Which of two nodes on the loop a plane cuts a ball, a pipe or a cone in
-    /// comes first, where each is where a plane of its own cuts the loop: read
-    /// off which side of the first's plane the second is on, and which way the
-    /// loop runs across that plane at each. `None` everywhere else, and
-    /// wherever a sign it reads is not proved.
+    /// comes first, where one at least is where a plane of its own cuts the
+    /// loop: read off which side of that plane the other node and the start
+    /// are on, and which way the loop runs across that plane at each. `None`
+    /// everywhere else, and wherever a sign it reads is not proved.
     ///
-    /// **It is [`Arrangement::as_two_parallel_cuts_through_the_loop_say`] with
-    /// the second's plane moved to run through the second, facing as the
-    /// first's does.** Write `M` for the first's plane, nought at the first.
-    /// Where the loop runs the same way across `M` at both nodes,
-    /// `n_M · (∇W₀ × ∇W₁)` proved one sign over both boxes, the two are on one
-    /// half of the loop across `n_M`, and the arc of that half between them is
-    /// where `M` lies between nought and its value at the second. So the
-    /// second comes after the first where that value has the sign the loop
-    /// runs across `M`, from a start where `M` is outside that range.
+    /// Write `M` for that plane, nought at its node, and `F` for the loop's
+    /// plane. The loop is a closed curve on `F` and `M` is affine, so `M` has
+    /// one highest and one lowest point on the loop, and those split it into
+    /// a half where `M` climbs and a half where it falls. Which half a node is
+    /// on is the way the loop runs across `M` there, the sign of
+    /// `n_M · (∇W₀ × ∇W₁)` proved over its box.
     ///
-    /// **The side of `M` the second is on is read exactly.** The second lies
-    /// on the line `L` the loop's plane and its own plane cross in, inside its
-    /// box. Along an axis `L` runs along, the box spans `[lo, hi]`. `M` is
-    /// affine along `L`, so where it has one sign at the two points `L` crosses
-    /// `lo` and `hi` at, it has that sign at the second, and each of those
-    /// signs is a meet of three planes
+    /// **Where the loop runs the same way across `M` at both nodes**, the two
+    /// are on one half, and the arc of that half between them is where `M`
+    /// lies between nought and its value at the other. So the other comes
+    /// after `M`'s node where that value has the sign the loop runs across
+    /// `M`, from a start where `M` is outside that range. This is
+    /// [`Arrangement::as_two_parallel_cuts_through_the_loop_say`] with the
+    /// other's plane moved to run through the other, facing as `M` does.
+    ///
+    /// **Where it runs opposite ways**, from a start below both values the
+    /// loop climbs past every value above the start's on the climbing half
+    /// before it falls past it on the falling half, wherever on the loop the
+    /// start is. So the node on the climbing half comes first, and from a
+    /// start above both, the one on the falling half.
+    ///
+    /// **Where a node's box is too wide to say which way the loop runs there,
+    /// which of two meets it is says it.** A node where a plane of its own
+    /// cuts the loop is one of the two meets of the line that plane crosses
+    /// `F` in with the round surface, and
+    /// [`Arrangement::the_turn_at_one_of_two_meets_of_a_line`] reads which way
+    /// the loop runs across that plane off which of the two it is. That is
+    /// the way across `M` where the node's plane faces as `M` does, number for
+    /// number, and the other way where it faces exactly the other way; it is
+    /// read nowhere else.
+    ///
+    /// **The side of `M` the other node is on is read off its box**, and,
+    /// where that box straddles `M` and the other has a plane of its own,
+    /// exactly. The other lies on the line `L` the loop's plane and its own
+    /// plane cross in, inside its box. Along an axis `L` runs along, the box
+    /// spans `[lo, hi]`. `M` is affine along `L`, so where it has one sign at
+    /// the two points `L` crosses `lo` and `hi` at, it has that sign at the
+    /// other, and each of those signs is a meet of three planes
     /// ([`side_of_a_plane_where_three_planes_meet`](rcad_predicates::side_of_a_plane_where_three_planes_meet)).
     ///
-    /// Only a node that stands for one meet is read, as in
+    /// **The start's box is read on `F` where it cannot say directly.** The
+    /// start is on `F`, `n_F · x = o_F`, so `n_M · x` there is
+    /// `(n_M − l n_F) · x + l o_F` for every `l`, and `l` may be rounded. With
+    /// `l = (n_M · n_F) / (n_F · n_F)` the normal read is square to `n_F`, so
+    /// where `M` faces nearly as `F` does, a box wide across `F` reads nearly
+    /// the one value `l o_F`.
+    ///
+    /// Only a node that stands for one meet is read as `M`'s, as in
     /// [`Arrangement::as_the_quadric_says`], and both starts are asked, as in
-    /// [`the_lower_meet_first_round_the_loop`].
+    /// [`the_lower_meet_first_round_the_loop`]. **Each node's plane is tried
+    /// as `M`**: the first's, and where that says nothing, the second's, with
+    /// the answer turned round. So a pair it puts in order one way round it
+    /// puts in order the other way round too.
     ///
     /// **It is asked only where the policy would refuse**
-    /// ([`Arrangement::order_along`]). Which plane is `M`, and which range
-    /// the starts must be clear of, change with which node is first, so it
-    /// can prove a pair one way round and say nothing the other. A cube cut
-    /// by a ball through its corner has the corner's three planes meet a
-    /// rounding off the ball, and its two meets round the loop one face cuts
-    /// the ball in, a rounding apart, were proved in order one way. Asked
-    /// before the policy, the other way round was left to the tolerant
-    /// policy, which read the two as one point, so the order the loop was
-    /// sorted in no longer held between those two neighbours and the fuse
-    /// panicked
+    /// ([`Arrangement::order_along`]). When it read the first's plane alone,
+    /// which plane was `M`, and which range the starts had to be clear of,
+    /// changed with which node was first, so it could prove a pair one way
+    /// round and say nothing the other. A cube cut by a ball through its
+    /// corner has the corner's three planes meet a rounding off the ball, and
+    /// its two meets round the loop one face cuts the ball in, a rounding
+    /// apart, were proved in order one way. Asked before the policy, the other
+    /// way round was left to the tolerant policy, which read the two as one
+    /// point, so the order the loop was sorted in no longer held between those
+    /// two neighbours and the fuse panicked
     /// (`tests/two_nodes_merged_on_a_closed_crossing_under_a_tolerant_policy.rs`).
     ///
-    /// The LED of `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step` is the shape
-    /// (Q2988). Its flange's front, normal `(0, 1, −1.158e−15)` at offset
-    /// `−3.810000000000007`, and its body's front disc, normal
-    /// `(5.55e−17, 1, 0)` at `−3.81`, are one plane written twice. The lead's
-    /// bottom `z = 5.7` cuts the flange's rim, a pipe of radius `1.9` whose
-    /// axis leans `1.1e−15` off `y`, in a loop about `3e15` long, and both
-    /// planes cut that loop near `(3.146, −3.81, 5.7)`, in boxes that touch
-    /// along `y`. Every fuse of the LED was refused on which of the two comes
-    /// first.
+    /// **Two meets whose boxes have one middle are read here too**, which
+    /// [`Arrangement::as_the_two_meets_of_one_line_say`] and
+    /// [`Arrangement::as_the_two_meets_of_one_cut_alone_on_the_loop_say`] do
+    /// not do. By the time this is asked a tolerant policy has folded them and
+    /// a certified one has refused their order, so reading it costs no answer
+    /// and moves the refusal on (Q3027). A block edge grazing a ball is then
+    /// refused by the limit's own name, where the answer writes the two at one
+    /// corner (`a_block_edge_grazing_a_ball.rs`); two places in one box, on
+    /// their order along the line their planes cross in
+    /// (`two_meets_in_one_box_on_a_closed_crossing.rs`).
+    ///
+    /// The LED of `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step` is the shape of
+    /// the same way round (Q2988). Its flange's front, normal
+    /// `(0, 1, −1.158e−15)` at offset `−3.810000000000007`, and its body's
+    /// front disc, normal `(5.55e−17, 1, 0)` at `−3.81`, are one plane written
+    /// twice. The lead's bottom `z = 5.7` cuts the flange's rim, a pipe of
+    /// radius `1.9` whose axis leans `1.1e−15` off `y`, in a loop about `3e15`
+    /// long, and both planes cut that loop near `(3.146, −3.81, 5.7)`, in boxes
+    /// that touch along `y`. Every fuse of the LED was refused on which of the
+    /// two comes first.
+    ///
+    /// The LED of `LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step` needs the rest
+    /// (Q3019). Its flange's flat `x = −1.23` leans `3.6e−32` off `x` and cuts
+    /// the flange's rim in a loop about `1.6e32` long, which the lead's side
+    /// `x = −0.3` meets `2.6e31` back along `−y` and `2.86e16` up. An `f64`
+    /// there is spaced 4, so that meet's box is 40 wide in `z` and holds both
+    /// meets of the line `x = −0.3` cuts the flat in: nothing read off it says
+    /// which way the loop runs there. Every fuse of the LED was refused on
+    /// whether the flat's corner on the rim at the back, `(−1.23, −2.27, 1.53)`,
+    /// comes before that meet, and then on whether `(−1.23, 4.257, 1.53)`, whose
+    /// own plane faces no way `x = −0.3` does, comes before it.
     fn as_the_side_of_one_cut_the_other_is_on_says(
         &self,
         crossing: usize,
         first: usize,
         second: usize,
     ) -> Option<Decision> {
+        let first_comes_first = self
+            .whether_one_comes_first_across_its_cut(crossing, first, second)
+            .or_else(|| {
+                self.whether_one_comes_first_across_its_cut(crossing, second, first)
+                    .map(|second_comes_first| !second_comes_first)
+            })?;
+        Some(if first_comes_first {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        })
+    }
+
+    /// Whether `one` comes before `other` round the loop of `crossing`, read
+    /// with `one`'s own plane as `M`
+    /// ([`Arrangement::as_the_side_of_one_cut_the_other_is_on_says`]): `None`
+    /// where `one` has no plane of its own, and wherever a sign it reads is
+    /// not proved.
+    fn whether_one_comes_first_across_its_cut(
+        &self,
+        crossing: usize,
+        one: usize,
+        other: usize,
+    ) -> Option<bool> {
         let HowItRuns::RoundAClosedCurve {
             from,
             node,
@@ -6677,7 +6762,10 @@ impl<'f> Arrangement<'f> {
             };
             Some(*cut)
         };
-        let (mine, theirs) = (the_cut_at(first)?, the_cut_at(second)?);
+        let mine = the_cut_at(one)?;
+        // Compared rather than matched: only a proved sign is read, and every
+        // other answer leaves the pair to the policy (§40).
+        let proved = |sign: Decision| sign == Decision::Pos || sign == Decision::Neg;
         let across = mine.normal().components().map(Interval::exactly);
         let runs_at = |at: usize| {
             let place = self.nodes[at].point;
@@ -6685,49 +6773,81 @@ impl<'f> Arrangement<'f> {
                 gradient_at(&wound_as[0], place).enclosure(),
                 gradient_at(&wound_as[1], place).enclosure(),
             );
-            dot_of(across, forward).sign()
-        };
-        let (runs, runs_there) = (runs_at(first), runs_at(second));
-        // Compared rather than matched: only one proved way is read, and every
-        // other answer leaves the pair to the policy (§40).
-        if runs != runs_there || !(runs == Decision::Pos || runs == Decision::Neg) {
-            return None;
-        }
-        let held = self.narrowed_box_of(second).enclosure();
-        let side_where_the_line_crosses = |axis: usize, at: f64| {
-            let mut square = [0.0; 4];
-            square[axis] = 1.0;
-            square[3] = -at;
-            rcad_predicates::side_of_a_plane_where_three_planes_meet(
-                [flat.coefficients(), theirs.coefficients(), square],
-                mine.coefficients(),
-            )
-            .ok()
-        };
-        let theirs_past_mine = (0..3).find_map(|axis| {
-            let [lo, hi] = [held[axis].lo(), held[axis].hi()];
-            if !(lo.is_finite() && hi.is_finite()) {
-                return None;
+            let read = dot_of(across, forward).sign();
+            if proved(read) {
+                return read;
             }
-            let at_lo = side_where_the_line_crosses(axis, lo)?;
-            let at_hi = side_where_the_line_crosses(axis, hi)?;
-            // Compared rather than matched: only one proved sign at both ends
-            // is read (§40).
-            (at_lo == at_hi && (at_lo == Decision::Pos || at_lo == Decision::Neg)).then_some(at_lo)
-        })?;
-        let [at_mine, at_theirs] = [Interval::exactly(mine.offset()), dot_of(across, held)];
-        let clear_of_the_arc = |start: PredicatePoint| {
-            let along = dot_of(across, start.enclosure());
-            let [past_mine, past_theirs] = [at_mine, at_theirs].map(|at| (along - at).sign());
-            past_mine == past_theirs && (past_mine == Decision::Pos || past_mine == Decision::Neg)
+            the_cut_at(at)
+                .and_then(|own| {
+                    let turn = self.the_turn_at_one_of_two_meets_of_a_line(
+                        at,
+                        [&wound_as[0], &wound_as[1], &Surface::Plane(own)],
+                    )?;
+                    let [facing, cut_facing] = [own, mine].map(|plane| plane.normal().components());
+                    if facing == cut_facing {
+                        Some(turn)
+                    } else if facing == cut_facing.map(|component| -component) {
+                        Some(the_other_way(turn))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(read)
         };
-        if !(clear_of_the_arc(from) && clear_of_the_arc(named_the_start.unwrap_or(node))) {
+        let (runs, runs_there) = (runs_at(one), runs_at(other));
+        if !(proved(runs) && proved(runs_there)) {
             return None;
         }
-        Some(if theirs_past_mine == runs {
-            Decision::Pos
+        let held = self.narrowed_box_of(other).enclosure();
+        let [at_mine, at_theirs] = [Interval::exactly(mine.offset()), dot_of(across, held)];
+        let side_of_the_arc = |along: Interval| {
+            let [past_mine, past_theirs] = [at_mine, at_theirs].map(|at| (along - at).sign());
+            (past_mine == past_theirs && proved(past_mine)).then_some(past_mine)
+        };
+        let slide =
+            Interval::exactly(mine.normal().dot(flat.normal()) / flat.normal().dot(flat.normal()));
+        let flat_normal = flat.normal().components().map(Interval::exactly);
+        let slid = [0, 1, 2].map(|axis| across[axis] - slide * flat_normal[axis]);
+        let on_the_flat = |start: PredicatePoint| {
+            let along = dot_of(across, start.enclosure());
+            if proved((along - at_mine).sign()) && proved((along - at_theirs).sign()) {
+                return along;
+            }
+            dot_of(slid, start.enclosure()) + slide * Interval::exactly(flat.offset())
+        };
+        let side = side_of_the_arc(dot_of(across, from.enclosure()))?;
+        if side_of_the_arc(on_the_flat(named_the_start.unwrap_or(node))) != Some(side) {
+            return None;
+        }
+        Some(if runs == runs_there {
+            let past = (at_theirs - at_mine).sign();
+            if proved(past) {
+                past == runs
+            } else {
+                let theirs = the_cut_at(other)?;
+                let side_where_the_line_crosses = |axis: usize, at: f64| {
+                    let mut square = [0.0; 4];
+                    square[axis] = 1.0;
+                    square[3] = -at;
+                    rcad_predicates::side_of_a_plane_where_three_planes_meet(
+                        [flat.coefficients(), theirs.coefficients(), square],
+                        mine.coefficients(),
+                    )
+                    .ok()
+                };
+                let theirs_past_mine = (0..3).find_map(|axis| {
+                    let [lo, hi] = [held[axis].lo(), held[axis].hi()];
+                    if !(lo.is_finite() && hi.is_finite()) {
+                        return None;
+                    }
+                    let at_lo = side_where_the_line_crosses(axis, lo)?;
+                    let at_hi = side_where_the_line_crosses(axis, hi)?;
+                    (at_lo == at_hi && proved(at_lo)).then_some(at_lo)
+                })?;
+                theirs_past_mine == runs
+            }
         } else {
-            Decision::Neg
+            runs != side
         })
     }
 
@@ -7311,17 +7431,24 @@ impl<'f> Arrangement<'f> {
     /// [`Arrangement::as_the_two_meets_of_one_line_say`] does not read them:
     /// the answer writes both at that middle, one corner, and an order between
     /// them draws an arc from that corner back to itself. Read here, such a
-    /// pair was refused further on, and by less telling names. A ball of
-    /// radius `1 + 2⁻⁵¹` round `(0, 0, 16)` meets the block edge `x = −1,
-    /// y = 2⁻²⁵` at `z = 16 ± 2⁻⁵¹`, in boxes with their middle at `16`, and
-    /// the union with the ball first was refused
-    /// `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` at that middle
-    /// (`a_block_edge_grazing_a_ball.rs`). Two balls at `y = 16` round a
-    /// circle in `z = 1` were refused on `orient3d`
-    /// (`a_tilted_wall_grazing_a_ball_sums_to_zero.rs`). And the two places one
-    /// box holds in `two_meets_in_one_box_on_a_closed_crossing.rs` went on to
-    /// the line the two planes cross in, which does not read them either, and
-    /// were refused on a step along its axis, whose enclosure is the two
+    /// pair was refused further on, and by less telling names. Two balls at
+    /// `y = 16` round a circle in `z = 1` were refused on `orient3d`
+    /// (`a_tilted_wall_grazing_a_ball_sums_to_zero.rs`).
+    ///
+    /// **Since Q3027 two such pairs are read anyway, before this is asked**, by
+    /// [`Arrangement::as_the_side_of_one_cut_the_other_is_on_says`], which
+    /// reads which of the two meets of one line each node is where the loop
+    /// crosses the line one way at one and the other way at the other. Each
+    /// goes on to the refusal that reading it here foretold. A ball of radius
+    /// `1 + 2⁻⁵¹` round `(0, 0, 16)` meets the block edge `x = −1, y = 2⁻²⁵`
+    /// at `z = 16 ± 2⁻⁵¹`, in boxes with their middle at `16`. Read here, the
+    /// union with the ball first was refused
+    /// `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` at that middle; read
+    /// there, every certified fuse of the two is, the limit queue row Q2482
+    /// names (`a_block_edge_grazing_a_ball.rs`). And the two places one box
+    /// holds in `two_meets_in_one_box_on_a_closed_crossing.rs` go on to the
+    /// line the two planes cross in, which does not read them either,
+    /// and are refused on a step along its axis, whose enclosure is the two
     /// boxes' widths added, twice the box (Q2655).
     ///
     /// A round bar of radius `1/2` with its axis at `(1.5, 1)`, in the L plate
