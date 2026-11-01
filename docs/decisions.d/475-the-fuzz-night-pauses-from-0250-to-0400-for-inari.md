@@ -99,6 +99,8 @@ session sends at 03:00 still runs. inari's job starts only when `load1` is below
   `INFO: exiting:` line, so a second run that never got fuzzing is not hidden
   by the first run's line. Every reader of a night's per-target logs counts both
   runs, `fuzz-yield` among them.
-- `rcad-fuzz.service` passes the pause. Its `TimeoutStartSec=` stays at 29400,
-  because the night's deadline is still 08:10.
+- `rcad-fuzz.service` passes the pause once the dispatcher installs it, as
+  `ExecStart=%h/.local/bin/mise exec -- just fuzz-overnight 28800 02:50 04:00`.
+  Its `TimeoutStartSec=` stays at 29400, because the night's deadline is still
+  08:10.
 - §81 gets a line saying the night now pauses, pointing here.

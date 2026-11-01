@@ -76,7 +76,7 @@ def summarise(path):
         target=target,
         fork=fork,
         window_s=window_s,
-        runs=rows[-1][2],
+        runs=executions(rows),
         cov_start=rows[0][1],
         cov_30=cov_30,
         cov_end=rows[-1][1],
@@ -84,42 +84,69 @@ def summarise(path):
     )
 
 
+# A log holds one run per launch line it can read: two on a night with a pause
+# (docs/decisions.d/475), and one otherwise. libFuzzer counts each run's time
+# and executions from zero, so a row's time here is counted from the start of
+# the first run, by adding the windows of the runs before it, and its last field
+# says which run it belongs to. `window_s` is the sum of the runs' windows.
 def parse_log(path):
     skipped = False
-    target = fork = window_s = None
+    target = fork = None
+    window_s = 0
+    offset = 0
+    launch_index = -1
     rows = []
     with open(path, errors="replace") as f:
         for line in f:
             if SKIPPED_LINE in line:
                 skipped = True
                 continue
-            if target is None and "Running `" in line:
+            if "Running `" in line:
                 launch = LAUNCH_LINE.search(line)
                 fork_m = FORK_FLAG.search(line)
                 window_m = WINDOW_FLAG.search(line)
                 if launch and fork_m and window_m:
-                    target = launch.group("target")
-                    fork = int(fork_m.group(1))
-                    window_s = int(window_m.group(1))
+                    this_target = launch.group("target")
+                    this_fork = int(fork_m.group(1))
+                    if target is not None and (this_target, this_fork) != (target, fork):
+                        raise ValueError(
+                            f"{path} holds a run of {this_target} with -fork={this_fork} "
+                            f"after one of {target} with -fork={fork}, and one night runs one target one way"
+                        )
+                    target, fork = this_target, this_fork
+                    offset = window_s
+                    window_s += int(window_m.group(1))
+                    launch_index += 1
                 continue
             m = RUN_LINE.search(line)
             if m:
-                rows.append((int(m["time"]), int(m["cov"]), int(m["run"])))
+                rows.append((offset + int(m["time"]), int(m["cov"]), int(m["run"]), launch_index))
+    if target is None:
+        window_s = None
     return skipped, target, fork, window_s, rows
+
+
+def executions(rows):
+    last_of_each_run = {}
+    for _time_s, _cov, count, launch_index in rows:
+        last_of_each_run[launch_index] = count
+    return sum(last_of_each_run.values())
 
 
 def coverage_at_or_before(rows, seconds):
     best = None
-    for time_s, cov, _run in rows:
+    for time_s, cov, _count, _launch_index in rows:
         if time_s <= seconds:
             best = cov
     return best
 
 
+# A rise is counted only within one run: from the last row of one run to the
+# first of the next is a new process starting, not a find.
 def last_rise_seconds(rows):
     rise = 0
     for i in range(1, len(rows)):
-        if rows[i][1] > rows[i - 1][1]:
+        if rows[i][3] == rows[i - 1][3] and rows[i][1] > rows[i - 1][1]:
             rise = rows[i][0]
     return rise
 
