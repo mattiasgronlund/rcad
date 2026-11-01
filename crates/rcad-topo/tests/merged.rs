@@ -95,6 +95,8 @@ pub mod a_bar_and_a_ball_on_its_cap_turned;
 pub mod a_bar_and_two_stacked_blocks_united_in_one_call;
 #[path = "a_bar_beside_a_blocks_wall_on_a_plate_turned.rs"]
 pub mod a_bar_beside_a_blocks_wall_on_a_plate_turned;
+#[path = "a_bar_capped_by_a_ball_of_its_radius_fused_again.rs"]
+pub mod a_bar_capped_by_a_ball_of_its_radius_fused_again;
 #[path = "a_bar_cut_beside_its_axis_and_united_again.rs"]
 pub mod a_bar_cut_beside_its_axis_and_united_again;
 #[path = "a_bar_flush_inside_a_turned_blocks_side.rs"]
