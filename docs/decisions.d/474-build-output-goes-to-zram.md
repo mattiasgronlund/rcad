@@ -12,9 +12,12 @@ other rows to be completed before any work can continue on them to same ZRAM
 space."*
 
 So: cargo's build output goes to a zram disk, and nothing else moves. A reboot
-empties that disk and loses only what kache can rebuild. The worktrees, their
-`target/` directories and everything the tooling writes there stay on disk.
-This amends §371.5 and §373.4. The rows are at 474.7.
+empties that disk and loses only what a build can make again. The worktrees,
+their `target/` directories and everything the tooling writes there stay on
+disk. This amends §371.5 and §373.4. The rows are at 474.7.
+
+474.8 is Mattias's layout: the disk is XFS at `/var/cache/zram`, and kache's
+store moves onto it too. Where 474.3 and 474.4 disagree with 474.8, 474.8 wins.
 
 ### 474.1 Why not whole worktrees in RAM
 
@@ -80,6 +83,9 @@ into `target/` for a binary target is unmeasured.
 
 ### 474.3 kache's store stays on disk, so XFS buys kache nothing here
 
+**474.8 overturns this.** Mattias put the store on the zram disk too, and 474.8
+shrinks it to fit.
+
 A reflink, like a hardlink, cannot cross filesystems. XFS helps kache only if
 the store sits on the same filesystem as the build directories, which here would
 put it on the zram disk too. That does not fit, and it would not last:
@@ -103,6 +109,9 @@ files in `target/`. What that comes to a day is for 474.6.
 
 ### 474.4 How big
 
+**474.8 replaces this section's sizes and its setup.** The disk now holds kache's
+store as well, and is XFS.
+
 A lane's `target/` (`status-page-queue-tables`, 6575 MiB) came to 4199 MiB at
 `zstd -3`: 1.56 to one. So zram holds about half as much again as a plain RAM
 disk of the same memory, not several times as much.
@@ -118,24 +127,12 @@ GB, and at most about 51 GB of RAM at 1.56 to one. 474.6 says what to read to
 resize it.
 
 When the disk is full, a build fails as it did with a full `/` (§315). So does a
-build when the disk is not mounted: `/mnt/rcad-build` is root's when nothing is
-mounted on it, so cargo cannot create a directory there and stops. That is the
-failure wanted. A build that quietly falls back to writing on the SSD would undo
-this section without anyone noticing.
+build when the disk is not mounted: `/var/cache/zram` is root's when nothing is
+mounted on it, so cargo cannot create a directory there and stops. 474.8 shows
+it stopping. That is the failure wanted. A build that quietly falls back to
+writing on the SSD would undo this section without anyone noticing.
 
-**Setting it up, as root, once per boot until Q3037's unit does it:**
-
-```
-sudo modprobe zram
-sudo zramctl --find --size 80G --algorithm zstd
-sudo mkfs.ext4 -q -m 0 /dev/zram0
-sudo mkdir -p /mnt/rcad-build
-sudo mount -o discard,noatime /dev/zram0 /mnt/rcad-build
-sudo chown mattias:mattias /mnt/rcad-build
-```
-
-`zramctl --find` prints the device it took. Use that device in place of
-`/dev/zram0` if it names another. **`discard` is what gives memory back.**
+The setup is in 474.8. **`discard` is what gives memory back.**
 According to the kernel's zram documentation, a zram device frees the memory
 behind a block when the filesystem discards it. Without that option, a deleted
 file keeps its RAM. Not yet tried here.
@@ -171,27 +168,35 @@ which of the two directories, is for Q3039 to find before it relies on one.
 - **SSD writes a day.** Read the drive's `total_data_written`, as the
   disk-wear notes from 2026-10-31 did: 56 TB in 31 days then, about 1.8 TB a
   day. Compare at the same number of compiles a day, never the raw figure.
-- **The zram disk's peak:** `zramctl` shows `DATA` (build output stored) and
+- **The zram disk's peak:** `zramctl` shows `DATA` (what is stored) and
   `TOTAL` (the RAM it takes). Read them at a moment when all three slots are
   building. If `TOTAL` comes near the RAM the machine can spare, or a build
-  failed for space, change the 80 GB.
+  failed for space, change the 80 GB. 474.8 adds three more readings.
 
 ### 474.7 The rows
 
 - **Q3037: send cargo's build output to the zram disk.**
-  - Set `CARGO_BUILD_BUILD_DIR` to `/mnt/rcad-build/{workspace-path-hash}` in
-    `mise.toml`'s `[env]`, off on CI as `RUSTC_WRAPPER` is.
+  - Set `CARGO_BUILD_BUILD_DIR` to
+    `/var/cache/zram/targets/{workspace-path-hash}` in `mise.toml`'s `[env]`,
+    off on CI as `RUSTC_WRAPPER` is.
   - Keep the fuzz recipes working. They read build-script output under
     `fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing`,
     which the setting would move.
   - Check every other recipe that reads cargo's layout under `target/`
     (`provenance-cost`'s `target/llvm-cov-target` among them).
   - Add a selftest showing that a build leaves no build output in `target/`.
-  - Write the unit that sets up the zram disk at boot, for Mattias to install.
-  - The lane first checks `findmnt /mnt/rcad-build`, and stops if it is not
-    the zram disk.
+  - Write the unit that sets up the zram disk at boot as 474.8 does by hand,
+    for Mattias to install. It makes `kache/` and `targets/` only once
+    `mountpoint -q /var/cache/zram` says the disk is mounted: made on the bare
+    mountpoint, they would let builds write to the SSD with no error. The disk
+    has to be up before Mattias's kache daemon starts.
+  - kache's config is Mattias's file and outside the repo, so the lane hands
+    him 474.8's two lines and does not edit it.
+  - The lane first checks `findmnt /var/cache/zram`, and stops if it is not
+    XFS on a zram device. It records whether a restore reflinks (474.8).
 - **Q3039, after Q3037: clear idle build directories (474.5)** in place of
-  sweeping `target/`, in `clean-targets` and its timer and selftest.
+  sweeping `target/`, in `clean-targets` and its timer and selftest. It never
+  touches `/var/cache/zram/kache`, which is kache's store.
 - **Q3038: make the scratchpads, `open-questions.md` and handoffs survive a
   reboot.**
   - Today they are in `/tmp`, which `systemd-tmpfiles` empties at every boot.
@@ -203,3 +208,156 @@ which of the two directories, is for Q3039 to find before it relies on one.
   - `questions_root` in the `justfile` defaults to `$TMPDIR/claude-<uid>`.
   - Once off `/tmp`, nothing empties the directory, and on 2026-10-17 it was
     61 GB, most of it old lane probe trees. So the row also says what clears it.
+
+### 474.8 Mattias's layout: one XFS zram disk at `/var/cache/zram`, kache's store on it too
+
+*Mattias, 2026-11-01: "I expect the filesystem layout to be: ZRAM backed XFS
+filesystem is mounted on /var/cache/zram and that there are: -
+/var/cache/zram/kache for kache:s files. - /var/cache/zram/targets for target
+folders."*
+
+So the zram disk is XFS, mounted at `/var/cache/zram`. kache's store goes in
+`/var/cache/zram/kache`, and cargo's build directories in
+`/var/cache/zram/targets/{workspace-path-hash}`. "Target folders" means 474.2's
+build directories, not each tree's `target/`. That stays on disk, because the
+tooling's evidence lives there. This overturns 474.3, and replaces 474.4's
+sizes and setup.
+
+**What it buys: reflinks, and builds off the SSD.**
+
+- A reflink cannot cross filesystems (474.3). With the store and the build
+  directories on one XFS, kache can reflink a restored file instead of copying
+  it.
+- kache tries to. `kache doctor` (0.27.0) printed `FICLONE unsupported
+  (expected on ext4)`, and FICLONE is the call that makes a reflink. Among the
+  strings in its binary are the build-record fields `reflinked_bytes` and
+  `store_reflinked_bytes`. That a restore here does reflink is not tried.
+- A reflinked file shares its blocks with the store, so a tree restored from
+  kache costs little RAM beyond what the store already takes. What a tree costs
+  of its own (incremental state, build-script output, what kache did not
+  restore) is unknown until it runs.
+- The store's writes leave the SSD too, so a build writes next to nothing
+  there. 474.6's SSD reading says how near.
+
+**The store has to shrink to fit in RAM.** Read on 2026-11-01 from kache's
+index, opened read-only:
+
+- The store holds 159.1 GiB of distinct files, against `local_max_size =
+  "150GiB"`. `du -sh ~/.cache/kache` said 205G, and the index beside the store
+  is 9.8 GB of that.
+- Store files that some entry used in the last 3, 7 and 14 days: 55.0, 75.5
+  and 100.6 GiB. Of those, the files of entries that had been hit at least
+  once: 20.1, 36.6 and 51.9 GiB.
+- kache evicted 88,968 entries between 2026-10-18 and 2026-10-30, all for
+  space. 333 of them, 0.4%, were asked for again afterwards.
+- Over the last 7 days, which is as far back as kache's events go (`kache stats
+  --since` 7d, 14d and 30d gave the same counts): 23,099 hits, 1,182 misses,
+  1,151 duplicates, a 90.8% hit rate.
+
+So the cap becomes **40 GiB**. That holds the 36.6 GiB used in the last week by
+entries that had been hit before, but not everything used that week. kache
+does not evict by age alone: 66,550 of its evictions were of entries idle for
+under a day, and 274 of those were wanted again. So what 40 GiB costs in hit
+rate is not known. The comment in `config.toml` says the rate had fallen to 57%
+at a 50 GiB cap; that is the risk, and 474.6's hit-rate reading is what moves
+the cap. Every 10 GiB more of it costs about 7.7 GiB of RAM at 1.3 to one.
+
+**How well it compresses, one page at a time.** zram compresses each 4 KiB page
+on its own, which does worse than compressing whole files. 400 files picked from
+each, run through `zstd -b3`, whole and with `-B4096`:
+
+| | whole files | 4 KiB blocks |
+|---|---|---|
+| kache's store | 1.451 | 1.386 |
+| this tree's `target/debug` | 1.410 | 1.325 |
+
+474.3's 1.69 and 474.4's 1.56 came from other samples, with more of their bytes
+in big files. The planning figure is 1.3 to one, the worst of the four. That the
+kernel's zram compresses at zstd level 3 by default is not checked.
+
+**The disk stays at 80 GiB, sized to fill before RAM runs out.**
+
+- A write zram cannot store, for want of RAM, is an I/O error to XFS. For its
+  own records, the kernel's XFS documentation (`docs.kernel.org/admin-guide/xfs`,
+  its error settings under `/sys/fs/xfs/<dev>/error/`) says XFS retries or
+  fails depending on the error, and that failing "may cause a shut down". What
+  it does by default for this error, it does not say. For file data, whether
+  cargo or kache ever see the error is unknown. None of it was tried. A build
+  that stops is better than one that reads back a file that was never written,
+  so the disk must fill and refuse writes while there is still RAM.
+- Full, at 1.3 to one, 80 GiB takes about 62 GiB of RAM, which leaves about 63
+  of the 125 GiB.
+- `sar -r`'s `kbmemused`, in 10-minute samples, peaked at 19.0 to 27.0 GiB a
+  day from 2026-10-23 to 2026-10-31, except on 2026-10-25, when it reached
+  74.3 GiB. A day like that beside a full disk does not fit, and which gives
+  first, the OOM killer or zram, is not known.
+- Inside the 80 GiB: the store at its 40 GiB cap; its index, which was 9.8 GB
+  after a month and starts empty after a reboot; and about 30 GiB for build
+  directories. That is four or five trees at 474.4's 6.6 GB if they share
+  nothing with the store, and more with reflinks.
+
+**A reboot empties the store,** so the first build after one is a cold build.
+§373.8 has a cold build of rcad-topo alone at 116 s with no kache. The trees
+after it restore from what that build stored.
+
+**The kache daemon is shared** with rscene and sketch_solve
+(`~/.config/systemd/user/kache.service`), so moving the store moves it for them
+too. Their build output stays on the SSD, on another filesystem from the store,
+so kache has to copy into them where today it can hardlink, and their entries
+share the 40 GiB. Giving them the same `CARGO_BUILD_BUILD_DIR` would put them on
+reflinks too. That is outside this repo, and Mattias's to decide.
+
+**A missing disk fails loudly, as 474.4 wants.** `/var/cache` is root's (mode
+755), and `/var/cache/zram` does not exist yet. As mattias, `mkdir
+/var/cache/zram` said `Permission denied`. A scratch crate built with
+`CARGO_BUILD_BUILD_DIR='/var/cache/zram/targets/{workspace-path-hash}'` stopped
+with exit 101: `failed to create directory /var/cache/zram/targets/29`, caused
+by `Permission denied (os error 13)`. The mountpoint, once made, is root's too,
+so the same holds while the disk is not mounted. What kache does when it cannot
+make its store is not tried.
+
+**Setting it up, as root, once per boot until Q3037's unit does it.** None of
+this was tried:
+
+```
+sudo apt install xfsprogs
+sudo modprobe zram
+sudo zramctl --find --size 80G --algorithm zstd
+sudo mkfs.xfs -q -m reflink=1 /dev/zram0
+sudo mkdir -p /var/cache/zram
+sudo mount -o discard,noatime /dev/zram0 /var/cache/zram
+sudo mkdir /var/cache/zram/kache /var/cache/zram/targets
+sudo chown mattias:mattias /var/cache/zram/kache /var/cache/zram/targets
+xfs_info /var/cache/zram
+```
+
+- `xfsprogs` is not installed today: `dpkg -l xfsprogs` says `un`.
+- `zramctl --find` prints the device it took. Use that device in place of
+  `/dev/zram0` if it names another.
+- `xfs_info` has to print `reflink=1`. `-m reflink=1` asks for it rather than
+  trusting the default.
+- Then, in `~/.config/kache/config.toml`, under `[cache]`:
+
+  ```
+  local_store = "/var/cache/zram/kache"
+  local_max_size = "40GiB"
+  ```
+
+  The key comes from kache 0.27.0's binary, not from its docs. Its strings pair
+  `cache.local_store` with `KACHE_CACHE_DIR`, and `kache doctor`'s advice says
+  to move "`cache.local_store`/`KACHE_CACHE_DIR`". The file's own comment says
+  the daemon restarts itself when the file changes. `kache doctor` should then
+  print `Cache dir /var/cache/zram/kache`.
+- The old store in `~/.cache/kache` is then read by nothing. When to delete it
+  is Mattias's call. Keeping it until 474.6's week has run costs only disk.
+
+**Four more readings for 474.6:**
+
+- `xfs_info /var/cache/zram` says `reflink=1`, and `cp --reflink=always` from
+  `/var/cache/zram/kache` into `/var/cache/zram/targets` works.
+- `reflinked_bytes` against `copied_bytes` in `kache report --format json`,
+  for a restore into a build directory: whether kache reflinks here at all.
+- `zramctl`'s `DATA` over `COMPR` is the real ratio, in place of 1.3. With
+  `sar -r`'s peak beside `TOTAL`, it says whether the 80 and the 40 GiB can
+  grow.
+- `kache stats --json --since 7d`'s hit rate, against 90.8%.
