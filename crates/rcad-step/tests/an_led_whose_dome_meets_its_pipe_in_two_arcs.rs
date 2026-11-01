@@ -117,7 +117,18 @@
 //!   `Z10.0` LED, `8` lower, which Q3034 traces to the flange's front and the
 //!   body's front disc, one plane written twice a rounding apart. The box
 //!   round the back corner stops refused `CannotTellTheCellsOfAFaceApart` on
-//!   the body's pipe, face slot 2.
+//!   the body's pipe, face slot 2. On that face the flat's ellipse has a cap
+//!   about `0.2` long behind the back plane, and the box's side `y = -7.45`
+//!   crosses the cap. Both places where the ellipse crosses the back circle
+//!   are folded into the corner, so one node stands for two places `0.4`
+//!   apart along the ellipse, and the order along it puts that node at the
+//!   tip of the cap. Two arcs of the ellipse then cross the circle where there
+//!   is no node, and one walk runs along both sides of the circle (Q3035).
+//!   Every face of the flat lies in front of the back plane, so none reaches
+//!   the pipe's face and the ellipse is no edge of the answer there. Left out
+//!   on the pipe by hand, the fuse gets past it and stops where the box's side
+//!   `x = -0.33` meets the flange's rim on its front below the axis, as the
+//!   boxes above do.
 //!
 //! When either answers, its test turns into the volume check of commit
 //! `f179ca02a`: what the box and the LED share is the box's part inside the
