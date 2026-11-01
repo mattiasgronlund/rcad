@@ -2557,6 +2557,20 @@ check-gate-verdicts-selftest:
     grep -q '^· check-timing-hooked-calls (' <<<"$got" \
         && fail "a served narrow step ran anyway"
 
+    # The text of the recipes that run the step is part of it too
+    # (docs/decisions.d/474.9): a change to how the step checks is run, not
+    # served the green of the old way. Read from a copy of this justfile, once
+    # as it is and once with a line of the rlib guard changed.
+    thc_fp_of() { PATH="$thc_narrow_path" "$j" --justfile "$1" --working-directory "$repo" _timing-hooked-calls-fingerprint; }
+    cp '{{ justfile() }}' "$dir/same.just"
+    [ "$(thc_fp_of "$dir/same.just")" = "$thc_fp1" ] \
+        || fail "a copy of this justfile gave check-timing-hooked-calls a fingerprint of its own, so the case below would prove nothing"
+    sed 's/^    timing_rlibs=\$(find "\$build\//    timing_rlibs=$(find -L "$build\//' '{{ justfile() }}' >"$dir/changed.just"
+    ! cmp -s "$dir/same.just" "$dir/changed.just" \
+        || fail "the edit meant to change the rlib guard matched nothing"
+    [ "$(thc_fp_of "$dir/changed.just")" != "$thc_fp1" ] \
+        || fail "a change to the rlib guard's own text left check-timing-hooked-calls's fingerprint where it was"
+
     # The toolchain version is part of the narrow fingerprint, so changing it
     # moves the key and the next gate re-runs rather than serves.
     printf 'rustc 1.0.0-nightly (deadbeef 2026-02-02)\n' >"$thcbin/version.txt"
