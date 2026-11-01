@@ -323,18 +323,23 @@ fn two_pointed_cones_of_two_slopes_crossing_in_a_loop_named_by_two_flats_answer_
 /// apart, `y + z = 4` and `y − z = 2.4`, both hyperbolas. Both caps' rims meet
 /// on the halfway cut at `(±√240, −4, 8)`.
 ///
-/// **Every fuse is still refused there, on one sign.** Along the upright cap's
-/// rim the meet of the cap with both cones and the meet of both caps with the
-/// upright cone are the one point `(√240, −4, 8)`, where four surfaces meet:
-/// the line the two caps cross in lies in `y + z = 4`, on which both cones cut
-/// one curve. Nothing in `fuse/arrange.rs` proves two such meets one point,
-/// so they cannot be put in order along the rim. The row filed from Q2914
-/// carries it.
+/// Along the upright cap's rim the meet of the cap with both cones and the
+/// meet of both caps with the upright cone are the one point `(√240, −4, 8)`,
+/// where four surfaces meet: the line the two caps cross in lies in
+/// `y + z = 4`, on which both cones cut one curve, and so along the turned
+/// cap's rim. Every fuse was refused there on one sign before row Q2997, since
+/// nothing in `fuse/arrange.rs` proved two such meets one point.
+///
+/// Unfinished in Q2997's first lane: this fails, and the five hundredths the
+/// intersection is held to here is not yet measured for this pair.
 #[test]
-fn two_steep_cones_eight_high_a_quarter_turn_apart_are_refused_where_four_surfaces_meet() {
-    assert_eq!(
-        every_fuse_of(two_steep_cones_eight_high_a_quarter_turn_apart).refusals(),
-        [[Some(ONE_SIGN_NOT_SETTLED); 2]; 3]
+fn two_steep_cones_eight_high_a_quarter_turn_apart_answer_every_fuse() {
+    every_fuse_answers_and_the_intersection_is_what_the_two_share(
+        two_steep_cones_eight_high_a_quarter_turn_apart,
+        (
+            what_two_cones_a_quarter_turn_apart_share(2.0, 8.0, 8.0),
+            0.05,
+        ),
     );
 }
 
