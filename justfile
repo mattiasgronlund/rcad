@@ -8782,13 +8782,27 @@ check-fuzz-overnight-selftest:
     # started one target, waited for it, and then ran the other four at once
     # would spend about what a correct one spends.
     stub_started=$(date +%s)
+    # Ahead of the log, which every arm counts as calls the night made to
+    # build and fuzz. With `STUB_BUILD_DIR` unset this answers what cargo
+    # answers with no `build-dir` configured, the target directory twice;
+    # set, it stands in for the `build-dir` of docs/decisions.d/474.9. It is
+    # not `CARGO_BUILD_BUILD_DIR`, so the night can learn it only from here.
+    case " $* " in
+        *" metadata "*)
+            printf '{"target_directory":"%s","build_directory":"%s"}\n' \
+                "$PWD/target" "${STUB_BUILD_DIR:-$PWD/target}"
+            exit 0 ;;
+    esac
     printf '%s [timings=%s] [at=%s]\n' "$*" "${RCAD_FUZZ_TIMINGS:-unset}" "$stub_started" >>"$STUB_LOG"
     case " $* " in
         *" build "*)
             # The real build's rlib is what §292's guard reads back, so every
             # arm needs one here too, real or not — clean unless
-            # `STUB_TIMING_SANCOV` asks for the kind that must fail the night.
-            timing_dir="target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-${STUB_ARTIFACT_TAG:-notag}/out"
+            # `STUB_TIMING_SANCOV` asks for the kind that must fail the night,
+            # and none at all under `STUB_NO_TIMING_RLIB`. It goes where cargo
+            # puts it, under the build directory.
+            [ -z "${STUB_NO_TIMING_RLIB:-}" ] || exit 0
+            timing_dir="${STUB_BUILD_DIR:-target}/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-${STUB_ARTIFACT_TAG:-notag}/out"
             mkdir -p "$timing_dir"
             symbol="clean_selftest_symbol"
             [ -z "${STUB_TIMING_SANCOV:-}" ] || symbol="__sancov_selftest_symbol"
@@ -10372,6 +10386,74 @@ check-fuzz-overnight-selftest:
     done
     }
 
+    # Every arm above runs with cargo's `build-dir` unset, where the build
+    # directory is the target directory, `fuzz/target`. The next three set
+    # it, as this machine's cargo config has since 2026-11-01
+    # (docs/decisions.d/474.9), so the build writes `rcad-fuzz-timing`'s
+    # rlib under it and nothing new under `fuzz/target`. An rlib there is a
+    # stale one, from before the build directory moved, and the guard must
+    # read the rlib this build wrote and no other.
+    #
+    # Thirty-eight: this build's rlib carries a sancov reference and a clean
+    # one is left under `fuzz/target`. A guard that read `fuzz/target` would
+    # find only clean rlibs there and pass the night.
+    thirty_eight() {
+    : >"$dir/log"
+    stale_out="fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-stale-$tag/out"
+    mkdir -p "$stale_out"
+    printf '.globl clean_stale_symbol\nclean_stale_symbol:\n' >"$stale_out/sym.s"
+    as "$stale_out/sym.s" -o "$stale_out/sym.o"
+    ar rcs "$stale_out/librcad_fuzz_timing-selftest-stale-$tag.rlib" "$stale_out/sym.o"
+    status=0
+    STUB_BUILD_DIR="$dir/build-dir" STUB_TIMING_SANCOV=1 run 8 || status=$?
+    [ "$status" -ne 0 ] \
+        || fail "a night whose build wrote a sancov rlib under its build directory read a clean one under fuzz/target and reported success"
+    grep -q 'sancov reference' "$dir/out" \
+        || fail "the night did not say why it failed: $(cat "$dir/out")"
+    grep -q 'BUILD FAILED' "$dir/logs/latest" \
+        || fail "an instrumented timing rlib under the build directory did not read as a build failure in the summary"
+    [ "$(grep -c 'fuzz run' "$dir/log")" -eq 0 ] \
+        || fail "the night fuzzed targets after its build wrote a sancov rlib under its build directory"
+    rm -rf "fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-stale-$tag"
+    }
+
+    # Thirty-nine: the build writes no rlib at all, into a build directory
+    # that does not exist yet. The night says it found none, rather than
+    # dying on `find`'s status under `set -e` with nothing said, which is
+    # what a fresh tree's night did before it read the build directory.
+    thirty_nine() {
+    : >"$dir/log"
+    status=0
+    STUB_BUILD_DIR="$dir/build-dir" STUB_NO_TIMING_RLIB=1 run 8 || status=$?
+    [ "$status" -ne 0 ] || fail "a build that wrote no timing rlib let the night report success"
+    grep -q 'was not found' "$dir/out" \
+        || fail "a build that wrote no timing rlib did not say so: $(cat "$dir/out")"
+    grep -q 'BUILD FAILED' "$dir/logs/latest" \
+        || fail "a build that wrote no timing rlib did not read as a build failure in the summary"
+    [ "$(grep -c 'fuzz run' "$dir/log")" -eq 0 ] \
+        || fail "the night fuzzed targets with no timing rlib to check"
+    }
+
+    # Forty: this build's rlib is clean and a sancov one is left under
+    # `fuzz/target`, which a guard that read `fuzz/target` would fail the
+    # night on. Alone, because that rlib sits where every night with
+    # `build-dir` unset looks.
+    forty() {
+    : >"$dir/log"
+    stale_out="fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-stale-forty-$tag/out"
+    mkdir -p "$stale_out"
+    printf '.globl __sancov_stale_symbol\n__sancov_stale_symbol:\n' >"$stale_out/sym.s"
+    as "$stale_out/sym.s" -o "$stale_out/sym.o"
+    ar rcs "$stale_out/librcad_fuzz_timing-selftest-stale-forty-$tag.rlib" "$stale_out/sym.o"
+    status=0
+    STUB_BUILD_DIR="$dir/build-dir-forty" run 8 || status=$?
+    rm -rf "fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-stale-forty-$tag"
+    [ "$status" -eq 0 ] \
+        || fail "a night whose build wrote a clean rlib under its build directory failed on a stale one under fuzz/target: $(cat "$dir/out")"
+    ! grep -q 'sancov reference' "$dir/out" \
+        || fail "a stale sancov rlib under fuzz/target was read as this build's"
+    }
+
     # **Which arms run at once, and why each still asserts what it says.** Run
     # in turn they took 86 s, nearly all of it the stub's sleeps (Q709), so
     # most of them run beside each other.
@@ -10394,11 +10476,13 @@ check-fuzz-overnight-selftest:
     #     `beside()` already gives every arm its own copy of, so the three
     #     cannot meet each other there either.
     #     Thirty-four to Thirty-seven, the pause's other cases, write slow
-    #     units only, or nothing.
+    #     units only, or nothing. Thirty-eight's sancov rlib is under its own
+    #     `$dir`, and the clean one it leaves under `fuzz/target` passes any
+    #     night that meets it; Thirty-nine writes none.
     #   - Alone, after them: Three and Twenty-three count slow units exactly,
-    #     Twelve, Thirty-three and Thirteen write crashes, and Sixteen and Twenty-nine write
-    #     a sancov rlib and a clean one beside it, either of which any other
-    #     night's guard could meet first.
+    #     Twelve, Thirty-three and Thirteen write crashes, and Sixteen,
+    #     Twenty-nine and Forty write a sancov rlib under `fuzz/target`, which
+    #     any other night's guard could meet.
     #
     # The clock arms. One, Four and Ten start first, together. One's ceiling
     # of 16 s is about 10 s above what it takes, and Four's 20 s about 9 s
@@ -10469,7 +10553,8 @@ check-fuzz-overnight-selftest:
     beside two_with_no_step_corpus five six_and_seven eight nine eleven \
         fourteen fifteen seventeen eighteen nineteen twenty twenty_one \
         twenty_two twenty_four twenty_five twenty_seven twenty_eight \
-        thirty thirty_one thirty_two thirty_four thirty_five thirty_six thirty_seven
+        thirty thirty_one thirty_two thirty_four thirty_five thirty_six thirty_seven \
+        thirty_eight thirty_nine
     settle
     overlap 5
     rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*-"$tag"
@@ -10479,6 +10564,7 @@ check-fuzz-overnight-selftest:
     alone thirteen
     alone sixteen
     alone twenty_nine
+    alone forty
     alone twenty_three
     arm="after the last"
     head_did_not_move
