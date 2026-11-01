@@ -45,6 +45,14 @@
 //! points along it as along that flat surface's cut of a cone, so every fuse
 //! of the pair answers.
 //!
+//! The last came with row Q2914: the quarter turn again, with cones of slope
+//! two, so each apex is inside the other and the two cross in the whole curves
+//! of two flat cuts that do not touch. Since Q2914 every fuse answers where
+//! one is eight high and the other ten. Both eight high, both caps' rims meet
+//! on the flat surface halfway, where four surfaces meet in one point, and
+//! since row Q2997 the fuse proves the meets named there one point, so every
+//! fuse of that pair answers too.
+//!
 //! Each answer that comes back is to be certified, sound, and measure as the
 //! two solids alone bound it and as the others that came back say it must: the
 //! union and the intersection together hold each solid once, and each solid
@@ -227,6 +235,9 @@ fn every_fuse_answers_and_the_intersection_is_what_the_two_share(
 /// and ten and eight high `805.957`, though the two are mirror images: each
 /// moves by about `0.03` from 500 steps and by `0.011` on to 2000, where the
 /// two are `0.019` apart, so each is within five hundredths of the volume.
+/// Both eight high it is `608.821`: it moves by `0.064` from 500 steps and by
+/// `0.0019` on to 2000, and is `0.0092` short of the sum at 16000 steps, which
+/// moves by `2e−4` from 8000, so it is within five hundredths too.
 fn what_two_cones_a_quarter_turn_apart_share(
     slope: f64,
     upright_high: f64,
@@ -330,8 +341,13 @@ fn two_pointed_cones_of_two_slopes_crossing_in_a_loop_named_by_two_flats_answer_
 /// cap's rim. Every fuse was refused there on one sign before row Q2997, since
 /// nothing in `fuse/arrange.rs` proved two such meets one point.
 ///
-/// Unfinished in Q2997's first lane: this fails, and the five hundredths the
-/// intersection is held to here is not yet measured for this pair.
+/// Since row Q2997 the fuse proves them one point where both are on one line
+/// in `y + z = 4` and on both cones, and either cone's gradient along that
+/// line keeps one sign over the box round the two. That settles the pairs on
+/// each cap's rim, on the line the two caps cross in, and on the curve the two
+/// cones cross in, where the meet of one cap with both cones and the meet of
+/// the other cap with both are one point. Every fuse answers, under every rule
+/// both ways round, and the intersection measures what the two share.
 #[test]
 fn two_steep_cones_eight_high_a_quarter_turn_apart_answer_every_fuse() {
     every_fuse_answers_and_the_intersection_is_what_the_two_share(

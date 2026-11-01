@@ -5346,10 +5346,12 @@ impl<'f> Arrangement<'f> {
     ///
     /// A pipe's axis ([`Arrangement::as_the_pipes_axis_says`]), which of a
     /// line's two meets each node is
-    /// ([`Arrangement::as_the_two_meets_of_one_line_say`]) and the same meet
+    /// ([`Arrangement::as_the_two_meets_of_one_line_say`]), the same meet
     /// of a line two pairs of planes name
-    /// ([`Arrangement::as_three_planes_through_one_line_say`]) are not asked:
-    /// no ray here has been shown to need any of them.
+    /// ([`Arrangement::as_three_planes_through_one_line_say`]) and two meets on
+    /// one line in the flat surface halfway between two mirror cones
+    /// ([`Arrangement::as_a_line_in_the_cut_halfway_between_mirror_cones_says`])
+    /// are not asked: no ray here has been shown to need any of them.
     fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         if let Some(read) = self.as_read_round_a_corner(crossing, first, second) {
             return Some(read);
@@ -5381,8 +5383,12 @@ impl<'f> Arrangement<'f> {
     /// meets with a ball or a pipe each is
     /// ([`Arrangement::as_the_two_meets_of_one_line_say`]), the same meet of
     /// a line with a ball or a pipe named by two pairs of planes through it
-    /// ([`Arrangement::as_three_planes_through_one_line_say`]), two meets of a
-    /// plane's line on a pipe with two planes that cross it in parallel lines
+    /// ([`Arrangement::as_three_planes_through_one_line_say`]), two meets on
+    /// one line in the flat surface halfway between two cones that are mirror
+    /// images held apart
+    /// ([`Arrangement::as_a_line_in_the_cut_halfway_between_mirror_cones_says`]),
+    /// two meets of a plane's line on a pipe with two planes that cross it in
+    /// parallel lines
     /// ([`Arrangement::as_two_cuts_crossing_the_plane_in_parallel_lines_say`]),
     /// where a second plane cuts a plane's loop
     /// ([`Arrangement::as_a_flat_cut_through_the_loop_says`]) and where two
