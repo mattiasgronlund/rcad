@@ -7598,9 +7598,15 @@ fuzz_corpus_root := env_var_or_default("RCAD_FUZZ_CORPUS", env_var("HOME") / "rc
 # the end if anything failed. A crash still ends *that* target's night, which is
 # the next thing to fix.
 #
+# `pause_start` and `pause_end` are two times `date -d` reads, `02:50` and
+# `04:00` from the timer, and between them no target runs, so inari can measure
+# on an idle host (docs/decisions.d/475). Every target stops at the start and
+# starts again at the end for what is left of the window; what the night lists
+# at its start, the build and the summary are done once. Give both or neither.
+#
 # Same nightly-compiler caveat as `fuzz` below.
-[doc("Fuzz all five targets at once, inside a window in seconds. What the timer runs.")]
-fuzz-overnight window="28800":
+[doc("Fuzz all five targets at once, inside a window in seconds, with an optional pause. What the timer runs.")]
+fuzz-overnight window="28800" pause_start="" pause_end="":
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -7618,6 +7624,28 @@ fuzz-overnight window="28800":
         echo "  timer at a locked worktree instead:"
         echo "      git worktree add ../rcad-fuzz && git worktree lock ../rcad-fuzz --reason 'overnight fuzzing'"
         exit 1
+    fi
+
+    # Resolved to seconds once, here, so that the night started again after
+    # the advance below pauses at the same two moments as the one that
+    # started it, whatever the clock says by then.
+    pause_start='{{ pause_start }}'
+    pause_end='{{ pause_end }}'
+    pause_from=""
+    pause_until=""
+    if [ -n "$pause_start$pause_end" ]; then
+        if [ -z "$pause_start" ] || [ -z "$pause_end" ]; then
+            echo "a pause needs a start and an end, and was given '$pause_start' to '$pause_end'"
+            exit 1
+        fi
+        pause_from=$(date -d "$pause_start" +%s) \
+            || { echo "cannot read the pause start '$pause_start' as a time"; exit 1; }
+        pause_until=$(date -d "$pause_end" +%s) \
+            || { echo "cannot read the pause end '$pause_end' as a time"; exit 1; }
+        if [ "$pause_until" -le "$pause_from" ]; then
+            echo "the pause ends at '$pause_end', which is not after its start at '$pause_start'"
+            exit 1
+        fi
     fi
 
     deadline=$(( $(date +%s) + {{window}} ))
@@ -7676,7 +7704,10 @@ fuzz-overnight window="28800":
             # and a night that spent itself chasing a busy branch would say
             # nothing about why. The night fuzzes the tip as of when it started.
             export RCAD_FUZZ_ALREADY_ADVANCED=1
-            exec {{just_executable()}} fuzz-overnight "$(( deadline - $(date +%s) ))"
+            pause_args=()
+            [ -z "$pause_from" ] || pause_args=("@$pause_from" "@$pause_until")
+            exec {{just_executable()}} fuzz-overnight "$(( deadline - $(date +%s) ))" \
+                ${pause_args[@]+"${pause_args[@]}"}
         fi
     fi
 
@@ -7688,7 +7719,10 @@ fuzz-overnight window="28800":
     commit=$(git rev-parse --short HEAD)
     age=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
     behind=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo '?')
-    echo "fuzzing $commit ($age days old, $behind behind main) until $(date -d "@$deadline" '+%H:%M:%S'), logs in $night"
+    pausing=""
+    [ -z "$pause_from" ] \
+        || pausing=", pausing $(date -d "@$pause_from" '+%H:%M:%S')-$(date -d "@$pause_until" '+%H:%M:%S')"
+    echo "fuzzing $commit ($age days old, $behind behind main) until $(date -d "@$deadline" '+%H:%M:%S')$pausing, logs in $night"
 
     # Built once, before the window is divided, so that the compiler comes out
     # of the night as a whole and not out of whichever target went first.
@@ -7814,34 +7848,6 @@ fuzz-overnight window="28800":
         cp -Rn fuzz/artifacts/. "$night/artifacts/" 2>/dev/null || true
     }
 
-    # **On a clock, and not at each target's end, because the ends are all in
-    # the same minute now.** The reason §91 wanted this at all is a night killed
-    # from outside, and the sequential loop got its protection for free: four
-    # target boundaries spread across the night, about ninety minutes apart. Run
-    # together, the five targets finish within seconds of each other and there
-    # are no boundaries left before the deadline — so a night killed at 04:00
-    # would keep nothing, which is worse than what this replaced rather than
-    # better. An interval so a test can afford one.
-    # `kill "$copier"` below reaches the subshell, not whatever it is
-    # currently running: a bare `sleep` inside it is a separate process, and a
-    # shell killed by SIGTERM while blocked in `wait` does not pass the signal
-    # on to a child it never trapped for. Q806: the subshell's own `sleep 300`
-    # kept running with `ppid 1` after the subshell that started it was gone,
-    # and `check-fuzz-overnight-selftest`'s eight `run()`s a gate left about
-    # sixteen of them. The `trap … TERM` here is what the subshell needs to
-    # kill its own `sleep` before it exits — `wait "$sleep_pid"` is what makes
-    # that `$sleep_pid` current no matter where in the loop the signal lands.
-    copy_every="${RCAD_FUZZ_COPY_EVERY:-300}"
-    ( trap 'kill "${sleep_pid:-}" 2>/dev/null; exit' TERM
-      while :; do
-          sleep "$copy_every" &
-          sleep_pid=$!
-          wait "$sleep_pid"
-          copy_out
-      done ) &
-    copier=$!
-    trap 'kill "$copier" 2>/dev/null || true' EXIT
-
     # **Every target for the whole window, all five at once, rather than a fifth
     # of the window each.** One target at a time was one core of 24 (§81), and
     # the night of 2026-09-18 spent 8 core-hours of the 192 it could have had.
@@ -7859,9 +7865,6 @@ fuzz-overnight window="28800":
     # above already did. That is the whole cost of not having a flag to skip it.
     recipes=({{fuzz_all}})
     to_look_at=()
-    left=$(( deadline - $(date +%s) ))
-    pids=()
-    started=()
 
     # The machine, split five ways, because all five run at once. `nproc` and not
     # a number in the file: 24 here, and a recipe carrying `4` would quietly
@@ -7892,6 +7895,12 @@ fuzz-overnight window="28800":
     # tell the two apart. The listing below is what replaces it.
     since="$night/.started"
     : >"$since"
+
+    # Emptied once, here, and appended to by every run, so that a target's log
+    # holds the run before the pause and the run after it.
+    for recipe in "${recipes[@]}"; do
+        : >"$night/$recipe.log"
+    done
 
     # Which files each target's writable corpus already held, before any
     # target is started tonight — the record §240.3 and §240.7 say an mtime
@@ -7953,79 +7962,153 @@ fuzz-overnight window="28800":
         done
     fi
 
-    for recipe in "${recipes[@]}"; do
-        # No floor beyond "there is time left". A minimum worth starting would
-        # be a number nobody can defend — an 18 MB corpus takes seconds just to
-        # load, so the honest floor depends on the target — and it would make
-        # the window untestable at any size a test can afford to wait for.
-        if [ "$left" -lt 1 ]; then
-            echo "$recipe: skipped, $left s left in the window" | tee -a "$night/$recipe.log"
-            to_look_at+=("$recipe:no-time")
-            continue
-        fi
-        echo "$recipe: $left s"
-        # libFuzzer's own `-timeout` bounds one input and not the process, and a
-        # target wedged outside the fuzzer's control would eat the whole night.
-        # The grace is for the corpus write on the way out.
-        timeout --kill-after=60 "$(( left + 300 ))" \
-            {{just_executable()}} "$recipe" "$left" "{{fuzz_corpus_root}}" "$fork" \
-            >"$night/$recipe.log" 2>&1 &
-        pids+=("$!")
-        started+=("$recipe")
-    done
+    # Every target for `left` seconds, then the copy out. Run once on a night
+    # with no pause, and on a night with one, once before it and once after
+    # it, the second run's tags ending `-after-pause`.
+    fuzz_for() {
+        local left=$1 after=""
+        [ "${2:-}" != after-pause ] || after=-after-pause
+        local -a pids=() started=() infos=()
 
-    # Waited in the order they were started, which is not the order they finish.
-    # It costs nothing: they were all given the same deadline, so the last wait
-    # returns within seconds of the first however they are ordered, and reading
-    # them in a fixed order keeps the summary's list stable night to night.
-    # **`$status` here says nothing about the night**, in either direction, and
-    # reading it as "crash" is how a night stops being believed.
-    #
-    # `$status` is `cargo fuzz run`'s own exit code, not libFuzzer's. libFuzzer's
-    # fork parent keeps one `ExitCode`, overwrites it with each job it collects,
-    # never resets it, and exits with it — `FuzzerFork.cpp:400-461` and the
-    # `exit(ExitCode)` at 490, under the comment *"Use the exit code from the
-    # last child process"* — so a job that only timed out can leave the fuzz
-    # binary's own process exiting 70: non-zero, as a crash in that job would
-    # leave it too, with 77 or a signal (§134.2). But
-    # `cargo fuzz run`'s `exec_fuzz` never passes that 70 on: it turns any
-    # non-zero child status into a bail, and a plain `fn main() -> Result<()>`
-    # turns any bail into a flat process exit of 1 (§275.1). So a last job that
-    # only timed out reads here as 1, indistinguishable from a real crash in the
-    # last job — a status mapping that trusted 1 as "crash" would be wrong. And
-    # the other direction is still open: a crash in job 3 of 40 000, with the
-    # last job clean, exits the fuzz binary 0, which `cargo fuzz run` passes
-    # through unchanged, so a status mapping that trusted 0 as "clean" would be
-    # wrong too.
-    #
-    # What is left that the status can still answer is the one thing no child
-    # decides: `timeout` killing the whole target from outside.
-    for i in "${!started[@]}"; do
-        recipe="${started[$i]}"
-        status=0
-        wait "${pids[$i]}" || status=$?
-        case "$status" in
-            124|137)
-                echo "$recipe: overran the window and was killed"
-                to_look_at+=("$recipe:overran") ;;
-            *)
-                # The fuzzer ran, and ran to the end. `INFO: exiting:` is the last
-                # line `FuzzWithFork` prints before `exit`, so it is present
-                # exactly when the fork loop finished of its own accord — which is
-                # the question the exit status used to be asked and can no longer
-                # answer. A target whose build or launch failed prints nothing of
-                # the sort, and that is a night that fuzzed four targets while
-                # reporting five.
-                grep -q '^INFO: exiting:' "$night/$recipe.log" \
-                    || { echo "$recipe: never got fuzzing (exited $status) — see $night/$recipe.log"
-                         to_look_at+=("$recipe:no-run"); } ;;
-        esac
+        # **On a clock, and not at each target's end, because the ends are all in
+        # the same minute now.** The reason §91 wanted this at all is a night killed
+        # from outside, and the sequential loop got its protection for free: four
+        # target boundaries spread across the night, about ninety minutes apart. Run
+        # together, the five targets finish within seconds of each other and there
+        # are no boundaries left before the deadline — so a night killed at 04:00
+        # would keep nothing, which is worse than what this replaced rather than
+        # better. An interval so a test can afford one.
+        # `kill "$copier"` below reaches the subshell, not whatever it is
+        # currently running: a bare `sleep` inside it is a separate process, and a
+        # shell killed by SIGTERM while blocked in `wait` does not pass the signal
+        # on to a child it never trapped for. Q806: the subshell's own `sleep 300`
+        # kept running with `ppid 1` after the subshell that started it was gone,
+        # and `check-fuzz-overnight-selftest`'s eight `run()`s a gate left about
+        # sixteen of them. The `trap … TERM` here is what the subshell needs to
+        # kill its own `sleep` before it exits — `wait "$sleep_pid"` is what makes
+        # that `$sleep_pid` current no matter where in the loop the signal lands.
+        copy_every="${RCAD_FUZZ_COPY_EVERY:-300}"
+        ( trap 'kill "${sleep_pid:-}" 2>/dev/null; exit' TERM
+          while :; do
+              sleep "$copy_every" &
+              sleep_pid=$!
+              wait "$sleep_pid"
+              copy_out
+          done ) &
+        copier=$!
+        trap 'kill "$copier" 2>/dev/null || true' EXIT
+
+        for recipe in "${recipes[@]}"; do
+            # No floor beyond "there is time left". A minimum worth starting would
+            # be a number nobody can defend — an 18 MB corpus takes seconds just to
+            # load, so the honest floor depends on the target — and it would make
+            # the window untestable at any size a test can afford to wait for.
+            if [ "$left" -lt 1 ]; then
+                echo "$recipe: skipped, $left s left in the window" | tee -a "$night/$recipe.log"
+                to_look_at+=("$recipe:no-time$after")
+                continue
+            fi
+            echo "$recipe: $left s"
+            # Counted rather than looked for, because the log may already hold
+            # the run before the pause, and that run's line says nothing about
+            # whether this one fuzzed.
+            infos+=("$(grep -c '^INFO: exiting:' "$night/$recipe.log" || true)")
+            # libFuzzer's own `-timeout` bounds one input and not the process, and a
+            # target wedged outside the fuzzer's control would eat the whole night.
+            # The grace is for the corpus write on the way out.
+            timeout --kill-after=60 "$(( left + 300 ))" \
+                {{just_executable()}} "$recipe" "$left" "{{fuzz_corpus_root}}" "$fork" \
+                >>"$night/$recipe.log" 2>&1 &
+            pids+=("$!")
+            started+=("$recipe")
+        done
+
+        # Waited in the order they were started, which is not the order they finish.
+        # It costs nothing: they were all given the same deadline, so the last wait
+        # returns within seconds of the first however they are ordered, and reading
+        # them in a fixed order keeps the summary's list stable night to night.
+        # **`$status` here says nothing about the night**, in either direction, and
+        # reading it as "crash" is how a night stops being believed.
+        #
+        # `$status` is `cargo fuzz run`'s own exit code, not libFuzzer's. libFuzzer's
+        # fork parent keeps one `ExitCode`, overwrites it with each job it collects,
+        # never resets it, and exits with it — `FuzzerFork.cpp:400-461` and the
+        # `exit(ExitCode)` at 490, under the comment *"Use the exit code from the
+        # last child process"* — so a job that only timed out can leave the fuzz
+        # binary's own process exiting 70: non-zero, as a crash in that job would
+        # leave it too, with 77 or a signal (§134.2). But
+        # `cargo fuzz run`'s `exec_fuzz` never passes that 70 on: it turns any
+        # non-zero child status into a bail, and a plain `fn main() -> Result<()>`
+        # turns any bail into a flat process exit of 1 (§275.1). So a last job that
+        # only timed out reads here as 1, indistinguishable from a real crash in the
+        # last job — a status mapping that trusted 1 as "crash" would be wrong. And
+        # the other direction is still open: a crash in job 3 of 40 000, with the
+        # last job clean, exits the fuzz binary 0, which `cargo fuzz run` passes
+        # through unchanged, so a status mapping that trusted 0 as "clean" would be
+        # wrong too.
+        #
+        # What is left that the status can still answer is the one thing no child
+        # decides: `timeout` killing the whole target from outside.
+        local i status
+        for i in "${!started[@]}"; do
+            recipe="${started[$i]}"
+            status=0
+            wait "${pids[$i]}" || status=$?
+            case "$status" in
+                124|137)
+                    echo "$recipe: overran the window and was killed"
+                    to_look_at+=("$recipe:overran$after") ;;
+                *)
+                    # The fuzzer ran, and ran to the end. `INFO: exiting:` is the last
+                    # line `FuzzWithFork` prints before `exit`, so it is present
+                    # exactly when the fork loop finished of its own accord — which is
+                    # the question the exit status used to be asked and can no longer
+                    # answer. A target whose build or launch failed prints nothing of
+                    # the sort, and that is a night that fuzzed four targets while
+                    # reporting five.
+                    [ "$(grep -c '^INFO: exiting:' "$night/$recipe.log" || true)" -gt "${infos[$i]}" ] \
+                        || { echo "$recipe: never got fuzzing (exited $status) — see $night/$recipe.log"
+                             to_look_at+=("$recipe:no-run$after"); } ;;
+            esac
+            copy_out
+        done
+
+        kill "$copier" 2>/dev/null || true
+        trap - EXIT
         copy_out
-    done
+    }
 
-    kill "$copier" 2>/dev/null || true
-    trap - EXIT
-    copy_out
+    # The pause (docs/decisions.d/475) splits the window in two. A pause that
+    # starts at or after the deadline, or has already ended, changes nothing;
+    # one that ends at or after the deadline ends the night where it starts.
+    now=$(date +%s)
+    first_stop=$deadline
+    second=""
+    if [ -n "$pause_from" ] && [ "$pause_from" -lt "$deadline" ] && [ "$pause_until" -gt "$now" ]; then
+        first_stop=$pause_from
+        [ "$pause_until" -ge "$deadline" ] || second=1
+    fi
+
+    left=$(( first_stop - $(date +%s) ))
+    if [ -n "$second" ] && [ "$left" -lt 1 ]; then
+        echo "started inside the pause, so nothing runs before it"
+    else
+        fuzz_for "$left"
+    fi
+
+    if [ -n "$second" ]; then
+        now=$(date +%s)
+        if [ "$(( pause_until - now ))" -gt 0 ]; then
+            echo "pausing until $(date -d "@$pause_until" '+%H:%M:%S')"
+            sleep "$(( pause_until - now ))"
+        fi
+        left=$(( deadline - $(date +%s) ))
+        if [ "$left" -ge 1 ]; then
+            fuzz_for "$left" after-pause
+        else
+            echo "the window ended inside the pause"
+        fi
+    fi
 
     # Every night so far has copied the whole of `fuzz/artifacts/` again, so a
     # name 21 nights hold is 21 copies of the same bytes (docs/decisions.d/436
@@ -8695,7 +8778,8 @@ check-fuzz-overnight-selftest:
     # long as its slowest target however the rest are arranged, so a recipe that
     # started one target, waited for it, and then ran the other four at once
     # would spend about what a correct one spends.
-    printf '%s [timings=%s] [at=%s]\n' "$*" "${RCAD_FUZZ_TIMINGS:-unset}" "$(date +%s)" >>"$STUB_LOG"
+    stub_started=$(date +%s)
+    printf '%s [timings=%s] [at=%s]\n' "$*" "${RCAD_FUZZ_TIMINGS:-unset}" "$stub_started" >>"$STUB_LOG"
     case " $* " in
         *" build "*)
             # The real build's rlib is what §292's guard reads back, so every
@@ -8775,8 +8859,13 @@ check-fuzz-overnight-selftest:
     # what an unremarkable target leaves behind.
     # Since §134 a crash file is what fails a night, and a stub that wrote one
     # every time would leave no fixture able to express a good night at all.
+    # `STUB_ARTIFACT_KIND_BEFORE` is an epoch, and limits the kind to a target
+    # started before it: a crash found before the pause, and none after.
     kind="${STUB_ARTIFACT_KIND:-slow-unit-}"
     if [ -n "${STUB_ARTIFACT_KIND_TARGET:-}" ] && [ "$target" != "$STUB_ARTIFACT_KIND_TARGET" ]; then
+        kind="slow-unit-"
+    fi
+    if [ -n "${STUB_ARTIFACT_KIND_BEFORE:-}" ] && [ "$stub_started" -ge "$STUB_ARTIFACT_KIND_BEFORE" ]; then
         kind="slow-unit-"
     fi
     if [ -n "$target" ] && [ -n "${STUB_ARTIFACT_TAG:-}" ]; then
@@ -8847,11 +8936,17 @@ check-fuzz-overnight-selftest:
                 ;;
         esac
     done
+    # When the target stopped, which with `at=` above is what says whether
+    # anything ran inside the pause.
+    [ -z "$target" ] || printf 'stopped %s [at=%s]\n' "$target" "$(date +%s)" >>"$STUB_LOG"
     # The line libFuzzer's fork parent prints last, which since §134 is what says
     # the target got as far as fuzzing. `STUB_NO_EXITING_TARGET` withholds it from
     # one target, which is how an arm asks for a target that never got going —
     # the failure the exit status used to carry and can no longer.
-    if [ "$target" != "${STUB_NO_EXITING_TARGET:-}" ]; then
+    # `STUB_NO_EXITING_FROM`, an epoch, withholds it only from a run started at
+    # or after it: a target that fuzzed before the pause and not after it.
+    if [ "$target" != "${STUB_NO_EXITING_TARGET:-}" ] \
+        || { [ -n "${STUB_NO_EXITING_FROM:-}" ] && [ "$stub_started" -lt "$STUB_NO_EXITING_FROM" ]; }; then
         echo "INFO: exiting: 0 time: 1s"
     fi
 
@@ -8907,7 +9002,7 @@ check-fuzz-overnight-selftest:
             RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
             RCAD_FUZZ_ALREADY_ADVANCED=1 RCAD_STEP_CORPUS="$dir/step-corpus" \
             RCAD_FUZZ_TIMING_CHECK="$dir/bin/timing-check-stub.sh" \
-            {{just_executable()}} fuzz-overnight "$1" >"$dir/out" 2>&1
+            {{just_executable()}} fuzz-overnight "$@" >"$dir/out" 2>&1
     }
 
     # One: five targets inside a twelve-second window, with the second of them
@@ -9251,8 +9346,8 @@ check-fuzz-overnight-selftest:
     git -C "$night_repo" -c user.email=t@t -c user.name=t commit -q -m "the real recipe"
     woke_on=$(git -C "$night_repo" rev-parse HEAD)
     cat >"$night_repo/justfile" <<'STUB'
-    fuzz-overnight window="28800":
-        @echo "the checked-out justfile ran, with {{{{ window }} s left"
+    fuzz-overnight window="28800" *pause:
+        @echo "the checked-out justfile ran, with {{{{ window }} s left and pause [{{{{ pause }}]"
     STUB
     git -C "$night_repo" add justfile
     git -C "$night_repo" -c user.email=t@t -c user.name=t commit -q -m "a recipe that names itself"
@@ -9288,6 +9383,21 @@ check-fuzz-overnight-selftest:
     [ -n "$left" ] || fail "the recipe taking over was told no window at all"
     [ "$left" -le 20 ] \
         || fail "the recipe taking over was given $left s of a twenty-second window"
+    grep -qF 'pause []' "$dir/out" \
+        || fail "a night given no pause handed one on, or empty arguments for one: $(cat "$dir/out")"
+
+    # And the pause is handed on as the same two moments, in seconds, so the
+    # recipe taking over pauses when the one that woke up would have.
+    git -C "$night_repo" checkout -q --detach "$woke_on"
+    pause_from=$(( $(date +%s) + 100 ))
+    pause_until=$(( pause_from + 60 ))
+    (cd "$night_repo" && STUB_LOG="$dir/log" PATH="$dir/bin:$PATH" \
+        RCAD_FUZZ_LOGS="$dir/logs" RCAD_FUZZ_CORPUS="$dir/corpus" \
+        {{just_executable()}} fuzz-overnight 20 "$(date -d "@$pause_from" '+%Y-%m-%d %H:%M:%S')" \
+        "@$pause_until") >"$dir/out" 2>&1 \
+        || fail "a night with a pause that advanced exited non-zero: $(cat "$dir/out")"
+    grep -qF "pause [@$pause_from @$pause_until]" "$dir/out" \
+        || fail "the recipe taking over was not handed the pause as @$pause_from @$pause_until: $(cat "$dir/out")"
 
     # Seven: a night advances once. The commit it lands on was the tip a moment
     # ago, so the recipe taking over almost always finds nothing to move to —
@@ -10128,6 +10238,137 @@ check-fuzz-overnight-selftest:
     rm -rf "$earlier_night"
     }
 
+    # Thirty-three: the pause (docs/decisions.d/475). Every target stops before
+    # it and starts again after it, nothing runs inside it, and each log holds
+    # both runs, each checked for its own `INFO: exiting:` — the reader fuzzes
+    # before the pause and never gets going after it. A crash written before the
+    # pause still fails the night, because what the night lists at its start it
+    # lists once; and the build and the reader's merge happen once each. Seven
+    # seconds before the pause leave room for a loaded start, and the stub
+    # sleeps half of each run.
+    thirty_three() {
+    : >"$dir/log"
+    t0=$(date +%s)
+    pause_from=$(( t0 + 7 ))
+    pause_until=$(( t0 + 9 ))
+    status=0
+    STUB_ARTIFACT_KIND=crash- STUB_ARTIFACT_KIND_TARGET=two_solids_fused_by_a_stranger \
+        STUB_ARTIFACT_KIND_BEFORE="$pause_from" \
+        STUB_NO_EXITING_TARGET=no_step_file_makes_the_reader_panic \
+        STUB_NO_EXITING_FROM="$pause_from" \
+        run 12 "@$pause_from" "@$pause_until" || status=$?
+    [ "$status" -ne 0 ] \
+        || fail "a crash before the pause and a reader that never fuzzed after it, and the night reported success: $(cat "$dir/out")"
+    expected=$'launch after 5\nlaunch before 5\nstop after 5\nstop before 5'
+    got=$(when_against_the_pause)
+    [ "$got" = "$expected" ] \
+        || fail "the targets did not stop for the pause and start again after it; launches and stops, against it: $(tr '\n' ',' <<<"$got")"
+    grep -q 'pausing until' "$dir/out" || fail "the night never said it was pausing: $(cat "$dir/out")"
+    night=$(awk 'END { print $NF }' "$dir/logs/latest")
+    for recipe in fuzz fuzz-writer fuzz-fuse fuzz-cones-and-tori; do
+        [ "$(grep -c '^INFO: exiting:' "$night/$recipe.log")" -eq 2 ] \
+            || fail "$recipe's log does not hold both runs: $(cat "$night/$recipe.log")"
+    done
+    [ "$(grep -c '^INFO: exiting:' "$night/fuzz-reader.log")" -eq 1 ] \
+        || fail "the reader's log does not hold its one run that fuzzed: $(cat "$night/fuzz-reader.log")"
+    [ "$(grep -oE '[a-z-]+:no-run[a-z-]*' "$dir/logs/latest")" = "fuzz-reader:no-run-after-pause" ] \
+        || fail "the run after the pause was not the one named for never getting going: $(cat "$dir/logs/latest")"
+    grep -q 'TO LOOK AT.*crashed:' "$dir/logs/latest" \
+        || fail "a crash written before the pause was not named as tonight's: $(cat "$dir/logs/latest")"
+    grep -q 'two_solids_fused_by_a_stranger: 1 crash' "$dir/logs/latest" \
+        || fail "the summary does not count the crash from before the pause: $(cat "$dir/logs/latest")"
+    rm -f fuzz/artifacts/two_solids_fused_by_a_stranger/crash-"$tag"
+    [ "$(grep -c 'fuzz build' "$dir/log")" -eq 1 ] \
+        || fail "the night built more than once: $(grep 'fuzz build' "$dir/log")"
+    [ "$(grep -c -- '-merge=1' "$dir/log")" -eq 1 ] \
+        || fail "the reader's merge did not run exactly once: $(grep -- '-merge=1' "$dir/log" || true)"
+    merged_at=$(grep -- '-merge=1' "$dir/log" | sed -E 's/.*\[at=([0-9]+)\]$/\1/')
+    [ "$merged_at" -ge "$pause_until" ] \
+        || fail "the reader's merge ran at $merged_at, before the run after the pause at $pause_until"
+    }
+
+    # Each target's launch and stop from the stub's log, counted by whether it
+    # came before `$pause_from`, inside the pause, or at or after `$pause_until`.
+    when_against_the_pause() {
+        awk -v from="$pause_from" -v upto="$pause_until" '
+            match($0, /\[at=[0-9]+\]$/) {
+                at = substr($0, RSTART + 4, RLENGTH - 5) + 0
+                if (/^stopped /) kind = "stop"
+                else if (/max_total_time/) kind = "launch"
+                else next
+                when = at < from ? "before" : at < upto ? "inside" : "after"
+                n[kind " " when]++
+            }
+            END { for (k in n) print k, n[k] }' "$dir/log" | LC_ALL=C sort
+    }
+
+    # Thirty-four: a night started inside its pause waits for the end of it
+    # before it starts anything, then fuzzes what is left of the window.
+    thirty_four() {
+    : >"$dir/log"
+    t0=$(date +%s)
+    pause_from=$(( t0 - 60 ))
+    pause_until=$(( t0 + 3 ))
+    run 8 "@$pause_from" "@$pause_until" \
+        || fail "a night started inside its pause failed: $(cat "$dir/out")"
+    grep -q 'started inside the pause' "$dir/out" \
+        || fail "a night started inside its pause did not say so: $(cat "$dir/out")"
+    expected=$'launch after 5\nstop after 5'
+    got=$(when_against_the_pause)
+    [ "$got" = "$expected" ] \
+        || fail "a night started inside its pause ran something inside it; launches and stops, against it: $(tr '\n' ',' <<<"$got")"
+    }
+
+    # Thirty-five: a pause that ends at or after the deadline ends the night
+    # where it starts. Nothing waits for its end, and nothing runs after it.
+    thirty_five() {
+    : >"$dir/log"
+    t0=$(date +%s)
+    pause_from=$(( t0 + 5 ))
+    pause_until=$(( t0 + 60 ))
+    run 8 "@$pause_from" "@$pause_until" \
+        || fail "a night whose pause outlasts it failed: $(cat "$dir/out")"
+    ! grep -q 'pausing until' "$dir/out" \
+        || fail "a night whose pause outlasts it waited for the pause to end: $(cat "$dir/out")"
+    expected=$'launch before 5\nstop before 5'
+    got=$(when_against_the_pause)
+    [ "$got" = "$expected" ] \
+        || fail "a night whose pause outlasts it ran past the pause's start; launches and stops, against it: $(tr '\n' ',' <<<"$got")"
+    }
+
+    # Thirty-six: a pause that starts after the deadline changes nothing, and
+    # every target gets the whole window, as on a night given none.
+    thirty_six() {
+    : >"$dir/log"
+    t0=$(date +%s)
+    pause_from=$(( t0 + 60 ))
+    pause_until=$(( t0 + 120 ))
+    run 8 "@$pause_from" "@$pause_until" \
+        || fail "a night with its pause after the deadline failed: $(cat "$dir/out")"
+    ! grep -q 'pausing until' "$dir/out" \
+        || fail "a night with its pause after the deadline waited for it: $(cat "$dir/out")"
+    expected=$'launch before 5\nstop before 5'
+    got=$(when_against_the_pause)
+    [ "$got" = "$expected" ] \
+        || fail "a night with its pause after the deadline ran in two parts; launches and stops, against it: $(tr '\n' ',' <<<"$got")"
+    longest=$(grep -oE 'max_total_time=[0-9]+' "$dir/log" | cut -d= -f2 | sort -n | tail -n1)
+    [ "$longest" -le 8 ] \
+        || fail "a pause after the deadline stretched the window to $longest s of 8"
+    }
+
+    # Thirty-seven: a pause given by half, one `date -d` cannot read, and one
+    # that ends before it starts are each refused before anything is built.
+    thirty_seven() {
+    local given
+    for given in "@100|" "|@100" "@100|not a time" "@200|@100" "@100|@100"; do
+        : >"$dir/log"
+        status=0
+        run 8 "${given%%|*}" "${given#*|}" || status=$?
+        [ "$status" -eq 1 ] || fail "the pause '$given' was not refused: $(cat "$dir/out")"
+        [ ! -s "$dir/log" ] || fail "the pause '$given' was refused only after cargo had run"
+    done
+    }
+
     # **Which arms run at once, and why each still asserts what it says.** Run
     # in turn they took 86 s, nearly all of it the stub's sleeps (Q709), so
     # most of them run beside each other.
@@ -10149,8 +10390,10 @@ check-fuzz-overnight-selftest:
     #     plants its own "earlier night" fixture under `$dir`, which
     #     `beside()` already gives every arm its own copy of, so the three
     #     cannot meet each other there either.
+    #     Thirty-four to Thirty-seven, the pause's other cases, write slow
+    #     units only, or nothing.
     #   - Alone, after them: Three and Twenty-three count slow units exactly,
-    #     Twelve and Thirteen write crashes, and Sixteen and Twenty-nine write
+    #     Twelve, Thirty-three and Thirteen write crashes, and Sixteen and Twenty-nine write
     #     a sancov rlib and a clean one beside it, either of which any other
     #     night's guard could meet first.
     #
@@ -10223,12 +10466,13 @@ check-fuzz-overnight-selftest:
     beside two_with_no_step_corpus five six_and_seven eight nine eleven \
         fourteen fifteen seventeen eighteen nineteen twenty twenty_one \
         twenty_two twenty_four twenty_five twenty_seven twenty_eight \
-        thirty thirty_one thirty_two
+        thirty thirty_one thirty_two thirty_four thirty_five thirty_six thirty_seven
     settle
     overlap 5
     rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*-"$tag"
     alone three
     alone twelve
+    alone thirty_three
     alone thirteen
     alone sixteen
     alone twenty_nine
