@@ -3415,6 +3415,13 @@ fn what_a_plane_that_grazes_one_of_them_leaves(
 /// Whether the one point a plane touches a surface at is on a second surface
 /// too.
 ///
+/// **A touch whose box has no width is asked as the point it names.** The box
+/// holds the touch, so a box of no width holds one `f64` triple and the touch
+/// is it, and only an exact point reaches a surface's exact level. An LED's
+/// flange flat touches its dome at such a point `3.4e−16` inside its body's
+/// pipe, and asked as a box, the pipe's own arithmetic could not tell that
+/// from zero.
+///
 /// **Certified and never tolerant**, and that is the one place in this file
 /// where the caller's policy does not reach.
 /// [`SideOfSurface`](rcad_predicates::SideOfSurface) hands back a
@@ -3429,6 +3436,7 @@ fn whether_a_touch_is_on_it(
     surface: &Surface,
     at: &[PredicatePoint],
 ) -> Result<MeetOfThree> {
+    let touch = the_point_a_box_names(touch.enclosure());
     match which_side_of_it(surface, touch) {
         Decision::Zero => Ok(MeetOfThree::At(smallvec![touch])),
         Decision::Pos | Decision::Neg => Ok(MeetOfThree::Nowhere),
