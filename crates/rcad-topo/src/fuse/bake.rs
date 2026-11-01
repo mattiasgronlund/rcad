@@ -2242,13 +2242,25 @@ fn the_side_a_closed_edge_is_walked_for(
     }
     let names_it =
         which_two_surfaces_a_run_is_between(edge.stored_run(), [&mine.stored, &across.stored]);
-    if names_it[1] != across.stored {
-        return Ok(None);
-    }
     let at = edge.stored_ends()[0];
+    let (partner_outward, partner_reversed) = if names_it[1] == across.stored {
+        (
+            gradient_of(&across.stored, at) * across.used.sign(),
+            across.used.is_reversed(),
+        )
+    } else if the_plane_a_side_between_two_curved_faces_is_named_by(
+        edge.stored_run(),
+        [mine, across],
+    )
+    .is_some()
+    {
+        (gradient_of(&names_it[1], at), false)
+    } else {
+        return Ok(None);
+    };
     let outward = [
         gradient_of(&mine.stored, at) * mine.used.sign(),
-        gradient_of(&across.stored, at) * across.used.sign(),
+        partner_outward,
     ];
     let Some(forward_if_it_keeps_the_back) = a_closed_crossing_is_walked_the_way_it_is_stored(
         [&names_it[0], &names_it[1]],
@@ -2262,8 +2274,9 @@ fn the_side_a_closed_edge_is_walked_for(
     let walked_forward = coedge.orientation_on_its_edge() == Orientation::Forward;
     let keeps_the_back = walked_forward == forward_if_it_keeps_the_back;
     // The back is the side of `across` as the solid uses it; a face used
-    // turned round has its stored surface's negative side in front.
-    Ok(Some(keeps_the_back != across.used.is_reversed()))
+    // turned round has its stored surface's negative side in front. A plane
+    // the run names is no face of the solid, and is used as it is stored.
+    Ok(Some(keeps_the_back != partner_reversed))
 }
 
 /// The surface across a side, as [`BakedEdge::across`] carries it: the face
@@ -2295,17 +2308,28 @@ fn the_surface_a_side_is_baked_against(
     run: &EdgeRun,
     [mine, across]: [PlacedSurface; 2],
 ) -> Surface {
-    let EdgeRun::PartOfWhereItCrosses { and, .. } = run else {
-        return across.baked_as;
+    match the_plane_a_side_between_two_curved_faces_is_named_by(run, [mine, across]) {
+        Some(plane) => plane.transformed(&mine.movement),
+        None => across.baked_as,
+    }
+}
+
+/// The plane a run between two curved faces names, as stored, and `None` for
+/// any other side: one with a flat face either side, and one whose run names
+/// no plane.
+fn the_plane_a_side_between_two_curved_faces_is_named_by(
+    run: &EdgeRun,
+    [mine, across]: [PlacedSurface; 2],
+) -> Option<Surface> {
+    let (EdgeRun::PartOfWhereItCrosses { and, .. } | EdgeRun::RightRoundWhereItCrosses { and }) =
+        run
+    else {
+        return None;
     };
     let both_curved = [mine, across]
         .iter()
         .all(|face| face.stored.as_plane().is_none());
-    if both_curved && and.as_plane().is_some() {
-        and.transformed(&mine.movement)
-    } else {
-        across.baked_as
-    }
+    (both_curved && and.as_plane().is_some()).then_some(*and)
 }
 
 /// Where an edge between two flat faces runs, moved into place with the face,
