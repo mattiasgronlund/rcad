@@ -6,11 +6,17 @@
 //! The union answers, and every fuse of what it gives was refused
 //! `ACrossingThisCannotBeOrderedAlong` under intersection and difference,
 //! with a box far off too (Q2999). The rim is one closed side between the
-//! bar's skin and the ball's, baked against the ball (`fuse/bake.rs`'s
-//! `the_surface_a_side_is_baked_against`), and `rcad-geom`'s
+//! bar's skin and the ball's, and it was baked against the ball: `rcad-geom`'s
 //! `where_a_closed_crossing_starts` marched the touch circle and refused it at
 //! the tangency, `CannotFollowACrossingWhereItsSurfacesAreTangent` at
-//! `SettlingAPointOntoBothSurfaces`.
+//! `SettlingAPointOntoBothSurfaces`. The union names the rim's plane in its
+//! run, and the rim is baked against that plane now, where the two faces
+//! touch round it (`fuse/bake.rs`'s `the_surface_a_side_is_baked_against`).
+//! A wall across the rim then cuts an arc out of it that the pipe's piece
+//! names by the pipe and the plane and the ball's by the ball and the plane;
+//! `fuse/assemble.rs`'s `the_name_each_arc_of_a_conic_goes_by` names the two
+//! as one edge, where they were two with one face each and the walls were
+//! refused `ResultIsNotManifold { count: 1 }` (Q3000).
 
 use std::f64::consts::PI;
 

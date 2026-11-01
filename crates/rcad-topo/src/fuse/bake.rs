@@ -311,7 +311,8 @@ pub(crate) struct BakedEdge {
     /// a cap circle starts and ends at the one corner it has.
     pub(crate) end: BakedCorner,
     /// The surface of the face on the other side of this edge, or for an arc
-    /// between two curved faces whose run names a plane, that plane
+    /// between two curved faces whose run names a plane, and a whole rim two
+    /// curved faces touch round whose run names one, that plane
     /// ([`the_surface_a_side_is_baked_against`]). Together with the face's own
     /// surface it *is* where the edge runs (§17.4, §31.3), except where
     /// [`Self::along_a_curved_surface`] says otherwise.
@@ -349,9 +350,11 @@ pub(crate) struct BakedEdge {
     /// `holds.rs` reads it for a ring's face (`docs/decisions.md` §340.5).
     ///
     /// `None` for an edge with two corners, and for a closed edge the rule says
-    /// nothing about: one whose run names some third surface rather than the
-    /// face across, and one along which the two surfaces touch rather than
-    /// cross.
+    /// nothing about: one whose run names some third surface rather than
+    /// `across`, and one along which the two surfaces touch rather than cross.
+    /// A whole rim two curved faces touch round, baked against the plane its
+    /// run names, is neither: it is read against that plane, which the face
+    /// crosses.
     pub(crate) inside_across: Option<bool>,
     /// The cuts the face on the other side of this edge does leave out,
     /// drawing no crossing of them at all, worked out to a fixed point by
@@ -1998,11 +2001,13 @@ fn middle_of_the_places(around: &[Surface]) -> PredicatePoint {
 ///
 /// **The face is on the one spelling [`spell_each_group_one_way`] gave the
 /// group**, and so is the `across` of each side whose face across is in a
-/// group, but an arc between two curved faces whose run names a plane, which
-/// is baked against that plane ([`the_surface_a_side_is_baked_against`]).
-/// A closed side's [`BakedEdge::inside_across`] is still read off the
-/// two faces' own spellings: it is a side of the surface across, and every
-/// spelling of a curved surface has one inside and one outside.
+/// group, but a side between two curved faces whose run names a plane — an
+/// arc, or a whole rim the two touch round — which is baked against that plane
+/// ([`the_surface_a_side_is_baked_against`]). A closed side's
+/// [`BakedEdge::inside_across`] is still read off the two faces' own
+/// spellings, or off this face's and that plane's as stored: it is a side of
+/// the surface across, and every spelling of a curved surface has one inside
+/// and one outside.
 ///
 /// # Errors
 ///
@@ -2216,8 +2221,10 @@ impl ASideOfAPlane {
 }
 
 /// Whether a face lies on the negative side of the face across a closed edge
-/// of it, as the way its wire walks that edge says; `None` for an edge that
-/// does not close, and see [`BakedEdge::inside_across`] for when else.
+/// of it, or of the plane the edge is baked against
+/// ([`the_surface_a_side_is_baked_against`]), as the way its wire walks that
+/// edge says; `None` for an edge that does not close, and see
+/// [`BakedEdge::inside_across`] for when else.
 ///
 /// Read where both faces are stored, for the reason
 /// `Model::validate`'s own reading of this rule gives: a ball stores no axis
@@ -2297,7 +2304,11 @@ fn the_side_a_closed_edge_is_walked_for(
 /// of its radius on its end has the whole rim as one closed side, and the
 /// union names the rim's plane in its run. Baked against the ball, which
 /// touches the bar's skin all round the rim, every fuse of the bar with a box
-/// was refused `ACrossingThisCannotBeOrderedAlong` (Q2999). A closed rim whose
+/// was refused `ACrossingThisCannotBeOrderedAlong` (Q2999). Baked against the
+/// plane, an arc a wall cuts out of the rim is the pipe and the plane on one
+/// side and the ball and the plane on the other, and
+/// `the_name_each_arc_of_a_conic_goes_by` in `fuse/assemble.rs` names the two
+/// as one edge (`a_bar_capped_by_a_ball_of_its_radius_fused_again.rs`). A closed rim whose
 /// two faces cross stays on the face across: baked against its plane, four
 /// fuses of a chamfered bar's pipe and cone with a block that answer against
 /// the cone were refused `Undecidable`
