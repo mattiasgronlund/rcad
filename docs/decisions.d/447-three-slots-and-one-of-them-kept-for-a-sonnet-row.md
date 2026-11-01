@@ -400,16 +400,18 @@ deduplicated on its exact duration and count, read from each record's own
 
 | | since 10-27 10:04 UTC (three slots, kept Sonnet slot) | since 10-13 21:35 UTC (447.6, four slots) | 10-05 to 10-13 (447.3) |
 |---|---|---|---|
-| fresh main test steps | 158 | 737 | 1 021 |
-| median | 820.2 s | 530.0 s | 266 s |
-| share past 600 s | 158 of 158, 100% | 303 of 737, 41.1% | 2.8% |
+| fresh main test steps | 159 | 737 | 1 021 |
+| median | 818.7 s | 530.0 s | 266 s |
+| share past 600 s | 159 of 159, 100% | 303 of 737, 41.1% | 2.8% |
 
 Both of 447.3's own thresholds are passed by more than they were at 447.6's
-reading, not less: every one of the 158 steps ran past 600 s, against the 10%
+reading, not less: every one of the 159 steps ran past 600 s, against the 10%
 bar, and the median has risen again, by more than half, against the 530.0 s
 447.6 watched it at. Every day in the window shows the same 100% share on its
 own: 27 of 27 on 10-27, 40 of 40 on 10-28, 49 of 49 on 10-29, 33 of 33 on
-10-30, 6 of 6 on 10-31, 3 of 3 on 11-01. The script is
+10-30, 6 of 6 on 10-31, 4 of 4 on 11-01 (one of these four is this row's own
+`just pre-gate gate-lane` run, a real fresh gate on this machine in this
+window like any other, not excluded for being the row's own). The script is
 `/tmp/.../scratchpad/gate_steps_447_8.py` of this row's session, run as
 `python3 gate_steps_447_8.py`; as with 447.6, the scratchpad is not kept, so
 the method is written out in full above rather than cited by path. Checked
@@ -441,10 +443,10 @@ run from 4 615–4 618 at the start of this window (10-27, matching `4c41703a`'s
 reading window (10-13 to 10-27), not between 447.6's reading and this one:
 by the time 447.6's window closed, the suite was already at the size it is
 now, within 1.45%. So the 27% growth 447.7 raised cannot be what pushed the
-share past 600 s from 41.1% to 100% or the median from 530.0 s to 820.2 s
+share past 600 s from 41.1% to 100% or the median from 530.0 s to 818.7 s
 between the two readings — the suite most of that growth happened under had
 already stopped growing by then. A further 1.45% growth, on its own, is far
-too small to explain a 59-point rise in the share past 600 s or a 55% rise in
+too small to explain a 59-point rise in the share past 600 s or a 54.5% rise in
 the median: nothing in 447.3's load-versus-duration table shows anything
 close to that sensitivity for a change of that size, and 447.2 itself already
 flagged that something other than the slot count was moving the load even
@@ -462,9 +464,9 @@ rows closed per day. Fewer merges racing each other also means fewer
 catch-ups, with or without a lower cap.
 
 A day/night split, checked because a running fuzzer with `nice`d CPU use is
-known to slow lanes at night: 27 of the 158 steps fell between 00:00 and
-08:00 UTC, median 1 282.5 s, all past 600 s; the other 131, in daytime hours,
-had median 794.5 s, also all past 600 s. Night makes it worse, but daytime
+known to slow lanes at night: 27 of the 159 steps fell between 00:00 and
+08:00 UTC, median 1 282.5 s, all past 600 s; the other 132, in daytime hours,
+had median 795.0 s, also all past 600 s. Night makes it worse, but daytime
 alone already sits far past both 447.6's 530.0 s median and the 10% bar, so
 time of day is not the whole story either.
 
