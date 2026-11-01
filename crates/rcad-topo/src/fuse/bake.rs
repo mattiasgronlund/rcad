@@ -71,7 +71,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use rcad_geom::{
     Cylinder, EdgeRun, Isometry, MeetOfThree, Orientation, Picker, Plane, Point, Surface,
     WHERE_THREE_SURFACES_MEET, meet_of_three_surfaces, where_a_corner_lands_after_moving,
-    which_two_surfaces_a_run_is_between,
+    which_two_surfaces_a_run_is_between, which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog,
@@ -82,10 +82,12 @@ use crate::holds::lie_along_one_line;
 use crate::key::{EdgeSlot, FaceSlot, VertexSlot};
 use crate::validate::{
     CornerRoom, MEASURING_SLACK, a_closed_crossing_is_walked_the_way_it_is_stored, gradient_of,
-    side_of_surface,
+    side_of_surface, the_curved_one_of, the_way_it_is_parametrised_about,
 };
 use crate::view::CoedgeView;
-use crate::{EdgeKey, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey};
+use crate::{
+    EdgeKey, EdgeView, FaceKey, FaceView, Invalid, Model, Result, SolidKey, SolidView, VertexKey,
+};
 
 use super::arrange::ACornerReadAsOnePoint;
 use super::assemble::{InputFace, joined_faces_of_an_input, one_surface};
@@ -309,7 +311,8 @@ pub(crate) struct BakedEdge {
     /// a cap circle starts and ends at the one corner it has.
     pub(crate) end: BakedCorner,
     /// The surface of the face on the other side of this edge, or for an arc
-    /// between two curved faces whose run names a plane, that plane
+    /// between two curved faces whose run names a plane, and a whole rim two
+    /// curved faces touch round whose run names one, that plane
     /// ([`the_surface_a_side_is_baked_against`]). Together with the face's own
     /// surface it *is* where the edge runs (§17.4, §31.3), except where
     /// [`Self::along_a_curved_surface`] says otherwise.
@@ -347,9 +350,11 @@ pub(crate) struct BakedEdge {
     /// `holds.rs` reads it for a ring's face (`docs/decisions.md` §340.5).
     ///
     /// `None` for an edge with two corners, and for a closed edge the rule says
-    /// nothing about: one whose run names some third surface rather than the
-    /// face across, and one along which the two surfaces touch rather than
-    /// cross.
+    /// nothing about: one whose run names some third surface rather than
+    /// `across`, and one along which the two surfaces touch rather than cross.
+    /// A whole rim two curved faces touch round, baked against the plane its
+    /// run names, is neither: it is read against that plane, which the face
+    /// crosses.
     pub(crate) inside_across: Option<bool>,
     /// The cuts the face on the other side of this edge does leave out,
     /// drawing no crossing of them at all, worked out to a fixed point by
@@ -1996,11 +2001,13 @@ fn middle_of_the_places(around: &[Surface]) -> PredicatePoint {
 ///
 /// **The face is on the one spelling [`spell_each_group_one_way`] gave the
 /// group**, and so is the `across` of each side whose face across is in a
-/// group, but an arc between two curved faces whose run names a plane, which
-/// is baked against that plane ([`the_surface_a_side_is_baked_against`]).
-/// A closed side's [`BakedEdge::inside_across`] is still read off the
-/// two faces' own spellings: it is a side of the surface across, and every
-/// spelling of a curved surface has one inside and one outside.
+/// group, but a side between two curved faces whose run names a plane — an
+/// arc, or a whole rim the two touch round — which is baked against that plane
+/// ([`the_surface_a_side_is_baked_against`]). A closed side's
+/// [`BakedEdge::inside_across`] is still read off the two faces' own
+/// spellings, or off this face's and that plane's as stored: it is a side of
+/// the surface across, and every spelling of a curved surface has one inside
+/// and one outside.
 ///
 /// # Errors
 ///
@@ -2047,7 +2054,7 @@ fn bake_one_face(
                     start: corners[&coedge.start().key().slot_in(model.id())].clone(),
                     end: corners[&coedge.end().key().slot_in(model.id())].clone(),
                     across: the_surface_a_side_is_baked_against(
-                        coedge.edge().stored_run(),
+                        coedge.edge(),
                         [surfaces[&mine], surfaces[&across]],
                     ),
                     along_a_curved_surface: where_an_edge_between_two_planes_runs(
@@ -2214,8 +2221,10 @@ impl ASideOfAPlane {
 }
 
 /// Whether a face lies on the negative side of the face across a closed edge
-/// of it, as the way its wire walks that edge says; `None` for an edge that
-/// does not close, and see [`BakedEdge::inside_across`] for when else.
+/// of it, or of the plane the edge is baked against
+/// ([`the_surface_a_side_is_baked_against`]), as the way its wire walks that
+/// edge says; `None` for an edge that does not close, and see
+/// [`BakedEdge::inside_across`] for when else.
 ///
 /// Read where both faces are stored, for the reason
 /// `Model::validate`'s own reading of this rule gives: a ball stores no axis
@@ -2242,13 +2251,21 @@ fn the_side_a_closed_edge_is_walked_for(
     }
     let names_it =
         which_two_surfaces_a_run_is_between(edge.stored_run(), [&mine.stored, &across.stored]);
-    if names_it[1] != across.stored {
-        return Ok(None);
-    }
     let at = edge.stored_ends()[0];
+    let (partner_outward, partner_reversed) = if names_it[1] == across.stored {
+        (
+            gradient_of(&across.stored, at) * across.used.sign(),
+            across.used.is_reversed(),
+        )
+    } else if the_plane_a_side_between_two_curved_faces_is_named_by(edge, [mine, across]).is_some()
+    {
+        (gradient_of(&names_it[1], at), false)
+    } else {
+        return Ok(None);
+    };
     let outward = [
         gradient_of(&mine.stored, at) * mine.used.sign(),
-        gradient_of(&across.stored, at) * across.used.sign(),
+        partner_outward,
     ];
     let Some(forward_if_it_keeps_the_back) = a_closed_crossing_is_walked_the_way_it_is_stored(
         [&names_it[0], &names_it[1]],
@@ -2262,14 +2279,15 @@ fn the_side_a_closed_edge_is_walked_for(
     let walked_forward = coedge.orientation_on_its_edge() == Orientation::Forward;
     let keeps_the_back = walked_forward == forward_if_it_keeps_the_back;
     // The back is the side of `across` as the solid uses it; a face used
-    // turned round has its stored surface's negative side in front.
-    Ok(Some(keeps_the_back != across.used.is_reversed()))
+    // turned round has its stored surface's negative side in front. A plane
+    // the run names is no face of the solid, and is used as it is stored.
+    Ok(Some(keeps_the_back != partner_reversed))
 }
 
 /// The surface across a side, as [`BakedEdge::across`] carries it: the face
-/// across, on the spelling its group is baked on, but for an arc between two
-/// curved faces whose run names a plane, which is that plane moved into place
-/// with the face.
+/// across, on the spelling its group is baked on, but for a side between two
+/// curved faces whose run names a plane — an arc, or a whole rim the two touch
+/// round — which is that plane moved into place with the face.
 ///
 /// **Two curved faces whose run names a plane are a face and that plane**
 /// ([`which_two_surfaces_a_run_is_between`]). A ball on a pipe of its radius,
@@ -2282,30 +2300,88 @@ fn the_side_a_closed_edge_is_walked_for(
 /// `every_reading_of_the_sides_of` in `holds.rs` reads the same side against
 /// the same plane (Q2923).
 ///
-/// **An arc, and not a whole rim.** A bar united with a ball of its radius
-/// on its end has the whole rim as one closed side, and the union names the
-/// rim's plane in its run. Baked against that plane, its fuses with a box
-/// came out `Invalid(FacesDoNotAgreeWhichWayTheyFace)` or
-/// `ResultIsNotManifold` where they refuse `ACrossingThisCannotBeOrderedAlong`
-/// baked against the ball, so the closed side stays on the face across until
-/// the fuse can answer for it (Q2942).
+/// **A whole rim only where its two faces touch.** A bar united with a ball
+/// of its radius on its end has the whole rim as one closed side, and the
+/// union names the rim's plane in its run. Baked against the ball, which
+/// touches the bar's skin all round the rim, every fuse of the bar with a box
+/// was refused `ACrossingThisCannotBeOrderedAlong` (Q2999). Baked against the
+/// plane, an arc a wall cuts out of the rim is the pipe and the plane on one
+/// side and the ball and the plane on the other, and
+/// `the_name_each_arc_of_a_conic_goes_by` in `fuse/assemble.rs` names the two
+/// as one edge (`a_bar_capped_by_a_ball_of_its_radius_fused_again.rs`). A closed rim whose
+/// two faces cross stays on the face across: baked against its plane, four
+/// fuses of a chamfered bar's pipe and cone with a block that answer against
+/// the cone were refused `Undecidable`
+/// (`a_chamfered_bar_cut_by_a_block_turned_another_way.rs`, Q3000).
 ///
 /// `faces` is this face and the face across, in that order.
 fn the_surface_a_side_is_baked_against(
-    run: &EdgeRun,
+    edge: EdgeView<'_>,
     [mine, across]: [PlacedSurface; 2],
 ) -> Surface {
-    let EdgeRun::PartOfWhereItCrosses { and, .. } = run else {
-        return across.baked_as;
+    match the_plane_a_side_between_two_curved_faces_is_named_by(edge, [mine, across]) {
+        Some(plane) => plane.transformed(&mine.movement),
+        None => across.baked_as,
+    }
+}
+
+/// The plane a side between two curved faces is baked against, as stored:
+/// the plane its run names, for an arc, and for a whole rim along which the
+/// two faces touch rather than cross. `None` for any other side: one with a
+/// flat face either side, one whose run names no plane, and a whole rim the
+/// two faces cross round, or that the closed-edge rule cannot tell they do
+/// not.
+///
+/// **Touching is read where the edge starts**, by the rule `Model::validate`
+/// reads a closed edge's direction with ([`which_way_a_closed_crossing_turns`]):
+/// [`Decision::Zero`] is the two faces' gradients exactly in line there, so a
+/// wire with no direction at all. A ball on a pipe of its own radius, centred
+/// on its axis, gives that all round the rim it touches the pipe round.
+fn the_plane_a_side_between_two_curved_faces_is_named_by(
+    edge: EdgeView<'_>,
+    [mine, across]: [PlacedSurface; 2],
+) -> Option<Surface> {
+    let run = edge.stored_run();
+    let (EdgeRun::PartOfWhereItCrosses { and, .. } | EdgeRun::RightRoundWhereItCrosses { and }) =
+        run
+    else {
+        return None;
     };
     let both_curved = [mine, across]
         .iter()
         .all(|face| face.stored.as_plane().is_none());
-    if both_curved && and.as_plane().is_some() {
-        and.transformed(&mine.movement)
-    } else {
-        across.baked_as
+    if !both_curved || and.as_plane().is_none() {
+        return None;
     }
+    if let EdgeRun::PartOfWhereItCrosses { .. } = run {
+        return Some(*and);
+    }
+    match whether_two_curved_faces_cross_where_it_starts(edge, [mine, across]) {
+        Decision::Zero => Some(*and),
+        Decision::Pos | Decision::Neg | Decision::Undecidable { .. } => None,
+        other => panic!("a fifth answer out of the closed-edge rule: {other:?}"),
+    }
+}
+
+/// Which way the wire round a closed edge between two curved faces turns
+/// where the edge starts, read off the two stored faces alone:
+/// [`Decision::Zero`] where they touch rather than cross there.
+///
+/// # Panics
+///
+/// If either face is flat.
+fn whether_two_curved_faces_cross_where_it_starts(
+    edge: EdgeView<'_>,
+    [mine, across]: [PlacedSurface; 2],
+) -> Decision {
+    let at = edge.stored_ends()[0];
+    let pair = [mine.stored, across.stored];
+    let curved = the_curved_one_of(&pair).expect("two curved faces");
+    which_way_a_closed_crossing_turns(
+        pair.map(|surface| gradient_of(&surface, at)),
+        gradient_of(&curved, at),
+        the_way_it_is_parametrised_about(&curved, at),
+    )
 }
 
 /// Where an edge between two flat faces runs, moved into place with the face,

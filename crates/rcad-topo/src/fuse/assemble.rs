@@ -535,7 +535,7 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
                     };
                     let mut sorted = ends;
                     sorted.sort_unstable();
-                    let key = (sorted, arc);
+                    let key = (sorted, corners.arc_goes_by(arc));
                     let number = arcs_at_one_corner.len();
                     let number = *arcs_at_one_corner.entry(key).or_insert(number);
                     of_this_piece.push(NamedSide {
@@ -10037,6 +10037,10 @@ struct Corners {
     /// the one name each of them goes by. See
     /// [`the_name_each_closed_curve_goes_by`].
     curves: BTreeMap<CurveName, CurveName>,
+    /// For every conic in a plane the kept arcs bring under the names of more
+    /// than one ball, pipe or cone, the one name each of them goes by. See
+    /// [`the_name_each_arc_of_a_conic_goes_by`].
+    arcs: BTreeMap<[[u64; 9]; 2], [[u64; 9]; 2]>,
 }
 
 /// What one closed curve of the answer is called and where it could start,
@@ -10161,6 +10165,13 @@ impl Corners {
                 }),
                 policy,
             ),
+            arcs: the_name_each_arc_of_a_conic_goes_by(
+                sides
+                    .iter()
+                    .filter(|(_, curve)| curve.is_none())
+                    .map(|(meet, _)| &meet.carried_by),
+                policy,
+            ),
             ..Self::default()
         };
         let mut closes: BTreeMap<VertexSlot, BTreeSet<Option<CurveName>>> = BTreeMap::new();
@@ -10245,6 +10256,14 @@ impl Corners {
     /// under more than one name.
     fn curve_goes_by(&self, curve: &CurveName) -> CurveName {
         self.curves.get(curve).unwrap_or(curve).clone()
+    }
+
+    /// The name an arc goes by: `arc` as [`which_arc_of_a_circle_this_is`]
+    /// names it, with the two surfaces it names replaced by the ones
+    /// [`the_name_each_arc_of_a_conic_goes_by`] found its conic goes by. The
+    /// sign is kept, and that function says why it may be.
+    fn arc_goes_by(&self, (named, sign): ([[u64; 9]; 2], bool)) -> ([[u64; 9]; 2], bool) {
+        (*self.arcs.get(&named).unwrap_or(&named), sign)
     }
 
     /// Make every name of one point go by one name, and put the point where
@@ -10920,11 +10939,11 @@ fn the_order_of_two_roundings(one: Point, other: Point) -> Ordering {
 /// For every name `joined` links to another, directly or along a chain of
 /// links, the least name it is so linked to; the least name of each group
 /// maps to itself. A name linked to nothing but itself is left out.
-fn the_least_name_of_each_group(
-    joined: impl IntoIterator<Item = [CornerName; 2]>,
-) -> BTreeMap<CornerName, CornerName> {
-    let mut leads_to: BTreeMap<CornerName, CornerName> = BTreeMap::new();
-    let leader = |leads_to: &BTreeMap<CornerName, CornerName>, mut name: CornerName| {
+fn the_least_name_of_each_group<Name: Ord + Clone>(
+    joined: impl IntoIterator<Item = [Name; 2]>,
+) -> BTreeMap<Name, Name> {
+    let mut leads_to: BTreeMap<Name, Name> = BTreeMap::new();
+    let leader = |leads_to: &BTreeMap<Name, Name>, mut name: Name| {
         while let Some(next) = leads_to.get(&name) {
             name = next.clone();
         }
@@ -11188,6 +11207,81 @@ fn the_plane_and_the_ring_of(carried_by: &[Surface; 2]) -> Option<(Plane, Surfac
     }
 }
 
+/// For every arc of a closed conic in a plane that comes under the names of
+/// more than one ball, pipe or cone, the one name all of them go by: the
+/// least, as [`which_arc_of_a_circle_this_is`] names an arc between a plane and
+/// one of those, so that which side arrived first cannot matter.
+///
+/// **An arc can be cut out of a curve two curved surfaces touch round**, as a
+/// whole closed curve can ([`the_name_each_closed_curve_goes_by`]). A bar of
+/// radius 2.5 united with a ball of its radius on its end has the rim `z = 5`
+/// as one closed edge between the pipe's face and the ball's, and its run
+/// names that plane, so each face's side of it is baked against the plane
+/// (`the_surface_a_side_is_baked_against` in `fuse/bake.rs`). A wall across
+/// the rim cuts an arc of it out, which the pipe's piece names by the pipe and
+/// the plane and the ball's by the ball and the plane. Named apart, the two
+/// were two edges with one face along each, and every fuse of the bar with a
+/// wall across its rim was refused `ResultIsNotManifold { count: 1 }`
+/// (`tests/a_bar_capped_by_a_ball_of_its_radius_fused_again.rs`, Q3000).
+///
+/// **Two names are one conic** where the plane is one at any scale and the
+/// plane and the two curved surfaces share more than a point, by the argument
+/// [`the_name_each_closed_curve_goes_by`] makes: two different conics in one
+/// plane share at most four points.
+///
+/// **The sign an arc is named with holds across the join.** It says whether a
+/// face walks the arc along `∇round × n` or against it, `n` the plane's
+/// normal as its name folds it. Only the part of `∇round` in the plane counts
+/// in that product, and on the conic that part is the slope of the round
+/// surface's polynomial along the plane, which climbs out of the region the
+/// polynomial is negative in. A ball's, a pipe's and a cone's polynomial is
+/// negative inside it, and their gradients point out of it (`gradient_of` in
+/// `validate.rs`), so where the plane cuts one of them in a closed conic that
+/// region is the inside of the conic, whichever of the three it is. So the
+/// two products point the same way round the one conic, and a face that walks
+/// the arc one way names it with one sign under either name.
+///
+/// A meet of the three that cannot be worked out joins nothing, as it joins
+/// nothing for a closed curve, and the answer is refused as not a manifold, as
+/// it was before anything was asked.
+fn the_name_each_arc_of_a_conic_goes_by<'a>(
+    open_sides: impl Iterator<Item = &'a [Surface; 2]>,
+    policy: &Policy,
+) -> BTreeMap<[[u64; 9]; 2], [[u64; 9]; 2]> {
+    let mut cut_out_of: BTreeMap<[[u64; 9]; 2], (Plane, Surface)> = BTreeMap::new();
+    for carried_by in open_sides {
+        if which_of_them_a_closed_crossing_runs_round(carried_by).is_none() {
+            continue;
+        }
+        if let Some((flat, round)) = the_plane_and_the_ball_pipe_or_cone_of(carried_by) {
+            let named = [
+                name_of_the_surface_either_way_round(&round),
+                name_of_the_plane_at_any_scale(&Surface::Plane(flat)),
+            ];
+            cut_out_of.entry(named).or_insert((flat, round));
+        }
+    }
+    let named: Vec<_> = cut_out_of.iter().collect();
+    let mut joined = Vec::new();
+    for (at, &(one, &(flat, mine))) in named.iter().enumerate() {
+        for &(other, &(_, theirs)) in &named[at + 1..] {
+            let one_conic = one[1] == other[1]
+                && matches!(
+                    meet_of_three_surfaces(
+                        [&Surface::Plane(flat), &mine, &theirs],
+                        policy,
+                        &mut ProvenanceLog::new(),
+                    ),
+                    Ok(MeetOfThree::MoreThanAPoint)
+                );
+            if one_conic {
+                joined.push([*one, *other]);
+            }
+        }
+    }
+    the_least_name_of_each_group(joined)
+}
+
 /// The lower of two points, `x` first and then `y` and `z`, the order
 /// [`Assembly::which_to_keep_first`] breaks a tie between two corners by.
 fn lowest_first(one: PredicatePoint, other: PredicatePoint) -> Ordering {
@@ -11409,7 +11503,8 @@ impl Edges {
         let key = (
             [from.min(to), from.max(to)],
             named,
-            which_arc_of_a_circle_this_is(meet, from, to, policy, log)?,
+            which_arc_of_a_circle_this_is(meet, from, to, policy, log)?
+                .map(|arc| corners.arc_goes_by(arc)),
             which_open_crossing_of_a_cone_this_is(meet, from, to),
             the_crossing_of_these_runs_straight(&carried_by) == Some(true),
         );
