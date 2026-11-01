@@ -11210,6 +11210,10 @@ _fuzz-timing-rlib-is-clean:
 # §425.7 is the demonstration that nothing else moves it). Same shape as
 # `_code-fingerprint` — `git ls-tree` over the paths, then the environment —
 # so the two stay easy to compare by eye.
+#
+# And on what runs them: the stand-in, which is what keeps the rlib clean,
+# and the text of the two recipes, so a change to how the step checks is run
+# again and not served the green of the old way (docs/decisions.d/474.9).
 [private]
 _timing-hooked-calls-fingerprint:
     #!/usr/bin/env bash
@@ -11221,7 +11225,10 @@ _timing-hooked-calls-fingerprint:
     fi
     {
         git ls-tree -r --full-tree HEAD -- crates/rcad-fuzz-timing fuzz/Cargo.toml \
-            fuzz/Cargo.lock fuzz/timing-hooked-calls.py
+            fuzz/Cargo.lock fuzz/timing-hooked-calls.py fuzz/rustc-stand-in.sh
+        echo "-- recipes"
+        {{just_executable()}} --justfile '{{ justfile() }}' --show check-timing-hooked-calls
+        {{just_executable()}} --justfile '{{ justfile() }}' --show _fuzz-timing-rlib-is-clean
         echo "-- toolchain"
         if rustc_path=$(rustup which --toolchain nightly rustc 2>/dev/null); then
             "$rustc_path" --version
