@@ -163,8 +163,9 @@ use crate::intersect::{
     HowTwoConesOffOneAxisCross, every_point_of_both_in_the_box_is_on,
     halfway_between_a_cones_apex_and_a_ball_on_its_axis, how_a_ball_on_a_cones_axis_meets_it,
     how_a_plane_leans_against_a_pipe, how_two_cones_off_one_axis_cross,
-    whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
-    whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
+    is_the_flat_surface_halfway_between, whether_a_ball_runs_through_a_cones_apex,
+    whether_a_ball_sits_on_a_cones_axis, whether_a_cone_and_a_pipe_share_an_axis,
+    whether_two_cones_share_an_axis,
 };
 use crate::{
     Cone, Cylinder, Error, HalfSpace, HalfSpaceThroughAPoint, Picker, Plane, Point, Result, Sphere,
@@ -1593,19 +1594,61 @@ impl Cone {
         other: &Self,
         at: PredicatePoint,
     ) -> Result<Option<Plane>> {
-        let Some(HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart {
-            cone,
-            other: mirror,
-            flats: [halfway, _],
-            ..
-        }) = self.how_it_crosses_a_cone_off_its_axis(other)?
-        else {
-            return Ok(None);
-        };
-        Ok(
-            every_point_of_both_in_the_box_is_on(&cone, &mirror, &halfway, at.enclosure())
-                .then_some(halfway),
-        )
+        Ok(self.the_flat_surface_halfway_as_stored_to(other)?.and_then(
+            |(cone, mirror, halfway)| {
+                every_point_of_both_in_the_box_is_on(&cone, &mirror, &halfway, at.enclosure())
+                    .then_some(halfway)
+            },
+        ))
+    }
+
+    /// Where this cone and `other` are mirror images held apart, as
+    /// [`Cone::the_two_flat_cuts_of_a_mirror_image_held_apart_from_it`] names
+    /// them: the flat surface halfway between the apexes, where the stored one
+    /// is proved to be the exact one, and nothing elsewhere.
+    ///
+    /// The mirror takes each point of that flat surface to itself, so a point
+    /// of it is on one cone just where it is on the other, and a line in it
+    /// meets the two in the same places. The stored flat surface is rounded
+    /// once from the point halfway and the gap between the apexes, so it is
+    /// asked to be the exact one rather than read as it
+    /// (`is_the_flat_surface_halfway_between` in `intersect.rs`).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`] where how the two cross could not be settled.
+    pub fn the_flat_surface_halfway_to_a_mirror_image_held_apart(
+        &self,
+        other: &Self,
+    ) -> Result<Option<Plane>> {
+        Ok(self.the_flat_surface_halfway_as_stored_to(other)?.and_then(
+            |(cone, mirror, halfway)| {
+                is_the_flat_surface_halfway_between(&cone, &mirror, &halfway).then_some(halfway)
+            },
+        ))
+    }
+
+    /// The one of this cone and `other` that sorts first, the other, and the
+    /// flat surface halfway between their apexes as `intersect` stores it,
+    /// where the two are mirror images held apart.
+    fn the_flat_surface_halfway_as_stored_to(
+        &self,
+        other: &Self,
+    ) -> Result<Option<(Self, Self, Plane)>> {
+        match self.how_it_crosses_a_cone_off_its_axis(other)? {
+            Some(HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart {
+                cone,
+                other: mirror,
+                flats: [halfway, _],
+                ..
+            }) => Ok(Some((cone, mirror, halfway))),
+            Some(
+                HowTwoConesOffOneAxisCross::HeldApart(_)
+                | HowTwoConesOffOneAxisCross::InTheFlatSurfaceBetweenThem { .. }
+                | HowTwoConesOffOneAxisCross::InTwoFlatCutsThatMeetWhereTheyTouch { .. },
+            )
+            | None => Ok(None),
+        }
     }
 
     /// What `HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart` names, where

@@ -6656,6 +6656,19 @@ pub(crate) fn every_point_of_both_in_the_box_is_on(
     })
 }
 
+/// Whether `flat` is `P = 0` in the working of
+/// [`two_flat_cuts_that_meet_where_they_touch`], the flat surface halfway
+/// between the apexes, proved exactly, where `second` is `first`'s mirror
+/// image across it and `first` sorts first, as
+/// [`HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart`] holds them.
+pub(crate) fn is_the_flat_surface_halfway_between(
+    first: &Cone,
+    second: &Cone,
+    flat: &Plane,
+) -> bool {
+    TwoFlatCuts::of(first, second).is_some_and(|made_of| made_of.is_the_flat_surface_halfway(flat))
+}
+
 /// The exact numbers the two flat cuts two mirror images cross in are made
 /// of, as [`two_flat_cuts_that_meet_where_they_touch`] works them out, each
 /// flat surface's form at `x` written as a normal and an offset, `g·x − c`,

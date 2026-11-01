@@ -6492,79 +6492,107 @@ impl<'f> Arrangement<'f> {
             .then_some(Decision::Zero)
     }
 
-    /// [`Decision::Zero`] where two nodes are one place because one is a meet
-    /// of a plane with two cones that are mirror images held apart, the other
-    /// a meet of two planes with one of those cones, and the line the two
-    /// planes cross in lies in the first plane and in the flat surface halfway
-    /// between the cones: `None` everywhere else.
+    /// [`Decision::Zero`] where two nodes are one place because both are on
+    /// one line in the flat surface halfway between two cones that are mirror
+    /// images held apart, and both on those cones: `None` everywhere else.
     ///
     /// **Two such cones cut one curve out of the flat surface halfway, and a
     /// line in it can be another solid's edge.** Two pointed cones of slope two
     /// and eight high, the second a quarter turn about `x` through `(0, 0, 4)`,
     /// are mirror images across `y + z = 4`, each apex inside the other. Both
-    /// caps' planes, `z = 8` and `y = −4`, cross in a line of `y + z = 4`, so
-    /// the meet of the upright cap with both cones and the meet of both caps
-    /// with the upright cone are one point, `(√240, −4, 8)`, and so on the
-    /// turned cap with the turned cone. Each pair was worked out into one box,
-    /// nothing proved them one place or put them in order, and every fuse of
-    /// the two was refused on their order (Q2997,
+    /// caps' planes, `z = 8` and `y = −4`, cross in a line of `y + z = 4`,
+    /// which meets both cones at `(±√240, −4, 8)`. Four meets are named for
+    /// each of those points: of either cap with both cones, and of both caps
+    /// with either cone. Each pair along a crossing was worked out into one
+    /// box, and every fuse of the two was refused on the order of three of
+    /// them: on each cap's rim, the cap with both cones against both caps with
+    /// that cap's cone; on both caps' edge, both caps with one cone against
+    /// both with the other; and on the curve the cones cross in, one cap with
+    /// both cones against the other cap with both (Q2997,
     /// `tests/a_funnel_with_a_leaning_spout.rs`).
     ///
-    /// The first node's true point is on both cones and, where the other flat
-    /// cut keeps one sign over its box, on the flat surface halfway, proved to
-    /// be the stored one exactly
-    /// ([`Cone::the_flat_surface_halfway_holding_every_point_of_both_in`]). The
-    /// first node's plane is proved to cross that flat surface, and both to
-    /// hold the line of the second node's two planes ([`holds_the_line_of`]),
-    /// so the first node's point is on that line, as the second node's is.
-    /// Both are on the cone the two share, in the smallest box round both
-    /// nodes' boxes, whose part of the line is one piece. Along that piece the
-    /// cone's form changes as twice its gradient along the line, and where
-    /// that keeps one sign over the box the form is nothing at one place of
-    /// the piece at most: the two points are one. A sign kept there proves the
-    /// line's way not nothing too, so the two planes do cross.
+    /// The line is the one a node's two planes cross in, or, where neither
+    /// node has two, the one the two nodes' planes cross in. The flat surface
+    /// halfway is proved to be the stored one exactly
+    /// ([`Cone::the_flat_surface_halfway_to_a_mirror_image_held_apart`]) and to
+    /// hold the line ([`holds_the_line_of`]). The mirror takes each point of
+    /// that flat surface to itself, so a point of the line is on one cone just
+    /// where it is on the other. A node of two planes and a cone is on the
+    /// line where its planes are the line's, and so on both cones. A node of a
+    /// plane and both cones is on one of their two flat cuts, and on the one
+    /// halfway where the other keeps one sign over its box
+    /// ([`Cone::the_flat_surface_halfway_holding_every_point_of_both_in`]).
+    /// Where its plane holds the line and is proved to cross the flat surface
+    /// halfway, the two cross in the line, and the node is on it.
+    ///
+    /// Both true points are then on the line and on either cone, in the
+    /// smallest box round both nodes' boxes, whose part of the line is one
+    /// piece. Along that piece a cone's form changes as twice its gradient
+    /// along the line, and where that keeps one sign over the box the form is
+    /// nothing at one place of the piece at most: the two points are one. A
+    /// sign kept there proves the line's way not nothing too, so the line's
+    /// two planes do cross.
     fn as_a_line_in_the_cut_halfway_between_mirror_cones_says(
         &self,
         first: usize,
         second: usize,
     ) -> Option<Decision> {
-        let one_place = |on_both: usize, on_the_line: usize| {
-            let (made_of, _) = self.the_one_meet_it_stands_for(on_both)?;
-            let (named_too, _) = self.the_one_meet_it_stands_for(on_the_line)?;
-            let (planes, cones) = the_planes_and_cones_of(&made_of);
-            let ([cut], [one, other]) = (&planes[..], &cones[..]) else {
-                return None;
-            };
-            let (planes_too, cones_too) = the_planes_and_cones_of(&named_too);
-            let ([along, across], [shared]) = (&planes_too[..], &cones_too[..]) else {
-                return None;
-            };
-            if one == other || (shared != one && shared != other) {
-                return None;
+        let ((surfaces, _), (named_too, _)) = (
+            self.the_one_meet_it_stands_for(first)?,
+            self.the_one_meet_it_stands_for(second)?,
+        );
+        let made_of = [&surfaces, &named_too].map(the_planes_and_cones_of);
+        let mut cones = SmallVec::<[Cone; 4]>::new();
+        for cone in made_of.iter().flat_map(|(_, of_one)| of_one) {
+            if !cones.contains(cone) {
+                cones.push(*cone);
             }
-            let halfway = one
-                .the_flat_surface_halfway_holding_every_point_of_both_in(
-                    other,
-                    self.nodes[on_both].point,
-                )
-                .ok()??;
-            let line = [*along, *across];
-            let normal = |plane: &Plane| plane.normal().components().map(Interval::exactly);
-            let settled = |value: Interval| matches!(value.sign(), Decision::Pos | Decision::Neg);
-            let crosses = cross_of_intervals(normal(cut), normal(&halfway))
-                .into_iter()
-                .any(settled);
-            if !(crosses && holds_the_line_of(line, cut) && holds_the_line_of(line, &halfway)) {
-                return None;
-            }
-            let both = the_box_round_both(self.nodes[on_both].point, self.nodes[on_the_line].point);
-            let climbs = dot_of(
-                gradient_at(&Surface::Cone(*shared), both).enclosure(),
-                cross_of_intervals(normal(along), normal(across)),
-            );
-            settled(climbs).then_some(Decision::Zero)
+        }
+        let &[one, other] = &cones[..] else {
+            return None;
         };
-        one_place(first, second).or_else(|| one_place(second, first))
+        let line = match (&made_of[0].0[..], &made_of[1].0[..]) {
+            ([along, across], _) | (_, [along, across]) => [*along, *across],
+            ([cut], [cut_too]) => [*cut, *cut_too],
+            _ => return None,
+        };
+        let halfway = one
+            .the_flat_surface_halfway_to_a_mirror_image_held_apart(&other)
+            .ok()??;
+        let normal = |plane: &Plane| plane.normal().components().map(Interval::exactly);
+        let settled = |value: Interval| matches!(value.sign(), Decision::Pos | Decision::Neg);
+        let on_the_line =
+            |node: usize, (planes, cones): &(SmallVec<[Plane; 3]>, SmallVec<[Cone; 3]>)| match (
+                &planes[..],
+                cones.len(),
+            ) {
+                ([along, across], 1) => [*along, *across] == line || [*across, *along] == line,
+                ([cut], 2) => {
+                    holds_the_line_of(line, cut)
+                        && cross_of_intervals(normal(cut), normal(&halfway))
+                            .into_iter()
+                            .any(settled)
+                        && one
+                            .the_flat_surface_halfway_holding_every_point_of_both_in(
+                                &other,
+                                self.nodes[node].point,
+                            )
+                            .is_ok_and(|held| held.is_some())
+                }
+                _ => false,
+            };
+        if !(holds_the_line_of(line, &halfway)
+            && on_the_line(first, &made_of[0])
+            && on_the_line(second, &made_of[1]))
+        {
+            return None;
+        }
+        let both = the_box_round_both(self.nodes[first].point, self.nodes[second].point);
+        let climbs = dot_of(
+            gradient_at(&Surface::Cone(one), both).enclosure(),
+            cross_of_intervals(normal(&line[0]), normal(&line[1])),
+        );
+        settled(climbs).then_some(Decision::Zero)
     }
 
     /// Which of two nodes on a line a plane cuts a pipe in comes first along
