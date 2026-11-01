@@ -3447,6 +3447,47 @@ check-wildcards-selftest:
             echo "so the two take turns re-checking every crate (docs/decisions.md §381.1)"
             exit 1 ;;
     esac
+    # And a build directory of its own, with cargo's build-dir set and unset.
+    # Once it is set, cargo keeps every check in the build directory and only
+    # copies finished binaries into the target directory, so a target directory
+    # of its own put clippy back in lint's cache (474.9). The stub answers the
+    # way cargo does: `CARGO_BUILD_BUILD_DIR` over the config's build-dir, and
+    # that over the target directory. The scratch tree is a git repository
+    # because the justfile's variables ask git where the tree is.
+    mkdir -p "$dir/wild/crates" "$dir/bin"
+    git init -q "$dir/wild"
+    cat > "$dir/bin/cargo" <<'SH'
+    #!/usr/bin/env bash
+    target=${CARGO_TARGET_DIR:-target}
+    case "$target" in /*) ;; *) target=$PWD/$target ;; esac
+    build=${CARGO_BUILD_BUILD_DIR:-${STUB_CONFIG_BUILD_DIR:-$target}}
+    case "$1" in
+        metadata) printf '{"target_directory": "%s", "build_directory": "%s"}\n' "$target" "$build" ;;
+        clippy) echo "$build" > "$STUB_CLIPPY_BUILD_DIR"; exit 1 ;;
+        *) exit 1 ;;
+    esac
+    SH
+    chmod +x "$dir/bin/cargo"
+    for config_build_dir in "" "$dir/zram"; do
+        lint_build_dir=${config_build_dir:-$dir/wild/target}
+        rm -f "$dir/clippy-build-dir"
+        PATH="$dir/bin:$PATH" STUB_CONFIG_BUILD_DIR="$config_build_dir" \
+            STUB_CLIPPY_BUILD_DIR="$dir/clippy-build-dir" \
+            {{ just_executable() }} --justfile {{ justfile() }} --working-directory "$dir/wild" \
+            check-wildcards >"$dir/wild.log" 2>&1 || true
+        if [ ! -s "$dir/clippy-build-dir" ]; then
+            echo "check-wildcards never reached its clippy under a stub cargo; it printed:"
+            cat "$dir/wild.log"
+            exit 1
+        fi
+        clippy_build_dir=$(cat "$dir/clippy-build-dir")
+        if [ "$clippy_build_dir" = "$lint_build_dir" ]; then
+            echo "with build-dir ${config_build_dir:+set to }${config_build_dir:-unset}, check-wildcards ran its clippy"
+            echo "in lint's build directory $clippy_build_dir, so the two take turns re-checking every crate"
+            echo "(docs/decisions.md §381.1, docs/decisions.d/474-build-output-goes-to-zram.md 474.9)"
+            exit 1
+        fi
+    done
 
     for f in plain coloured; do
         got=$({{ just_executable() }} _wildcard-direct-count "$dir/$f.log")
