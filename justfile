@@ -8666,16 +8666,19 @@ fuzz-target target duration corpus_root="" max_len="" fork="0" dict="" step_corp
 # stub sleeps half the time it was granted and logs when it started, so both the
 # clock the recipe runs against and the order it starts things in are real.
 #
-# **It takes about forty seconds now, and arm Twenty-six's bound is a 90 s
-# backstop (Q1774).** Four runs of `just check-fuzz-overnight-selftest` on
-# this machine under a load average from 4 to 32 (idle, and under six
+# **It takes about forty-seven seconds now, and arm Twenty-six's bound is a
+# 90 s backstop (Q1774).** Four runs of `just check-fuzz-overnight-selftest`
+# on this machine under a load average from 4 to 32 (idle, and under six
 # `yes >/dev/null` processes as a stand-in for a fuzz night's contention)
-# took 38.1, 40.0, 42.7 and 38.5 s wall. Most arms run beside each other,
-# and the end of the body says which and why; `overlap`, called after each
-# `beside()` batch settles, checks directly that they did, from the start
-# times the stub logs, so the 90 s bound only has to catch a hang or an
-# overrun no single arm bounds — see arm Twenty-six's own comment, at the
-# end, for the arithmetic and for why that bound is no longer the line
+# took 38.1, 40.0, 42.7 and 38.5 s wall. Q3041 then added arm Thirty-three,
+# the pause, which runs alone on a twelve-second night: three runs after it,
+# under a load average from 0.4 to 2.1, took 47.3, 46.8 and 47.3 s, and one
+# under six `yes` processes (load 1.7 to 5.3) took 45.5 s. Most arms run
+# beside each other, and the end of the body says which and why; `overlap`,
+# called after each `beside()` batch settles, checks directly that they did,
+# from the start times the stub logs, so the 90 s bound only has to catch a
+# hang or an overrun no single arm bounds — see arm Twenty-six's own comment,
+# at the end, for the arithmetic and for why that bound is no longer the line
 # doing the real work. On CI's four-core runner the gate runs four steps at
 # once (§372.12), so this step shares four cores with three others; it has
 # not been run there, since the Actions allowance is spent.
@@ -10541,6 +10544,9 @@ check-fuzz-overnight-selftest:
     # standing in for a fuzz night, load average 4 to 32) took 38.1, 40.0,
     # 42.7 and 38.5 s, and 90 clears all four with room left for a slower
     # machine without coming near the 129.5 s that used to call it close.
+    # Q3041's arm Thirty-three, alone on a twelve-second night, brought four
+    # runs to 47.3, 46.8, 47.3 and 45.5 s (load average 0.4 to 5.3, the last
+    # under six `yes` processes); 90 still clears them by more than 40 s.
     bound=90
     [ "$SECONDS" -le "$bound" ] \
         || { echo "check-fuzz-overnight-selftest took $SECONDS s, over its bound of $bound s: one of the arms is waiting on something new, or beside() itself hung"; exit 1; }
