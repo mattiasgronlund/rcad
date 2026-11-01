@@ -13256,6 +13256,26 @@ check-fuzz-yield-selftest:
     { running where_two_surfaces_cross 1 60; run_line 10 20 0; run_line 20 25 60; } >"$night5/fuzz-cross.log"
     { running where_two_surfaces_cross 1 60; run_line 10 20 0; run_line 20 25 60; } >"$night6/fuzz-cross.log"
 
+    # A night with a pause (docs/decisions.d/475): one log, two runs, each
+    # counting its time and its executions from zero. Read as one run, its
+    # window would be the first run's alone, its runs the second run's alone,
+    # its coverage at 30 minutes the second run's 850, and its last rise the
+    # step from 700 to 850 between the two processes.
+    night7="$logs/2026-09-16"
+    mkdir -p "$night7"
+    {
+        running demo_target 4 9000
+        run_line 1000 500 0
+        run_line 2000 700 1200
+        run_line 3000 700 9000
+        printf 'INFO: exiting: 0 time: 9000s\n'
+        running demo_target 4 14400
+        run_line 1000 850 0
+        run_line 3000 850 600
+        run_line 6000 850 14400
+        printf 'INFO: exiting: 0 time: 14400s\n'
+    } >"$night7/fuzz-paused.log"
+
     fail() {
         echo "fuzz-yield drifted from its own fixtures: $1"
         echo "--- got ---"; echo "$got"
@@ -13330,7 +13350,16 @@ check-fuzz-yield-selftest:
     grep -qF 'code changed since the previous night: unknown (reflog shows no checkout for the night before, 2026-09-14)' <<<"$no_prev_checkout" \
         || fail "09-15 has a checkout itself but 09-14 has none, and should say unknown naming 09-14, not guess yes or no"
 
-    echo "fuzz-yield: coverage arithmetic, the artifact diff, the fault count, and the changed-night check all match their fixtures"
+    got=$(yield 2026-09-16 2026-09-16) || fail "a night with a pause made the recipe fail"
+    grep -qF '    core-hours: 26.0 (fork 4 x window 6.50h)' <<<"$got" \
+        || fail "a night with a pause did not count both runs' windows"
+    grep -qF '    runs: 9000' <<<"$got" || fail "a night with a pause did not add up both runs' executions"
+    grep -qF '    coverage: 500 at start, 700 at 30m, 850 at end' <<<"$got" \
+        || fail "a night with a pause read its coverage at 30 minutes off the second run's own clock"
+    grep -qF '    last rose: hour 0.3' <<<"$got" \
+        || fail "a night with a pause counted the second run's start as a rise"
+
+    echo "fuzz-yield: coverage arithmetic, the artifact diff, the fault count, the changed-night check and a night with a pause all match their fixtures"
 
 [doc("The benchmarks.")]
 bench:
