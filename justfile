@@ -7759,46 +7759,9 @@ fuzz-overnight window="28800" pause_start="" pause_end="":
         exit 1
     fi
 
-    # A stale build would pass silently: cargo's fingerprint cannot see a flag
-    # the stand-in adds on top of `RUSTFLAGS`, so a build made before the
-    # stand-in existed, or made with it broken, looks exactly as fresh as one
-    # made with it working, and `cargo fuzz run` below would not know to redo
-    # it. So the night checks the artifact rather than trusting the build that
-    # made it: `rcad-fuzz-timing`'s rlib lands under `build/<pkg>-<hash>/out/`
-    # on this nightly rather than under `deps/`, because that is the directory
-    # cargo passes as `--out-dir` for a lib crate here — found by name since the
-    # hash in the path is not otherwise known.
-    timing_rlibs=$(find fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing \
-        -name 'librcad_fuzz_timing-*.rlib' 2>/dev/null)
-    if [ -z "$timing_rlibs" ]; then
-        echo "rcad-fuzz-timing's rlib was not found by name after the build, so whether it carries coverage could not be checked"
-        printf '%s  BUILD FAILED  %s\n' "$(date '+%Y-%m-%d %H:%M')" "$night" >"{{fuzz_log_root}}/latest"
-        exit 1
-    fi
-    # More than one of these can exist at once — a hash directory left over
-    # from before the stand-in was wired in, or from a build made with
-    # different flags, sitting beside the one this build just made — and
-    # `find`'s order between them is not the order they were written in, so
-    # `| head -n1` used to read whichever one it met first (Q288, Q857).
-    # There is no mtime to sort by instead: a `cargo build` that changes
-    # nothing does not even touch the files in the directory it would have
-    # written to, checked directly by running the same build twice and
-    # comparing `find -printf '%T@'` before and after — every file, including
-    # `fingerprint/invoked.timestamp`, kept the first run's timestamp to the
-    # microsecond. So this checks every rlib `find` turns up, not one chosen
-    # among them, and fails if *any* carries a sancov reference. That can
-    # still fail a night over a stale rlib this build did not write — a build
-    # failure that costs a retry — but it can never pass a night whose
-    # current rlib carries one, which is the fault that must not happen.
-    sancov_found=()
-    while IFS= read -r candidate; do
-        [ -n "$candidate" ] || continue
-        refs=$(nm "$candidate" 2>/dev/null | grep -ic sancov || true)
-        [ "$refs" -eq 0 ] || sancov_found+=("$candidate ($refs)")
-    done <<<"$timing_rlibs"
-    if [ "${#sancov_found[@]}" -gt 0 ]; then
-        echo "rcad-fuzz-timing's rlib carries a sancov reference, so the stand-in did not keep it out of coverage:"
-        printf '    %s\n' "${sancov_found[@]}"
+    # The build is checked by its artifact, in `_fuzz-timing-rlib-is-clean`
+    # below, which `check-timing-hooked-calls` shares.
+    if ! {{just_executable()}} _fuzz-timing-rlib-is-clean; then
         printf '%s  BUILD FAILED  %s\n' "$(date '+%Y-%m-%d %H:%M')" "$night" >"{{fuzz_log_root}}/latest"
         exit 1
     fi
@@ -10633,6 +10596,8 @@ check-fuzz-overnight-selftest:
     # Q3041's arm Thirty-three, alone on a twelve-second night, brought four
     # runs to 47.3, 46.8, 47.3 and 45.5 s (load average 0.4 to 5.3, the last
     # under six `yes` processes); 90 still clears them by more than 40 s.
+    # Q3037's arm Forty, alone on an eight-second night, brought one run to
+    # 52.95 s (load average 8.7 to 14.6); 90 clears it by 37 s.
     bound=90
     [ "$SECONDS" -le "$bound" ] \
         || { echo "check-fuzz-overnight-selftest took $SECONDS s, over its bound of $bound s: one of the arms is waiting on something new, or beside() itself hung"; exit 1; }
@@ -11116,9 +11081,9 @@ check-timing-hooked-calls-selftest:
 # stable and never links anything, so it cannot see what this checks —
 # docs/decisions.d/267.4's stand-in, and the hooked libFuzzer memcmp
 # intercepts `fuzz/timing-hooked-calls.py` scans a *linked* binary for.
-# Reuses `fuzz-overnight`'s own build command and its two post-build guards
-# (the rlib found by name, and no sancov reference in it) rather than
-# building twice.
+# Reuses `fuzz-overnight`'s own build command and the guard it runs after it,
+# `_fuzz-timing-rlib-is-clean` (the rlib found by name under the build
+# directory, and no sancov reference in it), rather than building twice.
 #
 # Skips, printing "skipped, not passed" rather than failing, where there is
 # no nightly toolchain or no cargo-fuzz on PATH — true of every CI runner
@@ -11147,10 +11112,69 @@ check-timing-hooked-calls:
     CI=1 RUSTC="{{ justfile_directory() }}/fuzz/rustc-stand-in.sh" \
         RUSTFLAGS="-C target-cpu=x86-64-v3" \
         cargo +nightly fuzz build
-    timing_rlibs=$(find target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing \
-        -name 'librcad_fuzz_timing-*.rlib' 2>/dev/null)
+    {{just_executable()}} --justfile '{{ justfile() }}' _fuzz-timing-rlib-is-clean
+    ./timing-hooked-calls.py \
+        target/x86_64-unknown-linux-gnu/release/where_two_surfaces_cross \
+        target/x86_64-unknown-linux-gnu/release/no_step_file_makes_the_reader_panic \
+        target/x86_64-unknown-linux-gnu/release/no_model_makes_the_writer_panic \
+        target/x86_64-unknown-linux-gnu/release/two_solids_fused_by_a_stranger \
+        target/x86_64-unknown-linux-gnu/release/where_a_cone_or_a_torus_crosses
+
+# The guard `fuzz-overnight` and `check-timing-hooked-calls` run after the
+# fuzz build: no `librcad_fuzz_timing-*.rlib` that build could have written
+# carries a sancov reference.
+#
+# A stale build would pass silently: cargo's fingerprint cannot see a flag
+# the stand-in adds on top of `RUSTFLAGS`, so a build made before the
+# stand-in existed, or made with it broken, looks exactly as fresh as one
+# made with it working, and `cargo fuzz run` would not know to redo it. So
+# the night checks the artifact rather than trusting the build that made it:
+# `rcad-fuzz-timing`'s rlib lands under `build/<pkg>-<hash>/out/` on this
+# nightly rather than under `deps/`, because that is the directory cargo
+# passes as `--out-dir` for a lib crate here — found by name since the hash
+# in the path is not otherwise known.
+#
+# **Under the build directory cargo reports, not under `fuzz/target`.** The
+# two are one directory until cargo's `build-dir` is set, and this machine
+# sets it for every build since 2026-11-01 (docs/decisions.d/474.9). Then
+# the five binaries are still copied up into `fuzz/target`, and the rlib
+# stays in the build directory. A guard that read `fuzz/target` read only
+# the rlibs older builds had left there, and in a tree with none it died on
+# `find`'s status with nothing said. `cargo metadata` names the build
+# directory however it was set: config, environment, or not at all.
+#
+# More than one of these can exist at once — a hash directory left over
+# from before the stand-in was wired in, or from a build made with
+# different flags, sitting beside the one this build just made — and
+# `find`'s order between them is not the order they were written in, so
+# `| head -n1` used to read whichever one it met first (Q288, Q857).
+# There is no mtime to sort by instead: a `cargo build` that changes
+# nothing does not even touch the files in the directory it would have
+# written to, checked directly by running the same build twice and
+# comparing `find -printf '%T@'` before and after — every file, including
+# `fingerprint/invoked.timestamp`, kept the first run's timestamp to the
+# microsecond. So this checks every rlib `find` turns up, not one chosen
+# among them, and fails if *any* carries a sancov reference. That can
+# still fail a night over a stale rlib this build did not write — a build
+# failure that costs a retry — but it can never pass a night whose
+# current rlib carries one, which is the fault that must not happen.
+[private]
+_fuzz-timing-rlib-is-clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd fuzz
+    metadata=$(cargo +nightly metadata --no-deps --format-version 1) || {
+        echo "cargo metadata failed in fuzz/, so where the build put rcad-fuzz-timing's rlib is not known"
+        exit 1
+    }
+    build=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["build_directory"])' <<<"$metadata") || {
+        echo "cargo metadata named no build_directory for fuzz/, so where the build put rcad-fuzz-timing's rlib is not known"
+        exit 1
+    }
+    timing_rlibs=$(find "$build/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing" \
+        -name 'librcad_fuzz_timing-*.rlib' 2>/dev/null || true)
     if [ -z "$timing_rlibs" ]; then
-        echo "rcad-fuzz-timing's rlib was not found by name after the build, so whether it carries coverage could not be checked"
+        echo "rcad-fuzz-timing's rlib was not found by name under $build after the build, so whether it carries coverage could not be checked"
         exit 1
     fi
     sancov_found=()
@@ -11164,12 +11188,6 @@ check-timing-hooked-calls:
         printf '    %s\n' "${sancov_found[@]}"
         exit 1
     fi
-    ./timing-hooked-calls.py \
-        target/x86_64-unknown-linux-gnu/release/where_two_surfaces_cross \
-        target/x86_64-unknown-linux-gnu/release/no_step_file_makes_the_reader_panic \
-        target/x86_64-unknown-linux-gnu/release/no_model_makes_the_writer_panic \
-        target/x86_64-unknown-linux-gnu/release/two_solids_fused_by_a_stranger \
-        target/x86_64-unknown-linux-gnu/release/where_a_cone_or_a_torus_crosses
 
 # `check-timing-hooked-calls`'s own fingerprint, narrower than
 # `_code-fingerprint`'s: its scan's answer depends only on
