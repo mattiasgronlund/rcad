@@ -476,3 +476,10 @@ already spent inside 447.6's own reading) nor the slot cut itself (which
 should have shortened the step, not lengthened it by more than half)
 accounts for the rise from 447.6's reading to this one. What does is not
 measured here.
+
+The lead, read once and not yet tied to the rise: Q3040's row reads
+`every_other_file`, in `a_real_file_written_out_and_read_back_is_the_same_solid.rs`,
+at 756.6 s of the 761.9 s test step in the full gate of `027696183` on
+2026-11-01, running alone on one of 24 cores for the last ten minutes. One test
+that sets the step's wall would explain a median that ignores the slot count.
+Q3040 splits it, and Q1239 asks why it grew.
