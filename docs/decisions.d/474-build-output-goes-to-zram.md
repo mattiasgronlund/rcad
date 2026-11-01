@@ -18,6 +18,7 @@ disk. This amends §371.5 and §373.4. The rows are at 474.7.
 
 474.8 is Mattias's layout: the disk is XFS at `/var/cache/zram`, and kache's
 store moves onto it too. Where 474.3 and 474.4 disagree with 474.8, 474.8 wins.
+474.9 is what was installed, and where it differs from 474.7 or 474.8, it wins.
 
 ### 474.1 Why not whole worktrees in RAM
 
@@ -175,7 +176,8 @@ which of the two directories, is for Q3039 to find before it relies on one.
 
 ### 474.7 The rows
 
-- **Q3037: send cargo's build output to the zram disk.**
+- **Q3037: send cargo's build output to the zram disk.** 474.9 cut this row
+  down to the recipes, the rest being done.
   - Set `CARGO_BUILD_BUILD_DIR` to
     `/var/cache/zram/targets/{workspace-path-hash}` in `mise.toml`'s `[env]`,
     off on CI as `RUSTC_WRAPPER` is.
@@ -361,3 +363,66 @@ xfs_info /var/cache/zram
   `sar -r`'s peak beside `TOTAL`, it says whether the 80 and the 40 GiB can
   grow.
 - `kache stats --json --since 7d`'s hit rate, against 90.8%.
+
+### 474.9 What was installed: zram-kache, with build-dir set for every build
+
+*Mattias, 2026-11-01, after running his own `setup-zram-kache.sh`, when asked
+whether to take build-dir back out of `~/.cargo/config.toml` until Q3037
+lands: "Keep it, we lets pin Q3037."*
+
+Mattias installed the layout with his own tool, zram-kache
+(`~/setup-zram-kache.sh`, `/usr/local/sbin/zram-kache`, `/etc/zram-kache.conf`).
+Read at 2026-11-01 17:55Z, it differs from 474.8 in three places. Where they
+differ, this section is what is on the machine.
+
+- **The disk is the size of RAM, and spills to a file on disk.** `zramctl`
+  shows `/dev/zram1` at 125.7G. Behind it is a backing file,
+  `/var/lib/zram-kache/backing.img` (134,981,136,384 bytes), and
+  `zram-kache-psi.service` writes pages out to it when memory runs short. That
+  replaces 474.8's rule of a disk small enough to fill before RAM runs out.
+  Whether writing out keeps up with builds that fill RAM fast is not tried. If
+  it does not, zram fails the write as 474.8 says. The backing file took `/` to
+  84% full, 148G free.
+- **kache's cap is 62 GiB**, the script's default of half the disk, not 40.
+- **build-dir is set for every cargo build on the machine**, in
+  `~/.cargo/config.toml`: `build-dir =
+  "/var/cache/zram/targets/{workspace-path-hash}"`. 474.7 had planned it in
+  rcad's `mise.toml`. `cargo metadata` now gives this tree's build directory
+  as `/var/cache/zram/targets/92/c34bc3ea8c8c4c`, and nightly cargo
+  (1.100.0-nightly) gives the fuzz workspace's as `.../2b/d0e823affcbaef`.
+  rscene and sketch_solve get it too, so their restores can reflink as well.
+  CI has no such file.
+
+**What works.**
+
+- `xfs_info` says `reflink=1`. `cp --reflink=always` of an 8 MiB file inside
+  `/var/cache/zram/targets` worked, and `cmp` found the two the same.
+- `kache doctor` says `Cache dir /var/cache/zram/kache` and `Cache FS xfs
+  (local)`. Its `Link layout` check fails when run from a worktree, with
+  `EXDEV: build tree is on mount /`, because it judges from the directory it
+  runs in and not from cargo's build directory. Whether a restore reflinks is
+  still 474.8's reading to take.
+- A missing disk still fails builds. zram-kache makes the bare mountpoint as
+  root (`mkdir -p`) and hands Mattias only the mounted filesystem (`chown` after
+  `mount`). `kache/` and `targets/` come from the unit's `ExecStartPost`, which
+  runs only after a start that worked. So 474.8's demonstration still holds.
+- Mattias's user manager starts after `zram-kache.service`, through a drop-in
+  for `user@1000.service`.
+
+**What broke: two recipes read cargo's old layout.** `fuzz-overnight` and
+`check-timing-hooked-calls` look for `rcad-fuzz-timing`'s rlib under
+`fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing`, and
+builds no longer write there.
+
+- In a fresh tree they fail with "rlib was not found".
+- `rcad-nightly-fuzz` still holds an rlib from 2026-10-21 at that path, so the
+  night's sancov guard reads that old file instead of the one its own build
+  made. The guard's promise, that a night can never pass while the current
+  rlib carries a sancov reference, does not hold until Q3037 lands.
+- A fuzz build was not run to show where the rlib lands now. The evidence is
+  `cargo metadata`'s build directory, and 474.2's scratch crate.
+
+Mattias chose to keep the setting and pin Q3037, not take build-dir back out.
+Q3037 is reworded to that. Its `mise.toml` line and its zram unit are dropped:
+the cargo config and zram-kache already do both. Q3039 no longer waits on it,
+since the build directories are already on the disk.
