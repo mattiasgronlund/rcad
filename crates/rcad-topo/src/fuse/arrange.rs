@@ -10480,6 +10480,8 @@ impl<'f> Arrangement<'f> {
                     Some(chosen) => facing[walk].push(chosen),
                     None if self.winding_of_cycle[walk] == Some(0) => (),
                     None => {
+                        eprintln!("DBG site facing walk {walk} candidates {candidates:?}");
+                        self.dbg_dump();
                         return Err(Error::CannotTellTheCellsOfAFaceApart {
                             face: self.face.keys[0],
                         });
@@ -11239,6 +11241,8 @@ impl<'f> Arrangement<'f> {
             let before = lumps.len();
             lumps.dedup();
             if lumps.len() != before {
+                eprintln!("DBG site two-walks-one-lump cell {cell:?}");
+                self.dbg_dump();
                 return Err(Error::CannotTellTheCellsOfAFaceApart {
                     face: self.face.keys[0],
                 });
@@ -14073,6 +14077,8 @@ impl<'f> Arrangement<'f> {
                 None => self.winding[cell] = Some(known),
                 Some(already) if already == known => (),
                 Some(_) => {
+                    eprintln!("DBG site count cycle {cycle} cell {cell}");
+                    self.dbg_dump();
                     return Err(Error::CannotTellTheCellsOfAFaceApart {
                         face: self.face.keys[0],
                     });
@@ -14087,6 +14093,63 @@ impl<'f> Arrangement<'f> {
         Ok(())
     }
 
+    fn dbg_dump(&self) {
+        eprintln!("DBG surface {:?}", self.surface);
+        for (i, c) in self.crossings.iter().enumerate() {
+            eprintln!(
+                "DBG crossing {i} cuts {} full {:?} partner {:?} run {:?} also_cut {:?} also_drawn {:?}",
+                c.cuts,
+                self.drawn_in_full.get(i),
+                c.partner,
+                c.run.run(),
+                c.also_cut_by,
+                c.also_drawn_by
+            );
+        }
+        for (i, n) in self.nodes.iter().enumerate() {
+            let e = n.point.enclosure();
+            eprintln!(
+                "DBG node {i} at [{:.12e},{:.12e}] [{:.12e},{:.12e}] [{:.12e},{:.12e}] vertex {:?} crossings {:?} half {} made {:?} also {}",
+                e[0].lo(),
+                e[0].hi(),
+                e[1].lo(),
+                e[1].hi(),
+                e[2].lo(),
+                e[2].hi(),
+                n.vertex,
+                n.crossings,
+                n.half_way_round,
+                n.made_of.map(|(_, k)| k),
+                n.also.len()
+            );
+        }
+        for (i, a) in self.arcs.iter().enumerate() {
+            eprintln!(
+                "DBG arc {i} crossing {} ends {:?} boundary {:?} against {}",
+                a.crossing,
+                a.ends,
+                a.boundary.map(|b| (b.wire, b.runs_forward, b.position)),
+                a.against_its_gradients
+            );
+        }
+        for (i, l) in self.leaving.iter().enumerate() {
+            eprintln!("DBG leaving node {i}: {l:?}");
+        }
+        for (i, c) in self.cycles.iter().enumerate() {
+            eprintln!(
+                "DBG cycle {i} half-edges {c:?} winding_in_lump {:?} cell {:?}",
+                self.winding_of_cycle.get(i),
+                self.cell_of.get(i)
+            );
+        }
+        for (i, c) in self.cells.iter().enumerate() {
+            eprintln!(
+                "DBG cell {i} cycles {c:?} winding {:?}",
+                self.winding.get(i)
+            );
+        }
+    }
+
     fn spread_the_winding(&mut self, from: usize) -> Result<()> {
         let mut waiting = vec![from];
         while let Some(cell) = waiting.pop() {
@@ -14097,6 +14160,10 @@ impl<'f> Arrangement<'f> {
                     let across = self.cell_of[self.cycle_of[half_edge ^ 1]];
                     let theirs = known + self.climb_across(half_edge);
                     if !(0..=1).contains(&theirs) {
+                        eprintln!(
+                            "DBG site spread-range cell {cell} across {across} theirs {theirs}"
+                        );
+                        self.dbg_dump();
                         return Err(Error::CannotTellTheCellsOfAFaceApart {
                             face: self.face.keys[0],
                         });
@@ -14108,6 +14175,10 @@ impl<'f> Arrangement<'f> {
                         }
                         Some(already) if already == theirs => (),
                         Some(_) => {
+                            eprintln!(
+                                "DBG site spread-disagree cell {cell} across {across} theirs {theirs}"
+                            );
+                            self.dbg_dump();
                             return Err(Error::CannotTellTheCellsOfAFaceApart {
                                 face: self.face.keys[0],
                             });
