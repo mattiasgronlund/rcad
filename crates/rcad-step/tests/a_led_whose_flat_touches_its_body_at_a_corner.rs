@@ -191,16 +191,27 @@
 //! The `D3.0` LED stops now `Undecidable` with the one record `side of
 //! plane`, the far box included, at a point on the flange's rim at the front:
 //! near `(-0.627, -3.81, 5.9)` for the boxes round the front corner, and
-//! `(-0.606, -3.81, 6.3)` for the far one. The `Z15.0` LED stops on its body's
-//! pipe, `Undecidable` with the one record `where three surfaces meet`, the
-//! far box included, handed the flange's flat `x = -1.23`, the dome and the
+//! `(-0.606, -3.81, 6.3)` for the far one. The `Z15.0` LED stopped on its
+//! body's pipe, `Undecidable` with the one record `where three surfaces meet`,
+//! the far box included, handed the flange's flat `x = -1.23`, the dome and the
 //! body's pipe. The flat touches the dome at one point, `(-1.23, -7.37, 15)`
-//! where the dome meets the pipe, and the flat runs along the pipe there too,
-//! and whether that point is on the pipe was not decided. The tests pin both.
+//! where the dome meets the pipe, and as stored that point is `3.4e-16` inside
+//! the pipe, so the three meet nowhere. The touch came back as a box of no
+//! width, and asked as a box the pipe could not tell; it is now asked as the
+//! point the box names (Q3020).
+//!
+//! The `Z15.0` LED stops now on its body's pipe, `Undecidable` with the one
+//! record `two ways out of a node along one line`, the far box included, at
+//! the back corner `(-1.23, -2.27, 15)`. One way out of it runs along `z`, on
+//! the circle the flange's back cuts in the pipe. The other is along the flat,
+//! which runs along the pipe there: the pipe's gradient is the flat's normal
+//! but for a rounding, so that way out is a box round nothing, `2.2e-16` either
+//! side of zero in `z`, and whether the two go the same way along one line was
+//! not decided. The tests pin both LEDs' stops.
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, SIDE_OF_PLANE, Vector, WHERE_THREE_SURFACES_MEET};
+use rcad_geom::{Isometry, SIDE_OF_PLANE, Vector};
 use rcad_predicates::{Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -210,6 +221,7 @@ const Z15: &str = "LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step";
 const D3: &str = "LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step";
 
 const ALONG_A_CROSSING: &str = "order along a crossing";
+const ALONG_ONE_LINE: &str = "two ways out of a node along one line";
 
 /// Half the side of the box put round each corner.
 const HALF: f64 = 0.1;
@@ -257,14 +269,18 @@ fn a_far_box_gets_past_a_meet_far_along_the_flat_and_stops_on_the_order_of_two_p
 /// proved apart, are the corner. Since Q2982 the flat's line and the circle
 /// turn by nothing at that corner, so it tells the cells of its front apart.
 /// Since Q2989 it puts in order the two points where `x = -0.3` meets the
-/// dome's rim at `y = -7.37`, and it stops where the flange's flat, the dome
-/// and the body's pipe meet, the far box included.
+/// dome's rim at `y = -7.37`. Since Q3020 the one point its flange's flat
+/// touches its dome at is asked as that point, which is inside the body's
+/// pipe, so the flat, the dome and the pipe meet nowhere. It stops at its back
+/// corner, on whether the way out along the flat and the way out along the
+/// flange's back go the same way, the far box included.
 #[test]
-fn a_z15_led_orders_two_points_on_its_domes_rim_and_stops_where_its_flat_touches_its_dome() {
+fn a_z15_led_gets_past_where_its_flat_touches_its_dome_and_stops_on_two_ways_out_of_its_back_corner()
+ {
     every_fuse_refuses(
         Z15,
         &a_box_round_each_of(&[[-1.23, -1.27, 15.0], [-1.23, -2.27, 15.0], FAR_OFF]),
-        where_the_flat_the_dome_and_the_body_pipe_meet_is_undecidable,
+        which_way_two_ways_out_of_the_back_corner_go_is_undecidable,
     );
 }
 
@@ -385,29 +401,30 @@ fn the_side_of_a_point_on_the_rim_at_the_front_is_undecidable(_: &Model, error: 
         && off_the_rim < 1e-9
 }
 
-/// Refused `Undecidable` with the one record `where three surfaces meet`,
-/// handed the three surfaces by a point of each: the flange's flat
-/// `x = -1.23` by `(-1.23, 0, 0)`, the dome by its centre `(1.27, -7.37, 15)`
-/// and the body's pipe by its axis's origin `(1.27, -1.27, 15)`.
-fn where_the_flat_the_dome_and_the_body_pipe_meet_is_undecidable(_: &Model, error: &Error) -> bool {
+/// Refused `Undecidable` with the one record `two ways out of a node along one
+/// line`, handed the back corner `(-1.23, -2.27, 15)` and the two ways out of
+/// it: one along `z` and one a box round nothing, each within `1e-9` of those.
+fn which_way_two_ways_out_of_the_back_corner_go_is_undecidable(_: &Model, error: &Error) -> bool {
     let Error::Undecidable { records } = error else {
         return false;
     };
     let [record] = records.records() else {
         return false;
     };
-    let [_, _, _] = record.inputs() else {
+    let [at, one, other] = record.inputs() else {
         return false;
     };
-    record.predicate() == WHERE_THREE_SURFACES_MEET
-        && [[-1.23, 0.0, 0.0], [1.27, -7.37, 15.0], [1.27, -1.27, 15.0]]
+    let along_z = |way: &Point| {
+        let [x, y, z] = way.enclosure();
+        [x, y]
             .iter()
-            .all(|&at| {
-                record
-                    .inputs()
-                    .iter()
-                    .any(|input| is_within_1e_9_of(input, at))
-            })
+            .all(|side| side.lo().abs() < 1e-9 && side.hi().abs() < 1e-9)
+            && z.lo() > 1.0
+    };
+    let round_nothing = |way: &Point| is_within_1e_9_of(way, [0.0; 3]);
+    record.predicate() == ALONG_ONE_LINE
+        && is_within_1e_9_of(at, [-1.23, -2.27, 15.0])
+        && ((along_z(one) && round_nothing(other)) || (round_nothing(one) && along_z(other)))
 }
 
 fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
