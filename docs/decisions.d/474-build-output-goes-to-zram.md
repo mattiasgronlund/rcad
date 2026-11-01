@@ -401,7 +401,8 @@ differ, this section is what is on the machine.
   (local)`. Its `Link layout` check fails when run from a worktree, with
   `EXDEV: build tree is on mount /`, because it judges from the directory it
   runs in and not from cargo's build directory. Whether a restore reflinks is
-  still 474.8's reading to take.
+  still 474.8's reading to take. (Q3037 took it: it does. See the end of this
+  section.)
 - A missing disk still fails builds. zram-kache makes the bare mountpoint as
   root (`mkdir -p`) and hands Mattias only the mounted filesystem (`chown` after
   `mount`). `kache/` and `targets/` come from the unit's `ExecStartPost`, which
@@ -414,15 +415,74 @@ differ, this section is what is on the machine.
 `fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing`, and
 builds no longer write there.
 
-- In a fresh tree they fail with "rlib was not found".
+- In a fresh tree they fail. This said "with 'rlib was not found'" at first,
+  and that was wrong: Q3037's lane ran `check-timing-hooked-calls` on the base
+  in a fresh tree, and it stopped with no message of its own, only `just`'s
+  `failed with exit code 1`. `find` on the missing directory exits 1, and under
+  `set -e` that ended the recipe before the line that prints the message. `fuzz-overnight` has the same line, so it wrote no
+  `BUILD FAILED` either.
 - `rcad-nightly-fuzz` still holds an rlib from 2026-10-21 at that path, so the
   night's sancov guard reads that old file instead of the one its own build
   made. The guard's promise, that a night can never pass while the current
   rlib carries a sancov reference, does not hold until Q3037 lands.
 - A fuzz build was not run to show where the rlib lands now. The evidence is
-  `cargo metadata`'s build directory, and 474.2's scratch crate.
+  `cargo metadata`'s build directory, and 474.2's scratch crate. (Q3037's lane
+  ran one. The five fuzz binaries are still copied into
+  `fuzz/target/x86_64-unknown-linux-gnu/release/`. The rlib stays in the build
+  directory, at
+  `x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/<hash>/out/`.)
 
 Mattias chose to keep the setting and pin Q3037, not take build-dir back out.
 Q3037 is reworded to that. Its `mise.toml` line and its zram unit are dropped:
 the cargo config and zram-kache already do both. Q3039 no longer waits on it,
 since the build directories are already on the disk.
+
+**What Q3037 changed, 2026-11-01.** Every recipe that reads cargo's output was
+read, and four things changed or were measured.
+
+- **The sancov guard reads the build directory cargo reports.**
+  `fuzz-overnight` and `check-timing-hooked-calls` now run one private recipe,
+  `_fuzz-timing-rlib-is-clean`. It asks `cargo +nightly metadata` in `fuzz/`
+  for `build_directory` and checks every `librcad_fuzz_timing-*.rlib` under
+  it. With build-dir unset, that directory is `fuzz/target`, as before. A tree
+  with no rlib now says so, and the night writes `BUILD FAILED`. A stale rlib
+  left under `fuzz/target` is no longer read. `check-fuzz-overnight-selftest`'s
+  stub cargo answers `metadata` too. Its arms Thirty-eight to Forty run the
+  night with build-dir set and with it unset, and the two with it set failed on
+  the old recipe.
+- **The gate could serve `check-timing-hooked-calls` after a change to its
+  own guard.** `just gate` serves that step from an older green when
+  `_timing-hooked-calls-fingerprint` has not moved. The fingerprint hashed
+  neither the recipe's own text nor `fuzz/rustc-stand-in.sh`, so a change to
+  either was served and not run. It now hashes both recipes, as `just --show`
+  prints them, and the stand-in. A case in `check-gate-verdicts-selftest`
+  failed before this and passes after it.
+- **`check-wildcards` had lost its own build directory.** §381 gave its clippy
+  `CARGO_TARGET_DIR=target/wildcards`, so that `lint` and it stop taking turns
+  in one cache. With build-dir set, both `cargo metadata` and
+  `CARGO_TARGET_DIR=target/wildcards cargo metadata` named the same build
+  directory, and `check-wildcards` run right after `lint` checked all 8
+  workspace crates again. It now sets `CARGO_BUILD_BUILD_DIR` to `wildcards`
+  under the build directory cargo reports, which is `target/wildcards` again
+  when build-dir is unset. In a fresh tree, `lint`, `check-wildcards`, `lint`
+  and `check-wildcards`, one after another, checked 79, 79, 0 and 0 crates.
+  `check-wildcards-selftest` runs the recipe under a stub cargo with build-dir
+  set and unset, and the case with it set failed on the old recipe.
+- **`coverage` needs nothing.** cargo-llvm-cov 0.6.24 follows build-dir by
+  itself. On a scratch crate, it built into `<build directory>/llvm-cov-target`,
+  wrote its `.profraw` files under `target/llvm-cov-target`, and reported 12
+  regions, 8 of them covered. That still shares nothing with the ordinary
+  build. `provenance-cost`, which the row named, is a plain `cargo bench` and
+  reads nothing under `target/`.
+
+The rest read only the fuzz binaries, which are still copied into
+`fuzz/target`. That is `fuzz-triage`, `check-fuzz-triage-selftest` and
+`check-gate-fresh-cleanup-selftest`, so they are right as they stand.
+`clean-targets` is Q3039's.
+
+**A restore into a build directory reflinks.** Between 18:54Z and 18:58Z, a
+fresh tree ran the four runs above and then `just t -p rcad-geom`. Then
+`kache report --format json --since 20m --root` with that tree's build
+directory gave 202 local hits, 0 misses, `reflinked_bytes` 249,787,538 and
+`copied_bytes` 16,285, with `zero_copy_pct` 100.0. The bytes that were copied
+are about 0.007% of what was restored.
