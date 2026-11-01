@@ -6629,6 +6629,33 @@ fn two_flat_cuts_held_apart(first: &Cone, second: &Cone) -> Result<HowTwoConesOf
     })
 }
 
+/// Whether every point `first` and `second` share in the box `at` is on
+/// `flat`, proved exactly, where `second` is `first`'s mirror image across the
+/// flat surface halfway between their apexes and `first` sorts first, as
+/// [`HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart`] holds them.
+///
+/// In the working of [`two_flat_cuts_that_meet_where_they_touch`], `second`'s
+/// form vanishes on `first` just where `P` does or `F` does. So where `F` keeps
+/// one sign all over `at`, a point of both in `at` is on `P = 0`, and it is on
+/// `flat` where `flat` is `P = 0` exactly. The stored flat surface halfway is
+/// rounded once from the point halfway and the gap between the apexes, so this
+/// asks it to be, rather than reading it as `P = 0`: for two a quarter turn
+/// apart about `x` through `(0, 0, 4)` it is `y + z = 4` to the last bit.
+pub(crate) fn every_point_of_both_in_the_box_is_on(
+    first: &Cone,
+    second: &Cone,
+    flat: &Plane,
+    at: [Interval; 3],
+) -> bool {
+    TwoFlatCuts::of(first, second).is_some_and(|made_of| {
+        made_of.is_the_flat_surface_halfway(flat)
+            && matches!(
+                made_of.the_second_cut_against(at),
+                Decision::Pos | Decision::Neg
+            )
+    })
+}
+
 /// The exact numbers the two flat cuts two mirror images cross in are made
 /// of, as [`two_flat_cuts_that_meet_where_they_touch`] works them out, each
 /// flat surface's form at `x` written as a normal and an offset, `g·x − c`,
@@ -6684,6 +6711,38 @@ impl TwoFlatCuts {
             ),
             second: (across, second_reach),
         })
+    }
+
+    /// Whether `flat` is `P = 0` exactly: its normal and offset `P`'s numbers
+    /// times one factor, so every two-by-two minor of the two rows is nothing.
+    /// Neither row is nothing, `flat`'s normal having length one and `P`'s
+    /// being twice the gap between two apexes, so the factor is not nothing
+    /// either. False where a product cannot be formed exactly.
+    fn is_the_flat_surface_halfway(&self, flat: &Plane) -> bool {
+        let [x, y, z] = flat.normal().components();
+        let stored = [x, y, z, flat.offset()].map(Exact::of);
+        let (along, reach) = &self.halfway;
+        let worked_out = [&along[0], &along[1], &along[2], reach];
+        [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
+            .into_iter()
+            .all(|(one, other)| {
+                stored[one]
+                    .times(worked_out[other])
+                    .zip(stored[other].times(worked_out[one]))
+                    .is_some_and(|(this, that)| this.minus(&that).sign() == Decision::Zero)
+            })
+    }
+
+    /// The sign `F` keeps all over the box `at`, worked out in intervals from
+    /// its exact numbers: [`Decision::Undecidable`] where the box reaches
+    /// `F = 0`, or too near it for the intervals to tell.
+    fn the_second_cut_against(&self, at: [Interval; 3]) -> Decision {
+        let (along, reach) = &self.second;
+        (0..3)
+            .fold(-reach.enclosure(), |so_far, axis| {
+                so_far + along[axis].enclosure() * at[axis]
+            })
+            .sign()
     }
 
     /// `P = 0` and `F = 0` as flat surfaces, the first from the point halfway

@@ -160,11 +160,11 @@ use rcad_predicates::{
 use crate::enclosure::{cross_enclosing, dot_enclosing, exactly, gap_enclosing};
 use crate::exact::Exact;
 use crate::intersect::{
-    HowTwoConesOffOneAxisCross, halfway_between_a_cones_apex_and_a_ball_on_its_axis,
-    how_a_ball_on_a_cones_axis_meets_it, how_a_plane_leans_against_a_pipe,
-    how_two_cones_off_one_axis_cross, whether_a_ball_runs_through_a_cones_apex,
-    whether_a_ball_sits_on_a_cones_axis, whether_a_cone_and_a_pipe_share_an_axis,
-    whether_two_cones_share_an_axis,
+    HowTwoConesOffOneAxisCross, every_point_of_both_in_the_box_is_on,
+    halfway_between_a_cones_apex_and_a_ball_on_its_axis, how_a_ball_on_a_cones_axis_meets_it,
+    how_a_plane_leans_against_a_pipe, how_two_cones_off_one_axis_cross,
+    whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
+    whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
 };
 use crate::{
     Cone, Cylinder, Error, HalfSpace, HalfSpaceThroughAPoint, Picker, Plane, Point, Result, Sphere,
@@ -1570,6 +1570,42 @@ impl Cone {
         Ok(self
             .the_two_flat_cuts_held_apart_from(other)?
             .map(|held_apart| held_apart.flats))
+    }
+
+    /// Where this cone and `other` are mirror images held apart, as
+    /// [`Cone::the_two_flat_cuts_of_a_mirror_image_held_apart_from_it`] names
+    /// them: the flat surface halfway between the apexes, where every point
+    /// the two share in the box `at` is proved to be on it, and nothing
+    /// elsewhere.
+    ///
+    /// A point of both is on one of the two flat cuts, and which one cannot be
+    /// read off the stored flat surfaces, each rounded once from exact numbers:
+    /// a point on one cut can read a rounding to either side of it. So the
+    /// other cut's sign over `at` is worked out from those exact numbers, and
+    /// the stored flat surface halfway is proved to be the exact one
+    /// (`every_point_of_both_in_the_box_is_on` in `intersect.rs`).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Undecidable`] where how the two cross could not be settled.
+    pub fn the_flat_surface_halfway_holding_every_point_of_both_in(
+        &self,
+        other: &Self,
+        at: PredicatePoint,
+    ) -> Result<Option<Plane>> {
+        let Some(HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart {
+            cone,
+            other: mirror,
+            flats: [halfway, _],
+            ..
+        }) = self.how_it_crosses_a_cone_off_its_axis(other)?
+        else {
+            return Ok(None);
+        };
+        Ok(
+            every_point_of_both_in_the_box_is_on(&cone, &mirror, &halfway, at.enclosure())
+                .then_some(halfway),
+        )
     }
 
     /// What `HowTwoConesOffOneAxisCross::InTwoFlatCutsHeldApart` names, where
