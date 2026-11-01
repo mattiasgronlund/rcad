@@ -29,7 +29,11 @@ Environment=PATH=%h/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 # mise by absolute path, for the same reason one line up: `just`, `cargo-fuzz`
 # and the RUSTC_WRAPPER=kache that mise.toml sets are all absent from a systemd
 # environment, and cargo fails outright on a wrapper it cannot find.
-ExecStart=%h/.local/bin/mise exec -- just fuzz-overnight 28800
+#
+# 02:50 and 04:00 are the pause: every target stops at 02:50 and starts again
+# at 04:00, so inari can measure on an idle host (docs/decisions.md §475). The
+# deadline is still 08:10, so the backstop below does not move.
+ExecStart=%h/.local/bin/mise exec -- just fuzz-overnight 28800 02:50 04:00
 
 # The outer backstop. `fuzz-overnight` divides its own window against the clock
 # and stops at 08:10 on its own; this is what makes 08:10 true when it does not.

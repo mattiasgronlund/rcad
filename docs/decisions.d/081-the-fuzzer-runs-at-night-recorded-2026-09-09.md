@@ -4,6 +4,10 @@
 a systemd user timer runs it from 00:10 to 08:10. It is the first thing in this
 repository that runs without somebody starting it.
 
+**Amended by §475 on 2026-11-01: the night pauses from 02:50 to 04:00,** so
+inari can measure on an idle host. It is still one run from one timer, and the
+recipe stops every target at 02:50 and starts them again at 04:00.
+
 What it adds is **hours, and not a second opinion.** §29.9 is the reason there
 is anything to add: `cargo-fuzz` builds with a sanitizer that wants a nightly
 compiler and `rust-toolchain.toml` pins a stable one, so the gate does not fuzz
