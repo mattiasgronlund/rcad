@@ -11261,7 +11261,7 @@ fn the_name_each_arc_of_a_conic_goes_by<'a>(
             cut_out_of.entry(named).or_insert((flat, round));
         }
     }
-    let named: Vec<(&[[u64; 9]; 2], &(Plane, Surface))> = cut_out_of.iter().collect();
+    let named: Vec<_> = cut_out_of.iter().collect();
     let mut joined = Vec::new();
     for (at, &(one, &(flat, mine))) in named.iter().enumerate() {
         for &(other, &(_, theirs)) in &named[at + 1..] {
