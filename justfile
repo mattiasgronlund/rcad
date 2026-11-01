@@ -3270,8 +3270,22 @@ check-wildcards:
     # once, one of the two waited on the other's lock. Here each re-checks only
     # what the edit reached. The directory costs 276 MB on its first run, and
     # about 1.1 GB once an edit has gone through it (§381.4).
-    if ! CARGO_TARGET_DIR=target/wildcards CARGO_TERM_COLOR=never cargo clippy --workspace --all-targets -- \
-            -W clippy::wildcard_enum_match_arm > "$log" 2>&1; then
+    #
+    # **And a build directory of its own, since 474.9.** Once cargo's
+    # `build-dir` is set, as this machine sets it for every build, the checks
+    # live there and not in the target directory, so `CARGO_TARGET_DIR` alone
+    # put clippy back in `lint`'s cache. `wildcards` under the build directory
+    # cargo reports is `target/wildcards` when build-dir is unset, as before.
+    if ! metadata=$(cargo metadata --no-deps --format-version 1); then
+        echo "cargo metadata failed, so where lint's build directory is is not known"
+        exit 1
+    fi
+    if ! build=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["build_directory"])' <<<"$metadata"); then
+        echo "cargo metadata named no build_directory, so where lint's build directory is is not known"
+        exit 1
+    fi
+    if ! CARGO_TARGET_DIR=target/wildcards CARGO_BUILD_BUILD_DIR="$build/wildcards" CARGO_TERM_COLOR=never cargo clippy \
+            --workspace --all-targets -- -W clippy::wildcard_enum_match_arm > "$log" 2>&1; then
         grep '^error' "$log" | head -5
         echo "clippy did not finish, so this counted nothing"
         echo "full log: $log"
