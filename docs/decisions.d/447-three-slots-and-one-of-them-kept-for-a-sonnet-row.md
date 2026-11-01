@@ -10,8 +10,12 @@ hyper-threads on this CPU, what do you see/think is the consequence of pushing
 to many simultanious slots?" 447.3 is the answer the session gave, and he
 answered "Yes!". This amends §397.7, and is the record Q853 asked for. 447.6
 then read 447.3's own bar once four slots had run with the kept Sonnet slot,
-and both halves of it were passed; 447.7 is Q2892 acting on that reading. The
-file keeps the name it was first written under, because rows name it.*
+and both halves of it were passed; 447.7 is Q2892 acting on that reading.
+447.8 reads the same bar again after a few days at three slots, and weighs
+447.7's suite-growth confound against what moved: the suite grew hardly at
+all over that window, while the bar it was supposed to bring back under got
+worse, not better. The file keeps the name it was first written under,
+because rows name it.*
 
 In short: three slots again, now that 447.3's bar is passed at four (§447.7).
 One of the three is kept for a Sonnet row while one is ready. There is no
@@ -24,6 +28,7 @@ fifth slot.
   447.5   What Q1932 built
   447.6   447.3's bars, read again with the kept Sonnet slot
   447.7   Back to three, by 447.3's bar
+  447.8   A few days at three slots: the bar again, and the suite-growth confound weighed
 
 ### 447.1 Why the Sonnet rows were not reached
 
@@ -379,3 +384,93 @@ filled or how costly the load is per §447.3's argument. 447.6 did not cross-
 check its 41.1% and 46.2% against this growth, and neither does this section;
 a later reading of the bar at three slots should weigh how much of any change
 in the share past 600 s is the suite growing rather than the slot count.
+
+### 447.8 A few days at three slots: the bar again, and the suite-growth confound weighed
+
+`queue_slots` went back to 3 at Q2892 (`44564b230`,
+2026-10-27T11:04:39+01:00, 10:04:39 UTC). This reads 447.3's two bars again
+over the days since, from that moment to now, 2026-11-01, and weighs 447.7's
+suite-growth confound against them.
+
+**The test-step bar.** Read the same way as 447.6 (a gate summary line
+`tests: Summary [ Ns] M tests run` with M over 3000 and no `served from`,
+found in the transcripts under `~/.claude/projects/*rcad*/**/*.jsonl`,
+deduplicated on its exact duration and count, read from each record's own
+`timestamp` field), since 2026-10-27T10:04:39Z:
+
+| | since 10-27 10:04 UTC (three slots, kept Sonnet slot) | since 10-13 21:35 UTC (447.6, four slots) | 10-05 to 10-13 (447.3) |
+|---|---|---|---|
+| fresh main test steps | 158 | 737 | 1 021 |
+| median | 820.2 s | 530.0 s | 266 s |
+| share past 600 s | 158 of 158, 100% | 303 of 737, 41.1% | 2.8% |
+
+Both of 447.3's own thresholds are passed by more than they were at 447.6's
+reading, not less: every one of the 158 steps ran past 600 s, against the 10%
+bar, and the median has risen again, by more than half, against the 530.0 s
+447.6 watched it at. Every day in the window shows the same 100% share on its
+own: 27 of 27 on 10-27, 40 of 40 on 10-28, 49 of 49 on 10-29, 33 of 33 on
+10-30, 6 of 6 on 10-31, 3 of 3 on 11-01. The script is
+`/tmp/.../scratchpad/gate_steps_447_8.py` of this row's session, run as
+`python3 gate_steps_447_8.py`; as with 447.6, the scratchpad is not kept, so
+the method is written out in full above rather than cited by path. Checked
+against 447.6's own window (since 2026-10-13T21:35:11Z to 2026-10-27T10:04:39Z)
+the same script finds 885 steps, median 520.9 s, 357 of 885 (40.3%) past
+600 s — close enough to 447.6's own 737/530.0 s/41.1% to trust the method
+reads the same thing 447.6 did, the gap being more transcripts now on disk
+for that past window than 447.6 had when it ran.
+
+**The catch-up bar.** Counted the way 447.6 counted it, over the same window:
+
+```
+git log origin/main --merges --since=2026-10-27T10:04:39Z --format='%H|%s' | grep -c '^[^|]*|Merge lane-'
+git log origin/main --merges --since=2026-10-27T10:04:39Z --format='%H|%s' | grep -c 'into merge-q[0-9]'
+```
+
+| catch-ups | lane merges | share |
+|---|---|---|
+| 28 | 76 | 36.8% |
+
+36.8% is still past the 35% bar, but only just, against 46.2% at 447.6's
+reading. This is the one figure that moved the way cutting the slot count
+predicts.
+
+**Weighing 447.7's suite-growth confound.** The transcripts' own test counts
+run from 4 615–4 618 at the start of this window (10-27, matching `4c41703a`'s
+4 615 that 447.7 already named) to 4 682 now — a 1.45% rise, not the 27% rise
+447.7 flagged between 10-10 and 10-27. That 27% rise sits inside 447.6's own
+reading window (10-13 to 10-27), not between 447.6's reading and this one:
+by the time 447.6's window closed, the suite was already at the size it is
+now, within 1.45%. So the 27% growth 447.7 raised cannot be what pushed the
+share past 600 s from 41.1% to 100% or the median from 530.0 s to 820.2 s
+between the two readings — the suite most of that growth happened under had
+already stopped growing by then. A further 1.45% growth, on its own, is far
+too small to explain a 59-point rise in the share past 600 s or a 55% rise in
+the median: nothing in 447.3's load-versus-duration table shows anything
+close to that sensitivity for a change of that size, and 447.2 itself already
+flagged that something other than the slot count was moving the load even
+before the suite had grown this much.
+
+**The slot count does not explain it either, and in the direction that
+matters it runs the wrong way.** Cutting from four slots to three is supposed
+to lower the load and so shorten the test step, per 447.3's own argument; the
+median instead grew by more than half. The one bar that moved the way the
+cut predicts is the catch-up share, and even that may be riding a falling
+merge rate rather than the lower cap as such: 76 lane merges over about 5.3
+days here is roughly 14 a day, against roughly 36 a day over 447.6's 13.7-day
+window — a further fall from the decline 447.6 itself already measured in
+rows closed per day. Fewer merges racing each other also means fewer
+catch-ups, with or without a lower cap.
+
+A day/night split, checked because a running fuzzer with `nice`d CPU use is
+known to slow lanes at night: 27 of the 158 steps fell between 00:00 and
+08:00 UTC, median 1 282.5 s, all past 600 s; the other 131, in daytime hours,
+had median 794.5 s, also all past 600 s. Night makes it worse, but daytime
+alone already sits far past both 447.6's 530.0 s median and the 10% bar, so
+time of day is not the whole story either.
+
+**So this section rules out the two things it was asked to weigh, and
+nothing else.** Neither the suite's growth (1.45% over this window, its 27%
+already spent inside 447.6's own reading) nor the slot cut itself (which
+should have shortened the step, not lengthened it by more than half)
+accounts for the rise from 447.6's reading to this one. What does is not
+measured here.
