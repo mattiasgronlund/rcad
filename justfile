@@ -2557,6 +2557,20 @@ check-gate-verdicts-selftest:
     grep -q '^· check-timing-hooked-calls (' <<<"$got" \
         && fail "a served narrow step ran anyway"
 
+    # The text of the recipes that run the step is part of it too
+    # (docs/decisions.d/474.9): a change to how the step checks is run, not
+    # served the green of the old way. Read from a copy of this justfile, once
+    # as it is and once with a line of the rlib guard changed.
+    thc_fp_of() { PATH="$thc_narrow_path" "$j" --justfile "$1" --working-directory "$repo" _timing-hooked-calls-fingerprint; }
+    cp '{{ justfile() }}' "$dir/same.just"
+    [ "$(thc_fp_of "$dir/same.just")" = "$thc_fp1" ] \
+        || fail "a copy of this justfile gave check-timing-hooked-calls a fingerprint of its own, so the case below would prove nothing"
+    sed 's/^    timing_rlibs=\$(find "\$build\//    timing_rlibs=$(find -L "$build\//' '{{ justfile() }}' >"$dir/changed.just"
+    ! cmp -s "$dir/same.just" "$dir/changed.just" \
+        || fail "the edit meant to change the rlib guard matched nothing"
+    [ "$(thc_fp_of "$dir/changed.just")" != "$thc_fp1" ] \
+        || fail "a change to the rlib guard's own text left check-timing-hooked-calls's fingerprint where it was"
+
     # The toolchain version is part of the narrow fingerprint, so changing it
     # moves the key and the next gate re-runs rather than serves.
     printf 'rustc 1.0.0-nightly (deadbeef 2026-02-02)\n' >"$thcbin/version.txt"
@@ -3256,8 +3270,22 @@ check-wildcards:
     # once, one of the two waited on the other's lock. Here each re-checks only
     # what the edit reached. The directory costs 276 MB on its first run, and
     # about 1.1 GB once an edit has gone through it (§381.4).
-    if ! CARGO_TARGET_DIR=target/wildcards CARGO_TERM_COLOR=never cargo clippy --workspace --all-targets -- \
-            -W clippy::wildcard_enum_match_arm > "$log" 2>&1; then
+    #
+    # **And a build directory of its own, since 474.9.** Once cargo's
+    # `build-dir` is set, as this machine sets it for every build, the checks
+    # live there and not in the target directory, so `CARGO_TARGET_DIR` alone
+    # put clippy back in `lint`'s cache. `wildcards` under the build directory
+    # cargo reports is `target/wildcards` when build-dir is unset, as before.
+    if ! metadata=$(cargo metadata --no-deps --format-version 1); then
+        echo "cargo metadata failed, so where lint's build directory is is not known"
+        exit 1
+    fi
+    if ! build=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["build_directory"])' <<<"$metadata"); then
+        echo "cargo metadata named no build_directory, so where lint's build directory is is not known"
+        exit 1
+    fi
+    if ! CARGO_TARGET_DIR=target/wildcards CARGO_BUILD_BUILD_DIR="$build/wildcards" CARGO_TERM_COLOR=never cargo clippy \
+            --workspace --all-targets -- -W clippy::wildcard_enum_match_arm > "$log" 2>&1; then
         grep '^error' "$log" | head -5
         echo "clippy did not finish, so this counted nothing"
         echo "full log: $log"
@@ -3433,6 +3461,47 @@ check-wildcards-selftest:
             echo "so the two take turns re-checking every crate (docs/decisions.md §381.1)"
             exit 1 ;;
     esac
+    # And a build directory of its own, with cargo's build-dir set and unset.
+    # Once it is set, cargo keeps every check in the build directory and only
+    # copies finished binaries into the target directory, so a target directory
+    # of its own put clippy back in lint's cache (474.9). The stub answers the
+    # way cargo does: `CARGO_BUILD_BUILD_DIR` over the config's build-dir, and
+    # that over the target directory. The scratch tree is a git repository
+    # because the justfile's variables ask git where the tree is.
+    mkdir -p "$dir/wild/crates" "$dir/bin"
+    git init -q "$dir/wild"
+    cat > "$dir/bin/cargo" <<'SH'
+    #!/usr/bin/env bash
+    target=${CARGO_TARGET_DIR:-target}
+    case "$target" in /*) ;; *) target=$PWD/$target ;; esac
+    build=${CARGO_BUILD_BUILD_DIR:-${STUB_CONFIG_BUILD_DIR:-$target}}
+    case "$1" in
+        metadata) printf '{"target_directory": "%s", "build_directory": "%s"}\n' "$target" "$build" ;;
+        clippy) echo "$build" > "$STUB_CLIPPY_BUILD_DIR"; exit 1 ;;
+        *) exit 1 ;;
+    esac
+    SH
+    chmod +x "$dir/bin/cargo"
+    for config_build_dir in "" "$dir/zram"; do
+        lint_build_dir=${config_build_dir:-$dir/wild/target}
+        rm -f "$dir/clippy-build-dir"
+        PATH="$dir/bin:$PATH" STUB_CONFIG_BUILD_DIR="$config_build_dir" \
+            STUB_CLIPPY_BUILD_DIR="$dir/clippy-build-dir" \
+            {{ just_executable() }} --justfile {{ justfile() }} --working-directory "$dir/wild" \
+            check-wildcards >"$dir/wild.log" 2>&1 || true
+        if [ ! -s "$dir/clippy-build-dir" ]; then
+            echo "check-wildcards never reached its clippy under a stub cargo; it printed:"
+            cat "$dir/wild.log"
+            exit 1
+        fi
+        clippy_build_dir=$(cat "$dir/clippy-build-dir")
+        if [ "$clippy_build_dir" = "$lint_build_dir" ]; then
+            echo "with build-dir ${config_build_dir:+set to }${config_build_dir:-unset}, check-wildcards ran its clippy"
+            echo "in lint's build directory $clippy_build_dir, so the two take turns re-checking every crate"
+            echo "(docs/decisions.md §381.1, docs/decisions.d/474-build-output-goes-to-zram.md 474.9)"
+            exit 1
+        fi
+    done
 
     for f in plain coloured; do
         got=$({{ just_executable() }} _wildcard-direct-count "$dir/$f.log")
@@ -7759,46 +7828,9 @@ fuzz-overnight window="28800" pause_start="" pause_end="":
         exit 1
     fi
 
-    # A stale build would pass silently: cargo's fingerprint cannot see a flag
-    # the stand-in adds on top of `RUSTFLAGS`, so a build made before the
-    # stand-in existed, or made with it broken, looks exactly as fresh as one
-    # made with it working, and `cargo fuzz run` below would not know to redo
-    # it. So the night checks the artifact rather than trusting the build that
-    # made it: `rcad-fuzz-timing`'s rlib lands under `build/<pkg>-<hash>/out/`
-    # on this nightly rather than under `deps/`, because that is the directory
-    # cargo passes as `--out-dir` for a lib crate here — found by name since the
-    # hash in the path is not otherwise known.
-    timing_rlibs=$(find fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing \
-        -name 'librcad_fuzz_timing-*.rlib' 2>/dev/null)
-    if [ -z "$timing_rlibs" ]; then
-        echo "rcad-fuzz-timing's rlib was not found by name after the build, so whether it carries coverage could not be checked"
-        printf '%s  BUILD FAILED  %s\n' "$(date '+%Y-%m-%d %H:%M')" "$night" >"{{fuzz_log_root}}/latest"
-        exit 1
-    fi
-    # More than one of these can exist at once — a hash directory left over
-    # from before the stand-in was wired in, or from a build made with
-    # different flags, sitting beside the one this build just made — and
-    # `find`'s order between them is not the order they were written in, so
-    # `| head -n1` used to read whichever one it met first (Q288, Q857).
-    # There is no mtime to sort by instead: a `cargo build` that changes
-    # nothing does not even touch the files in the directory it would have
-    # written to, checked directly by running the same build twice and
-    # comparing `find -printf '%T@'` before and after — every file, including
-    # `fingerprint/invoked.timestamp`, kept the first run's timestamp to the
-    # microsecond. So this checks every rlib `find` turns up, not one chosen
-    # among them, and fails if *any* carries a sancov reference. That can
-    # still fail a night over a stale rlib this build did not write — a build
-    # failure that costs a retry — but it can never pass a night whose
-    # current rlib carries one, which is the fault that must not happen.
-    sancov_found=()
-    while IFS= read -r candidate; do
-        [ -n "$candidate" ] || continue
-        refs=$(nm "$candidate" 2>/dev/null | grep -ic sancov || true)
-        [ "$refs" -eq 0 ] || sancov_found+=("$candidate ($refs)")
-    done <<<"$timing_rlibs"
-    if [ "${#sancov_found[@]}" -gt 0 ]; then
-        echo "rcad-fuzz-timing's rlib carries a sancov reference, so the stand-in did not keep it out of coverage:"
-        printf '    %s\n' "${sancov_found[@]}"
+    # The build is checked by its artifact, in `_fuzz-timing-rlib-is-clean`
+    # below, which `check-timing-hooked-calls` shares.
+    if ! {{just_executable()}} _fuzz-timing-rlib-is-clean; then
         printf '%s  BUILD FAILED  %s\n' "$(date '+%Y-%m-%d %H:%M')" "$night" >"{{fuzz_log_root}}/latest"
         exit 1
     fi
@@ -8782,13 +8814,27 @@ check-fuzz-overnight-selftest:
     # started one target, waited for it, and then ran the other four at once
     # would spend about what a correct one spends.
     stub_started=$(date +%s)
+    # Ahead of the log, which every arm counts as calls the night made to
+    # build and fuzz. With `STUB_BUILD_DIR` unset this answers what cargo
+    # answers with no `build-dir` configured, the target directory twice;
+    # set, it stands in for the `build-dir` of docs/decisions.d/474.9. It is
+    # not `CARGO_BUILD_BUILD_DIR`, so the night can learn it only from here.
+    case " $* " in
+        *" metadata "*)
+            printf '{"target_directory":"%s","build_directory":"%s"}\n' \
+                "$PWD/target" "${STUB_BUILD_DIR:-$PWD/target}"
+            exit 0 ;;
+    esac
     printf '%s [timings=%s] [at=%s]\n' "$*" "${RCAD_FUZZ_TIMINGS:-unset}" "$stub_started" >>"$STUB_LOG"
     case " $* " in
         *" build "*)
             # The real build's rlib is what §292's guard reads back, so every
             # arm needs one here too, real or not — clean unless
-            # `STUB_TIMING_SANCOV` asks for the kind that must fail the night.
-            timing_dir="target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-${STUB_ARTIFACT_TAG:-notag}/out"
+            # `STUB_TIMING_SANCOV` asks for the kind that must fail the night,
+            # and none at all under `STUB_NO_TIMING_RLIB`. It goes where cargo
+            # puts it, under the build directory.
+            [ -z "${STUB_NO_TIMING_RLIB:-}" ] || exit 0
+            timing_dir="${STUB_BUILD_DIR:-target}/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-${STUB_ARTIFACT_TAG:-notag}/out"
             mkdir -p "$timing_dir"
             symbol="clean_selftest_symbol"
             [ -z "${STUB_TIMING_SANCOV:-}" ] || symbol="__sancov_selftest_symbol"
@@ -10372,6 +10418,74 @@ check-fuzz-overnight-selftest:
     done
     }
 
+    # Every arm above runs with cargo's `build-dir` unset, where the build
+    # directory is the target directory, `fuzz/target`. The next three set
+    # it, as this machine's cargo config has since 2026-11-01
+    # (docs/decisions.d/474.9), so the build writes `rcad-fuzz-timing`'s
+    # rlib under it and nothing new under `fuzz/target`. An rlib there is a
+    # stale one, from before the build directory moved, and the guard must
+    # read the rlib this build wrote and no other.
+    #
+    # Thirty-eight: this build's rlib carries a sancov reference and a clean
+    # one is left under `fuzz/target`. A guard that read `fuzz/target` would
+    # find only clean rlibs there and pass the night.
+    thirty_eight() {
+    : >"$dir/log"
+    stale_out="fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-stale-$tag/out"
+    mkdir -p "$stale_out"
+    printf '.globl clean_stale_symbol\nclean_stale_symbol:\n' >"$stale_out/sym.s"
+    as "$stale_out/sym.s" -o "$stale_out/sym.o"
+    ar rcs "$stale_out/librcad_fuzz_timing-selftest-stale-$tag.rlib" "$stale_out/sym.o"
+    status=0
+    STUB_BUILD_DIR="$dir/build-dir" STUB_TIMING_SANCOV=1 run 8 || status=$?
+    [ "$status" -ne 0 ] \
+        || fail "a night whose build wrote a sancov rlib under its build directory read a clean one under fuzz/target and reported success"
+    grep -q 'sancov reference' "$dir/out" \
+        || fail "the night did not say why it failed: $(cat "$dir/out")"
+    grep -q 'BUILD FAILED' "$dir/logs/latest" \
+        || fail "an instrumented timing rlib under the build directory did not read as a build failure in the summary"
+    [ "$(grep -c 'fuzz run' "$dir/log")" -eq 0 ] \
+        || fail "the night fuzzed targets after its build wrote a sancov rlib under its build directory"
+    rm -rf "fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-stale-$tag"
+    }
+
+    # Thirty-nine: the build writes no rlib at all, into a build directory
+    # that does not exist yet. The night says it found none, rather than
+    # dying on `find`'s status under `set -e` with nothing said, which is
+    # what a fresh tree's night did before it read the build directory.
+    thirty_nine() {
+    : >"$dir/log"
+    status=0
+    STUB_BUILD_DIR="$dir/build-dir" STUB_NO_TIMING_RLIB=1 run 8 || status=$?
+    [ "$status" -ne 0 ] || fail "a build that wrote no timing rlib let the night report success"
+    grep -q 'was not found' "$dir/out" \
+        || fail "a build that wrote no timing rlib did not say so: $(cat "$dir/out")"
+    grep -q 'BUILD FAILED' "$dir/logs/latest" \
+        || fail "a build that wrote no timing rlib did not read as a build failure in the summary"
+    [ "$(grep -c 'fuzz run' "$dir/log")" -eq 0 ] \
+        || fail "the night fuzzed targets with no timing rlib to check"
+    }
+
+    # Forty: this build's rlib is clean and a sancov one is left under
+    # `fuzz/target`, which a guard that read `fuzz/target` would fail the
+    # night on. Alone, because that rlib sits where every night with
+    # `build-dir` unset looks.
+    forty() {
+    : >"$dir/log"
+    stale_out="fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-stale-forty-$tag/out"
+    mkdir -p "$stale_out"
+    printf '.globl __sancov_stale_symbol\n__sancov_stale_symbol:\n' >"$stale_out/sym.s"
+    as "$stale_out/sym.s" -o "$stale_out/sym.o"
+    ar rcs "$stale_out/librcad_fuzz_timing-selftest-stale-forty-$tag.rlib" "$stale_out/sym.o"
+    status=0
+    STUB_BUILD_DIR="$dir/build-dir-forty" run 8 || status=$?
+    rm -rf "fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-stale-forty-$tag"
+    [ "$status" -eq 0 ] \
+        || fail "a night whose build wrote a clean rlib under its build directory failed on a stale one under fuzz/target: $(cat "$dir/out")"
+    ! grep -q 'sancov reference' "$dir/out" \
+        || fail "a stale sancov rlib under fuzz/target was read as this build's"
+    }
+
     # **Which arms run at once, and why each still asserts what it says.** Run
     # in turn they took 86 s, nearly all of it the stub's sleeps (Q709), so
     # most of them run beside each other.
@@ -10394,11 +10508,13 @@ check-fuzz-overnight-selftest:
     #     `beside()` already gives every arm its own copy of, so the three
     #     cannot meet each other there either.
     #     Thirty-four to Thirty-seven, the pause's other cases, write slow
-    #     units only, or nothing.
+    #     units only, or nothing. Thirty-eight's sancov rlib is under its own
+    #     `$dir`, and the clean one it leaves under `fuzz/target` passes any
+    #     night that meets it; Thirty-nine writes none.
     #   - Alone, after them: Three and Twenty-three count slow units exactly,
-    #     Twelve, Thirty-three and Thirteen write crashes, and Sixteen and Twenty-nine write
-    #     a sancov rlib and a clean one beside it, either of which any other
-    #     night's guard could meet first.
+    #     Twelve, Thirty-three and Thirteen write crashes, and Sixteen,
+    #     Twenty-nine and Forty write a sancov rlib under `fuzz/target`, which
+    #     any other night's guard could meet.
     #
     # The clock arms. One, Four and Ten start first, together. One's ceiling
     # of 16 s is about 10 s above what it takes, and Four's 20 s about 9 s
@@ -10469,7 +10585,8 @@ check-fuzz-overnight-selftest:
     beside two_with_no_step_corpus five six_and_seven eight nine eleven \
         fourteen fifteen seventeen eighteen nineteen twenty twenty_one \
         twenty_two twenty_four twenty_five twenty_seven twenty_eight \
-        thirty thirty_one thirty_two thirty_four thirty_five thirty_six thirty_seven
+        thirty thirty_one thirty_two thirty_four thirty_five thirty_six thirty_seven \
+        thirty_eight thirty_nine
     settle
     overlap 5
     rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*-"$tag"
@@ -10479,6 +10596,7 @@ check-fuzz-overnight-selftest:
     alone thirteen
     alone sixteen
     alone twenty_nine
+    alone forty
     alone twenty_three
     arm="after the last"
     head_did_not_move
@@ -10547,6 +10665,8 @@ check-fuzz-overnight-selftest:
     # Q3041's arm Thirty-three, alone on a twelve-second night, brought four
     # runs to 47.3, 46.8, 47.3 and 45.5 s (load average 0.4 to 5.3, the last
     # under six `yes` processes); 90 still clears them by more than 40 s.
+    # Q3037's arm Forty, alone on an eight-second night, brought one run to
+    # 52.95 s (load average 8.7 to 14.6); 90 clears it by 37 s.
     bound=90
     [ "$SECONDS" -le "$bound" ] \
         || { echo "check-fuzz-overnight-selftest took $SECONDS s, over its bound of $bound s: one of the arms is waiting on something new, or beside() itself hung"; exit 1; }
@@ -11030,9 +11150,9 @@ check-timing-hooked-calls-selftest:
 # stable and never links anything, so it cannot see what this checks —
 # docs/decisions.d/267.4's stand-in, and the hooked libFuzzer memcmp
 # intercepts `fuzz/timing-hooked-calls.py` scans a *linked* binary for.
-# Reuses `fuzz-overnight`'s own build command and its two post-build guards
-# (the rlib found by name, and no sancov reference in it) rather than
-# building twice.
+# Reuses `fuzz-overnight`'s own build command and the guard it runs after it,
+# `_fuzz-timing-rlib-is-clean` (the rlib found by name under the build
+# directory, and no sancov reference in it), rather than building twice.
 #
 # Skips, printing "skipped, not passed" rather than failing, where there is
 # no nightly toolchain or no cargo-fuzz on PATH — true of every CI runner
@@ -11061,10 +11181,69 @@ check-timing-hooked-calls:
     CI=1 RUSTC="{{ justfile_directory() }}/fuzz/rustc-stand-in.sh" \
         RUSTFLAGS="-C target-cpu=x86-64-v3" \
         cargo +nightly fuzz build
-    timing_rlibs=$(find target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing \
-        -name 'librcad_fuzz_timing-*.rlib' 2>/dev/null)
+    {{just_executable()}} --justfile '{{ justfile() }}' _fuzz-timing-rlib-is-clean
+    ./timing-hooked-calls.py \
+        target/x86_64-unknown-linux-gnu/release/where_two_surfaces_cross \
+        target/x86_64-unknown-linux-gnu/release/no_step_file_makes_the_reader_panic \
+        target/x86_64-unknown-linux-gnu/release/no_model_makes_the_writer_panic \
+        target/x86_64-unknown-linux-gnu/release/two_solids_fused_by_a_stranger \
+        target/x86_64-unknown-linux-gnu/release/where_a_cone_or_a_torus_crosses
+
+# The guard `fuzz-overnight` and `check-timing-hooked-calls` run after the
+# fuzz build: no `librcad_fuzz_timing-*.rlib` that build could have written
+# carries a sancov reference.
+#
+# A stale build would pass silently: cargo's fingerprint cannot see a flag
+# the stand-in adds on top of `RUSTFLAGS`, so a build made before the
+# stand-in existed, or made with it broken, looks exactly as fresh as one
+# made with it working, and `cargo fuzz run` would not know to redo it. So
+# the night checks the artifact rather than trusting the build that made it:
+# `rcad-fuzz-timing`'s rlib lands under `build/<pkg>-<hash>/out/` on this
+# nightly rather than under `deps/`, because that is the directory cargo
+# passes as `--out-dir` for a lib crate here — found by name since the hash
+# in the path is not otherwise known.
+#
+# **Under the build directory cargo reports, not under `fuzz/target`.** The
+# two are one directory until cargo's `build-dir` is set, and this machine
+# sets it for every build since 2026-11-01 (docs/decisions.d/474.9). Then
+# the five binaries are still copied up into `fuzz/target`, and the rlib
+# stays in the build directory. A guard that read `fuzz/target` read only
+# the rlibs older builds had left there, and in a tree with none it died on
+# `find`'s status with nothing said. `cargo metadata` names the build
+# directory however it was set: config, environment, or not at all.
+#
+# More than one of these can exist at once — a hash directory left over
+# from before the stand-in was wired in, or from a build made with
+# different flags, sitting beside the one this build just made — and
+# `find`'s order between them is not the order they were written in, so
+# `| head -n1` used to read whichever one it met first (Q288, Q857).
+# There is no mtime to sort by instead: a `cargo build` that changes
+# nothing does not even touch the files in the directory it would have
+# written to, checked directly by running the same build twice and
+# comparing `find -printf '%T@'` before and after — every file, including
+# `fingerprint/invoked.timestamp`, kept the first run's timestamp to the
+# microsecond. So this checks every rlib `find` turns up, not one chosen
+# among them, and fails if *any* carries a sancov reference. That can
+# still fail a night over a stale rlib this build did not write — a build
+# failure that costs a retry — but it can never pass a night whose
+# current rlib carries one, which is the fault that must not happen.
+[private]
+_fuzz-timing-rlib-is-clean:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd fuzz
+    metadata=$(cargo +nightly metadata --no-deps --format-version 1) || {
+        echo "cargo metadata failed in fuzz/, so where the build put rcad-fuzz-timing's rlib is not known"
+        exit 1
+    }
+    build=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["build_directory"])' <<<"$metadata") || {
+        echo "cargo metadata named no build_directory for fuzz/, so where the build put rcad-fuzz-timing's rlib is not known"
+        exit 1
+    }
+    timing_rlibs=$(find "$build/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing" \
+        -name 'librcad_fuzz_timing-*.rlib' 2>/dev/null || true)
     if [ -z "$timing_rlibs" ]; then
-        echo "rcad-fuzz-timing's rlib was not found by name after the build, so whether it carries coverage could not be checked"
+        echo "rcad-fuzz-timing's rlib was not found by name under $build after the build, so whether it carries coverage could not be checked"
         exit 1
     fi
     sancov_found=()
@@ -11078,12 +11257,6 @@ check-timing-hooked-calls:
         printf '    %s\n' "${sancov_found[@]}"
         exit 1
     fi
-    ./timing-hooked-calls.py \
-        target/x86_64-unknown-linux-gnu/release/where_two_surfaces_cross \
-        target/x86_64-unknown-linux-gnu/release/no_step_file_makes_the_reader_panic \
-        target/x86_64-unknown-linux-gnu/release/no_model_makes_the_writer_panic \
-        target/x86_64-unknown-linux-gnu/release/two_solids_fused_by_a_stranger \
-        target/x86_64-unknown-linux-gnu/release/where_a_cone_or_a_torus_crosses
 
 # `check-timing-hooked-calls`'s own fingerprint, narrower than
 # `_code-fingerprint`'s: its scan's answer depends only on
@@ -11092,6 +11265,10 @@ check-timing-hooked-calls:
 # §425.7 is the demonstration that nothing else moves it). Same shape as
 # `_code-fingerprint` — `git ls-tree` over the paths, then the environment —
 # so the two stay easy to compare by eye.
+#
+# And on what runs them: the stand-in, which is what keeps the rlib clean,
+# and the text of the two recipes, so a change to how the step checks is run
+# again and not served the green of the old way (docs/decisions.d/474.9).
 [private]
 _timing-hooked-calls-fingerprint:
     #!/usr/bin/env bash
@@ -11103,7 +11280,10 @@ _timing-hooked-calls-fingerprint:
     fi
     {
         git ls-tree -r --full-tree HEAD -- crates/rcad-fuzz-timing fuzz/Cargo.toml \
-            fuzz/Cargo.lock fuzz/timing-hooked-calls.py
+            fuzz/Cargo.lock fuzz/timing-hooked-calls.py fuzz/rustc-stand-in.sh
+        echo "-- recipes"
+        {{just_executable()}} --justfile '{{ justfile() }}' --show check-timing-hooked-calls
+        {{just_executable()}} --justfile '{{ justfile() }}' --show _fuzz-timing-rlib-is-clean
         echo "-- toolchain"
         if rustc_path=$(rustup which --toolchain nightly rustc 2>/dev/null); then
             "$rustc_path" --version
