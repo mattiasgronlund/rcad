@@ -1111,14 +1111,13 @@ fn what_a_run_between_these_two_lies_on(
         // ends' and its picker's to say, as for a cone and a pipe on one axis.
         // Marched instead, a closed run with a corner on the second circle was
         // walked round the first, because a run nothing picks starts at the
-        // first seed (Q1241). A ball of the pipe's own width touches it round
-        // one circle, and the marcher cannot settle a point onto two surfaces
-        // that are tangent all along it, so that circle is drawn here too: a
-        // bar with a ball of its radius on its end was refused by every fuse
-        // after the union (Q2999). A ball narrower than the pipe misses it.
+        // first seed (Q1241). A ball no wider than the pipe is marched as
+        // before: drawing the one circle a ball of the pipe's own width touches
+        // it round lets `SolidBuilder` build a rim it refuses today, which
+        // `rcad-step` pins.
         [Surface::Sphere(ball), Surface::Cylinder(pipe)]
         | [Surface::Cylinder(pipe), Surface::Sphere(ball)] => {
-            if ball.radius() >= pipe.radius()
+            if ball.radius() > pipe.radius()
                 && whether_a_ball_sits_on_a_pipes_axis(&ball, &pipe) == Decision::Zero
             {
                 let ball_first = matches!(pair[0], Surface::Sphere(_));
@@ -3396,8 +3395,8 @@ fn whether_a_ball_sits_on_a_pipes_axis(ball: &Sphere, pipe: &Cylinder) -> Decisi
     .0
 }
 
-/// The circle of the crossing of a pipe and a ball centred on its axis and no
-/// narrower than it that the run names.
+/// The circle of the crossing of a pipe and a ball centred on its axis and
+/// wider than it that the run names.
 ///
 /// # Errors
 ///
@@ -3413,7 +3412,7 @@ fn where_a_ball_on_a_pipes_axis_cuts_it(
     log: &mut ProvenanceLog,
 ) -> Result<Conic> {
     which_of_these_circles_this_run_is(
-        the_circles_a_ball_on_a_pipes_axis_cuts(ball, pipe, ball_first),
+        the_two_circles_a_ball_on_a_pipes_axis_cuts(ball, pipe, ball_first),
         run,
         policy,
         log,
@@ -3422,10 +3421,7 @@ fn where_a_ball_on_a_pipes_axis_cuts_it(
 
 /// The two circles a ball centred on a pipe's axis and wider than it crosses
 /// it in, `√(R² − r²)` either way along the axis from the centre, each of the
-/// pipe's radius — or the one circle round the centre where the ball is the
-/// pipe's own width and touches it all the way round. `R² − r²` is written
-/// `(R − r)(R + r)`, which does not cancel, and `R = r` is asked on the two
-/// stored radii, which is exact.
+/// pipe's radius. `R² − r²` is written `(R − r)(R + r)`, which does not cancel.
 ///
 /// # Which way round each goes
 ///
@@ -3434,31 +3430,23 @@ fn where_a_ball_on_a_pipes_axis_cuts_it(
 /// of `S` and `T` runs along `∇S × ∇T`, which for the ball first is
 /// anticlockwise about the axis on the circle ahead of the centre and about its
 /// opposite on the circle behind (`the_way_a_circle_round_a_pipes_axis_winds`
-/// derives it). The pipe first turns both round. The circle a ball of the
-/// pipe's width touches has no such direction, `∇S × ∇T` being nothing all
-/// round it, and runs about the axis for the ball first, as the circle ahead
-/// does, which is how `rcad-topo`'s arrangement orders round it.
-fn the_circles_a_ball_on_a_pipes_axis_cuts(
+/// derives it). The pipe first turns both round.
+fn the_two_circles_a_ball_on_a_pipes_axis_cuts(
     ball: &Sphere,
     pipe: &Cylinder,
     ball_first: bool,
 ) -> Vec<Conic> {
     let radius = ball.radius();
     let skin = pipe.radius();
-    let reaches = if radius == skin {
-        vec![0.0]
-    } else {
-        let reach = ((radius - skin) * (radius + skin)).sqrt();
-        vec![reach, -reach]
-    };
+    let reach = ((radius - skin) * (radius + skin)).sqrt();
     let along = pipe.axis().direction();
     let up = along * along.length().recip();
     let (across, and) = pipe.basis();
-    reaches
+    [reach, -reach]
         .into_iter()
         .map(|reach| {
             let middle = ball.centre() + up * reach;
-            let about_the_axis = (reach >= 0.0) == ball_first;
+            let about_the_axis = (reach > 0.0) == ball_first;
             let and = if about_the_axis { and } else { -and };
             Conic {
                 centre: middle,
@@ -7757,54 +7745,6 @@ mod tests {
                     );
                 }
             }
-        }
-    }
-
-    /// A ball of radius two and a half centred on a pipe of the same radius
-    /// touches it all the way round one circle, and a closed run with its
-    /// corner on that circle is walked round it: about the axis with the ball
-    /// listed first and about its opposite with the pipe first.
-    ///
-    /// The two are tangent all round the circle, so the marcher had nothing to
-    /// settle a point by, and a bar with a ball of its own radius on its end
-    /// was refused by every fuse after the union (Q2999).
-    #[test]
-    fn a_closed_run_round_the_circle_a_ball_of_a_pipes_width_touches_is_walked_round_it() {
-        let pipe = Surface::Cylinder(Cylinder::new(crate::Axis::z(), 2.5).expect("a radius"));
-        let ball = Surface::Sphere(Sphere::new(Point::origin(), 2.5).expect("a radius"));
-        let corner = Point::new(2.5, 0.0, 0.0);
-        let run = NamedRun::new(
-            EdgeRun::RightRoundWhereItsFacesCross,
-            [corner, corner].map(|end| PredicatePoint::from(end.coordinates())),
-        )
-        .expect("a closed run with one corner");
-        for (pair, about) in [([&ball, &pipe], 1.0), ([&pipe, &ball], -1.0)] {
-            let walked = walk(
-                &run,
-                pair,
-                Deflection::of(0.01).expect("a length"),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .expect("the circle a ball of a pipe's width touches is walked");
-            let off = walked.deviation().magnitude();
-            let points = walked.points();
-            assert!(points.len() > 2, "the circle has points");
-            for point in points {
-                let [x, y, z] = point.coordinates();
-                assert!(
-                    z.abs() <= off
-                        && how_far_off(&ball, *point) <= off
-                        && how_far_off(&pipe, *point) <= off,
-                    "the run round the circle was walked through ({x}, {y}, {z})"
-                );
-            }
-            let [_, y, _] = points[1].coordinates();
-            assert!(
-                y * about > 0.0,
-                "with {:?} first the walk turns the other way, through y = {y}",
-                pair[0]
-            );
         }
     }
 
