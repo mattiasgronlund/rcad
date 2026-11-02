@@ -21,8 +21,10 @@
 //! and since row Q2894 `walk` marches the loop and a run between two corners
 //! on a branch without stepping from one onto the other, but every fuse of
 //! them is still refused. Where both caps' rims nearly meet, the two caps'
-//! planes and the two cones meet in four points a rounding apart, not one, and
-//! the fuse cannot settle the order of two of them along a crossing.
+//! planes and the two cones meet in four points a rounding apart, not one.
+//! Since row Q2961 the fuse orders those by exact signs and gets past them,
+//! and is refused instead ordering points along a branch that reaches each
+//! cone's wall there.
 //!
 //! A third shape came with row Q2818: two pointed cones of different slopes,
 //! the narrower leaning off the wider, which cross in a loop and two branches
@@ -106,17 +108,14 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 /// that hold the piece it is on apart from the others, so it no longer steps
 /// across the gap onto the branch and runs off along it.
 ///
-/// Every fuse is still refused, under every rule both ways round, as
-/// undecided: `fuse/arrange.rs` cannot settle the order of two points along a
-/// crossing at about `(−3.9541, −0.6045, 8)`, where both caps' rims nearly
-/// meet. The two are mirror images but for a rounding, and equally high, so
-/// each rim is nearly the other's mirror image.
-///
-/// Row Q2910 traced it. There `z = 8`, the leaning cap's plane and the two
-/// cones meet in four points, not one: each three of the four surfaces meet
-/// once, and worked out exactly from the stored numbers the four points are
-/// all within `4.3e-16` of each other. The fuse finds each as a node of its own
-/// on each face it lies on, and orders them along each crossing through them.
+/// Where both caps' rims nearly meet, at about `(−3.9541, −0.6045, 8)`, the
+/// two are mirror images but for a rounding, and equally high, so each rim is
+/// nearly the other's mirror image. Row Q2910 traced it. There `z = 8`, the
+/// leaning cap's plane and the two cones meet in four points, not one: each
+/// three of the four surfaces meet once, and worked out exactly from the
+/// stored numbers the four points are all within `4.3e-16` of each other. The
+/// fuse finds each as a node of its own on each face it lies on, and orders
+/// them along each crossing through them.
 ///
 /// - Round the upright cap's rim from `(0, 4, 8)`, anticlockwise about `z`,
 ///   the meet with the leaning cone comes `4.15e-16` before the meet with the
@@ -126,22 +125,33 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 ///   leaning cone lies `1.84e-16` further along `−x` than the meet with the
 ///   upright cone. Both lie in one box an `ulp` wide along `x` and along `y`,
 ///   and `y` and `z` do not change along that line, so no box parts them.
-///   Every fuse with the upright cone first is refused here.
-/// - Round the leaning cap's rim, every fuse with the leaning cone first is
-///   refused ordering the meet with the upright cone and the meet with `z = 8`,
-///   `4.15e-16` apart.
+/// - Round the leaning cap's rim, the meet with the upright cone and the meet
+///   with `z = 8` are `4.15e-16` apart.
 ///
-/// Every order of the four follows, through which way the four surfaces lean
-/// there, from one sign that no box gives: whether the meet of that line with
-/// the leaning cone is outside the upright cone. Worked out exactly it is, by
-/// `1.46e-15` read as the upright cone's equation `x² + y² − z²/4`.
+/// Since row Q2961 the fuse orders those last two pairs by the exact sign of
+/// one cone at a meet of that line with the other, and puts the meet of that
+/// line with the upright cone, a node of a walk on `z = 8`, inside the leaning
+/// cone by the same exact sign. Until then every fuse was refused undecided
+/// there.
+///
+/// **Every fuse is still refused**, under every rule both ways round, now on
+/// each cone's wall: of the loop and the two branches `intersect` names the
+/// crossing as, the branch beyond the flat surface that holds it apart from
+/// the loop reaches the wall near those four points, and nothing puts points in
+/// order along a branch that runs off for ever. The loop has a start
+/// `where_a_closed_crossing_starts` finds; both branches it refuses
+/// `ACrossingBetweenAConeAndAnotherCurvedSurface`.
 #[test]
-fn two_pointed_cones_one_leaning_off_the_other_answer_every_fuse() {
+fn two_pointed_cones_one_leaning_off_the_other_are_refused_ordering_along_a_branch() {
     assert_eq!(
         every_fuse_of(two_pointed_cones).refusals(),
-        [[None; 2]; 3]
+        [[Some(NOTHING_ORDERS_ALONG_A_BRANCH); 2]; 3]
     );
 }
+
+/// What a fuse is refused with where nothing puts points in order along a
+/// curve it is cut by.
+const NOTHING_ORDERS_ALONG_A_BRANCH: &str = "nothing can put points in order along this curve";
 
 /// **Two pointed cones, one a quarter turn off the other.** Both have slope a
 /// half and height eight, and the second turns a quarter about the `x` axis
