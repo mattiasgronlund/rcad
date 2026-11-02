@@ -85,13 +85,21 @@
 //! the half where it falls. The arrangement now reads the order so, with the
 //! plane of either node as the one climbed across (Q3019).
 //!
-//! The boxes round both corners stop now `Undecidable` with the one record
-//! `side of plane`, at the point where the plane of the box's floor `z = 2.9`
-//! meets the flange's rim on its front, near `(-1.628, -1.27, 2.9)`: the
-//! stop the `D3.0` LED met below, on its rim at the front (Q2995, Q3009). The
-//! far box stops on `order along a crossing` between the front corner and a
-//! point within `1.8e-15` of it, the shape Q2959 folds into the corner, not
-//! folded here (Q3015).
+//! The boxes round both corners stopped then `Undecidable` with the one
+//! record `side of plane`, at the point where the plane of the box's floor
+//! `z = 2.9` meets the flange's rim on its front, near `(-1.628, -1.27, 2.9)`:
+//! the stop the `D3.0` LED met below, on its rim at the front (Q2995). A node
+//! of a walk that cannot tell its side is now passed over, and the walk read
+//! off a node that can (Q3009); a node solved from a pipe and two planes is
+//! read as where the line the two planes share crosses the pipe (Q3017).
+//! Either alone gets both boxes past that point.
+//!
+//! Every box, the far one included, stops now on `order along a crossing`
+//! between the front corner and a point within `1.8e-15` of it, the shape
+//! Q2959 folds into the corner, not folded here (Q3015). The front draws the
+//! circle it meets the body's pipe in twice, as the edge of its hole and as
+//! the pipe cut across it, and the flat's line meets the two a rounding apart
+//! (Q3021).
 //!
 //! These tests pin that. When it answers, each turns back
 //! into the volume check of commit `f179ca02a`: what the box and the LED share
@@ -196,7 +204,9 @@
 //! front disc, the same plane written again, the walk is on. Every node of a
 //! walk is on the walk's side of a crossing it does not run along, or on the
 //! crossing, so a node that cannot tell is now passed over and the walk read
-//! off a node that can (Q3009). It stops now `Undecidable` with the one record
+//! off a node that can (Q3009). Reading a node solved from a pipe and two
+//! planes as where the line the two planes share crosses the pipe gets it past
+//! too, on its own (Q3017). It stops now `Undecidable` with the one record
 //! `order along a crossing`, the far box included, between two points a
 //! rounding apart on the front where `x = 2.24` crosses the body's pipe, near
 //! `(2.24, -3.81, 4.856)`: one where the front's hole meets it, and one where
@@ -221,7 +231,7 @@
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, SIDE_OF_PLANE, Vector};
+use rcad_geom::{Isometry, Vector};
 use rcad_predicates::{Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -240,22 +250,12 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 #[test]
-fn a_box_round_the_back_corner_gets_past_a_meet_far_along_the_flat_and_stops_on_the_side_of_a_point_on_its_rim()
+fn a_box_round_either_corner_gets_past_the_side_of_a_point_on_its_rim_and_stops_on_the_order_of_two_points_at_the_front_corner()
  {
     every_fuse_refuses(
         Z3,
-        &a_box_round_each_of(&[[-1.23, -2.27, 3.0]]),
-        the_side_of_where_the_floor_meets_the_rim_at_the_front_is_undecidable,
-    );
-}
-
-#[test]
-fn a_box_round_the_front_corner_gets_past_a_meet_far_along_the_flat_and_stops_on_the_side_of_a_point_on_its_rim()
- {
-    every_fuse_refuses(
-        Z3,
-        &a_box_round_each_of(&[[-1.23, -1.27, 3.0]]),
-        the_side_of_where_the_floor_meets_the_rim_at_the_front_is_undecidable,
+        &a_box_round_each_of(&[[-1.23, -1.27, 3.0], [-1.23, -2.27, 3.0]]),
+        the_order_of_the_front_corner_and_a_point_beside_it_is_undecidable,
     );
 }
 
@@ -350,27 +350,6 @@ fn every_fuse_refuses(
             ),
         }
     }
-}
-
-/// Refused `Undecidable` with the one record `side of plane`, its one point
-/// within `1e-9` of where the plane of the box's floor, `z = 2.9`, meets the
-/// flange's rim on its front `y = -1.27`, the circle of radius 2.9 about
-/// `x = 1.27, z = 3`, on the flat's side of the axis.
-fn the_side_of_where_the_floor_meets_the_rim_at_the_front_is_undecidable(
-    _: &Model,
-    error: &Error,
-) -> bool {
-    let Error::Undecidable { records } = error else {
-        return false;
-    };
-    let [record] = records.records() else {
-        return false;
-    };
-    let [point] = record.inputs() else {
-        return false;
-    };
-    let on_the_flats_side = 1.27 - (2.9_f64.powi(2) - 0.1_f64.powi(2)).sqrt();
-    record.predicate() == SIDE_OF_PLANE && is_within_1e_9_of(point, [on_the_flats_side, -1.27, 2.9])
 }
 
 /// Refused `Undecidable` with the one record `order along a crossing`, its two
