@@ -118,11 +118,15 @@
 //!   bends was read with a dot product of terms that cancel, and its way out
 //!   at the corner is under `4.6e-16` long, so the sum straddled nothing. It is
 //!   now read as the square of that way out (Q3028). The boxes round the front
-//!   corner and far off now stop refused `Undecidable` on order along a
+//!   corner and far off then stopped refused `Undecidable` on order along a
 //!   crossing, where the box's side `x = -0.33` or a lead's side `x = -0.3`
 //!   meets the flange's rim on its front below the axis: Q3029's stop in the
-//!   `Z10.0` LED, `8` lower, which Q3034 traces to the flange's front and the
-//!   body's front disc, one plane written twice a rounding apart. The box
+//!   `Z10.0` LED, `8` lower, between where the flange's front and the body's
+//!   front disc, one plane written twice a rounding apart, cross that line.
+//!   Their order is now read off which side of one plane the other's meet
+//!   lies (Q3059), and both boxes stop refused `Undecidable` on `orient3d`,
+//!   handed the flat's normal `(-1, 1.6e-16, -1.9e-31)` and two ways out of a
+//!   node (Q3058). The box
 //!   round the back corner stops refused `CannotTellTheCellsOfAFaceApart` on
 //!   the body's pipe, face slot 2. On that face the flat's ellipse has a cap
 //!   about `0.2` long behind the back plane, and the box's side `y = -7.45`
@@ -133,9 +137,9 @@
 //!   is no node, and one walk runs along both sides of the circle (Q3035).
 //!   Every face of the flat lies in front of the back plane, so none reaches
 //!   the pipe's face and the ellipse is no edge of the answer there. Left out
-//!   on the pipe by hand, the fuse gets past it and stops where the box's side
+//!   on the pipe by hand, the fuse got past it and stopped where the box's side
 //!   `x = -0.33` meets the flange's rim on its front below the axis, as the
-//!   boxes above do.
+//!   boxes above did before Q3059.
 //!
 //! What answers is checked as commit `f179ca02a` checks it: what the box and
 //! the LED share is the box's part inside the LED. When a box's difference
@@ -144,15 +148,12 @@
 use std::{env, fs, path::PathBuf};
 
 use rcad_geom::{Deflection, Isometry, Surface, Vector};
-use rcad_predicates::{Point, Policy, ProvenanceLog};
+use rcad_predicates::{ORIENT3D, Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
 const D5: &str = "LED_D5.0mm-3.step";
 const D3: &str = "LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step";
-
-/// What a refusal on the order of two places along one crossing names.
-const ALONG_A_CROSSING: &str = "order along a crossing";
 
 /// Where the box round the D3 LED's corner in two fans of faces on its
 /// flange's front goes, `4.4e-8` below the corner `(-0.23, -6.35, 2)`.
@@ -164,12 +165,6 @@ const THE_BACK_CORNER: [f64; 3] = [-0.23, -7.35, 2.0];
 
 /// The radius of the D3 LED's body's pipe, about `x = 1.27, z = 2`.
 const THE_BODY_PIPES_RADIUS: f64 = 1.5;
-
-/// The radius of the D3 LED's flange's rim, a pipe about the same line.
-const THE_RIMS_RADIUS: f64 = 1.9;
-
-/// The plane one side of one of the D3 LED's leads lies in.
-const A_LEADS_SIDE: f64 = -0.3;
 
 /// Half the side of the box put round each corner.
 const HALF: f64 = 0.1;
@@ -217,31 +212,24 @@ fn a_d3_led_gets_past_how_two_curves_bend_at_its_back_corner_and_stops_on_the_ce
 }
 
 #[test]
-fn a_d3_led_gets_past_its_back_corner_and_stops_where_a_plane_across_meets_its_rim_below_the_axis()
+fn a_d3_led_gets_past_where_a_plane_across_meets_its_rim_and_stops_turning_two_ways_about_its_flat()
 {
-    for (centre, across) in [
-        (THE_FRONT_CORNER, THE_FRONT_CORNER[0] - HALF),
-        (FAR_OFF, A_LEADS_SIDE),
-    ] {
-        every_fuse_refuses(
-            D3,
-            &both_rules_with_a_box_round_each_of(&[centre]),
-            |_, error| {
-                let Error::Undecidable { records } = error else {
-                    return false;
-                };
-                let [record] = records.records() else {
-                    return false;
-                };
-                let below = where_a_plane_across_meets_the_rim_below_the_axis(across);
-                record.predicate() == ALONG_A_CROSSING
-                    && record
-                        .inputs()
-                        .iter()
-                        .all(|point| is_within_1e_9_of(point, below))
-            },
-        );
-    }
+    every_fuse_refuses(
+        D3,
+        &both_rules_with_a_box_round_each_of(&[THE_FRONT_CORNER, FAR_OFF]),
+        |_, error| {
+            let Error::Undecidable { records } = error else {
+                return false;
+            };
+            let [record] = records.records() else {
+                return false;
+            };
+            let [about, _, _] = record.inputs() else {
+                return false;
+            };
+            record.predicate() == ORIENT3D && is_within_1e_9_of(about, [-1.0, 0.0, 0.0])
+        },
+    );
 }
 
 /// The LED in `file` and a box of side `2 * HALF` centred on `centre`, fused
@@ -334,13 +322,6 @@ fn two_ends_of_an_edge_on_the_flange_rim_round_to_one_point(model: &Model, error
             .iter()
             .zip([2.74, on_the_minus_y_side, 3.5])
             .all(|(at, expected)| (at - expected).abs() < 1e-9)
-}
-
-/// Where the plane `x = across` meets the D3 LED's flange's rim on the
-/// flange's front, below the axis.
-fn where_a_plane_across_meets_the_rim_below_the_axis(across: f64) -> [f64; 3] {
-    let down = (THE_RIMS_RADIUS.powi(2) - (1.27 - across).powi(2)).sqrt();
-    [across, -6.35, 2.0 - down]
 }
 
 fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
