@@ -611,3 +611,69 @@ a31350d3's gate at 2026-10-21T20:00:27Z`, beside the whole tree's served line.
 None of the four ran. The gate started at 20:01:05Z and wrote its exit at
 20:02:03Z, 58 s. The step that ran longest was `check-lanes-workflow`, at 57.0
 s, so it still decides how long a served gate takes, as it did on the base.
+
+### 337.10 `check-queue-api-selftest`, served on a key narrower than the tree
+
+*Q3074, 2026-11-02: `check-queue-api-selftest` was keyed on the whole-tree
+fingerprint, like every step in `gate_reusable_steps` other than the five
+above. So a `docs/queue.md` push served it, but every change to the Rust
+kernel — the usual kind of commit — ran it again, for no reason tied to what
+it actually reads.*
+
+**What it costs.** Run alone at `51da3d6e` on 2026-11-02, it took 441 s wall,
+182 s user and 185 s sys. In the three gate logs found where it ran, the
+serial cargo chain beside it (`test`, mostly) took 753 to 1009 s, so
+`check-queue-api-selftest` is not what sets a gate's wall time — but it is
+about 6 CPU minutes of a gate's total that a narrower key can give back. Of
+the 370 commits on `main` from 2026-10-26 to 2026-11-02 that touched anything
+outside `docs/` and `*.md`, 310 touched nothing in `justfile`, `tooling/`,
+`.gitattributes` or `mise.toml` either — so 310 of 370 non-prose commits were
+paying for a run the whole-tree key could not serve, on inputs that had not
+moved.
+
+**What it reads.** `check-queue-api-selftest` copies only `tooling/queue/*.py`
+and `.gitattributes` into a scratch hub (`justfile:18446-18448` at the time
+this was measured) and drives `just queue` against that copy — it reads no
+part of the kernel crates at all. A 90 s `openat`-only `strace -f` of a real
+run, extended by a second trace into the recipe's own loop of cases before it
+was cut off by its own timeout, found nothing opened inside the tree outside
+`justfile`, `tooling/`, `.gitattributes`, `mise.toml` and `mise.lock` — and
+nothing under `docs/` outside the selftest's own scratch repository. `mise.lock`
+is in the key though none of `_timing-hooked-calls-fingerprint`'s four paths
+need anything like it: every `python3` the recipe runs resolves through mise's
+own shim first, and that shim reads the project's `mise.toml` and `mise.lock`
+to pick a version before it ever reaches `tooling/queue/queue.py`.
+
+**The key**, `_queue-api-selftest-fingerprint`: `git ls-tree -r --full-tree
+HEAD` restricted to `justfile`, `tooling/`, `.gitattributes`, `mise.toml` and
+`mise.lock`, plus the same environment block `_code-fingerprint` takes
+(§337.3). Same shape as `_code-fingerprint`, so the two stay easy to compare by
+eye; unlike `_timing-hooked-calls-fingerprint`, there is no `--show` of a
+recipe to add, since `justfile` is itself one of the paths and a change to
+either recipe's own text already moves the key. The record is
+`<git common dir>/rcad-verdicts-queue-api-selftest/<fingerprint>`, beside
+`rcad-verdicts/` and §425.7's `rcad-verdicts-timing-hooked-calls/`. `gate`'s
+own body excludes `check-queue-api-selftest` from the whole-tree `$reusable`
+loop the same way it excludes `check-timing-hooked-calls`, and gives it a
+lookup block and a write-back block shaped like that step's own, against this
+narrower fingerprint and this record directory instead.
+
+**The demonstration.** `check-gate-verdicts-selftest` drives the whole `gate`
+recipe against a disposable git repository, through a copy of this justfile
+committed into that repository as its own `justfile` — `set
+allow-duplicate-recipes` lets a trailing stub `check-queue-api-selftest:` win
+over the real, slow recipe, so the test exercises `gate`'s serve and
+write-back logic for real without paying for the real recipe's minutes. It
+asserts: the first gate runs the step and records it under its own store, not
+the whole-tree one; a commit that touches only `crates/a.rs`, outside the
+narrow set, leaves the fingerprint where it was and is served the step's
+green, without running it again; a commit to `tooling/queue/rows.py`, inside
+the narrow set, moves the fingerprint and the next gate runs the step again.
+
+**The real run.** `just pre-gate gate-lane` on this section's own commit
+passed, 4689 of 4689 tests (7 slow, 79 skipped), and recorded
+`check-queue-api-selftest`'s green under its own store. The step itself ran
+once, cold, at 335.0 s — there was no record yet for this exact fingerprint —
+beside `test`'s own 844.6 s. A later gate on a commit that moves nothing under
+`justfile`, `tooling/`, `.gitattributes` or `mise.toml` is served this step's
+green instead of running it again.
