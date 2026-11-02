@@ -19,6 +19,8 @@ disk. This amends §371.5 and §373.4. The rows are at 474.7.
 474.8 is Mattias's layout: the disk is XFS at `/var/cache/zram`, and kache's
 store moves onto it too. Where 474.3 and 474.4 disagree with 474.8, 474.8 wins.
 474.9 is what was installed, and where it differs from 474.7 or 474.8, it wins.
+474.10 adds a second way build output goes: with its tree, when
+`prune-worktrees` removes it.
 
 ### 474.1 Why not whole worktrees in RAM
 
@@ -486,3 +488,56 @@ fresh tree ran the four runs above and then `just t -p rcad-geom`. Then
 directory gave 202 local hits, 0 misses, `reflinked_bytes` 249,787,538 and
 `copied_bytes` 16,285, with `zero_copy_pct` 100.0. The bytes that were copied
 are about 0.007% of what was restored.
+
+### 474.10 A removed tree's build directories go with it
+
+*Mattias, 2026-11-02, with the zram disk 79G full: "Should we not alos clear
+build directories as part of pruning a workspace?"*
+
+Yes. 474.5 left every build directory to one rule, cleared after 30 idle
+minutes, and counted a finished lane among what that rule covers. The rule is
+Q3039's and has not landed, so today nothing clears a build directory, and the
+ones whose trees are gone are most of the disk.
+
+**What was on the disk at 2026-11-02 09:09Z.** `df` gave 79G used of 126G.
+Every live worktree was asked for its two build directories, root and `fuzz/`,
+with `cargo metadata`. Every directory under `/var/cache/zram/targets` that
+none of them named was put down to the workspace its `deps/*.d` files name:
+
+| Whose | Directories | `du` |
+|---|---|---|
+| a worktree that exists | 19 | 34.8 GiB |
+| an rcad worktree that no longer exists | 41 | 69.9 GiB |
+| a workspace under `/tmp` | 7 | 1.7 GiB |
+| no rcad path and no `/tmp` path in its `.d` files | 21 | 6.4 GiB |
+
+`du` counts a file kache restored by reflink once for every place it sits, so
+69.9 GiB overstates the space. 25.5 GiB of it is `incremental*`, which rustc
+writes itself and kache never holds, so at least that much is real. The 41 were
+all lane trees under `rcad-worktrees/clean-up-dead-sessions-worktrees/`. Eight
+of them were looked up by path, and none exists.
+
+**So `prune-worktrees` clears a tree's build directories when it removes the
+tree.** That is the one moment something knows for certain no build will use
+them again, so it needs no answer to the lock question 474.5 leaves to Q3039.
+The idle rule is still wanted. A tree the harness removes, a `git worktree
+remove` by hand and a scratch workspace under `/tmp` never pass through
+`prune-worktrees`; the last two rows of the table are those.
+
+What the recipe needs:
+
+- **Ask cargo before the tree goes.** `cargo metadata` reads the tree's
+  manifest, so it cannot answer after. `build_directory` comes from `cargo
+  metadata --no-deps --offline --format-version 1` at the root, and from `cargo
+  +nightly metadata` in `fuzz/`, as `_fuzz-timing-rlib-is-clean` asks. Those
+  are the only two workspaces: they are the two tracked `Cargo.toml` files with
+  a `[workspace]` table. All 73 trees answered both at 09:09Z.
+- **Clear only a build directory outside the tree.** With build-dir unset it
+  is `<tree>/target`, which goes with the tree already.
+- **Never touch `/var/cache/zram/kache`**, which is kache's store.
+- **A tree whose cargo cannot answer still goes**, and the recipe prints which
+  build directory it could not find. A tree is not worth keeping for its
+  cache, and the idle rule reaches what is left.
+
+The 41 already left behind are out of the recipe's reach: their trees are gone,
+so cargo cannot name their build directories.
