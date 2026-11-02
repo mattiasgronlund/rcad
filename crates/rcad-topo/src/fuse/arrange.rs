@@ -5348,9 +5348,11 @@ impl<'f> Arrangement<'f> {
     /// line's two meets each node is
     /// ([`Arrangement::as_the_two_meets_of_one_line_say`]), the same meet
     /// of a line two pairs of planes name
-    /// ([`Arrangement::as_three_planes_through_one_line_say`]) and two meets on
+    /// ([`Arrangement::as_three_planes_through_one_line_say`]), two meets on
     /// one line in the flat surface halfway between two mirror cones
     /// ([`Arrangement::as_a_line_in_the_cut_halfway_between_mirror_cones_says`])
+    /// and the sign of one quadric where a line meets another
+    /// ([`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`])
     /// are not asked: no ray here has been shown to need any of them.
     fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         if let Some(read) = self.as_read_round_a_corner(crossing, first, second) {
@@ -5387,6 +5389,10 @@ impl<'f> Arrangement<'f> {
     /// one line in the flat surface halfway between two cones that are mirror
     /// images held apart
     /// ([`Arrangement::as_a_line_in_the_cut_halfway_between_mirror_cones_says`]),
+    /// a meet of two planes' line with a ball, a pipe or a cone against the
+    /// crossing's meet with another of those, read off the sign of the other's
+    /// expression at the first
+    /// ([`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`]),
     /// two meets of a plane's line on a pipe with two planes that cross it in
     /// parallel lines
     /// ([`Arrangement::as_two_cuts_crossing_the_plane_in_parallel_lines_say`]),
@@ -12327,6 +12333,13 @@ impl<'f> Arrangement<'f> {
     /// one of them, and with the part below the lower halves, about every
     /// closed curve (queue row Q2464). Only the part above is on the loop's
     /// side of both planes.
+    ///
+    /// **A node where the line two planes cross in meets a ball, a pipe or a
+    /// cone is read against another of those exactly, where its box cannot
+    /// tell** ([`Arrangement::side_of_a_quadric_where_a_line_meets_another`]).
+    /// The funnel file's two pointed cones, one leaning off the other, have
+    /// such a node a rounding off the leaning cone, and asked its box alone
+    /// every fuse of the two was refused `Undecidable` (Q2961).
     fn which_side_of_everything(
         &self,
         cycle: usize,
@@ -12523,9 +12536,9 @@ impl<'f> Arrangement<'f> {
     /// through `(0, 0, 4)`, meet `z = 8` and the leaning cap's plane in four
     /// points a rounding apart near `(−3.9541, −0.6045, 8)`. The line the two
     /// caps' planes cross in meets the upright cone there, and that meet is a
-    /// node of a walk on `z = 8` that is about `4e−16` off the leaning cone.
-    /// Its box is `5.7e−15` wide along `x`, the cone's value over it spans
-    /// `6.6e−14`, and every fuse of the two was refused (Q2961,
+    /// node of a walk on `z = 8` a rounding off the leaning cone, and inside
+    /// it. Its box is `5.7e−15` wide along `x`, the leaning cone's value over
+    /// it spans `6.6e−14`, and every fuse of the two was refused (Q2961,
     /// `tests/a_funnel_with_a_leaning_spout.rs`).
     fn side_of_a_quadric_where_a_line_meets_another(
         node: &Node,
