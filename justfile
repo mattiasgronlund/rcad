@@ -969,18 +969,20 @@ gate mode="loud" verdicts="reuse" jobs="cores":
 
     # Which of this run's steps an earlier green could stand in for. None is
     # the usual answer inside the selftests, and then there is nothing to look
-    # up and nothing to say. `check-timing-hooked-calls`, `check-queue-api-selftest`
-    # and the steps that check the machine are left out here even when they
-    # are in `gate_reusable_steps`: each gets a key of its own, below, which
-    # the whole-tree fingerprint this loop builds for everything else cannot
-    # stand in for, and mixing them into `$reusable` would serve or record
-    # them off the wrong one.
+    # up and nothing to say. `check-timing-hooked-calls`, `check-queue-api-selftest`,
+    # the steps that check the machine and the five that build and test the
+    # kernel are left out here even when they are in `gate_reusable_steps`:
+    # each gets a key of its own, below, which the whole-tree fingerprint this
+    # loop builds for everything else cannot stand in for, and mixing them
+    # into `$reusable` would serve or record them off the wrong one.
     machine_steps="check-hooks check-questions-selftest check-plugins deny"
+    rust_steps="check check-ignored test test-slow check-release-build"
     reusable=""
     for step in {{ gate_steps }}; do
         [ "$step" != check-timing-hooked-calls ] || continue
         [ "$step" != check-queue-api-selftest ] || continue
         case " $machine_steps " in *" $step "*) continue ;; esac
+        case " $rust_steps " in *" $step "*) continue ;; esac
         case " {{ gate_reusable_steps }} " in *" $step "*) reusable="$reusable $step" ;; esac
     done
     fingerprint="" record="" served=""
@@ -1101,6 +1103,54 @@ gate mode="loud" verdicts="reuse" jobs="cores":
         else
             served="$served check-queue-api-selftest"
             note "· served: check-queue-api-selftest from ${qas_from:0:8}'s gate at $qas_at"
+        fi
+    fi
+
+    # The five steps that build and test the kernel, off a key of what they
+    # read and a record directory of their own (docs/decisions.d/337
+    # §337.11), so a commit that changes no Rust is served them. Shaped like
+    # the whole-tree block rather than the two above it: one record stands
+    # for several steps, names the ones it passed, and holds their counts.
+    rust_reusable=""
+    for step in {{ gate_steps }}; do
+        case " $rust_steps " in *" $step "*) ;; *) continue ;; esac
+        case " {{ gate_reusable_steps }} " in *" $step "*) rust_reusable="$rust_reusable $step" ;; esac
+    done
+    rust_fingerprint="" rust_record=""
+    if [ -n "$rust_reusable" ]; then
+        rust_fingerprint=$($j _code-fingerprint rust)
+        if [[ "$rust_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+            rust_record="$(git rev-parse --path-format=absolute --git-common-dir)/rcad-verdicts-rust/$rust_fingerprint"
+        else
+            note "· verdicts: ${rust_fingerprint:-no fingerprint could be taken} for the cargo steps, so none is served or recorded"
+            rust_fingerprint=""
+        fi
+    fi
+    # A copy, for the whole-tree block's reason.
+    rust_copy="$log.served-rust"
+    rm -f "$rust_copy"
+    rust_trusted="" rust_served=""
+    if [ -n "$rust_record" ] && cp "$rust_record" "$rust_copy" 2>/dev/null; then
+        rust_from=$(sed -n 's/^commit //p' "$rust_copy")
+        rust_at=$(sed -n 's/^date //p' "$rust_copy")
+        rust_passed=$(sed -n 's/^steps //p' "$rust_copy")
+        rust_at_s=$(date -u -d "${rust_at:-unreadable}" +%s 2>/dev/null || echo 0)
+        rust_age=$(( $(date +%s) - rust_at_s ))
+        if [ -z "$rust_from" ] || [ "$rust_at_s" -eq 0 ] || [ -z "$rust_passed" ]; then
+            note "· verdicts: the record for the cargo steps' inputs cannot be read, so they run: $rust_record"
+        elif [ "$verdicts" = fresh ]; then
+            note "· verdicts: fresh, so ${rust_from:0:8}'s green for the cargo steps' inputs is run again, not served"
+        elif [ "$rust_age" -lt 0 ] || [ "$rust_age" -ge 86400 ]; then
+            note "· verdicts: ${rust_from:0:8}'s green for the cargo steps' inputs is from $rust_at, not the last day, so it is run again"
+        elif [[ "$head" == 0* ]]; then
+            note "· verdicts: audit, since this sha starts with 0: ${rust_from:0:8}'s green for the cargo steps' inputs is run again"
+        else
+            rust_trusted=yes
+            for step in $rust_reusable; do
+                case " $rust_passed " in *" $step "*) rust_served="$rust_served $step" ;; esac
+            done
+            [ -z "$rust_served" ] || note "· served:$rust_served from ${rust_from:0:8}'s gate at $rust_at"
+            served="$served$rust_served"
         fi
     fi
 
@@ -1290,7 +1340,12 @@ gate mode="loud" verdicts="reuse" jobs="cores":
         echo "=== last 60 lines of ${names[$first]} ==="
         tail -60 "$steps_dir/$first-${names[$first]}.log"
     fi
-    summary=$($j _gate-summary "$log" "$status" "$failed" "${tree_served:+$served_copy}")
+    # The summary shows one record's counts. The cargo steps' is the one that
+    # holds any, since a record holds only the counts of the steps it names
+    # and the whole tree's names no step that prints a count (§337.11).
+    counts_from=${tree_served:+$served_copy}
+    [ -z "$rust_served" ] || counts_from=$rust_copy
+    summary=$($j _gate-summary "$log" "$status" "$failed" "$counts_from")
 
     # The first failing step that the green on record for this code passed. Not
     # any reusable step: a land gate whose `test-slow` fails over a lane's
@@ -1308,6 +1363,73 @@ gate mode="loud" verdicts="reuse" jobs="cores":
         case " $served " in *" $step "*) ;; *) ran="$ran $step" ;; esac
     done
 
+    # What a passing run learned, written to `record`, the store file of key
+    # `key`: the reusable steps it ran, `ran`, and their counts, added to what
+    # the record named if this run was served from it. `whose` says whose
+    # green it is.
+    record_green() {
+        local record=$1 key=$2 trusted=$3 ran=$4 whose=$5
+        local store new old own
+        store=$(dirname "$record")
+        mkdir -p "$store"
+        new=$(mktemp "$store/.new.XXXXXX")
+        # The record as it is now and not the copy this run read: a violation
+        # in another worktree may have deleted it since, and what it was found
+        # wrong about must not come back.
+        old=""
+        [ -z "$trusted" ] || old=$(cat "$record" 2>/dev/null)
+        own=$(counts_of "$ran")
+        {
+            if grep -q '^steps ' <<<"$old"; then
+                grep -E '^(commit|date|host) ' <<<"$old"
+                echo "$(grep '^steps ' <<<"$old")$ran"
+                grep -E '^(tests|doc tests): ' <<<"$old"
+            else
+                echo "commit $head"
+                echo "date $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                echo "host $(hostname)"
+                echo "steps$ran"
+            fi
+            [ -z "$own" ] || echo "$own"
+        } >"$new"
+        mv "$new" "$record"
+        # Nothing is served past a day, and a week keeps enough to catch a
+        # violation against an expired record.
+        find "$store" -maxdepth 1 -type f -mtime +7 -delete
+        if grep -q '^steps ' <<<"$old"; then
+            note "· verdicts:$ran added to $whose green, ${key:0:12}"
+        else
+            note "· verdicts: $whose green is recorded as ${key:0:12}"
+        fi
+    }
+    # The counts the steps named in `$1` printed, read from their own logs and
+    # not the gate's: two records can be written by one run, and each holds
+    # the counts of the steps it names and no other's.
+    counts_of() {
+        local i
+        : >"$log.counts"
+        for i in "${!names[@]}"; do
+            case " $1 " in *" ${names[$i]} "*) cat "$steps_dir/$i-${names[$i]}.log" >>"$log.counts" ;; esac
+        done
+        $j _gate-summary "$log.counts" 0 | grep -E '^(tests|doc tests): ' | grep -v ': not reached$'
+    }
+    # The same code and the same environment gave a different answer, so the
+    # key is missing an input or a step is not deterministic. Either way the
+    # record is wrong and must go before anything serves it.
+    record_violation() {
+        local record=$1 key=$2 step=$3
+        local from at violations
+        from=$(sed -n 's/^commit //p' "$record")
+        at=$(sed -n 's/^date //p' "$record")
+        violations="$(dirname "$(dirname "$record")")/rcad-verdict-violations"
+        echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $key $step $head passed-at=$from $(hostname)" >>"$violations"
+        rm -f "$record"
+        note "!!! verdict violated: $step failed on code that ${from:0:8}'s gate passed at $at."
+        note "!!! Same code, same environment, different answer: the fingerprint is missing an"
+        note "!!! input, or the step is not deterministic (docs/decisions.md §337.6). The record is"
+        note "!!! deleted, and the case is kept in $violations"
+    }
+
     # What this run learned about the code, written down before the block is
     # printed so that the block stays last. A run served every step learned
     # nothing new.
@@ -1316,52 +1438,35 @@ gate mode="loud" verdicts="reuse" jobs="cores":
             if [ "$($j _code-fingerprint)" != "$fingerprint" ]; then
                 note "· verdicts: not recorded, because the tree changed while the gate ran"
             else
-                store=$(dirname "$record")
-                mkdir -p "$store"
-                new=$(mktemp "$store/.new.XXXXXX")
-                # The record as it is now and not the copy this run read: a
-                # violation in another worktree may have deleted it since, and
-                # what it was found wrong about must not come back.
-                old=""
-                [ -z "$trusted" ] || old=$(cat "$record" 2>/dev/null)
-                own=$($j _gate-summary "$log" 0 | grep -E '^(tests|doc tests): ' | grep -v ': not reached$')
-                {
-                    if grep -q '^steps ' <<<"$old"; then
-                        grep -E '^(commit|date|host) ' <<<"$old"
-                        echo "$(grep '^steps ' <<<"$old")$ran"
-                        grep -E '^(tests|doc tests): ' <<<"$old"
-                    else
-                        echo "commit $head"
-                        echo "date $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-                        echo "host $(hostname)"
-                        echo "steps$ran"
-                    fi
-                    [ -z "$own" ] || echo "$own"
-                } >"$new"
-                mv "$new" "$record"
-                # Nothing is served past a day, and a week keeps enough to
-                # catch a violation against an expired record.
-                find "$store" -maxdepth 1 -type f -mtime +7 -delete
-                if grep -q '^steps ' <<<"$old"; then
-                    note "· verdicts:$ran added to this code's green, ${fingerprint:0:12}"
-                else
-                    note "· verdicts: this code's green is recorded as ${fingerprint:0:12}"
-                fi
+                record_green "$record" "$fingerprint" "$trusted" "$ran" "this code's"
             fi
         elif [ -n "$violated" ]; then
-            # The same code and the same environment gave a different answer,
-            # so the fingerprint is missing an input or a step is not
-            # deterministic. Either way the record is wrong and must go before
-            # anything serves it.
-            from=$(sed -n 's/^commit //p' "$record")
-            at=$(sed -n 's/^date //p' "$record")
-            violations="$(dirname "$(dirname "$record")")/rcad-verdict-violations"
-            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $fingerprint $violated $head passed-at=$from $(hostname)" >>"$violations"
-            rm -f "$record"
-            note "!!! verdict violated: $violated failed on code that ${from:0:8}'s gate passed at $at."
-            note "!!! Same code, same environment, different answer: the fingerprint is missing an"
-            note "!!! input, or the step is not deterministic (docs/decisions.md §337.6). The record is"
-            note "!!! deleted, and the case is kept in $violations"
+            record_violation "$record" "$fingerprint" "$violated"
+        fi
+    fi
+
+    # The cargo steps' own write-back, the same as the whole tree's above but
+    # against their own key and record (§337.11).
+    rust_violated=""
+    if [ -n "$rust_fingerprint" ] && [ -f "$rust_record" ]; then
+        rust_passed=$(sed -n 's/^steps //p' "$rust_record")
+        for step in $failed; do
+            case " $rust_passed " in *" $step "*) rust_violated=$step; break ;; esac
+        done
+    fi
+    rust_ran=""
+    for step in $rust_reusable; do
+        case " $served " in *" $step "*) ;; *) rust_ran="$rust_ran $step" ;; esac
+    done
+    if [ -n "$rust_fingerprint" ] && [ -n "$rust_ran" ]; then
+        if [ "$status" -eq 0 ]; then
+            if [ "$($j _code-fingerprint rust)" != "$rust_fingerprint" ]; then
+                note "· verdicts: the cargo steps are not recorded, because what they read changed while the gate ran"
+            else
+                record_green "$rust_record" "$rust_fingerprint" "$rust_trusted" "$rust_ran" "the cargo steps'"
+            fi
+        elif [ -n "$rust_violated" ]; then
+            record_violation "$rust_record" "$rust_fingerprint" "$rust_violated"
         fi
     fi
 
@@ -1528,17 +1633,58 @@ gate mode="loud" verdicts="reuse" jobs="cores":
 # compiled anyway. `gate` refuses such a tree before it starts (§415), so it
 # meets this sentence when the tree changes while it runs, and its pass is then
 # not recorded; `check-gate-verdicts-selftest` drives that case.
+#
+# **`rust` names what the five steps that build and test the kernel read**:
+# `check`, `check-ignored`, `test`, `test-slow` and `check-release-build`. An
+# strace of each found them opening nothing in the tree outside the cargo and
+# toolchain files, `mise.toml` and `mise.lock`, `crates/`, `fuzz/` and the
+# `justfile` (docs/decisions.d/337 §337.11). So the files are HEAD's tree under
+# those paths, and under the names cargo, mise and kache look for and did not
+# find, all without `*.md`; and of the justfile only what the five run: their
+# recipes and `_slow-tests-filter`'s as `--show` prints them, the settings and
+# exports every recipe gets, and the two values the recipes read. `corpus/` is
+# in it for the manifest that pins `RCAD_STEP_CORPUS`. The environment is the
+# same as the whole tree's. A commit that changes only `tooling/`, the gate's
+# own recipes or `docs/` leaves it where it was, and that is the case it is
+# for: such a commit ran `test` for 842 s.
 [private]
-_code-fingerprint:
+_code-fingerprint of="":
     #!/usr/bin/env bash
     set -euo pipefail
+    of='{{ of }}'
+    case "$of" in
+        ""|rust) ;;
+        *) echo "_code-fingerprint takes 'rust' or nothing, not '$of'" >&2; exit 2 ;;
+    esac
     git rev-parse --verify --quiet HEAD >/dev/null || { echo "there is no commit here"; exit 0; }
     if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
         echo "the tree has uncommitted or untracked files"
         exit 0
     fi
+    # Before the hash rather than inside it, so a recipe that cannot be shown
+    # stops this with no hash printed rather than one that left it out.
+    shown=""
+    if [ "$of" = rust ]; then
+        for recipe in check check-ignored test test-slow check-release-build _slow-tests-filter; do
+            shown+=$('{{ just_executable() }}' --justfile '{{ justfile() }}' --show "$recipe")$'\n'
+        done
+    fi
     {
-        git ls-tree -r --full-tree HEAD | awk -F'\t' '$2 !~ /^docs\// && $2 !~ /\.md$/'
+        if [ "$of" = rust ]; then
+            git ls-tree -r --full-tree HEAD -- Cargo.toml Cargo.lock .cargo .config \
+                rust-toolchain.toml rust-toolchain mise.toml mise.lock mise.local.toml mise.local.lock \
+                .mise.toml .mise.local.toml .mise mise .miserc.toml .miserc.local.toml .tool-versions \
+                .kache.toml crates fuzz corpus \
+                | awk -F'\t' '$2 !~ /\.md$/'
+            echo "-- recipes"
+            printf '%s' "$shown"
+            echo "-- settings"
+            grep -E '^(set|export) ' '{{ justfile() }}' || true
+            echo "-- values"
+            printf '%s\n' '{{ slow_tests }}' '{{ ignored_tests }}'
+        else
+            git ls-tree -r --full-tree HEAD | awk -F'\t' '$2 !~ /^docs\// && $2 !~ /\.md$/'
+        fi
         echo "-- environment"
         for name in $(compgen -e | LC_ALL=C sort); do
             case "$name" in
@@ -2789,8 +2935,13 @@ check-gate-verdicts-selftest:
     g commit -q -m 'cargo steps fixture files'
     rust_commit1=$(g rev-parse HEAD)
     [[ "$rust_commit1" != 0* ]] || fail "the cargo steps' fixture commit starts with 0, so every serving case below is an audit"
-    rust_fp1=$(rust_fingerprint)
+    rust_fp1=$(rust_fingerprint) || fail "the cargo steps' own fingerprint could not be taken: $rust_fp1"
     [[ "$rust_fp1" =~ ^[0-9a-f]{64}$ ]] || fail "the cargo steps' own fingerprint did not come back as a hash: $rust_fp1"
+    rc=0
+    got=$(cd "$repo" && "$j" _code-fingerprint rusty 2>&1) || rc=$?
+    [ "$rc" -eq 2 ] && grep -q "takes 'rust' or nothing, not 'rusty'" <<<"$got" \
+        || fail "_code-fingerprint took a name it does not know, or refused it without saying which"
+    got=""
     tree_fp1=$(fingerprint)
 
     got=$(rust_gate "$rust_steps") || fail "the first gate of the cargo steps failed"
