@@ -243,9 +243,9 @@ pub(crate) struct BakedFace {
     /// the inside of either face is on the other. Read as `lies_in` is, to say
     /// a crossing lies wholly past one, that the face's own crossings miss
     /// it, or that two faces meet on their boundaries alone, these sides
-    /// changed what 24 fuses of boxes and bars gave, among them ones that were
-    /// refused `ResultIsNotManifold`: the faces across a crossing did not agree
-    /// on what to leave out.
+    /// changed what fuses of boxes and bars gave, and some came back refused
+    /// `ResultIsNotManifold`: the faces across a crossing did not agree on what
+    /// to leave out.
     pub(crate) lies_in_as_a_flat_face: SmallVec<[ASideOfAPlane; 2]>,
     /// The cuts every face carrying which meets this one on its boundary
     /// alone, filled in by the gathering step. A crossing with one of these
@@ -3144,22 +3144,24 @@ mod tests {
         }
     }
 
-    /// **A half disc lies on the side of the plane across its straight edge
-    /// that its arc leaves that plane into**, and the flat side of a half bar
-    /// on the side of each cap the bar is on, along its two lines on the
-    /// pipe. Half of a bar of radius one, two high, cut by the plane `x = 0`
-    /// through its axis: the arcs and the lines on the pipe each have an end on
-    /// the plane, and are read by which way they leave it
-    /// ([`super::leaves_each_end_on_the_plane_into_the_side`]).
+    /// **A quarter disc lies on the side of each plane across its straight
+    /// edges that its arc leaves that plane into.** A quarter of a bar of
+    /// radius one, two high, cut by the planes `x = 0` and `y = 0` through its
+    /// axis: each quarter disc's arc runs from `(1, 0)` on the one plane to
+    /// `(0, 1)` on the other, so it is read by which way it leaves each
+    /// ([`super::leaves_each_end_on_the_plane_into_the_side`]), at its start
+    /// for `y = 0` and at its end for `x = 0`. The corner off each plane is
+    /// the other's end of the arc. A half bar has no corner off its cut, since
+    /// the fuse keeps no seam corner on its arc, so it is not asked here.
     #[test]
-    fn a_half_discs_arc_leaves_the_plane_across_its_straight_edge_into_the_half_disc() {
+    fn a_quarter_discs_arc_leaves_each_plane_across_its_straight_edges_into_the_quarter_disc() {
         let policy = Policy::certified();
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
         let bar = model
             .add_round_bar(1.0, 2.0, &Isometry::identity())
             .expect("a bar of radius one, two high");
         let square =
-            crate::ProfileBuilder::new(vec![[0.0, -2.0], [2.0, -2.0], [2.0, 2.0], [0.0, 2.0]])
+            crate::ProfileBuilder::new(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]])
                 .build(&policy, &mut ProvenanceLog::new())
                 .expect("a square");
         let block = model
@@ -3168,7 +3170,7 @@ mod tests {
                 4.0,
                 &Isometry::translation(Vector::new(0.0, 0.0, -1.0)).expect("a shift down `z`"),
             )
-            .expect("a block over the half of the bar past `x = 0`");
+            .expect("a block over the quarter of the bar past `x = 0` and `y = 0`");
         let fused = model
             .fuse(
                 &[bar],
@@ -3177,84 +3179,90 @@ mod tests {
                 &policy,
                 &mut ProvenanceLog::new(),
             )
-            .expect("a bar and a block over half of it share that half");
-        let [half] = fused.solids() else {
-            panic!("half a bar is one solid: {:?}", fused.solids());
+            .expect("a bar and a block over a quarter of it share that quarter");
+        let [quarter] = fused.solids() else {
+            panic!("a quarter of a bar is one solid: {:?}", fused.solids());
         };
-        let inside = PredicatePoint::from([0.5, 0.0, 1.0]);
+        let inside = PredicatePoint::from([0.4, 0.4, 1.0]);
+        let past_each_cut = [[-0.5, 0.4, 1.0], [0.4, -0.5, 1.0]].map(PredicatePoint::from);
 
-        let baked = baked(&model, &[*half]);
+        let baked = baked(&model, &[*quarter]);
 
         let flats: Vec<&super::BakedFace> = baked[0]
             .faces
             .iter()
             .filter(|face| face.surface.as_plane().is_some())
             .collect();
-        assert_eq!(flats.len(), 3, "two half discs and the cut");
-        for flat in flats {
+        assert_eq!(flats.len(), 4, "two quarter discs and the two cuts");
+        let on_the_axis = PredicatePoint::from([0.0, 0.0, 1.0]);
+        let discs: Vec<&super::BakedFace> = flats
+            .into_iter()
+            .filter(|flat| {
+                flat.surface
+                    .as_plane()
+                    .is_some_and(|plane| plane.side_of_point(on_the_axis) != Decision::Zero)
+            })
+            .collect();
+        assert_eq!(discs.len(), 2, "the two cuts hold the axis");
+        for disc in discs {
             assert!(
-                flat.lies_in.is_empty(),
+                disc.lies_in.is_empty(),
                 "a flat face's sides are kept apart"
             );
-            let is_the_cut = flat.surface.as_plane().is_some_and(|plane| {
-                plane.side_of_point(PredicatePoint::from([0.0, 0.0, 1.0])) == Decision::Zero
-            });
-            let outside = if is_the_cut {
-                vec![
-                    PredicatePoint::from([0.5, 0.0, -1.0]),
-                    PredicatePoint::from([0.5, 0.0, 3.0]),
-                ]
-            } else {
-                vec![PredicatePoint::from([-0.5, 0.0, 1.0])]
-            };
             assert_eq!(
-                flat.lies_in_as_a_flat_face.len(),
-                outside.len(),
-                "{:?}: one side of each plane across a straight edge",
-                flat.surface
+                disc.lies_in_as_a_flat_face.len(),
+                2,
+                "{:?}: one side of each cut",
+                disc.surface
             );
-            for side in &flat.lies_in_as_a_flat_face {
+            for side in &disc.lies_in_as_a_flat_face {
                 assert_eq!(
                     side.plane.side_of_point(inside),
                     side.kept(),
-                    "{:?}: inside the half bar is on the side kept",
-                    flat.surface
+                    "{:?}: inside the quarter bar is on the side kept",
+                    disc.surface
                 );
             }
-            for point in outside {
+            for point in past_each_cut {
                 assert!(
-                    !flat
+                    !disc
                         .lies_in_as_a_flat_face
                         .iter()
                         .all(|side| side.plane.side_of_point(point) == side.kept()),
-                    "{:?}: a point past it is outside a side",
-                    flat.surface
+                    "{:?}: a point past a cut is outside a side",
+                    disc.surface
                 );
             }
         }
     }
 
     /// **A pipe's face lies on the side of a plane its edges go round it on
-    /// in a ring** ([`super::go_round_in_one_ring`]). A bar of radius one, two
-    /// high, standing on the top of the block `[0, 4]³` flush with its edge
-    /// `x = 0`, united with it: the top's outline runs through the touch
-    /// `(0, 2, 4)`, so the bar's foot is two arcs, the touch and the seam
-    /// corner `(2, 2, 4)` between them, and no closed edge says which side of
-    /// `z = 4` the pipe is on. The pipe is above it, and below its own top.
+    /// in a ring** ([`super::go_round_in_one_ring`]). A bar of radius two, two
+    /// high, standing on the top of the block `[0, 4] × [0, 8] × [0, 4]` as
+    /// wide as it is, united with it: the bar's foot touches the top's outline
+    /// at `(0, 3, 4)` and `(4, 3, 4)`, which split the top in two, so the foot
+    /// is two arcs between those touches, and no closed edge says which side
+    /// of `z = 4` the pipe is on. The pipe is above it, and below its own top.
+    /// A bar flush with one edge alone does not do: the fuse keeps its foot one
+    /// closed edge, with its corner at the touch.
     #[test]
     fn a_pipes_face_lies_on_the_side_of_a_plane_its_edges_go_round_it_on_in_a_ring() {
         let policy = Policy::certified();
         let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let oblong =
+            crate::ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 8.0], [0.0, 8.0]])
+                .build(&policy, &mut ProvenanceLog::new())
+                .expect("an oblong");
         let block = model
-            .add_cube(4.0, &policy, &mut ProvenanceLog::new())
-            .expect("a block of side four");
+            .add_extrusion(&oblong, 4.0, &Isometry::identity())
+            .expect("a block four wide, eight long and four high");
         let bar = model
             .add_round_bar(
-                1.0,
                 2.0,
-                &Isometry::translation(Vector::new(1.0, 2.0, 4.0)).expect("a shift onto the top"),
+                2.0,
+                &Isometry::translation(Vector::new(2.0, 3.0, 4.0)).expect("a shift onto the top"),
             )
-            .expect("a bar of radius one, two high");
+            .expect("a bar of radius two, two high");
         let fused = model
             .fuse(
                 &[block],
@@ -3267,7 +3275,7 @@ mod tests {
         let [union] = fused.solids() else {
             panic!("the union is one solid: {:?}", fused.solids());
         };
-        let along_the_axis = |z: f64| PredicatePoint::from([1.0, 2.0, z]);
+        let along_the_axis = |z: f64| PredicatePoint::from([2.0, 3.0, z]);
 
         let baked = baked(&model, &[*union]);
 
