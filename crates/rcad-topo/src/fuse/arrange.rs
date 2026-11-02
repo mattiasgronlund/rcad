@@ -25334,6 +25334,87 @@ mod tests {
         arrangement.nodes.len() - 1
     }
 
+    /// The pipe of radius `5/16` along `x` through `(0, 1/2, 3/16)` cuts the
+    /// unit cube's bottom in the lines `y = 1/4` and `y = 3/4`. The planes
+    /// `x = 1/2` and `x + 2⁻⁴⁸ y = 1/2 + 2⁻⁴⁹` cross the bottom in two lines
+    /// that lean apart by `2⁻⁴⁸` and meet at `y = 1/2`, so the second's meet
+    /// with the lower line is `2⁻⁵⁰` further along `x` than the first's, and
+    /// its meet with the upper line `2⁻⁵⁰` behind it. With both meets in one
+    /// box, which comes first is read off which side of one plane the other's
+    /// meet lies, and it is the order the two points give, either way round
+    /// (Q3059). Two lines that lean apart are no parallel lines, so the reading
+    /// of those says nothing.
+    #[test]
+    fn two_planes_that_lean_apart_by_a_rounding_are_ordered_along_a_line_a_pipe_cuts_a_face_in() {
+        let (cube, _) = the_unit_cube_baked_and_the_plane_x_equals_y();
+        let along_x = Axis::new(Point::new(0.0, 0.5, 0.1875), Vector::new(1.0, 0.0, 0.0))
+            .expect("an axis along x");
+        let pipe = Surface::Cylinder(Cylinder::new(along_x, 0.3125).expect("a positive radius"));
+        let lean = f64::powi(2.0, -48);
+        let [straight, leaning] = [[1.0, 0.0, 0.0, -0.5], [1.0, lean, 0.0, -(0.5 + lean / 2.0)]]
+            .map(|plane| Surface::Plane(Plane::from_coefficients(plane).expect("a plane")));
+        let mut bottom = the_face_facing(&cube, [0.0, 0.0, -1.0]);
+        bottom.cuts = vec![pipe];
+        let mut arrangement = drawn_up_to_its_corners(&bottom);
+
+        for (y, leaning_x) in [(0.25, 0.5 + lean / 4.0), (0.75, 0.5 - lean / 4.0)] {
+            let line = (0..arrangement.crossings.len())
+                .find(|&crossing| {
+                    arrangement.crossings[crossing].partner == pipe
+                        && nothing_rules_the_point_out(
+                            arrangement.crossings[crossing].picked_by(),
+                            PredicatePoint::from([0.5, y, 0.0]),
+                        )
+                })
+                .unwrap_or_else(|| panic!("the pipe cuts the bottom in the line y = {y}"));
+            let [first, second] = [(straight, 0.5), (leaning, leaning_x)].map(|(cut, x)| {
+                let mut surfaces = [arrangement.surface, pipe, cut];
+                surfaces.sort_by_key(name_of_surface_bits);
+                arrangement.nodes.push(Node {
+                    point: PredicatePoint::from([x, y, 0.0]),
+                    vertex: None,
+                    made_of: Some((surfaces, 0)),
+                    also: Vec::new(),
+                    half_way_round: false,
+                    crossings: vec![line],
+                });
+                arrangement.nodes.len() - 1
+            });
+            let (as_the_points_say, _) = arrangement
+                .as_the_boxes_say(line, first, second)
+                .expect("two points on a line");
+            assert!(
+                matches!(as_the_points_say, Decision::Pos | Decision::Neg),
+                "two points {lean} apart on y = {y}: {as_the_points_say:?}"
+            );
+
+            let both = PredicatePoint::Constructed([
+                Interval::new(0.5 - lean, 0.5 + lean).expect("a span"),
+                Interval::new(y - lean, y + lean).expect("a span"),
+                Interval::new(-lean, lean).expect("a span"),
+            ]);
+            for node in [first, second] {
+                arrangement.nodes[node].point = both;
+            }
+            assert_eq!(
+                arrangement
+                    .as_two_cuts_crossing_the_plane_in_parallel_lines_say(line, first, second),
+                None,
+                "the two planes cross the bottom in lines that lean apart"
+            );
+            assert_eq!(
+                arrangement.as_two_cuts_across_a_line_along_a_pipe_say(line, first, second),
+                Some(as_the_points_say),
+                "on y = {y}"
+            );
+            assert_eq!(
+                arrangement.as_two_cuts_across_a_line_along_a_pipe_say(line, second, first),
+                Some(the_other_way(as_the_points_say)),
+                "on y = {y}, the other way round"
+            );
+        }
+    }
+
     /// A ball of radius `13s` at `(3s, 4s, 12s)` runs through the corner of a
     /// unit cube at the origin, and the cube's edges there meet it again at
     /// `6s`, `8s` and `24s`. At `s = 2⁻⁴⁸` the nearest of those is one and a
