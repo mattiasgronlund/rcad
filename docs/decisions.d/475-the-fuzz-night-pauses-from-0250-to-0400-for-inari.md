@@ -104,3 +104,30 @@ session sends at 03:00 still runs. inari's job starts only when `load1` is below
   Its `TimeoutStartSec=` stays at 29400, because the night's deadline is still
   08:10.
 - §81 gets a line saying the night now pauses, pointing here.
+
+### 475.5 The first night with the pause fuzzed nothing
+
+The unit was installed on 2026-11-01 (3e770449f). At 00:10 on 11-02 it failed
+in the same second it started, and the journal holds one line from it:
+``error: Justfile does not contain recipe `02:50` ``.
+
+The night runs the `justfile` of its own tree, not `main`'s, and that tree was
+still on `d0a1458d`, the 10-31 night's commit, where `fuzz-overnight` takes
+only `window`. So `just` read `02:50` as a second recipe name and stopped before
+the recipe ran. The recipe is also what moves the tree onto `main` (§186), so
+the tree cannot get past this by itself. It will fail the same way every night
+until somebody moves it.
+
+The fix is the hand move that §81.4 keeps for this case, run once:
+`git -C ~/git/mattiasgronlund/rcad-nightly-fuzz checkout --detach origin/main`.
+After that the tree is on a commit whose recipe takes the pause, and that
+recipe passes the pause on when it moves to a newer tip and runs again
+(`pause_args` in `fuzz-overnight`). So the next night works, and so does every
+night after it.
+
+**The rule this leaves:** a new argument in `rcad-fuzz.service` waits until
+the night's tree is on a commit whose recipe takes that argument. The gate
+cannot see this. `check-systemd-units` compares the unit with `tooling/systemd/`,
+not with the night's tree, so both commits here passed it. This is §108's
+shape again: a night that fuzzed nothing because of what it found on its PATH,
+this time because of what it found in its own tree.
