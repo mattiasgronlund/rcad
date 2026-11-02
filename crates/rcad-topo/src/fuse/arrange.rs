@@ -1842,7 +1842,31 @@ impl<'f> Arrangement<'f> {
     /// and a surface crossing the curve of a corner with two surfaces round
     /// it, within what writing the corner down cost
     /// ([`Arrangement::a_corner_of_two_surfaces_is_where_the_partner_crosses_their_curve`]).
+    ///
+    /// **The face's own plane written a second time is always asked.** Across
+    /// an edge between two flat faces that runs along a curved surface
+    /// ([`BakedEdge::along_a_curved_surface`]) is this face's own plane a
+    /// rounding off, and the two cross in a line that can run anywhere on the
+    /// face. A corner on both planes to within a rounding is then not near
+    /// that line at all. A KiCad D3.0 LED's flange front has the corners of
+    /// its body pipe's hole at `(1.27, -6.35, 3.5)`, `(-0.23, -6.35, 2)` and
+    /// `(2.77, -6.35, 2)` on its body's front disc too, and the line where the
+    /// two planes cross runs at about `z = 1.5`. Taken through all three
+    /// unasked, that line zigzagged across the face, and the windings of its
+    /// cells could not be counted (Q3071). Asked, the stored corner is told off
+    /// the plane exactly, and the line meets the hole only where it really
+    /// does.
+    ///
+    /// [`BakedEdge::along_a_curved_surface`]: super::bake::BakedEdge::along_a_curved_surface
     fn place_the_corners(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
+        let own_plane_written_again: SmallVec<[Surface; 1]> = self
+            .face
+            .wires
+            .iter()
+            .flatten()
+            .filter(|edge| edge.along_a_curved_surface.is_some())
+            .map(|edge| edge.across)
+            .collect();
         for wire in 0..self.face.wires.len() {
             let mut corners = Vec::new();
             let count = self.face.wires[wire].len();
@@ -1861,15 +1885,20 @@ impl<'f> Arrangement<'f> {
                     // cone at a node, and the turn between them is undecided
                     // (§224.2's joined cone, taken back in).
                     let crossing = &self.crossings[index];
-                    let on_it = if corner.is_on_by_construction(&crossing.partner)
-                        || self.a_corner_on_a_cap_circle_is_where_two_pipes_touch(
-                            &corner,
-                            &crossing.partner,
-                        )
-                        || self.a_corner_of_two_surfaces_is_where_the_partner_crosses_their_curve(
-                            &corner,
-                            &crossing.partner,
-                        ) {
+                    let asked_anyway = own_plane_written_again
+                        .iter()
+                        .any(|again| one_surface(again, &crossing.partner));
+                    let on_it = if !asked_anyway
+                        && (corner.is_on_by_construction(&crossing.partner)
+                            || self.a_corner_on_a_cap_circle_is_where_two_pipes_touch(
+                                &corner,
+                                &crossing.partner,
+                            )
+                            || self
+                                .a_corner_of_two_surfaces_is_where_the_partner_crosses_their_curve(
+                                    &corner,
+                                    &crossing.partner,
+                                )) {
                         nothing_rules_the_point_out(crossing.picked_by(), at)
                     } else {
                         self.passes_through(index, &corner, policy, log)?
