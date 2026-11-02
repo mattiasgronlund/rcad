@@ -4389,10 +4389,20 @@ impl<'f> Arrangement<'f> {
     }
 
     /// Whether every face carrying `surface` lies in a side of a plane that
-    /// shares no point with `side` ([`two_sides_share_no_point`]).
+    /// shares no point with `side` ([`two_sides_share_no_point`]), or in the
+    /// other closed side of `side`'s own plane.
+    ///
+    /// **The other closed side shares the plane, and the inside of no face in
+    /// it is on the plane** ([`BakedFace::lies_in`]): so no point of a face in
+    /// `side` is on the inside of a face in the other, though the two may meet
+    /// on their boundaries. A flat along a pipe's side, ending on the plane the
+    /// pipe ends on, is the shape (Q3048): its crossing with the pipe runs on
+    /// past the pipe's end, where no face of the flat reaches it.
     fn its_faces_lie_apart_from(&self, surface: Surface, side: ASideOfAPlane) -> bool {
-        self.the_sides_its_faces_lie_in(surface)
-            .any(|theirs| two_sides_share_no_point(theirs, side))
+        self.the_sides_its_faces_lie_in(surface).any(|theirs| {
+            two_sides_share_no_point(theirs, side)
+                || the_other_closed_side_of_its_plane(theirs, side)
+        })
     }
 
     /// A closed crossing with no node on it still needs one.
@@ -17725,7 +17735,7 @@ fn the_same_pickers_in_any_order(one: &[Picker], other: &[Picker]) -> bool {
 /// normal for a plane, `x − c` for a ball, and `|w|²(x − o) − (w·(x − o))w` for
 /// a pipe. For a plane it does not depend on the point at all, which is why the
 /// planar arithmetic here is exactly what it was.
-fn gradient_at(surface: &Surface, at: PredicatePoint) -> PredicatePoint {
+pub(super) fn gradient_at(surface: &Surface, at: PredicatePoint) -> PredicatePoint {
     match surface {
         Surface::Plane(flat) => PredicatePoint::from(flat.normal().components()),
         Surface::Sphere(ball) => {
@@ -18156,7 +18166,7 @@ fn how_far_off_its_skin(round: &Surface, at: [f64; 3]) -> Option<Interval> {
     )
 }
 
-fn dot_of(one: [Interval; 3], other: [Interval; 3]) -> Interval {
+pub(super) fn dot_of(one: [Interval; 3], other: [Interval; 3]) -> Interval {
     (0..3)
         .map(|axis| one[axis] * other[axis])
         .fold(Interval::exactly(0.0), |so_far, term| so_far + term)
@@ -19520,6 +19530,22 @@ fn two_sides_share_no_point(one: ASideOfAPlane, other: ASideOfAPlane) -> bool {
         (true, false) => one.plane.offset() < offset,
         (false, true) => offset < one.plane.offset(),
         (true, true) | (false, false) => false,
+    }
+}
+
+/// Whether `other` is the closed side of `one`'s own plane opposite `one`,
+/// read from the numbers as stored as [`two_sides_share_no_point`] reads
+/// them: written with one normal, or each with the other's turned round, at
+/// one offset, facing apart.
+fn the_other_closed_side_of_its_plane(one: ASideOfAPlane, other: ASideOfAPlane) -> bool {
+    let normal = one.plane.normal().components();
+    let theirs = other.plane.normal().components();
+    if theirs == normal {
+        other.plane.offset() == one.plane.offset() && other.behind != one.behind
+    } else if theirs == normal.map(|component| -component) {
+        -other.plane.offset() == one.plane.offset() && other.behind == one.behind
+    } else {
+        false
     }
 }
 
@@ -21977,7 +22003,7 @@ const A_PLANE_AGAINST_AN_AXIS: &str = "a plane against an axis";
 const A_PLANE_AGAINST_A_CONE: &str = "a plane against a cone";
 
 /// The cross product of two boxes.
-fn cross_of(one: PredicatePoint, other: PredicatePoint) -> [Interval; 3] {
+pub(super) fn cross_of(one: PredicatePoint, other: PredicatePoint) -> [Interval; 3] {
     cross_of_intervals(one.enclosure(), other.enclosure())
 }
 
