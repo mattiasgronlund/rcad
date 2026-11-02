@@ -20,7 +20,8 @@ disk. This amends §371.5 and §373.4. The rows are at 474.7.
 store moves onto it too. Where 474.3 and 474.4 disagree with 474.8, 474.8 wins.
 474.9 is what was installed, and where it differs from 474.7 or 474.8, it wins.
 474.10 adds a second way build output goes: with its tree, when
-`prune-worktrees` removes it.
+`prune-worktrees` removes it. 474.11 answers 474.5's question of which lock
+cargo holds during a build, and says what `clean-targets` keeps.
 
 ### 474.1 Why not whole worktrees in RAM
 
@@ -164,7 +165,9 @@ tree.
 The one guard is not clearing a directory under a build that is running. The
 scratch crate left `.cargo-lock` and `.cargo-artifact-lock` in `target/debug`,
 not in the build directory. Which lock cargo 1.96 holds during a build, and in
-which of the two directories, is for Q3039 to find before it relies on one.
+which of the two directories, was for Q3039 to find before it relied on one.
+474.11 has the answer: `.cargo-build-lock`, in the build directory itself, and
+no lock at all while `cargo test` runs the tests it built.
 
 ### 474.6 What to read once this has run a week
 
@@ -200,7 +203,9 @@ which of the two directories, is for Q3039 to find before it relies on one.
     XFS on a zram device. It records whether a restore reflinks (474.8).
 - **Q3039, after Q3037: clear idle build directories (474.5)** in place of
   sweeping `target/`, in `clean-targets` and its timer and selftest. It never
-  touches `/var/cache/zram/kache`, which is kache's store.
+  touches `/var/cache/zram/kache`, which is kache's store. (474.11: the timer
+  and its unit change on `main` together with their install, in a row of their
+  own.)
 - **Q3038: make the scratchpads, `open-questions.md` and handoffs survive a
   reboot.**
   - Today they are in `/tmp`, which `systemd-tmpfiles` empties at every boot.
@@ -497,7 +502,7 @@ build directories as part of pruning a workspace?"*
 Yes. 474.5 left every build directory to one rule, cleared after 30 idle
 minutes, and counted a finished lane among what that rule covers. The rule is
 Q3039's and has not landed, so today nothing clears a build directory, and the
-ones whose trees are gone are most of the disk.
+ones whose trees are gone are most of the disk. (474.11 is that rule.)
 
 **What was on the disk at 2026-11-02 09:09Z.** `df` gave 79G used of 126G.
 Every live worktree was asked for its two build directories, root and `fuzz/`,
@@ -541,3 +546,104 @@ What the recipe needs:
 
 The 41 already left behind are out of the recipe's reach: their trees are gone,
 so cargo cannot name their build directories.
+
+### 474.11 Which lock cargo holds, and what `clean-targets` keeps
+
+474.5 left one question: which lock cargo 1.96 holds while it builds, and in
+which directory. **It is `.cargo-build-lock`, in the build directory, one beside
+each profile it builds. No lock is held while `cargo test` runs the tests it
+built.** So `clean-targets` takes those locks, and also keeps a directory that a
+program is running from.
+
+**The measurement.** A scratch crate under cargo 1.96.0, with
+`~/.cargo/config.toml`'s build-dir set (474.9) and a `build.rs` that sleeps
+15 s. While the build script slept, `lslocks` showed cargo holding three
+`flock`s:
+
+- `FLOCK WRITE` on `<build directory>/debug/.cargo-build-lock`;
+- `FLOCK READ` on `target/debug/.cargo-lock`;
+- `FLOCK WRITE` on `target/debug/.cargo-artifact-lock`.
+
+A `--target x86_64-unknown-linux-gnu` build held those three, and the same
+three again under `x86_64-unknown-linux-gnu/debug/`. Once cargo exited, `flock
+-n` took every one of them. While `cargo test` ran a test that sleeps 15 s, it
+took every one of them too, and the test's process was running
+`<build directory>/debug/deps/lockprobe-<hash>`. With the build directory's
+`.cargo-build-lock` held from a shell, `cargo build` printed `Blocking waiting
+for file lock on build directory` and waited.
+
+The two locks in `target/` say the same about `target/`, which `clean-targets`
+no longer touches.
+
+**Where the locks sit on the machine.** At 2026-11-02 15:55Z, the
+`.cargo-build-lock` files under `/var/cache/zram/targets` were at these places
+inside their build directories:
+
+| Where | How many |
+|---|---|
+| `debug/` | 52 |
+| `release/` | 36 |
+| `wildcards/debug/` | 15 |
+| `x86_64-unknown-linux-gnu/release/` | 8 |
+| `armv7-unknown-linux-gnueabihf/debug/` | 1 |
+
+`wildcards/` is `check-wildcards`'s own build directory inside the tree's
+(474.9). So the recipe looks for the lock at any depth, not at a list of
+profiles.
+
+**What `clean-targets` does now.** Each directory two levels under
+`/var/cache/zram/targets` is one build directory, since `{workspace-path-hash}`
+makes two levels. It is cleared only when all of these hold:
+
+- Nothing anywhere in it changed in the last 30 minutes. Any file or directory
+  in it decides, not the directory's own time, which moves only when its own
+  entries do.
+- Every `.cargo-build-lock` in it can be taken with `flock -n`.
+- It has at least one, since a directory with none cannot say whether a cargo
+  is building there; and `find` read all of it.
+- No process is running a program from it, read from `/proc/<pid>/exe`.
+
+It keeps the locks while it renames the directory to a `.clearing-*` name
+beside the others, then lets them go and deletes it. The rename is instant, and
+the delete takes as long as the directory is big. A run killed between the two
+leaves a `.clearing-*` directory, and the next run deletes it. A run takes a
+lock on `/var/cache/zram/targets` first, and a second run that finds it taken
+clears nothing and exits 0. It refuses a directory that holds kache's store or
+sits inside it, and exits 1 when `/var/cache/zram/targets` is missing, which is
+the disk not being mounted. The recipe's comment block says why for each, and
+`check-clean-targets-selftest` builds each case in a miniature disk. The
+selftest failed on the old recipe.
+
+**What it would clear today.** The same checks with nothing deleted, at
+2026-11-02 15:55Z: 65 build directories, 7 with something changed in the last
+30 minutes, none without a lock file, none locked, none running a program, so
+58 would be cleared. The pass took 3.9 s. One about ten minutes earlier counted
+63 and 57, in 3.6 s. `df` gave the disk 77G used of 126G.
+
+**The unit files are unchanged, and that is a row of its own.** The installed
+`rcad-clean-targets.service` runs `just clean-targets` with no arguments in
+`main`'s tree, and the recipe's defaults are the zram paths, so it runs the new
+rule as soon as this reaches `main`. What is stale is the wording, which still
+says it strips `target/`, and the hourly timer: a directory idle for 30
+minutes can wait up to 90 before it goes. They are not changed here because
+`check-systemd-units` fails any gate whose tracked pair differs from the
+installed copy, and the pair is installed on this machine. A lane that changed
+the pair would fail its own gate until the install, and every other tree's
+gate would fail after it. So the pair changes on `main` together with its
+install, as 3e770449f did for `rcad-fuzz.service`.
+
+**Not tried, so not claimed either way.** A row from Q3039 tries both.
+
+- **A test run caught between two tests.** nextest runs each test in a process
+  of its own. If its build finished more than 30 minutes ago, and a run of
+  `clean-targets` lands at a moment when no test process is running, the
+  directory is cleared, and the next test fails to start.
+- **A cargo waiting on the lock while the directory is renamed.** It opened
+  `.cargo-build-lock` before the rename. Once the recipe lets go, it holds the
+  lock on the file now under `.clearing-*`, and builds into a fresh directory
+  at the old path. A second cargo starting then takes the fresh directory's own
+  lock, and the first one's lock does not keep it out.
+
+474.10 says why `prune-worktrees` needs no lock: it clears a build directory
+only together with its tree. `clean-targets` never asks which tree a build
+directory is for, so the two need no helper in common.
