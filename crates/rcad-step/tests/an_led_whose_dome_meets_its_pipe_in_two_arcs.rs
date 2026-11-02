@@ -124,9 +124,18 @@
 //!   `Z10.0` LED, `8` lower, between where the flange's front and the body's
 //!   front disc, one plane written twice a rounding apart, cross that line.
 //!   Their order is now read off which side of one plane the other's meet
-//!   lies (Q3059), and both boxes stop refused `Undecidable` on `orient3d`,
-//!   handed the flat's normal `(-1, 1.6e-16, -1.9e-31)` and two ways out of a
-//!   node (Q3058). The box
+//!   lies (Q3059). Both boxes then stopped refused `Undecidable` on
+//!   `orient3d`, handed the flat's normal `(-1, 1.6e-16, -1.9e-31)`, where the
+//!   flat's thin ellipses with the body's pipe and the flange's rim cross
+//!   `7.5e14` up `y`, and the pipes' gradients there were boxes `0.9` wide
+//!   along `y`. They are now read again as `w x ((x - o) x w)`, where that
+//!   coordinate never meets itself. On the flat, the flange's front and the
+//!   body's front disc then both run through the corner `(-0.23, -6.35, 2)`
+//!   and cross `0.486` lower, so the slivers between the two lines were walked
+//!   twice. Two lines meet once, so the corner is now read as a place they
+//!   touch (Q3058). Both boxes stop refused `CannotTellTheCellsOfAFaceApart`
+//!   on the flange's front, face slot 8, which the body's front disc, a
+//!   rounding off the flange front's own plane, also cuts. Untraced. The box
 //!   round the back corner stops refused `CannotTellTheCellsOfAFaceApart` on
 //!   the body's pipe, face slot 2. On that face the flat's ellipse has a cap
 //!   about `0.2` long behind the back plane, and the box's side `y = -7.45`
@@ -148,7 +157,7 @@
 use std::{env, fs, path::PathBuf};
 
 use rcad_geom::{Deflection, Isometry, Surface, Vector};
-use rcad_predicates::{ORIENT3D, Point, Policy, ProvenanceLog};
+use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -212,22 +221,24 @@ fn a_d3_led_gets_past_how_two_curves_bend_at_its_back_corner_and_stops_on_the_ce
 }
 
 #[test]
-fn a_d3_led_gets_past_where_a_plane_across_meets_its_rim_and_stops_turning_two_ways_about_its_flat()
-{
+fn a_d3_led_gets_past_two_lines_on_its_flat_that_meet_below_its_front_corner_and_stops_on_the_cells_of_its_flange_front()
+ {
     every_fuse_refuses(
         D3,
         &both_rules_with_a_box_round_each_of(&[THE_FRONT_CORNER, FAR_OFF]),
-        |_, error| {
-            let Error::Undecidable { records } = error else {
+        |model, error| {
+            let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
                 return false;
             };
-            let [record] = records.records() else {
+            let face = model.face(*face).expect("the face is the LED's own");
+            let Surface::Plane(plane) = face.surface() else {
                 return false;
             };
-            let [about, _, _] = record.inputs() else {
-                return false;
-            };
-            record.predicate() == ORIENT3D && is_within_1e_9_of(about, [-1.0, 0.0, 0.0])
+            let [x, y, z, d] = plane.coefficients();
+            face.wire_count() == 2
+                && [x, y - 1.0, z, d - 6.35]
+                    .iter()
+                    .all(|part| part.abs() < 1e-9)
         },
     );
 }
@@ -322,14 +333,6 @@ fn two_ends_of_an_edge_on_the_flange_rim_round_to_one_point(model: &Model, error
             .iter()
             .zip([2.74, on_the_minus_y_side, 3.5])
             .all(|(at, expected)| (at - expected).abs() < 1e-9)
-}
-
-fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
-    point
-        .enclosure()
-        .iter()
-        .zip(at)
-        .all(|(side, at)| (side.lo() - at).abs() < 1e-9 && (side.hi() - at).abs() < 1e-9)
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
