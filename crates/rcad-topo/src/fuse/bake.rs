@@ -69,8 +69,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use rcad_geom::{
-    Cylinder, EdgeRun, Isometry, MeetOfThree, Orientation, Picker, Plane, Point, Surface,
-    WHERE_THREE_SURFACES_MEET, meet_of_three_surfaces, where_a_corner_lands_after_moving,
+    Cylinder, EdgeRun, Isometry, MeetOfThree, Orientation, Picker, Plane, PlaneAgreement, Point,
+    Surface, WHERE_THREE_SURFACES_MEET, meet_of_three_surfaces, where_a_corner_lands_after_moving,
     which_two_surfaces_a_run_is_between, which_way_a_closed_crossing_turns,
 };
 use rcad_predicates::{
@@ -230,8 +230,23 @@ pub(crate) struct BakedFace {
     /// Sides of planes the whole face is proved to lie in, closed: a plane
     /// may hold points of its boundary but none of its inside. Empty for
     /// every face but a pipe's or a ring's, one input face with a closed edge
-    /// across a plane ([`the_sides_of_planes_it_lies_in`]).
+    /// across a plane, or a ring of edges across one round a pipe
+    /// ([`the_sides_of_planes_it_lies_in`]).
     pub(crate) lies_in: SmallVec<[ASideOfAPlane; 2]>,
+    /// For a flat face, the sides of planes across its straight edges that
+    /// its boundary, and so the whole face, lies in, closed as
+    /// [`BakedFace::lies_in`] is ([`the_sides_a_flat_face_lies_in`]); empty for
+    /// every other face.
+    ///
+    /// **Kept apart from `lies_in`, and read only where a face lies in the
+    /// other closed side of one of these planes** (Q3048), so that no point of
+    /// the inside of either face is on the other. Read as `lies_in` is, to say
+    /// a crossing lies wholly past one, that the face's own crossings miss
+    /// it, or that two faces meet on their boundaries alone, these sides
+    /// changed what 24 fuses of boxes and bars gave, among them ones that were
+    /// refused `ResultIsNotManifold`: the faces across a crossing did not agree
+    /// on what to leave out.
+    pub(crate) lies_in_as_a_flat_face: SmallVec<[ASideOfAPlane; 2]>,
     /// The cuts every face carrying which meets this one on its boundary
     /// alone, filled in by the gathering step. A crossing with one of these
     /// crosses no boundary of either solid inside the face, and the
@@ -244,6 +259,11 @@ pub(crate) struct BakedFace {
     /// place a meet on lies wholly past one of them, so that no face of the cut
     /// reaches it (Q1909).
     pub(crate) sides_the_faces_of_each_cut_lie_in: Vec<(Surface, SmallVec<[ASideOfAPlane; 2]>)>,
+    /// The same for [`BakedFace::lies_in_as_a_flat_face`]: for each flat cut,
+    /// the sides of planes every face carrying it lies in by its boundary,
+    /// filled in by the gathering step, the face's own surface among them.
+    pub(crate) sides_the_flat_faces_of_each_cut_lie_in:
+        Vec<(Surface, SmallVec<[ASideOfAPlane; 2]>)>,
     /// Each cap this face is, or has a side along, that is square to its own
     /// pipe's axis through where the axis starts, as stored, with that pipe
     /// ([`the_cap_through_the_start_of_its_axis`]). Empty for every face but a
@@ -980,8 +1000,10 @@ fn bake_the_joined_faces(
             cuts: Vec::new(),
             bounds: round_this_face,
             lies_in: SmallVec::new(),
+            lies_in_as_a_flat_face: SmallVec::new(),
             cuts_that_reach_only_its_boundary: Vec::new(),
             sides_the_faces_of_each_cut_lie_in: Vec::new(),
+            sides_the_flat_faces_of_each_cut_lie_in: Vec::new(),
             caps_through_the_start_of_their_axis: Vec::new(),
             corners_of_the_solids_cutting_it: Vec::new(),
         });
@@ -2095,12 +2117,15 @@ fn bake_one_face(
         cuts: Vec::new(),
         bounds,
         lies_in: SmallVec::new(),
+        lies_in_as_a_flat_face: SmallVec::new(),
         cuts_that_reach_only_its_boundary: Vec::new(),
         sides_the_faces_of_each_cut_lie_in: Vec::new(),
+        sides_the_flat_faces_of_each_cut_lie_in: Vec::new(),
         caps_through_the_start_of_their_axis: caps,
         corners_of_the_solids_cutting_it: Vec::new(),
     };
     baked.lies_in = the_sides_of_planes_it_lies_in(&baked);
+    baked.lies_in_as_a_flat_face = the_sides_a_flat_face_lies_in(&baked);
     Ok(baked)
 }
 
@@ -2141,9 +2166,10 @@ fn the_cap_through_the_start_of_its_axis(
     Some(ACapThroughTheStartOfItsAxis { cap, pipe })
 }
 
-/// The side of each plane across a closed edge of a pipe's or a ring's face
-/// that the whole face lies on, where that is proved, and nothing for any
-/// other face.
+/// The side of each plane across a closed edge of a pipe's or a ring's face,
+/// or round a pipe's face in a ring of edges, that the whole face lies on,
+/// where that is proved, and nothing for any other face. A flat face's are
+/// kept apart ([`BakedFace::lies_in_as_a_flat_face`]).
 ///
 /// **One input face, or nothing.** A face of the model is in one piece, and
 /// so its inside, which misses each plane below, lies on one side of it. A
@@ -2153,7 +2179,11 @@ fn the_cap_through_the_start_of_its_axis(
 /// **A pipe's.** A plane that crosses a pipe in a closed curve leans to its
 /// axis, so it crosses the pipe in that one ellipse and nowhere else. The
 /// face's inside misses the edge, so it misses the plane, and is on the side
-/// [`BakedEdge::inside_across`] says.
+/// [`BakedEdge::inside_across`] says. **Or the edges across the plane go
+/// round in one ring**, each one's end the next one's start, as where a flat
+/// along a pipe's side puts a corner on its rim (Q3048): the edges of a model
+/// do not run over each other, so the ring is that whole ellipse, and a corner
+/// off the plane says which side the face is on.
 ///
 /// **A ring's**, between two planes through its axis and no other edges: each
 /// plane crosses the ring in two circles, the edge and its mirror across the
@@ -2170,7 +2200,7 @@ fn the_sides_of_planes_it_lies_in(face: &BakedFace) -> SmallVec<[ASideOfAPlane; 
         return SmallVec::new();
     }
     let edges: Vec<&BakedEdge> = face.wires.iter().flatten().collect();
-    let sides: SmallVec<[ASideOfAPlane; 2]> = edges
+    let mut sides: SmallVec<[ASideOfAPlane; 2]> = edges
         .iter()
         .filter_map(|edge| {
             Some(ASideOfAPlane {
@@ -2180,6 +2210,18 @@ fn the_sides_of_planes_it_lies_in(face: &BakedFace) -> SmallVec<[ASideOfAPlane; 
         })
         .collect();
     if let Surface::Cylinder(_) = face.surface {
+        for edge in &edges {
+            let Some(plane) = edge.across.as_plane() else {
+                continue;
+            };
+            if sides.iter().any(|side| side.plane == *plane) || !go_round_in_one_ring(&edges, plane)
+            {
+                continue;
+            }
+            if let Some(side) = the_side_a_corner_off_it_is_on(&edges, plane) {
+                sides.push(side);
+            }
+        }
         return sides;
     }
     if let Surface::Torus(ring) = face.surface {
@@ -2197,6 +2239,227 @@ fn the_sides_of_planes_it_lies_in(face: &BakedFace) -> SmallVec<[ASideOfAPlane; 
         }
     }
     SmallVec::new()
+}
+
+/// The side of each plane across a straight edge of a flat face that the
+/// whole face lies on, where its boundary proves it, and nothing for any
+/// other face ([`BakedFace::lies_in_as_a_flat_face`]).
+///
+/// **A flat region lies in a closed side of another plane exactly when its
+/// boundary does.** Through a point of it strictly past the plane runs a line
+/// in its own plane, along the line the two planes cross in, that stays
+/// strictly past it; the line leaves the region somewhere, and there it is on
+/// the boundary. So this holds for a group of faces of one plane as much as
+/// for one face, since the wires hold the group's boundary. The inside then
+/// misses the plane: round a point of the inside on it, the face would have
+/// points on both sides.
+///
+/// Each edge stays in the side ([`stays_in_the_side`]), and a corner off the
+/// plane says which side that is.
+fn the_sides_a_flat_face_lies_in(face: &BakedFace) -> SmallVec<[ASideOfAPlane; 2]> {
+    let Surface::Plane(flat) = face.surface else {
+        return SmallVec::new();
+    };
+    let edges: Vec<&BakedEdge> = face.wires.iter().flatten().collect();
+    let mut asked: Vec<Plane> = Vec::new();
+    let mut sides: SmallVec<[ASideOfAPlane; 2]> = SmallVec::new();
+    for edge in &edges {
+        let Some(&plane) = edge.across.as_plane() else {
+            continue;
+        };
+        if edge.along_a_curved_surface.is_some() || asked.contains(&plane) {
+            continue;
+        }
+        asked.push(plane);
+        if flat.agreement_with(&plane) != PlaneAgreement::Different {
+            continue;
+        }
+        let Some(side) = the_side_a_corner_off_it_is_on(&edges, &plane) else {
+            continue;
+        };
+        if edges
+            .iter()
+            .all(|edge| stays_in_the_side(face, edge, side, &edges))
+        {
+            sides.push(side);
+        }
+    }
+    sides
+}
+
+/// Whether every point of `edge`, an edge of the flat face `face`, is in the
+/// closed `side`:
+///
+/// - **an edge across the side's plane** lies on it;
+/// - **a straight edge** with both ends in the side lies between them;
+/// - **an arc of the curve the face's plane crosses a ball, a pipe or a cone
+///   in**, with an end on the plane and the other in the side, that leaves
+///   each end on the plane into the side
+///   ([`leaves_each_end_on_the_plane_into_the_side`]). The two planes cross
+///   in a line, which meets the ball, the pipe or the cone in two points at
+///   most unless it lies on it, and an arc leaving the plane at an end is not
+///   along that line. So the arc meets the plane at one more point at most,
+///   and each piece of it either side of that point is next to an end it
+///   leaves into the side, or next to an end strictly in it. Two ends strictly
+///   in the side prove nothing: the arc could cross the plane twice between
+///   them.
+/// - Anything else proves nothing.
+fn stays_in_the_side(
+    face: &BakedFace,
+    edge: &BakedEdge,
+    side: ASideOfAPlane,
+    edges: &[&BakedEdge],
+) -> bool {
+    if edge.along_a_curved_surface.is_some() {
+        return false;
+    }
+    let on_the_plane_or_in = [&edge.start, &edge.end].map(|corner| {
+        if is_on_the_plane(corner, &side.plane, edges) {
+            Some(true)
+        } else if side.plane.side_of_point(corner.point) == side.kept() {
+            Some(false)
+        } else {
+            None
+        }
+    });
+    let [Some(start_on_it), Some(end_on_it)] = on_the_plane_or_in else {
+        return false;
+    };
+    if edge.across.as_plane().is_some() {
+        return true;
+    }
+    matches!(
+        edge.across,
+        Surface::Cylinder(_) | Surface::Cone(_) | Surface::Sphere(_)
+    ) && (start_on_it || end_on_it)
+        && leaves_each_end_on_the_plane_into_the_side(face, edge, side, [start_on_it, end_on_it])
+}
+
+/// Whether `edge`, an arc of the curve the flat face `face` crosses
+/// `edge.across` in, leaves each end `on_the_plane` says is on `side`'s plane
+/// into `side`, strictly.
+///
+/// The edge runs along `±(∇Q × ∇S)`, `Q` the face's plane and `S` the surface
+/// across, and which sign is read as
+/// `Arrangement::which_way_an_edge_runs_round` reads it in `fuse/arrange.rs`:
+/// against the way into the arc its pickers give, at its start
+/// ([`the_way_into_an_arc`](crate::holds::the_way_into_an_arc)), or against
+/// its chord at the end the face's box names
+/// ([`which_end_tells_the_arc_a_box_holds`](crate::holds::which_end_tells_the_arc_a_box_holds)).
+/// It leaves its start along that direction and its end against it.
+fn leaves_each_end_on_the_plane_into_the_side(
+    face: &BakedFace,
+    edge: &BakedEdge,
+    side: ASideOfAPlane,
+    on_the_plane: [bool; 2],
+) -> bool {
+    let (flat, round) = (&face.surface, &edge.across);
+    let ends = [edge.start.point, edge.end.point];
+    let read = match crate::holds::the_way_into_an_arc(flat, round, ends, &edge.picked_by) {
+        Some(into_the_arc) => Some((0, into_the_arc)),
+        None => face
+            .bounds
+            .as_a_point_anywhere_inside()
+            .and_then(|inside| {
+                crate::holds::which_end_tells_the_arc_a_box_holds(
+                    flat,
+                    round,
+                    ends,
+                    inside.enclosure(),
+                )
+            })
+            .map(|read_at| {
+                let [start, end] = ends.map(PredicatePoint::enclosure);
+                (
+                    read_at,
+                    core::array::from_fn(|axis| end[axis] - start[axis]),
+                )
+            }),
+    };
+    let Some((read_at, against)) = read else {
+        return false;
+    };
+    let tangent = |at: PredicatePoint| {
+        super::arrange::cross_of(
+            super::arrange::gradient_at(flat, at),
+            super::arrange::gradient_at(round, at),
+        )
+    };
+    let along_the_tangent = super::arrange::dot_of(tangent(ends[read_at]), against).sign();
+    let runs_along_the_tangent = if along_the_tangent == Decision::Pos {
+        true
+    } else if along_the_tangent == Decision::Neg {
+        false
+    } else {
+        return false;
+    };
+    let normal = side.plane.normal().components().map(Interval::exactly);
+    [0, 1]
+        .into_iter()
+        .filter(|&end| on_the_plane[end])
+        .all(|end| {
+            let leaving_along_the_tangent = (end == 0) == runs_along_the_tangent;
+            let wanted = if leaving_along_the_tangent {
+                side.kept()
+            } else {
+                side.past_it()
+            };
+            super::arrange::dot_of(tangent(ends[end]), normal).sign() == wanted
+        })
+}
+
+/// Whether every edge of a pipe's face across `plane` is one of a ring of
+/// them, each one's end the next one's start, round to the first, with no
+/// corner twice. A closed edge alone is not a ring here:
+/// [`BakedEdge::inside_across`] reads that one.
+fn go_round_in_one_ring(edges: &[&BakedEdge], plane: &Plane) -> bool {
+    let ring: Vec<&BakedEdge> = edges
+        .iter()
+        .copied()
+        .filter(|edge| edge.across.as_plane() == Some(plane))
+        .collect();
+    let Some(first) = ring.first() else {
+        return false;
+    };
+    if ring.len() < 2 {
+        return false;
+    }
+    let mut at = first.end.vertex;
+    for _ in 1..ring.len() {
+        let mut next = ring.iter().filter(|edge| edge.start.vertex == at);
+        let (Some(next), None) = (next.next(), next.next()) else {
+            return false;
+        };
+        at = next.end.vertex;
+    }
+    at == first.start.vertex
+}
+
+/// The side of `plane` a corner of the face off it is strictly on, by the
+/// first such corner whose side is proved; `None` where none is.
+fn the_side_a_corner_off_it_is_on(edges: &[&BakedEdge], plane: &Plane) -> Option<ASideOfAPlane> {
+    edges
+        .iter()
+        .flat_map(|edge| [&edge.start, &edge.end])
+        .filter(|corner| !is_on_the_plane(corner, plane, edges))
+        .find_map(|corner| {
+            let side = plane.side_of_point(corner.point);
+            (side == Decision::Pos || side == Decision::Neg).then_some(ASideOfAPlane {
+                plane: *plane,
+                behind: side == Decision::Neg,
+            })
+        })
+}
+
+/// Whether the model puts `corner` on `plane`: at an end of an edge of the
+/// face across it, with it among the surfaces round the corner, or with the
+/// corner on it as stored.
+fn is_on_the_plane(corner: &BakedCorner, plane: &Plane, edges: &[&BakedEdge]) -> bool {
+    edges.iter().any(|edge| {
+        edge.across.as_plane() == Some(plane)
+            && (edge.start.vertex == corner.vertex || edge.end.vertex == corner.vertex)
+    }) || corner.around.contains(&Surface::Plane(*plane))
+        || plane.side_of_point(corner.point) == Decision::Zero
 }
 
 impl ASideOfAPlane {
@@ -2821,6 +3084,235 @@ mod tests {
                 assert!(cap.lies_in.is_empty(), "a flat face lies in nothing here");
             }
         }
+    }
+
+    /// **Each face of a cube lies in the closed side of each of its four
+    /// neighbours' planes the cube is on**, read off its straight edges
+    /// ([`super::the_sides_a_flat_face_lies_in`]), and kept apart from
+    /// `lies_in`, which stays empty (Q3048). So a point past a neighbour is
+    /// outside one of the four, and a point past the face itself or the face
+    /// across is inside all four.
+    #[test]
+    fn each_face_of_a_cube_lies_on_the_side_of_each_neighbours_plane_the_cube_is_on() {
+        let (model, cube) = a_cube_of_side_two();
+        let middle = PredicatePoint::from([1.0, 1.0, 1.0]);
+        let past_each_face = [
+            [-1.0, 1.0, 1.0],
+            [3.0, 1.0, 1.0],
+            [1.0, -1.0, 1.0],
+            [1.0, 3.0, 1.0],
+            [1.0, 1.0, -1.0],
+            [1.0, 1.0, 3.0],
+        ]
+        .map(PredicatePoint::from);
+
+        let baked = baked(&model, &[cube]);
+
+        assert_eq!(baked[0].faces.len(), 6, "a cube has six faces");
+        for face in &baked[0].faces {
+            assert!(
+                face.lies_in.is_empty(),
+                "a flat face's sides are kept apart"
+            );
+            assert_eq!(
+                face.lies_in_as_a_flat_face.len(),
+                4,
+                "{:?}: one side of each neighbour's plane",
+                face.surface
+            );
+            for side in &face.lies_in_as_a_flat_face {
+                assert_eq!(
+                    side.plane.side_of_point(middle),
+                    side.kept(),
+                    "the middle of the cube is on the side kept"
+                );
+            }
+            let outside_one = past_each_face
+                .iter()
+                .filter(|&&point| {
+                    !face
+                        .lies_in_as_a_flat_face
+                        .iter()
+                        .all(|side| side.plane.side_of_point(point) == side.kept())
+                })
+                .count();
+            assert_eq!(
+                outside_one, 4,
+                "{:?}: the points past its four neighbours are outside a side",
+                face.surface
+            );
+        }
+    }
+
+    /// **A half disc lies on the side of the plane across its straight edge
+    /// that its arc leaves that plane into**, and the flat side of a half bar
+    /// on the side of each cap the bar is on, along its two lines on the
+    /// pipe. Half of a bar of radius one, two high, cut by the plane `x = 0`
+    /// through its axis: the arcs and the lines on the pipe each have an end on
+    /// the plane, and are read by which way they leave it
+    /// ([`super::leaves_each_end_on_the_plane_into_the_side`]).
+    #[test]
+    fn a_half_discs_arc_leaves_the_plane_across_its_straight_edge_into_the_half_disc() {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let bar = model
+            .add_round_bar(1.0, 2.0, &Isometry::identity())
+            .expect("a bar of radius one, two high");
+        let square =
+            crate::ProfileBuilder::new(vec![[0.0, -2.0], [2.0, -2.0], [2.0, 2.0], [0.0, 2.0]])
+                .build(&policy, &mut ProvenanceLog::new())
+                .expect("a square");
+        let block = model
+            .add_extrusion(
+                &square,
+                4.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, -1.0)).expect("a shift down `z`"),
+            )
+            .expect("a block over the half of the bar past `x = 0`");
+        let fused = model
+            .fuse(
+                &[bar],
+                &[block],
+                crate::Rule::Intersection,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar and a block over half of it share that half");
+        let [half] = fused.solids() else {
+            panic!("half a bar is one solid: {:?}", fused.solids());
+        };
+        let inside = PredicatePoint::from([0.5, 0.0, 1.0]);
+
+        let baked = baked(&model, &[*half]);
+
+        let flats: Vec<&super::BakedFace> = baked[0]
+            .faces
+            .iter()
+            .filter(|face| face.surface.as_plane().is_some())
+            .collect();
+        assert_eq!(flats.len(), 3, "two half discs and the cut");
+        for flat in flats {
+            assert!(
+                flat.lies_in.is_empty(),
+                "a flat face's sides are kept apart"
+            );
+            let is_the_cut = flat.surface.as_plane().is_some_and(|plane| {
+                plane.side_of_point(PredicatePoint::from([0.0, 0.0, 1.0])) == Decision::Zero
+            });
+            let outside = if is_the_cut {
+                vec![
+                    PredicatePoint::from([0.5, 0.0, -1.0]),
+                    PredicatePoint::from([0.5, 0.0, 3.0]),
+                ]
+            } else {
+                vec![PredicatePoint::from([-0.5, 0.0, 1.0])]
+            };
+            assert_eq!(
+                flat.lies_in_as_a_flat_face.len(),
+                outside.len(),
+                "{:?}: one side of each plane across a straight edge",
+                flat.surface
+            );
+            for side in &flat.lies_in_as_a_flat_face {
+                assert_eq!(
+                    side.plane.side_of_point(inside),
+                    side.kept(),
+                    "{:?}: inside the half bar is on the side kept",
+                    flat.surface
+                );
+            }
+            for point in outside {
+                assert!(
+                    !flat
+                        .lies_in_as_a_flat_face
+                        .iter()
+                        .all(|side| side.plane.side_of_point(point) == side.kept()),
+                    "{:?}: a point past it is outside a side",
+                    flat.surface
+                );
+            }
+        }
+    }
+
+    /// **A pipe's face lies on the side of a plane its edges go round it on
+    /// in a ring** ([`super::go_round_in_one_ring`]). A bar of radius one, two
+    /// high, standing on the top of the block `[0, 4]³` flush with its edge
+    /// `x = 0`, united with it: the top's outline runs through the touch
+    /// `(0, 2, 4)`, so the bar's foot is two arcs, the touch and the seam
+    /// corner `(2, 2, 4)` between them, and no closed edge says which side of
+    /// `z = 4` the pipe is on. The pipe is above it, and below its own top.
+    #[test]
+    fn a_pipes_face_lies_on_the_side_of_a_plane_its_edges_go_round_it_on_in_a_ring() {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let block = model
+            .add_cube(4.0, &policy, &mut ProvenanceLog::new())
+            .expect("a block of side four");
+        let bar = model
+            .add_round_bar(
+                1.0,
+                2.0,
+                &Isometry::translation(Vector::new(1.0, 2.0, 4.0)).expect("a shift onto the top"),
+            )
+            .expect("a bar of radius one, two high");
+        let fused = model
+            .fuse(
+                &[block],
+                &[bar],
+                crate::Rule::Union,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar standing on a block unites with it");
+        let [union] = fused.solids() else {
+            panic!("the union is one solid: {:?}", fused.solids());
+        };
+        let along_the_axis = |z: f64| PredicatePoint::from([1.0, 2.0, z]);
+
+        let baked = baked(&model, &[*union]);
+
+        let pipe = baked[0]
+            .faces
+            .iter()
+            .find(|face| matches!(face.surface, Surface::Cylinder(_)))
+            .expect("the union has the bar's pipe");
+        let foot = pipe
+            .wires
+            .iter()
+            .flatten()
+            .filter(|edge| {
+                edge.across
+                    .as_plane()
+                    .is_some_and(|plane| plane.side_of_point(along_the_axis(4.0)) == Decision::Zero)
+            })
+            .count();
+        assert_eq!(
+            foot, 2,
+            "the foot is two arcs, so it is the ring that tells"
+        );
+        assert_eq!(pipe.lies_in.len(), 2, "one side of the foot and of the top");
+        for side in &pipe.lies_in {
+            assert_eq!(
+                side.plane.side_of_point(along_the_axis(5.0)),
+                side.kept(),
+                "the middle of the bar is on the side kept"
+            );
+        }
+        for outside in [3.0, 7.0] {
+            assert!(
+                !pipe
+                    .lies_in
+                    .iter()
+                    .all(|side| side.plane.side_of_point(along_the_axis(outside)) == side.kept()),
+                "a point past the foot or the top is outside one of the sides"
+            );
+        }
+        assert!(
+            pipe.lies_in
+                .iter()
+                .any(|side| side.plane.side_of_point(along_the_axis(4.0)) == Decision::Zero),
+            "the plane of the foot, z = 4, is one of the two"
+        );
     }
 
     /// A corner of a round bar has two surfaces round it and the whole cap

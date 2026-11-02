@@ -303,13 +303,40 @@ pub(crate) fn gather(
         for (face, ((cuts, told), corners_cutting)) in
             faces.into_iter().zip(told).zip(corners_cutting).enumerate()
         {
-            let own =
-                the_sides_every_face_on_its_surface_lies_in(solids, &within_reach, solid, face);
+            let own = the_sides_every_face_on_its_surface_lies_in(
+                solids,
+                &within_reach,
+                solid,
+                face,
+                the_sides_it_lies_in,
+            );
+            let own_as_flat = the_sides_every_face_on_its_surface_lies_in(
+                solids,
+                &within_reach,
+                solid,
+                face,
+                |face| face.lies_in_as_a_flat_face.clone(),
+            );
             let face = &mut solids[solid].faces[face];
             let kept = the_cuts_left_on(face, &cuts);
             face.cuts.extend(kept);
             face.cuts_that_reach_only_its_boundary = the_cuts_that_reach_only_its_boundary(&cuts);
-            face.sides_the_faces_of_each_cut_lie_in = the_sides_the_faces_of_each_cut_lie_in(&cuts);
+            face.sides_the_faces_of_each_cut_lie_in =
+                the_sides_the_faces_of_each_cut_lie_in(&cuts, |found| &found.its_face_lies_in);
+            face.sides_the_flat_faces_of_each_cut_lie_in =
+                the_sides_the_faces_of_each_cut_lie_in(&cuts, |found| &found.its_flat_face_lies_in);
+            assert!(
+                face.sides_the_flat_faces_of_each_cut_lie_in
+                    .iter()
+                    .all(|(cut, _)| *cut != face.surface),
+                "a face found its own surface {:?} as a cut carried by flat faces lying in sides \
+                 of planes, which only an edge between two faces of one surface would give",
+                face.surface
+            );
+            if !own_as_flat.is_empty() {
+                face.sides_the_flat_faces_of_each_cut_lie_in
+                    .push((face.surface, own_as_flat));
+            }
             assert!(
                 face.sides_the_faces_of_each_cut_lie_in
                     .iter()
@@ -444,6 +471,9 @@ struct ACutFound {
     /// ([`the_sides_it_lies_in`]) when `cut` is that face's own surface, and
     /// none when it is a surface across that face's boundary.
     its_face_lies_in: SmallVec<[ASideOfAPlane; 2]>,
+    /// The same for the sides a flat face lies in by its boundary
+    /// ([`BakedFace::lies_in_as_a_flat_face`]).
+    its_flat_face_lies_in: SmallVec<[ASideOfAPlane; 2]>,
     /// Whether the face that carries `cut` provably shares no point with the
     /// whole surface of the face it cuts, so that no point of their crossing is
     /// on that face.
@@ -459,16 +489,24 @@ fn found_on(face: &BakedFace, against: &BakedFace, cuts: Vec<Surface>) -> Vec<AC
         !cuts.is_empty() && a_face_misses_a_surface_by_its_band(against, &face.surface);
     let reaches_only_its_boundary =
         !cuts.is_empty() && meets_it_only_on_its_boundary(face, against);
-    let against_lies_in = if cuts.contains(&against.surface) {
-        the_sides_it_lies_in(against)
+    let (against_lies_in, against_lies_in_as_a_flat_face) = if cuts.contains(&against.surface) {
+        (
+            the_sides_it_lies_in(against),
+            against.lies_in_as_a_flat_face.clone(),
+        )
     } else {
-        SmallVec::new()
+        (SmallVec::new(), SmallVec::new())
     };
     cuts.into_iter()
         .map(|cut| ACutFound {
             cut,
             its_face_lies_in: if cut == against.surface {
                 against_lies_in.clone()
+            } else {
+                SmallVec::new()
+            },
+            its_flat_face_lies_in: if cut == against.surface {
+                against_lies_in_as_a_flat_face.clone()
             } else {
                 SmallVec::new()
             },
@@ -514,26 +552,25 @@ fn the_cuts_that_reach_only_its_boundary(found: &[ACutFound]) -> Vec<Surface> {
 }
 
 /// For each cut, the sides of planes that every face carrying it lies in, by
-/// the first finding's sides that every other finding of that cut holds as
-/// well; a cut left with none is not listed.
+/// the first finding's `sides_of` that every other finding of that cut holds
+/// as well; a cut left with none is not listed.
 fn the_sides_the_faces_of_each_cut_lie_in(
     found: &[ACutFound],
+    sides_of: impl Fn(&ACutFound) -> &SmallVec<[ASideOfAPlane; 2]>,
 ) -> Vec<(Surface, SmallVec<[ASideOfAPlane; 2]>)> {
     let mut sides: Vec<(Surface, SmallVec<[ASideOfAPlane; 2]>)> = Vec::new();
     for one in found {
         if sides.iter().any(|(cut, _)| *cut == one.cut) {
             continue;
         }
-        let every_face_lies_in: SmallVec<[ASideOfAPlane; 2]> = one
-            .its_face_lies_in
+        let every_face_lies_in: SmallVec<[ASideOfAPlane; 2]> = sides_of(one)
             .iter()
             .filter(|side| {
                 found
                     .iter()
                     .filter(|other| other.cut == one.cut)
                     .all(|other| {
-                        other
-                            .its_face_lies_in
+                        sides_of(other)
                             .iter()
                             .any(|theirs| one_closed_side_of_one_plane(side, theirs))
                     })
@@ -547,25 +584,26 @@ fn the_sides_the_faces_of_each_cut_lie_in(
     sides
 }
 
-/// The sides of planes the face lies in ([`the_sides_it_lies_in`]) that every
-/// other face on its surface lies in too, of every solid within reach of its
-/// own: the faces across know the face's surface by just these, since each
-/// face on it cuts them, and a face asks of its own surface what they ask
-/// (Q2619).
+/// The sides of planes the face lies in (`sides_of`, [`the_sides_it_lies_in`]
+/// or [`BakedFace::lies_in_as_a_flat_face`]) that every other face on its
+/// surface lies in too, of every solid within reach of its own: the faces
+/// across know the face's surface by just these, since each face on it cuts
+/// them, and a face asks of its own surface what they ask (Q2619).
 fn the_sides_every_face_on_its_surface_lies_in(
     solids: &[BakedSolid],
     within_reach: &Sameness,
     solid: usize,
     face: usize,
+    sides_of: impl Fn(&BakedFace) -> SmallVec<[ASideOfAPlane; 2]>,
 ) -> SmallVec<[ASideOfAPlane; 2]> {
     let mine = &solids[solid].faces[face];
     let on_it: Vec<SmallVec<[ASideOfAPlane; 2]>> = (0..solids.len())
         .filter(|&other| within_reach.leader(other) == within_reach.leader(solid))
         .flat_map(|other| &solids[other].faces)
         .filter(|other| other.surface == mine.surface)
-        .map(the_sides_it_lies_in)
+        .map(&sides_of)
         .collect();
-    the_sides_it_lies_in(mine)
+    sides_of(mine)
         .into_iter()
         .filter(|side| {
             on_it.iter().all(|theirs| {

@@ -136,19 +136,22 @@
 //!   touch (Q3058). Both boxes stop refused `CannotTellTheCellsOfAFaceApart`
 //!   on the flange's front, face slot 8, which the body's front disc, a
 //!   rounding off the flange front's own plane, also cuts. Untraced. The box
-//!   round the back corner stops refused `CannotTellTheCellsOfAFaceApart` on
-//!   the body's pipe, face slot 2. On that face the flat's ellipse has a cap
-//!   about `0.2` long behind the back plane, and the box's side `y = -7.45`
-//!   crosses the cap. Both places where the ellipse crosses the back circle
-//!   are folded into the corner, so one node stands for two places `0.4`
-//!   apart along the ellipse, and the order along it puts that node at the
-//!   tip of the cap. Two arcs of the ellipse then cross the circle where there
-//!   is no node, and one walk runs along both sides of the circle (Q3035).
-//!   Every face of the flat lies in front of the back plane, so none reaches
-//!   the pipe's face and the ellipse is no edge of the answer there. Left out
-//!   on the pipe by hand, the fuse got past it and stopped where the box's side
-//!   `x = -0.33` meets the flange's rim on its front below the axis, as the
-//!   boxes above did before Q3059.
+//!   round the back corner stopped refused `CannotTellTheCellsOfAFaceApart`
+//!   on the body's pipe, face slot 2. On that face the flat's ellipse has a
+//!   cap about `0.2` long behind the back plane, and the box's side
+//!   `y = -7.45` crosses the cap. Both places where the ellipse crosses the
+//!   back circle are folded into the corner, so one node stands for two places
+//!   `0.4` apart along the ellipse, and the order along it puts that node at
+//!   the tip of the cap. Two arcs of the ellipse then cross the circle where
+//!   there is no node, and one walk runs along both sides of the circle
+//!   (Q3035). Every face of the flat lies in front of the back plane, so none
+//!   reaches the pipe's face and the ellipse is no edge of the answer there. A
+//!   flat face now knows the closed sides of the planes across its straight
+//!   edges it lies in, and a pipe's face the side of a plane its edges go
+//!   round it on in a ring, so the flat is read in front of the back plane and
+//!   the pipe behind it, and the ellipse is left out (Q3048). The box round the
+//!   back corner stops then on the flange's front, face slot 8, as the other
+//!   two do.
 //!
 //! What answers is checked as commit `f179ca02a` checks it: what the box and
 //! the LED share is the box's part inside the LED. When a box's difference
@@ -171,9 +174,6 @@ const THE_FRONT_CORNER: [f64; 3] = [-0.23, -6.35, 1.999999956464];
 /// The D3 LED's corner in two fans of faces on its flange's back, where its
 /// flat touches its body's pipe.
 const THE_BACK_CORNER: [f64; 3] = [-0.23, -7.35, 2.0];
-
-/// The radius of the D3 LED's body's pipe, about `x = 1.27, z = 2`.
-const THE_BODY_PIPES_RADIUS: f64 = 1.5;
 
 /// Half the side of the box put round each corner.
 const HALF: f64 = 0.1;
@@ -205,18 +205,12 @@ fn a_d5_led_reads_a_walk_far_up_its_pipe_off_a_node_that_can_tell_and_stops_cutt
 }
 
 #[test]
-fn a_d3_led_gets_past_how_two_curves_bend_at_its_back_corner_and_stops_on_the_cells_of_its_body_pipe()
+fn a_d3_led_leaves_its_flats_crossing_with_its_body_pipe_out_at_its_back_corner_and_stops_on_the_cells_of_its_flange_front()
  {
     every_fuse_refuses(
         D3,
         &both_rules_with_a_box_round_each_of(&[THE_BACK_CORNER]),
-        |model, error| {
-            let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
-                return false;
-            };
-            let face = model.face(*face).expect("the face is the LED's own");
-            matches!(face.surface(), Surface::Cylinder(pipe) if pipe.radius() == THE_BODY_PIPES_RADIUS)
-        },
+        refused_on_the_cells_of_the_flange_front,
     );
 }
 
@@ -226,21 +220,25 @@ fn a_d3_led_gets_past_two_lines_on_its_flat_that_meet_below_its_front_corner_and
     every_fuse_refuses(
         D3,
         &both_rules_with_a_box_round_each_of(&[THE_FRONT_CORNER, FAR_OFF]),
-        |model, error| {
-            let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
-                return false;
-            };
-            let face = model.face(*face).expect("the face is the LED's own");
-            let Surface::Plane(plane) = face.surface() else {
-                return false;
-            };
-            let [x, y, z, d] = plane.coefficients();
-            face.wire_count() == 2
-                && [x, y - 1.0, z, d - 6.35]
-                    .iter()
-                    .all(|part| part.abs() < 1e-9)
-        },
+        refused_on_the_cells_of_the_flange_front,
     );
+}
+
+/// Refused `CannotTellTheCellsOfAFaceApart` on the `D3.0` LED's flange's
+/// front, the plane `y = -6.35` with the body's pipe a hole in it.
+fn refused_on_the_cells_of_the_flange_front(model: &Model, error: &Error) -> bool {
+    let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
+        return false;
+    };
+    let face = model.face(*face).expect("the face is the LED's own");
+    let Surface::Plane(plane) = face.surface() else {
+        return false;
+    };
+    let [x, y, z, d] = plane.coefficients();
+    face.wire_count() == 2
+        && [x, y - 1.0, z, d - 6.35]
+            .iter()
+            .all(|part| part.abs() < 1e-9)
 }
 
 /// The LED in `file` and a box of side `2 * HALF` centred on `centre`, fused
