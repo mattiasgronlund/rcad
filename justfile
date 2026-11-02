@@ -318,6 +318,16 @@ gate_metered_steps := "check check-fuzz-builds check-timing-hooked-calls check-w
 # narrower tree instead of the whole-tree fingerprint serves it on 310 of the
 # 370 commits that touch anything outside `docs/` (docs/decisions.d/337
 # §337.10), rather than only on prose commits.
+#
+# `check`, `check-ignored`, `test`, `test-slow` and `check-release-build`, the
+# five that build and test the kernel, read less of the tree than the
+# whole-tree fingerprint holds: an strace of each found nothing opened in the
+# tree outside the cargo, toolchain and mise files, `crates/`, `fuzz/` and the
+# justfile. So `gate` keys them on `_code-fingerprint rust`, which takes those
+# paths, `corpus/` for the manifest, and of the justfile only the recipes the
+# five run. A commit that changes only `tooling/` or the gate's own recipes is
+# then served them; before, such a commit ran `test` for 842 s
+# (docs/decisions.d/337 §337.11).
 gate_reusable_steps := "check \
     check-fuzz-builds \
     check-enums \
@@ -760,6 +770,14 @@ pre-gate:
 # way, each off a key that adds what it reads outside the tree to the code's
 # fingerprint, so a plugin pulled or an advisory fetched runs it again
 # (§337.9).
+#
+# The five steps that build and test the kernel, `check`, `check-ignored`,
+# `test`, `test-slow` and `check-release-build`, are served off a key of what
+# they read rather than the whole tree: the cargo, toolchain and mise files,
+# `crates/`, `fuzz/`, `corpus/`, and of the justfile only their own recipes.
+# So a commit that changes only `tooling/` or the justfile outside those
+# recipes runs the rest and is served those five, with `test`'s counts
+# (§337.11).
 #
 # **The record names the steps it passed** (§397.4). A run that leaves some out,
 # as `gate-lane` and `gate-docs` do, records the ones it ran, and a later gate
