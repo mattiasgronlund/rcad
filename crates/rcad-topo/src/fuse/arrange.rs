@@ -12090,6 +12090,26 @@ impl<'f> Arrangement<'f> {
     /// thin pipe runs through it. Asked the box alone here, every fuse of the
     /// two was refused `Undecidable` (Q2763).
     ///
+    /// **A node whose side cannot be told is passed over**, as a node on the
+    /// partner is, and the walk read off another. Every node of the walk is on
+    /// the walk's side of a crossing it does not run along, or on the
+    /// crossing, so whichever node can tell answers for all. Only where no
+    /// node and neither reading after the nodes says is the policy asked, of
+    /// the first node that could not tell. The plane `y = 0.2` of
+    /// `LED_D5.0mm-3.step` is written twice a rounding apart, each writing
+    /// leaning `6.7e-16` off the body pipe's axis, so each cuts the pipe in an
+    /// ellipse reaching `3.4e15` up it. A walk `1.8e15` up the pipe had its first
+    /// node on one writing, and that box could not say its side of the other;
+    /// asked the policy there, every fuse of the LED was refused, though the
+    /// walk's next node, on the ellipse of `y = −0.2`, reads `Neg` (Q3009).
+    ///
+    /// **A tolerant policy reads the same sides as it did.** It reads a node
+    /// whose box is narrow enough for its budget as on the partner, `Zero`,
+    /// and the loop passed over that node then as well; it is no longer
+    /// logged when another node tells, since the side is then proved. A node
+    /// whose box is too wide for the budget was refused, and is now passed
+    /// over as under a certified policy.
+    ///
     /// **Each half of an ellipse drawn whole with its other half says which
     /// side of the ellipse's plane the walk is on**
     /// ([`Arrangement::whole_ellipses`]). No half closes, so none is drawn in
@@ -12129,6 +12149,7 @@ impl<'f> Arrangement<'f> {
                 continue;
             }
             let partner = self.crossings[crossing].partner;
+            let mut first_undecided = None;
             for &half_edge in &self.cycles[cycle] {
                 let node = &self.nodes[self.arcs[half_edge / 2].ends[half_edge % 2]];
                 match self.whether_past_the_picker(crossing, node.point) {
@@ -12154,9 +12175,19 @@ impl<'f> Arrangement<'f> {
                             .collect();
                         plane
                             .and_then(|plane| {
-                                Self::side_of_a_plane_holding_a_rings_axis(&on, at, plane).or_else(
-                                    || Self::side_of_a_plane_clear_of_a_cap_circle(&on, plane),
-                                )
+                                Self::side_of_a_plane_holding_a_rings_axis(&on, at, plane)
+                                    .or_else(|| {
+                                        Self::side_of_a_plane_clear_of_a_cap_circle(&on, plane)
+                                    })
+                                    .or_else(|| {
+                                        node.made_of.iter().chain(&node.also).find_map(
+                                            |(three, _)| {
+                                                Self::side_of_a_plane_at_a_corner_solved_on_a_pipe(
+                                                    three, at, plane,
+                                                )
+                                            },
+                                        )
+                                    })
                             })
                             .or_else(|| {
                                 Self::side_of_one_of_a_plane_a_pipe_and_a_cone_on_one_axis(
@@ -12173,6 +12204,10 @@ impl<'f> Arrangement<'f> {
                     }
                     (side, _) => side,
                 };
+                if matches!(read, Decision::Undecidable { .. }) {
+                    first_undecided.get_or_insert((read, at));
+                    continue;
+                }
                 let found = must_decide(
                     read,
                     name_of_surface(&partner),
@@ -12192,6 +12227,19 @@ impl<'f> Arrangement<'f> {
                     .or_else(|| {
                         self.side_off_the_other_circle_a_plane_cuts_a_ring_in(cycle, &partner)
                     });
+            }
+            if side.is_none()
+                && let Some((undecided, at)) = first_undecided
+            {
+                let settled = must_decide(
+                    undecided,
+                    name_of_surface(&partner),
+                    &[at],
+                    Measures::Length,
+                    policy,
+                    log,
+                )?;
+                *side = (settled != Decision::Zero).then_some(settled);
             }
         }
         for &ellipse in &self.whole_ellipses {
@@ -13699,14 +13747,15 @@ impl<'f> Arrangement<'f> {
         Some([k, a])
     }
 
-    /// Which side of `partner` a corner bake solved from a pipe and two planes
+    /// Which side of `partner` a point placed where a pipe and two planes meet
     /// lies, read as the point where the line the two planes share crosses the
     /// pipe, the crossing whose box is `at`
     /// ([`Arrangement::side_of_a_plane_where_a_line_crosses_a_pipe`]). `None`
     /// where those are not the three it was `solved_from`, where the box does
-    /// not say which of the two crossings it is, or where a product would
-    /// round. The box holds where exactly those three meet
-    /// ([`BakedCorner::solved_from`]).
+    /// not say which of the two crossings it is, or where the arithmetic
+    /// cannot tell. The box must hold where exactly those three meet: a corner
+    /// bake solved from them ([`BakedCorner::solved_from`]), or a node they
+    /// are a name of ([`Node::made_of`], [`Node::also`]).
     ///
     /// `LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step` has its flange's front and
     /// the disc inside it in two planes a rounding apart, and bake solved the
@@ -13738,7 +13787,7 @@ impl<'f> Arrangement<'f> {
     /// the point where its `seam` plane crosses the circle the two meet in, the
     /// crossing whose box is `at` ([`BakedCorner::seam_plane`], §294.9).
     /// `None` where it is not that shape, where the box does not say which of
-    /// the two crossings it is, or where a product would round.
+    /// the two crossings it is, or where the arithmetic cannot tell.
     ///
     /// A round bar of radius `1/2` with its axis at `(1.5, 1)`, in the L plate
     /// whose inner side lies along `x = 2`, both turned `π/2` about `z`, has
@@ -13782,9 +13831,10 @@ impl<'f> Arrangement<'f> {
 
     /// The side of `partner` at the point whose box is `at` where the line
     /// `cap` and `through` share crosses `pipe`; `None` where the box does not
-    /// say which of the two crossings it is, `partner` runs along the line, or
-    /// a product would round. The box must hold the crossing it is asked
-    /// about.
+    /// say which of the two crossings it is, `partner` runs along the line, a
+    /// product would round before the meet is worked out, or a sign after it
+    /// is too near nought for an interval to tell. The box must hold the
+    /// crossing it is asked about.
     ///
     /// **The corner is `Y + t·e` for the `t` the pipe and the box say.** Let
     /// the cap be `n_c·p = d_c`, `through` `n_s·p = d_s` and `partner`
@@ -13822,6 +13872,19 @@ impl<'f> Arrangement<'f> {
     /// **A line that slants across the pipe is read too** (Q3001). The cap's
     /// circle was all this read before, and the root it took was the sign of
     /// `e·(p − o)`, which is `g·(p − o)` only where `e·w` is nought.
+    ///
+    /// **Where a product in `C·D²` or `B·D` would round, its sign is read off
+    /// an interval round each exact factor** (Q3017). Planes stored with
+    /// components far below a rounding of one leave each exact quantity a
+    /// tail of tiny entries, and squaring `(Y − o) × w` multiplies two of them
+    /// below `2⁻⁹⁶⁹`, under which no product of two `f64` is held exactly. The
+    /// interval rounds outward, so a sign it gives is the exact one, and it is
+    /// a few roundings of the terms wide, so it says nothing only where `C`
+    /// or `B` is within those of nought.
+    /// The far box of `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step` has the
+    /// line its flange's flat `(−1, −2.1e−32, 2.6e−47)` and its front share
+    /// meet its disc's plane inside the rim, and was refused `Undecidable`
+    /// "side of plane" at the corner below the axis for want of `C·D²`.
     fn side_of_a_plane_where_a_line_crosses_a_pipe(
         partner: &Plane,
         cap: &Plane,
@@ -13872,18 +13935,37 @@ impl<'f> Arrangement<'f> {
             &exactly_scaled_across(&exact(origin), &negated(&along_the_line))?,
         );
         let square_to_the_axis = exactly_crossed(&off_the_axis, &along)?;
-        let radius_squared = exactly_scaled(&[pipe.radius()], pipe.radius())?;
-        let pipe_at_the_meet = expansion_sign(&exactly_added(
-            &exactly_dotted_across(&square_to_the_axis, &square_to_the_axis)?,
-            &negated(&exactly_multiplied(
-                &exactly_multiplied(&radius_squared, &exactly_dotted_across(&along, &along)?)?,
-                &exactly_multiplied(&along_the_line, &along_the_line)?,
-            )?),
-        ));
-        let lean = expansion_sign(&exactly_dotted_across(
-            &square_to_the_axis,
-            &exactly_crossed(&line, &along)?,
-        )?);
+        let held = |vector: &[Vec<f64>; 3]| {
+            vector
+                .each_ref()
+                .map(|component| held_as_an_interval(component))
+        };
+        let pipe_at_the_meet = sign_exactly_or_of_its_box(
+            || {
+                let radius_squared = exactly_scaled(&[pipe.radius()], pipe.radius())?;
+                Some(exactly_added(
+                    &exactly_dotted_across(&square_to_the_axis, &square_to_the_axis)?,
+                    &negated(&exactly_multiplied(
+                        &exactly_multiplied(
+                            &radius_squared,
+                            &exactly_dotted_across(&along, &along)?,
+                        )?,
+                        &exactly_multiplied(&along_the_line, &along_the_line)?,
+                    )?),
+                ))
+            },
+            || {
+                let (square, radius) =
+                    (held(&square_to_the_axis), Interval::exactly(pipe.radius()));
+                let along_the_line = held_as_an_interval(&along_the_line);
+                dot_of(square, square)
+                    - radius
+                        * radius
+                        * dot_of(held(&along), held(&along))
+                        * along_the_line
+                        * along_the_line
+            },
+        );
         let times = |one: Decision, other: Decision| {
             if one == other {
                 Decision::Pos
@@ -13894,9 +13976,19 @@ impl<'f> Arrangement<'f> {
         if pipe_at_the_meet == Decision::Neg {
             return Some(times(which_root, way));
         }
-        if !matches!(pipe_at_the_meet, Decision::Pos | Decision::Zero)
-            || !matches!(lean, Decision::Pos | Decision::Neg)
-        {
+        if !matches!(pipe_at_the_meet, Decision::Pos | Decision::Zero) {
+            return None;
+        }
+        let lean = sign_exactly_or_of_its_box(
+            || exactly_dotted_across(&square_to_the_axis, &exactly_crossed(&line, &along)?),
+            || {
+                dot_of(
+                    held(&square_to_the_axis),
+                    cross_of_intervals(held(&line), held(&along)),
+                )
+            },
+        );
+        if !matches!(lean, Decision::Pos | Decision::Neg) {
             return None;
         }
         let the_meet_is_the_corner =
@@ -18824,6 +18916,20 @@ fn held_as_an_interval(expansion: &[f64]) -> Interval {
         })
 }
 
+/// The sign of one value, worked out `exactly`, or, where a product in that
+/// would round, the sign of the interval `held` puts round the same value,
+/// which is `Undecidable` where the interval holds nought. The interval
+/// rounds outward, so a sign it gives is the value's own.
+fn sign_exactly_or_of_its_box(
+    exactly: impl FnOnce() -> Option<Vec<f64>>,
+    held: impl FnOnce() -> Interval,
+) -> Decision {
+    match exactly() {
+        Some(value) => expansion_sign(&value),
+        None => held().sign(),
+    }
+}
+
 /// The three surfaces the two nodes where four half ellipses meet are named
 /// by: the lesser of the two pipes by [`name_of_surface_bits`], then the
 /// greater twice, so that the face on either pipe names them alike. A pipe
@@ -22658,6 +22764,69 @@ mod tests {
             None,
             "a partner along the line"
         );
+    }
+
+    /// The planes `x = 0` and `y = 0` of the test above, each tilted by a
+    /// hair and stored with the normals `(1, 2⁻²⁰⁰, 2⁻³⁰⁰)` and
+    /// `(2⁻²⁰⁰, 1, 2⁻²⁵⁰)`, share a line that crosses the same pipe within
+    /// `2⁻²⁴⁰` of `(0, 0, ±4)`. So a partner through `(0, 0, a)` for `|a|`
+    /// other than 4 puts each crossing on the side its own predicate puts
+    /// `(0, 0, ±4)`. The tilts leave tails on every exact quantity, and the
+    /// square of how far the meet is off the axis has products of two tails
+    /// below `2⁻⁹⁶⁹`, which no `f64` product holds exactly. The line a
+    /// flange's flat and its front share has such tails where it crosses the
+    /// rim of `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step`, and the far box of
+    /// that LED was refused `Undecidable` there (Q3017).
+    #[test]
+    fn a_plane_puts_each_place_a_line_of_two_tilted_planes_crosses_a_pipe_on_its_side() {
+        let pipe = Cylinder::new(
+            Axis::new(Point::new(-100.0, -1.0, -100.0), Vector::new(1.0, 0.0, 1.0))
+                .expect("an axis"),
+            3.0,
+        )
+        .expect("a positive radius");
+        let hair = |power: i32| 2f64.powi(power);
+        let [one, other] =
+            [[1.0, hair(-200), hair(-300)], [hair(-200), 1.0, hair(-250)]].map(|normal| {
+                Plane::from_point_and_normal_as_written(Point::origin(), Vector::from(normal))
+                    .expect("a plane")
+            });
+        assert_eq!(
+            one.normal().components(),
+            [1.0, hair(-200), hair(-300)],
+            "the tilt is stored as written"
+        );
+        let round = |z: f64| {
+            PredicatePoint::Constructed([
+                Interval::new(-1e-9, 1e-9).expect("an interval"),
+                Interval::new(-1e-9, 1e-9).expect("an interval"),
+                Interval::new(z - 1e-9, z + 1e-9).expect("an interval"),
+            ])
+        };
+        for a in [0.0, 2.0, -2.0, 8.0, -8.0] {
+            for [k, m] in [[0.0, 0.0], [3.0, 0.0], [0.0, 1.0], [-2.0, 5.0]] {
+                for facing in [1.0, -1.0] {
+                    let partner = Plane::from_point_and_normal(
+                        Point::from([0.0, 0.0, a]),
+                        Vector::new(facing * k, facing * m, facing),
+                    )
+                    .expect("a plane");
+                    for z in [4.0, -4.0] {
+                        assert_eq!(
+                            Arrangement::side_of_a_plane_where_a_line_crosses_a_pipe(
+                                &partner,
+                                &one,
+                                &other,
+                                &pipe,
+                                round(z),
+                            ),
+                            Some(partner.side_of_point(PredicatePoint::from([0.0, 0.0, z]))),
+                            "through (0, 0, {a}) facing ({facing}, {k}, {m}), at (0, 0, {z})"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// The top of a cube a pyramid pokes up through is cut by the pyramid's

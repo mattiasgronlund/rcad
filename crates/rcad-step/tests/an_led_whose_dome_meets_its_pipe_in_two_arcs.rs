@@ -71,13 +71,20 @@
 //!   `(5.032, 0.2, 9.1)` for the box that misses the LED. They are outside it
 //!   by `4e-16` and `8e-16`, and the ball's side of a point of the pipe is now
 //!   read with the pipe's own equation, the same way turned round (Q2992).
-//!   Every fuse now stops refused `Undecidable` on side of plane, on the
+//!   Every fuse then stopped refused `Undecidable` on side of plane, on the
 //!   body's pipe, at a node `1.8e15` up it, near `(1.07, 1.415, 1.8e15)`.
 //!   There the line the plane `x = 1.07` cuts the pipe in meets the line the
 //!   plane `y = 0.2` does, as one face writes it, normal
 //!   `(0, 1, −6.7e-16)`: two lines along the pipe that lean apart by a
-//!   rounding. It is asked against `y = 0.2` as another face writes it,
-//!   normal `(7.8e-32, 1, −6.7e-16)`, its offset `6.7e-16` from the first's.
+//!   rounding. It was asked against `y = 0.2` as another face writes it,
+//!   normal `(7.8e-32, 1, −6.7e-16)`, its offset `6.7e-16` from the first's,
+//!   for which side of that writing a walk through it is on. Every node of a
+//!   walk is on the walk's side of a crossing it does not run along, or on
+//!   the crossing, so a node that cannot tell is now passed over and the walk
+//!   read off its next node, `(1.07, 1.28, 2.2e15)`, which can (Q3009). Every
+//!   intersection now answers, and shares with the LED what it should; every
+//!   difference stops refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`
+//!   on the flange's rim, the pipe of radius 2.9, at `(2.74, −2.893, 3.5)`.
 //! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
 //!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
 //!   rounding apart in direction. Q2938's road answers that triple, and the
@@ -130,13 +137,13 @@
 //!   `x = -0.33` meets the flange's rim on its front below the axis, as the
 //!   boxes above do.
 //!
-//! When either answers, its test turns into the volume check of commit
-//! `f179ca02a`: what the box and the LED share is the box's part inside the
-//! LED, and the intersection and the difference add up to the LED.
+//! What answers is checked as commit `f179ca02a` checks it: what the box and
+//! the LED share is the box's part inside the LED. When a box's difference
+//! answers too, the intersection and the difference must add up to the LED.
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, SIDE_OF_PLANE, Surface, Vector};
+use rcad_geom::{Deflection, Isometry, Surface, Vector};
 use rcad_predicates::{Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -170,40 +177,43 @@ const HALF: f64 = 0.1;
 /// Where the box that misses the LED goes.
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
+/// The box round the corner `(0.04, 0, 4)` holds the flange below `z = 4`
+/// from the flat `x = 0.04` on, and the body's pipe above it.
 #[test]
-fn a_d5_led_gets_past_the_balls_side_of_its_rim_and_stops_where_two_lines_on_its_pipe_meet_far_up()
-{
-    every_fuse_refuses(D5, &[[0.04, 0.0, 4.0], FAR_OFF], |_, error| {
-        let Error::Undecidable { records } = error else {
-            return false;
-        };
-        let [record] = records.records() else {
-            return false;
-        };
-        let [at] = record.inputs() else {
-            return false;
-        };
-        let [x, y, z] = at.enclosure();
-        let where_x_is_1_07_and_y_is_a_fifth_meet_far_up_the_pipe = 1.06 < x.lo()
-            && x.hi() < 1.08
-            && 1.41 < y.lo()
-            && y.hi() < 1.42
-            && 1.8e15 < z.lo()
-            && z.hi() < 1.9e15;
-        record.predicate() == SIDE_OF_PLANE && where_x_is_1_07_and_y_is_a_fifth_meet_far_up_the_pipe
-    });
+fn a_d5_led_reads_a_walk_far_up_its_pipe_off_a_node_that_can_tell_and_stops_cutting_a_box_out_on_its_flange_rim()
+ {
+    let radius = 2.5_f64;
+    let flange_in_the_box = HALF * HALF * (2.0 * HALF);
+    let body_in_the_box = HALF
+        * (HALF * (radius * radius - HALF * HALF).sqrt()
+            + radius * radius * (HALF / radius).asin()
+            - 2.0 * HALF * (radius - HALF));
+    the_led_and_a_box_share(D5, [0.04, 0.0, 4.0], flange_in_the_box + body_in_the_box);
+    the_led_and_a_box_share(D5, FAR_OFF, 0.0);
+    every_fuse_refuses(
+        D5,
+        &[
+            ([0.04, 0.0, 4.0], Rule::Difference),
+            (FAR_OFF, Rule::Difference),
+        ],
+        two_ends_of_an_edge_on_the_flange_rim_round_to_one_point,
+    );
 }
 
 #[test]
 fn a_d3_led_gets_past_how_two_curves_bend_at_its_back_corner_and_stops_on_the_cells_of_its_body_pipe()
  {
-    every_fuse_refuses(D3, &[THE_BACK_CORNER], |led, error| {
-        let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
-            return false;
-        };
-        let face = led.face(*face).expect("the face is the LED's own");
-        matches!(face.surface(), Surface::Cylinder(pipe) if pipe.radius() == THE_BODY_PIPES_RADIUS)
-    });
+    every_fuse_refuses(
+        D3,
+        &both_rules_with_a_box_round_each_of(&[THE_BACK_CORNER]),
+        |model, error| {
+            let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
+                return false;
+            };
+            let face = model.face(*face).expect("the face is the LED's own");
+            matches!(face.surface(), Surface::Cylinder(pipe) if pipe.radius() == THE_BODY_PIPES_RADIUS)
+        },
+    );
 }
 
 #[test]
@@ -213,21 +223,117 @@ fn a_d3_led_gets_past_its_back_corner_and_stops_where_a_plane_across_meets_its_r
         (THE_FRONT_CORNER, THE_FRONT_CORNER[0] - HALF),
         (FAR_OFF, A_LEADS_SIDE),
     ] {
-        every_fuse_refuses(D3, &[centre], |_, error| {
-            let Error::Undecidable { records } = error else {
-                return false;
-            };
-            let [record] = records.records() else {
-                return false;
-            };
-            let below = where_a_plane_across_meets_the_rim_below_the_axis(across);
-            record.predicate() == ALONG_A_CROSSING
-                && record
-                    .inputs()
-                    .iter()
-                    .all(|point| is_within_1e_9_of(point, below))
-        });
+        every_fuse_refuses(
+            D3,
+            &both_rules_with_a_box_round_each_of(&[centre]),
+            |_, error| {
+                let Error::Undecidable { records } = error else {
+                    return false;
+                };
+                let [record] = records.records() else {
+                    return false;
+                };
+                let below = where_a_plane_across_meets_the_rim_below_the_axis(across);
+                record.predicate() == ALONG_A_CROSSING
+                    && record
+                        .inputs()
+                        .iter()
+                        .all(|point| is_within_1e_9_of(point, below))
+            },
+        );
     }
+}
+
+/// The LED in `file` and a box of side `2 * HALF` centred on `centre`, fused
+/// under intersection, answer with a model `validate` accepts, and what they
+/// share is `shared` to within what measuring costs.
+fn the_led_and_a_box_share(file: &str, centre: [f64; 3], shared: f64) {
+    let (mut model, solid) = the_led(file);
+    let knife = a_box_round(&mut model, centre);
+    let fused = model
+        .fuse(
+            &[solid],
+            &[knife],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{file}: the box round {centre:?} refused: {why:?}"));
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| {
+            panic!("{file}: the box round {centre:?} left a model that is not valid: {why:?}")
+        });
+    let (common, error) = volume_of(&model, fused.solids());
+    assert!(
+        (common - shared).abs() <= error + 1e-12,
+        "{file}: the LED and the box round {centre:?} share {common} ± {error}, and {shared} is \
+         right"
+    );
+}
+
+/// Each box of side `2 * HALF` centred on a corner of `fuses`, fused with the
+/// LED in `file` under its rule, is refused as `the_refusal` takes, handed the
+/// model it was refused in, which holds every face of the LED.
+fn every_fuse_refuses(
+    file: &str,
+    fuses: &[([f64; 3], Rule)],
+    the_refusal: impl Fn(&Model, &Error) -> bool,
+) {
+    let (led, solid) = the_led(file);
+    for &(centre, rule) in fuses {
+        let mut model = led.clone();
+        let knife = a_box_round(&mut model, centre);
+        match model.fuse(
+            &[solid],
+            &[knife],
+            rule,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) {
+            Err(error) if the_refusal(&model, &error) => {}
+            Err(error) => panic!(
+                "{file}: {rule:?} with a box round {centre:?} refused {error:?}, which is not the \
+                 refusal this pins"
+            ),
+            Ok(_) => panic!(
+                "{file}: {rule:?} with a box round {centre:?} answers: check its volume as \
+                 f179ca02a did"
+            ),
+        }
+    }
+}
+
+/// A box round each centre, to be fused with the LED under intersection and
+/// under difference.
+fn both_rules_with_a_box_round_each_of(centres: &[[f64; 3]]) -> Vec<([f64; 3], Rule)> {
+    centres
+        .iter()
+        .flat_map(|&centre| [Rule::Intersection, Rule::Difference].map(|rule| (centre, rule)))
+        .collect()
+}
+
+/// Refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` on the `D5.0`
+/// LED's flange rim, the pipe of radius 2.9 about its body's axis, where the
+/// lead's side `x = 2.74` crosses it at `z = 3.5` on its `-y` side.
+fn two_ends_of_an_edge_on_the_flange_rim_round_to_one_point(model: &Model, error: &Error) -> bool {
+    let Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face, at } = error else {
+        return false;
+    };
+    let surface = model
+        .face(*face)
+        .expect("the refusal names a face of the LED")
+        .surface();
+    let Surface::Cylinder(rim) = surface else {
+        return false;
+    };
+    let on_the_minus_y_side = -(2.9_f64.powi(2) - 0.2_f64.powi(2)).sqrt();
+    (rim.radius() - 2.9).abs() < 1e-9
+        && at
+            .coordinates()
+            .iter()
+            .zip([2.74, on_the_minus_y_side, 3.5])
+            .all(|(at, expected)| (at - expected).abs() < 1e-9)
 }
 
 /// Where the plane `x = across` meets the D3 LED's flange's rim on the
@@ -243,40 +349,6 @@ fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
         .iter()
         .zip(at)
         .all(|(side, at)| (side.lo() - at).abs() < 1e-9 && (side.hi() - at).abs() < 1e-9)
-}
-
-/// The LED in `file` and a box of side `2 * HALF` centred on each of
-/// `centres`, fused under intersection and under difference, each refused as
-/// `the_refusal` takes, which is handed the LED before the fuse as well.
-fn every_fuse_refuses(
-    file: &str,
-    centres: &[[f64; 3]],
-    the_refusal: impl Fn(&Model, &Error) -> bool,
-) {
-    let (led, solid) = the_led(file);
-    for &centre in centres {
-        for rule in [Rule::Intersection, Rule::Difference] {
-            let mut model = led.clone();
-            let knife = a_box_round(&mut model, centre);
-            match model.fuse(
-                &[solid],
-                &[knife],
-                rule,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            ) {
-                Err(error) if the_refusal(&led, &error) => {}
-                Err(error) => panic!(
-                    "{file}: {rule:?} with a box round {centre:?} refused {error:?}, which is not \
-                     the refusal this pins"
-                ),
-                Ok(_) => panic!(
-                    "{file}: {rule:?} with a box round {centre:?} answers: check its volume as \
-                     f179ca02a did"
-                ),
-            }
-        }
-    }
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
@@ -307,4 +379,20 @@ fn a_box_round(model: &mut Model, centre: [f64; 3]) -> SolidKey {
             &Isometry::translation(low).expect("a finite shift"),
         )
         .expect("a box")
+}
+
+/// The volume of `solids` together, and how far measuring it may be off.
+fn volume_of(model: &Model, solids: &[SolidKey]) -> (f64, f64) {
+    solids.iter().fold((0.0, 0.0), |(volume, error), &solid| {
+        let measured = model
+            .solid(solid)
+            .expect("a solid of this model")
+            .measure(
+                Deflection::for_scale(model.scale()),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("it measures");
+        (volume + measured.volume(), error + measured.volume_error())
+    })
 }
