@@ -1342,9 +1342,18 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     fi
     # The summary shows one record's counts. The cargo steps' is the one that
     # holds any, since a record holds only the counts of the steps it names
-    # and the whole tree's names no step that prints a count (§337.11).
+    # and the whole tree's names no step that prints a count (§337.11). Should
+    # one ever print a count, a run served both records names it here rather
+    # than dropping it.
     counts_from=${tree_served:+$served_copy}
-    [ -z "$rust_served" ] || counts_from=$rust_copy
+    if [ -n "$rust_served" ]; then
+        counts_from=$rust_copy
+        if [ -n "$tree_served" ]; then
+            while IFS= read -r line; do
+                note "· verdicts: not in the summary, which shows the cargo steps' counts: $line (served from ${from:0:8})"
+            done < <(grep -E '^(tests|doc tests): ' "$served_copy")
+        fi
+    fi
     summary=$($j _gate-summary "$log" "$status" "$failed" "$counts_from")
 
     # The first failing step that the green on record for this code passed. Not
