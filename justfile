@@ -2224,6 +2224,12 @@ check-gate-verdicts-selftest:
     # have caught, so this checks it is there on purpose rather than by it.
     grep -qx check-timing-hooked-calls <<<"$reusable" \
         || fail "check-timing-hooked-calls is not in gate_reusable_steps, so the narrow-key design below would exercise nothing real"
+    # check-queue-api-selftest is not named above either: it reads nothing
+    # outside the tree, but it answers from a narrower set than the rest of
+    # this list shares, so it too is served off a fingerprint of its own
+    # rather than the whole-tree one (docs/decisions.d/337 §337.10).
+    grep -qx check-queue-api-selftest <<<"$reusable" \
+        || fail "check-queue-api-selftest is not in gate_reusable_steps, so the narrow-key design below would exercise nothing real"
     # The fingerprint leaves out what CI's docs split leaves out, for the same
     # reason. If one of the two claims changes, the other has to change with it.
     wf='{{ justfile_directory() }}/.github/workflows'
@@ -2584,6 +2590,80 @@ check-gate-verdicts-selftest:
         && fail "a toolchain version change was reported as served"
     [ -f "$thc_store/$thc_fp2" ] \
         || fail "the re-run after a toolchain version change recorded nothing under the new fingerprint"
+    g reset -q --hard "$base"
+
+    # check-queue-api-selftest's own narrow-key cache (docs/decisions.d/337
+    # §337.10): a fingerprint and record store kept apart from the whole-tree
+    # one above, keyed on justfile, tooling/, .gitattributes, mise.toml and
+    # mise.lock. The real recipe copies tooling/queue/*.py into a scratch hub
+    # and drives `just queue` end to end, which takes minutes, so this drives
+    # the step through a copy of this justfile, committed into `$repo` itself
+    # as `$repo/justfile`, with the real recipe's body replaced by a fast one:
+    # `set allow-duplicate-recipes` makes the later of two definitions of the
+    # same name win, so gate's own serve/write-back logic around
+    # check-queue-api-selftest is exercised for real while the slow recipe
+    # itself is not. Driven from a `cd` into `$repo` rather than `--justfile`,
+    # so that the `just` calls `gate`'s own body makes for each step and each
+    # fingerprint, none of which pass `--justfile` themselves, find
+    # `$repo/justfile` the same way the outer call does — `--working-directory`
+    # only renames where recipes run, and `just` still requires `--justfile`
+    # beside it, so it cannot reach those inner calls.
+    qas_store="$repo/.git/rcad-verdicts-queue-api-selftest"
+    qas_fingerprint() { (cd "$repo" && "$j" _queue-api-selftest-fingerprint); }
+    qas_gate() {
+        (cd "$repo" && "$j" --set gate_steps check-queue-api-selftest \
+            --set gate_reusable_steps check-queue-api-selftest \
+            --set gate_log "$dir/gate.log" gate quiet "$@" 2>&1)
+    }
+
+    mkdir -p "$repo/tooling/queue"
+    cp '{{ justfile() }}' "$repo/justfile"
+    printf '\nset allow-duplicate-recipes\n\ncheck-queue-api-selftest:\n    exit 0\n' >>"$repo/justfile"
+    printf 'print("queue")\n' >"$repo/tooling/queue/rows.py"
+    printf '* text=auto\n' >"$repo/.gitattributes"
+    printf '[tools]\n' >"$repo/mise.toml"
+    printf '[tools]\n' >"$repo/mise.lock"
+    g add -A
+    g commit -q -m 'queue-api-selftest fixture files'
+    qas_commit1=$(g rev-parse HEAD)
+
+    got=$(qas_gate) || fail "the first narrow gate of check-queue-api-selftest failed"
+    grep -q '^· check-queue-api-selftest (' <<<"$got" \
+        || fail "the first narrow gate did not run check-queue-api-selftest"
+    qas_fp1=$(qas_fingerprint)
+    [[ "$qas_fp1" =~ ^[0-9a-f]{64}$ ]] \
+        || fail "check-queue-api-selftest's own fingerprint did not come back as a hash: $qas_fp1"
+    [ -f "$qas_store/$qas_fp1" ] || fail "a passing narrow gate recorded nothing under its own store"
+    grep -qx "commit $qas_commit1" "$qas_store/$qas_fp1" \
+        || fail "the narrow record does not name the commit that was gated"
+
+    # A kernel-only change: crates/a.rs sits outside the narrow set, so the
+    # row's own first case — the narrow key must still serve it.
+    printf '// kernel change\n' >>"$repo/crates/a.rs"
+    g add -A
+    g commit -q -m 'a kernel-only change, queue-api-selftest case'
+    [ "$(qas_fingerprint)" = "$qas_fp1" ] \
+        || fail "a commit that touched only crates/a.rs moved check-queue-api-selftest's own fingerprint"
+    got=$(qas_gate) || fail "a narrow gate of a kernel-only change failed"
+    grep -q "^· served: check-queue-api-selftest from ${qas_commit1:0:8}'s gate at " <<<"$got" \
+        || fail "a kernel-only commit was not served check-queue-api-selftest's green from the commit under it"
+    grep -q '^· check-queue-api-selftest (' <<<"$got" \
+        && fail "a served narrow step ran anyway"
+
+    # tooling/queue/rows.py sits inside the narrow set, so a change to it
+    # moves the key and the next gate runs the step again — the row's second
+    # case.
+    g reset -q --hard "$qas_commit1"
+    printf 'print("more")\n' >>"$repo/tooling/queue/rows.py"
+    g add -A
+    g commit -q -m 'tooling/queue/rows.py change'
+    [ "$(qas_fingerprint)" != "$qas_fp1" ] \
+        || fail "a commit that touched tooling/queue/rows.py left check-queue-api-selftest's fingerprint where it was"
+    got=$(qas_gate) || fail "a narrow gate after a tooling/queue/rows.py change failed"
+    grep -q '^· check-queue-api-selftest (' <<<"$got" \
+        || fail "a tooling/queue/rows.py change was served instead of run again"
+    grep -q '^· served: check-queue-api-selftest' <<<"$got" \
+        && fail "a tooling/queue/rows.py change was reported as served"
     g reset -q --hard "$base"
 
     # The steps that check the machine, each served off a key of its own: the
