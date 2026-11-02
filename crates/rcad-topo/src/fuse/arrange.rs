@@ -9846,7 +9846,12 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::the_corner_that_is_this_place`]). Read off the corner,
     /// the four ways out sorted flat, circle, flat, circle, a winding spread
     /// out of range, and the front was refused `CannotTellTheCellsOfAFaceApart`
-    /// (Q2982).
+    /// (Q2982). Where the two curves cross at an angle at each place instead,
+    /// two ways out that leave from different places can run along one line,
+    /// and nothing about how they bend parts them, so
+    /// [`Arrangement::sorted_anticlockwise`] reads the order off the two places
+    /// before it asks this at all
+    /// ([`Arrangement::round_two_places_two_curves_cross`], Q3043).
     fn turns_anticlockwise(
         &self,
         node: usize,
