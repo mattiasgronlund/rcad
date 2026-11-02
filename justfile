@@ -309,6 +309,15 @@ gate_metered_steps := "check check-fuzz-builds check-timing-hooked-calls check-w
 # checkouts and Claude Code's config, and `deny` the advisory database. Each is
 # keyed on the code's fingerprint and what it reads outside the tree
 # (§337.9).
+#
+# `check-queue-api-selftest` reads nothing outside the tree, so it does not
+# belong beside those five, but it answers from `justfile`, `tooling/`,
+# `.gitattributes` and `mise.toml` alone (plus what `_code-fingerprint` reads
+# from the environment): a strace of it found nothing it opens outside those
+# paths and its own scratch repository under `docs/`. Keying it on that
+# narrower tree instead of the whole-tree fingerprint serves it on 310 of the
+# 370 commits that touch anything outside `docs/` (docs/decisions.d/337
+# §337.10), rather than only on prose commits.
 gate_reusable_steps := "check \
     check-fuzz-builds \
     check-enums \
@@ -960,16 +969,17 @@ gate mode="loud" verdicts="reuse" jobs="cores":
 
     # Which of this run's steps an earlier green could stand in for. None is
     # the usual answer inside the selftests, and then there is nothing to look
-    # up and nothing to say. `check-timing-hooked-calls` and the steps that
-    # check the machine are left out here even when they are in
-    # `gate_reusable_steps`: each gets a key of its own, below, which the
-    # whole-tree fingerprint this loop builds for everything else cannot
+    # up and nothing to say. `check-timing-hooked-calls`, `check-queue-api-selftest`
+    # and the steps that check the machine are left out here even when they
+    # are in `gate_reusable_steps`: each gets a key of its own, below, which
+    # the whole-tree fingerprint this loop builds for everything else cannot
     # stand in for, and mixing them into `$reusable` would serve or record
     # them off the wrong one.
     machine_steps="check-hooks check-questions-selftest check-plugins deny"
     reusable=""
     for step in {{ gate_steps }}; do
         [ "$step" != check-timing-hooked-calls ] || continue
+        [ "$step" != check-queue-api-selftest ] || continue
         case " $machine_steps " in *" $step "*) continue ;; esac
         case " {{ gate_reusable_steps }} " in *" $step "*) reusable="$reusable $step" ;; esac
     done
@@ -1053,6 +1063,44 @@ gate mode="loud" verdicts="reuse" jobs="cores":
         else
             served="$served check-timing-hooked-calls"
             note "· served: check-timing-hooked-calls from ${thc_from:0:8}'s gate at $thc_at"
+        fi
+    fi
+
+    # `check-queue-api-selftest`'s own lookup, off its own narrower
+    # fingerprint and its own record directory (docs/decisions.d/337
+    # §337.10). Shaped like the `check-timing-hooked-calls` block above, but
+    # kept apart from it for the same reason: the two differ in which
+    # fingerprint names the record.
+    qas_fingerprint="" qas_record=""
+    case " {{ gate_steps }} " in *" check-queue-api-selftest "*)
+        case " {{ gate_reusable_steps }} " in *" check-queue-api-selftest "*)
+            qas_fingerprint=$($j _queue-api-selftest-fingerprint)
+            if [[ "$qas_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+                qas_record="$(git rev-parse --path-format=absolute --git-common-dir)/rcad-verdicts-queue-api-selftest/$qas_fingerprint"
+            else
+                note "· verdicts: ${qas_fingerprint:-no fingerprint could be taken} for check-queue-api-selftest, so it is not served or recorded"
+                qas_fingerprint=""
+            fi
+            ;;
+        esac
+        ;;
+    esac
+    if [ -n "$qas_record" ] && [ -f "$qas_record" ]; then
+        qas_from=$(sed -n 's/^commit //p' "$qas_record")
+        qas_at=$(sed -n 's/^date //p' "$qas_record")
+        qas_at_s=$(date -u -d "${qas_at:-unreadable}" +%s 2>/dev/null || echo 0)
+        qas_age=$(( $(date +%s) - qas_at_s ))
+        if [ -z "$qas_from" ] || [ "$qas_at_s" -eq 0 ]; then
+            note "· verdicts: the record for check-queue-api-selftest's inputs cannot be read, so it runs: $qas_record"
+        elif [ "$verdicts" = fresh ]; then
+            note "· verdicts: fresh, so ${qas_from:0:8}'s green for check-queue-api-selftest's inputs is run again, not served"
+        elif [ "$qas_age" -lt 0 ] || [ "$qas_age" -ge 86400 ]; then
+            note "· verdicts: ${qas_from:0:8}'s green for check-queue-api-selftest's inputs is from $qas_at, not the last day, so it is run again"
+        elif [[ "$head" == 0* ]]; then
+            note "· verdicts: audit, since this sha starts with 0: ${qas_from:0:8}'s green for check-queue-api-selftest's inputs is run again"
+        else
+            served="$served check-queue-api-selftest"
+            note "· served: check-queue-api-selftest from ${qas_from:0:8}'s gate at $qas_at"
         fi
     fi
 
@@ -1357,6 +1405,49 @@ gate mode="loud" verdicts="reuse" jobs="cores":
             note "!!! verdict violated: check-timing-hooked-calls failed on inputs that ${thc_from:0:8}'s gate passed at $thc_at."
             note "!!! Same inputs, different answer: the narrow fingerprint is missing something, or the"
             note "!!! step is not deterministic. The record is deleted, and the case is kept in $thc_violations"
+        done
+    fi
+
+    # `check-queue-api-selftest`'s own write-back, parallel to
+    # `check-timing-hooked-calls`'s own above but against its own fingerprint
+    # and record (§337.10). It ran this time if its name reached `names` — a
+    # served step never does — and ended with 0.
+    qas_ran=""
+    for i in "${!names[@]}"; do
+        [ "${names[$i]}" = check-queue-api-selftest ] || continue
+        [ "${ended_with[$i]}" -ne 0 ] || qas_ran=yes
+    done
+    if [ -n "$qas_fingerprint" ] && [ -n "$qas_ran" ]; then
+        if [ "$($j _queue-api-selftest-fingerprint)" != "$qas_fingerprint" ]; then
+            note "· verdicts: check-queue-api-selftest not recorded, because its inputs changed while the gate ran"
+        else
+            qas_store=$(dirname "$qas_record")
+            mkdir -p "$qas_store"
+            qas_new=$(mktemp "$qas_store/.new.XXXXXX")
+            {
+                echo "commit $head"
+                echo "date $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                echo "host $(hostname)"
+                echo "steps check-queue-api-selftest"
+            } >"$qas_new"
+            mv "$qas_new" "$qas_record"
+            # Same week as the whole-tree store, for the same reason (above).
+            find "$qas_store" -maxdepth 1 -type f -mtime +7 -delete
+            note "· verdicts: check-queue-api-selftest's green is recorded as ${qas_fingerprint:0:12}"
+        fi
+    elif [ -n "$qas_fingerprint" ] && [ -f "$qas_record" ]; then
+        for step in $failed; do
+            [ "$step" = check-queue-api-selftest ] || continue
+            qas_from=$(sed -n 's/^commit //p' "$qas_record")
+            qas_at=$(sed -n 's/^date //p' "$qas_record")
+            # The same violations file the whole-tree block uses: both
+            # records live under the same git common dir, two directories up.
+            qas_violations="$(dirname "$(dirname "$qas_record")")/rcad-verdict-violations"
+            echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) $qas_fingerprint check-queue-api-selftest $head passed-at=$qas_from $(hostname)" >>"$qas_violations"
+            rm -f "$qas_record"
+            note "!!! verdict violated: check-queue-api-selftest failed on inputs that ${qas_from:0:8}'s gate passed at $qas_at."
+            note "!!! Same inputs, different answer: the narrow fingerprint is missing something, or the"
+            note "!!! step is not deterministic. The record is deleted, and the case is kept in $qas_violations"
         done
     fi
 
@@ -2224,6 +2315,12 @@ check-gate-verdicts-selftest:
     # have caught, so this checks it is there on purpose rather than by it.
     grep -qx check-timing-hooked-calls <<<"$reusable" \
         || fail "check-timing-hooked-calls is not in gate_reusable_steps, so the narrow-key design below would exercise nothing real"
+    # check-queue-api-selftest is not named above either: it reads nothing
+    # outside the tree, but it answers from a narrower set than the rest of
+    # this list shares, so it too is served off a fingerprint of its own
+    # rather than the whole-tree one (docs/decisions.d/337 §337.10).
+    grep -qx check-queue-api-selftest <<<"$reusable" \
+        || fail "check-queue-api-selftest is not in gate_reusable_steps, so the narrow-key design below would exercise nothing real"
     # The fingerprint leaves out what CI's docs split leaves out, for the same
     # reason. If one of the two claims changes, the other has to change with it.
     wf='{{ justfile_directory() }}/.github/workflows'
@@ -2584,6 +2681,80 @@ check-gate-verdicts-selftest:
         && fail "a toolchain version change was reported as served"
     [ -f "$thc_store/$thc_fp2" ] \
         || fail "the re-run after a toolchain version change recorded nothing under the new fingerprint"
+    g reset -q --hard "$base"
+
+    # check-queue-api-selftest's own narrow-key cache (docs/decisions.d/337
+    # §337.10): a fingerprint and record store kept apart from the whole-tree
+    # one above, keyed on justfile, tooling/, .gitattributes, mise.toml and
+    # mise.lock. The real recipe copies tooling/queue/*.py into a scratch hub
+    # and drives `just queue` end to end, which takes minutes, so this drives
+    # the step through a copy of this justfile, committed into `$repo` itself
+    # as `$repo/justfile`, with the real recipe's body replaced by a fast one:
+    # `set allow-duplicate-recipes` makes the later of two definitions of the
+    # same name win, so gate's own serve/write-back logic around
+    # check-queue-api-selftest is exercised for real while the slow recipe
+    # itself is not. Driven from a `cd` into `$repo` rather than `--justfile`,
+    # so that the `just` calls `gate`'s own body makes for each step and each
+    # fingerprint, none of which pass `--justfile` themselves, find
+    # `$repo/justfile` the same way the outer call does — `--working-directory`
+    # only renames where recipes run, and `just` still requires `--justfile`
+    # beside it, so it cannot reach those inner calls.
+    qas_store="$repo/.git/rcad-verdicts-queue-api-selftest"
+    qas_fingerprint() { (cd "$repo" && "$j" _queue-api-selftest-fingerprint); }
+    qas_gate() {
+        (cd "$repo" && "$j" --set gate_steps check-queue-api-selftest \
+            --set gate_reusable_steps check-queue-api-selftest \
+            --set gate_log "$dir/gate.log" gate quiet "$@" 2>&1)
+    }
+
+    mkdir -p "$repo/tooling/queue"
+    cp '{{ justfile() }}' "$repo/justfile"
+    printf '\nset allow-duplicate-recipes\n\ncheck-queue-api-selftest:\n    exit 0\n' >>"$repo/justfile"
+    printf 'print("queue")\n' >"$repo/tooling/queue/rows.py"
+    printf '* text=auto\n' >"$repo/.gitattributes"
+    printf '[tools]\n' >"$repo/mise.toml"
+    printf '[tools]\n' >"$repo/mise.lock"
+    g add -A
+    g commit -q -m 'queue-api-selftest fixture files'
+    qas_commit1=$(g rev-parse HEAD)
+
+    got=$(qas_gate) || fail "the first narrow gate of check-queue-api-selftest failed"
+    grep -q '^· check-queue-api-selftest (' <<<"$got" \
+        || fail "the first narrow gate did not run check-queue-api-selftest"
+    qas_fp1=$(qas_fingerprint)
+    [[ "$qas_fp1" =~ ^[0-9a-f]{64}$ ]] \
+        || fail "check-queue-api-selftest's own fingerprint did not come back as a hash: $qas_fp1"
+    [ -f "$qas_store/$qas_fp1" ] || fail "a passing narrow gate recorded nothing under its own store"
+    grep -qx "commit $qas_commit1" "$qas_store/$qas_fp1" \
+        || fail "the narrow record does not name the commit that was gated"
+
+    # A kernel-only change: crates/a.rs sits outside the narrow set, so the
+    # row's own first case — the narrow key must still serve it.
+    printf '// kernel change\n' >>"$repo/crates/a.rs"
+    g add -A
+    g commit -q -m 'a kernel-only change, queue-api-selftest case'
+    [ "$(qas_fingerprint)" = "$qas_fp1" ] \
+        || fail "a commit that touched only crates/a.rs moved check-queue-api-selftest's own fingerprint"
+    got=$(qas_gate) || fail "a narrow gate of a kernel-only change failed"
+    grep -q "^· served: check-queue-api-selftest from ${qas_commit1:0:8}'s gate at " <<<"$got" \
+        || fail "a kernel-only commit was not served check-queue-api-selftest's green from the commit under it"
+    grep -q '^· check-queue-api-selftest (' <<<"$got" \
+        && fail "a served narrow step ran anyway"
+
+    # tooling/queue/rows.py sits inside the narrow set, so a change to it
+    # moves the key and the next gate runs the step again — the row's second
+    # case.
+    g reset -q --hard "$qas_commit1"
+    printf 'print("more")\n' >>"$repo/tooling/queue/rows.py"
+    g add -A
+    g commit -q -m 'tooling/queue/rows.py change'
+    [ "$(qas_fingerprint)" != "$qas_fp1" ] \
+        || fail "a commit that touched tooling/queue/rows.py left check-queue-api-selftest's fingerprint where it was"
+    got=$(qas_gate) || fail "a narrow gate after a tooling/queue/rows.py change failed"
+    grep -q '^· check-queue-api-selftest (' <<<"$got" \
+        || fail "a tooling/queue/rows.py change was served instead of run again"
+    grep -q '^· served: check-queue-api-selftest' <<<"$got" \
+        && fail "a tooling/queue/rows.py change was reported as served"
     g reset -q --hard "$base"
 
     # The steps that check the machine, each served off a key of its own: the
@@ -19657,6 +19828,45 @@ check-queue-api-selftest:
     [ -z "$dup" ] || fail "two racing batches handed out the same id: $dup"
 
     exit 0
+
+# `check-queue-api-selftest`'s own fingerprint, narrower than
+# `_code-fingerprint`'s: a 90s `openat`-only trace of a real run, extended by a
+# second trace into the recipe's own loop of cases before it was cut off by its
+# timeout, found nothing it opens inside the tree outside `justfile`,
+# `tooling/`, `.gitattributes`, `mise.toml` and `mise.lock` — and nothing under
+# `docs/` outside its own scratch repository (docs/decisions.d/337 §337.10).
+# Same shape as `_code-fingerprint` — `git ls-tree` over the paths, then the
+# same environment block — so the two stay easy to compare by eye.
+#
+# `mise.lock` is here and `_timing-hooked-calls-fingerprint`'s four paths have
+# nothing like it: every `python3` this recipe runs resolves through mise's own
+# shim, which reads the project's `mise.toml` and `mise.lock` to pick a
+# version before it ever reaches `tooling/queue/queue.py`. `just` itself does
+# not: `just_executable()` already names the real binary, not a shim.
+#
+# `justfile` is one of the paths, so a change to this recipe's own text, or to
+# check-queue-api-selftest's, already moves the key on its own. There is no
+# `--show` of either to keep in step, unlike the narrower four paths above.
+[private]
+_queue-api-selftest-fingerprint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git rev-parse --verify --quiet HEAD >/dev/null || { echo "there is no commit here"; exit 0; }
+    if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+        echo "the tree has uncommitted or untracked files"
+        exit 0
+    fi
+    {
+        git ls-tree -r --full-tree HEAD -- justfile tooling .gitattributes mise.toml mise.lock
+        echo "-- environment"
+        for name in $(compgen -e | LC_ALL=C sort); do
+            case "$name" in
+                RCAD_STEP_CORPUS) ;;
+                RCAD_*|PROPTEST_*|NEXTEST_*|CARGO_BUILD_*|CARGO_PROFILE_*|RUSTFLAGS|RUSTDOCFLAGS|CARGO_ENCODED_RUSTFLAGS|RUSTC|RUSTUP_TOOLCHAIN|RUST_MIN_STACK)
+                    printf '%s=%s\0' "$name" "${!name}" ;;
+            esac
+        done
+    } | sha256sum | cut -d' ' -f1
 
 # The fuzz half of `status`: for the night `latest` names, how many of the
 # groups `fuzz-triage` found still failing on `main` no row names yet (§418.4).
