@@ -9593,6 +9593,9 @@ impl<'f> Arrangement<'f> {
         if let Some(sorted) = self.round_two_places_two_curves_cross(node, half_edges) {
             return Ok(sorted);
         }
+        if let Some(sorted) = self.round_two_lines_that_meet_at_another_node(node, half_edges) {
+            return Ok(sorted);
+        }
         let reference = Direction {
             crossing: half_edges
                 .iter()
@@ -9797,6 +9800,183 @@ impl<'f> Arrangement<'f> {
         } else {
             vec![one_here, one_there, other_there, other_here]
         })
+    }
+
+    /// The four ways out of a node two straight crossings both run through,
+    /// where another node is the place the two meet, in anticlockwise order:
+    /// `None` where any step of that reading is not proved, and for every
+    /// other node.
+    ///
+    /// **Two lines meet once**, so where two planes cut the face's plane and
+    /// the arrangement draws both lines through this node and through
+    /// another node named as the meet of the three planes, the two only touch
+    /// here. Each line's two ways out are on one side of the other, and the
+    /// two directions here, which are what the general sort reads, would put
+    /// one line's ways either side of the other's.
+    ///
+    /// **Which side.** Write `A` and `B` for the two crossings, `M` for where
+    /// they meet, and `τ` for the sign of `det(∇S, ∇A, ∇B)`, exact for three
+    /// planes. Left of `A` forward, `f·(∇S × ∇A)` with `f = 1`, is `A`'s
+    /// negative side: `∇A · (∇S × (∇S × ∇A)) = (∇S·∇A)² − |∇S|²|∇A|²`. Along
+    /// `B`, `A`'s value is `t·∇A·(∇S × ∇B) = −t·τ` for `t` how far past `M`
+    /// along `B` forward, nothing only at `M`. So `B` is left of `A` forward
+    /// here when `τ` is `Pos` and `M` lies behind along `B`, or `τ` is `Neg`
+    /// and `M` lies ahead. Round the node the order is then `A`'s way with
+    /// `B` on its left, `B`'s way running along with that one, `B`'s other
+    /// way, and `A`'s other way. Which way `M` lies along each line is read
+    /// off the arcs, and the node must lie the same way out of `M` along both
+    /// lines, as the two directions here say, or nothing is answered.
+    ///
+    /// The flat `x = −0.23` of `LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step` is
+    /// the shape. Its corner `(−0.23, −6.35, 2)` is on the flange's front and
+    /// on the body's front disc, two planes a rounding apart, which meet the
+    /// flat in two lines that cross `0.486` lower, at `z = 1.514`. Read as a
+    /// crossing at the corner, the slivers between the two lines were walked
+    /// twice and wound `2`, and every fuse of a box round its front corner or
+    /// far off was refused `CannotTellTheCellsOfAFaceApart` (Q3058).
+    ///
+    /// Every sign it reads is exact or proved, whatever the caller's policy,
+    /// and where one is not the general sort runs.
+    fn round_two_lines_that_meet_at_another_node(
+        &self,
+        node: usize,
+        half_edges: &[usize],
+    ) -> Option<Vec<usize>> {
+        if half_edges.len() != 4 {
+            return None;
+        }
+        let crossings = half_edges
+            .iter()
+            .map(|&half_edge| self.direction(half_edge).crossing);
+        let (one, other) = (crossings.clone().min()?, crossings.max()?);
+        if one == other
+            || self.has_a_way_of_its_own(node, one)
+            || self.has_a_way_of_its_own(node, other)
+        {
+            return None;
+        }
+        let the_way = |crossing: usize, forward: bool| {
+            let mut found = half_edges
+                .iter()
+                .copied()
+                .filter(|&half_edge| self.direction(half_edge) == Direction { crossing, forward });
+            let (Some(half_edge), None) = (found.next(), found.next()) else {
+                return None;
+            };
+            Some(half_edge)
+        };
+        let [one_forward, one_back, other_forward, other_back] = [
+            the_way(one, true)?,
+            the_way(one, false)?,
+            the_way(other, true)?,
+            the_way(other, false)?,
+        ];
+        let partners = [one, other].map(|crossing| self.crossings[crossing].partner);
+        let mut surfaces = [self.surface, partners[0], partners[1]];
+        if !surfaces
+            .iter()
+            .all(|surface| matches!(surface, Surface::Plane(_)))
+        {
+            return None;
+        }
+        surfaces.sort_by_key(name_of_surface_bits);
+        let names_the_meet = |at: usize| {
+            let Node { made_of, also, .. } = &self.nodes[at];
+            made_of
+                .iter()
+                .chain(also)
+                .any(|(named, _)| *named == surfaces)
+        };
+        if names_the_meet(node) {
+            return None;
+        }
+        let mut meets = (0..self.nodes.len()).filter(|&at| names_the_meet(at));
+        let (Some(meet), None) = (meets.next(), meets.next()) else {
+            return None;
+        };
+        let lies_ahead = |crossing: usize| match (
+            self.walks_along_to(crossing, node, meet, true)?,
+            self.walks_along_to(crossing, node, meet, false)?,
+        ) {
+            (true, false) => Some(true),
+            (false, true) => Some(false),
+            (true, true) | (false, false) => None,
+        };
+        let (one_ahead, other_ahead) = (lies_ahead(one)?, lies_ahead(other)?);
+        let at = self.nodes[node].point;
+        let turn = orient3d_of_points(
+            gradient_at(&self.surface, at),
+            gradient_at(&partners[0], at),
+            gradient_at(&partners[1], at),
+            PredicatePoint::from([0.0; 3]),
+        );
+        let alike = dot_of(
+            self.way_out_of(
+                node,
+                Direction {
+                    crossing: one,
+                    forward: true,
+                },
+            ),
+            self.way_out_of(
+                node,
+                Direction {
+                    crossing: other,
+                    forward: true,
+                },
+            ),
+        )
+        .sign();
+        let proved = |sign: Decision| sign == Decision::Pos || sign == Decision::Neg;
+        if !proved(turn) || !proved(alike) || (alike == Decision::Pos) != (one_ahead == other_ahead)
+        {
+            return None;
+        }
+        let on_the_left = (turn == Decision::Pos) != other_ahead;
+        let (one_left, one_right) = if on_the_left {
+            (one_forward, one_back)
+        } else {
+            (one_back, one_forward)
+        };
+        let (other_along, other_against) = if (alike == Decision::Pos) == on_the_left {
+            (other_forward, other_back)
+        } else {
+            (other_back, other_forward)
+        };
+        Some(vec![one_left, other_along, other_against, one_right])
+    }
+
+    /// Whether walking `crossing`'s arcs from `start`, forward or back, comes
+    /// to `goal` before it runs out or comes back: `None` where the walk
+    /// could go on along two arcs.
+    fn walks_along_to(
+        &self,
+        crossing: usize,
+        start: usize,
+        goal: usize,
+        forward: bool,
+    ) -> Option<bool> {
+        let (near, far) = if forward { (0, 1) } else { (1, 0) };
+        let mut at = start;
+        for _ in 0..self.arcs.len() {
+            let mut next = self
+                .arcs
+                .iter()
+                .filter(|arc| arc.crossing == crossing && arc.ends[near] == at);
+            let arc = match (next.next(), next.next()) {
+                (None, _) => return Some(false),
+                (Some(arc), None) => arc,
+                (Some(_), Some(_)) => return None,
+            };
+            at = arc.ends[far];
+            if at == goal {
+                return Some(true);
+            }
+            if at == start {
+                return Some(false);
+            }
+        }
+        Some(false)
     }
 
     /// Which half of the turn starting at `reference` a direction is in: `0` for
