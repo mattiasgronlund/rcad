@@ -22052,8 +22052,9 @@ one.
 ### 464.32 The side of rcad-geom's torus with a zero factor
 
 Draft, left by Q2786's second lane for the lane after it: `torzero.py` below
-writes 169 cases and their 169 controls, and none of them has been run. The
-lane that runs them replaces this paragraph with the write-up.
+writes 169 cases and their 169 controls. The third lane ran them, and its
+draft after `torzero.py` says what they printed. The lane that writes this
+section up replaces both drafts.
 
 ```python
 """Write tor.g's cases where a difference or a direction component is zero,
@@ -22081,7 +22082,9 @@ at least right and n is its only state. Left out: a zero set holding all three
 direction components, since Torus's axis has no zero direction (torus.rs, the
 doc on basis); and, with all three differences zero, which puts the point at
 the centre, hollow below the normals: out_and_back is 0, so bulge is hollow
-exactly, bulge^2 is not normal, and on_floats returns None. At the centre the
+exactly, bulge^2 is not normal, and on_floats returns None. hollow is not
+zero, since Torus::new keeps the tube narrower than the ring and the squares
+of two normal doubles round apart. At the centre the
 w.w bulge^2 block is the three pieces of (RR - rr)^2. The names are
 torz_<zeros>_<state><hollow><P2>.g and c_torz_<zeros>_<state><hollow><P2>_half.g,
 the state left out where no component keeps both halves.
@@ -22762,4 +22765,293 @@ for zero, tag, state, hollow, p2 in cases():
     count += 1
 assert count == 169, count
 print("cases written:", count)
+```
+
+Draft, left by Q2786's third lane for the lane after it: the run below is
+done, and the write-up still replaces these draft paragraphs. `runzt.sh` ran
+the 169 cases with `gappa -Bcoq` and `coqc`, and their 169 controls, 20 at a
+time, started by `start.sh`. `tallyzt.py` printed, after its line for each
+case:
+
+```text
+y bounds {'[-1.77636e-15, 1.77636e-15]': 24, '[-1.66533e-15, 1.66533e-15]': 30, '[-1.55431e-15, 1.55431e-15]': 48, '[-1.44329e-15, 1.44329e-15]': 24, '[-1.33227e-15, 1.33227e-15]': 18, '[-1.22125e-15, 1.22125e-15]': 18, '[-9.99201e-16, 9.99201e-16]': 1, '[-8.88178e-16, 8.88178e-16]': 3, '[-7.77156e-16, 7.77156e-16]': 3}
+P bounds {'[-7.77156e-16, 7.77156e-16]': 150, '[-6.66134e-16, 6.66134e-16]': 12, '[-4.44089e-16, 4.44089e-16]': 7}
+control bests {'[-32, 32]': 24, '[-30, 30]': 30, '[-28, 28]': 48, '[-26, 26]': 24, '[-24, 24]': 18, '[-22, 22]': 18, '[-18, 18]': 1, '[-16, 16]': 3, '[-14, 14]': 3}
+cases printing pointless: 0 []
+cases exit 0: 169 of 169
+controls at u/2 exit 1: 169 of 169
+case times (1.1, 'torz_fxfyfzdydz_nb') (31.3, 'torz_fy_nen')
+coq ok: 168 of 169
+coq smallest (5281, 18, 'torz_fxfyfzdydz_nb') largest (20070, 62, 'torz_fz_nen') times 4.57 48.18
+files with a line other than results, 'pointless' and 'assumed to be nonzero': ['torz_dy_cen.coqc']
+```
+
+`torz_dy_cen.coqc` ends `The term "eq_refl" has type "true = true" while it
+is expected to have type "intersect_helper (upper i156) (lower i156) i155 =
+true".`, at `torz_dy_cen.v` line 8382, `apply intersect with (1 := h1) (2 :=
+h2)`, where `h1` and `h2` are the same lemma, `l481 h0`: the fault of
+464.17's `tor_cusen.g` (464.17's 8). `runzt2.sh` printed:
+
+```text
+torz_dy_cen2.g is torz_dy_cen.g
+torz_dy_cen2 exit 0 11.95s
+torz_dy_cen2 coq -Bcoq exit 0 coqc exit 0 14.67s lines 18456 hints 61
+coqc printed:
+done
+```
+
+`kut.py` writes each case's bound on `y` as `a u + b u²`: the largest is
+`16u + 83u²`, in the 24 cases of the sets `{dx}`, `{dy}` and `{dz}`, below
+464.17's `17u + 95u²`, and each control's best is twice its case's `a`.
+
+`runzt.sh`, whole:
+
+```sh
+#!/bin/bash
+# torzero.py's 169 cases, each with gappa -Bcoq and coqc when it proves, and
+# their 169 controls at u/2, 20 at a time: the cases first.
+# Writes runzt.txt, which ends "done".
+cd "$(dirname "$0")"
+python3 torzero.py
+{
+  for f in torz_*.g; do
+    echo "./one.sh $f coq"
+  done
+  for f in c_torz_*_half.g; do
+    echo "./one1.sh $f"
+  done
+} > runzt.jobs
+{
+  wc -l < runzt.jobs
+  xargs -P 20 -L 1 env < runzt.jobs
+} > runzt.txt 2>&1
+echo done >> runzt.txt
+```
+
+`start.sh`, whole, which a lane runs in the foreground and then waits on the
+pid it prints:
+
+```sh
+#!/bin/bash
+# Start runzt.sh detached in its own process group and print its pid.
+cd "$(dirname "$0")"
+setsid nohup ./runzt.sh > runzt.nohup 2>&1 &
+echo $!
+```
+
+`runzt2.sh`, whole:
+
+```sh
+#!/bin/bash
+# gappa -Bcoq and coqc again on torz_dy_cen.g, the one case whose certificate
+# coqc refused in runzt.txt. It runs on a copy, again/torz_dy_cen2.g, beside a
+# copy of one.sh, so that torz_dy_cen.coqc, which tallyzt.py reads, stays as
+# runzt.sh left it, and tallyzt.py and samezt.py do not count the copy.
+# Writes runzt2.txt.
+cd "$(dirname "$0")"
+mkdir -p again
+cp one.sh again/one.sh
+cp torz_dy_cen.g again/torz_dy_cen2.g
+{
+  cmp torz_dy_cen.g again/torz_dy_cen2.g && echo "torz_dy_cen2.g is torz_dy_cen.g"
+  ./again/one.sh torz_dy_cen2.g coq
+  echo "coqc printed:"
+  cat again/torz_dy_cen2.coqc
+  echo done
+} > runzt2.txt 2>&1
+```
+
+`tallyzt.py`, whole:
+
+```python
+"""Tally runzt.txt and the .out files of torzero.py's 169 cases: for each case
+its exit, the relative bound on y and on P that it prints, and its coqc line;
+for each control its exit and best, and which print "pointless". Prints one
+line per case, then counts. Run as: python3 tallyzt.py"""
+import collections
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+run = open("runzt.txt").read()
+cases = sorted(f[:-2] for f in os.listdir(".") if f.startswith("torz_") and f.endswith(".g"))
+
+
+def short(out, goal):
+    m = re.search(r"^  " + goal + r" in \[[^{]*\{([^,]*),[^}]*\}, [^{]*\{([^,]*),", out, re.M)
+    return f"[{m.group(1)}, {m.group(2)}]" if m else "-"
+
+
+def control(name):
+    ex = re.search(rf"^{name} exit (\d+) ([\d.]+)s$", run, re.M)
+    out = open(f"{name}.out").read() if os.path.exists(f"{name}.out") else ""
+    best = re.search(r"best: (\[[^\]]*\])", out)
+    return (ex.group(1) if ex else "?", best.group(1) if best else "pointless" if "pointless" in out else "-")
+
+
+ybounds = collections.Counter()
+pbounds = collections.Counter()
+bests = collections.Counter()
+pointless = []
+coq = []
+times = []
+for c in cases:
+    out = open(f"{c}.out").read()
+    ex = re.search(rf"^{c} exit (\d+) ([\d.]+)s$", run, re.M)
+    cq = re.search(rf"^{c} coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$", run, re.M)
+    ctl = control(f"c_{c}_half")
+    y = short(out, r"\([^\n]*? - Ex\) / [^\n]*?")
+    p = short(out, r"[^\n]*? -/ [^\n]*?")
+    if "pointless" in out:
+        pointless.append(c)
+    ybounds[y] += 1
+    pbounds[p] += 1
+    bests[ctl[1]] += 1
+    if ex:
+        times.append((float(ex.group(2)), c))
+    if cq:
+        coq.append((int(cq.group(4)), int(cq.group(5)), c, cq.group(1), cq.group(2), float(cq.group(3))))
+    print(c, "exit", ex.group(1) if ex else "?", ex.group(2) if ex else "", "y", y, "P", p,
+          "coq", cq.groups() if cq else "-", "ctl", *ctl, "pointless" if "pointless" in out else "")
+print("y bounds", dict(ybounds))
+print("P bounds", dict(pbounds))
+print("control bests", dict(bests))
+print("cases printing pointless:", len(pointless), pointless)
+print("cases exit 0:", len(re.findall(r"^torz_\w+ exit 0 ", run, re.M)), "of", len(cases))
+print("controls at u/2 exit 1:", len(re.findall(r"^c_torz_\w+_half exit 1 ", run, re.M)), "of", len(cases))
+times.sort()
+print("case times", times[0], times[-1])
+print("coq ok:", sum(1 for x in coq if x[3] == "0" and x[4] == "0"), "of", len(coq))
+if coq:
+    coq.sort()
+    print("coq smallest", coq[0][:3], "largest", coq[-1][:3], "times", min(x[5] for x in coq), max(x[5] for x in coq))
+
+
+def other_lines(f):
+    return [line for line in open(f).read().split("\n")
+            if line and "assumed to be nonzero" not in line and "pointless" not in line
+            and not line.startswith(("Results:", "  "))]
+
+
+warn = [f for f in os.listdir(".") if f.startswith("torz_") and f.endswith((".out", ".bcoq", ".coqc"))
+        and other_lines(f)]
+print("files with a line other than results, 'pointless' and 'assumed to be nonzero':", sorted(warn))
+```
+
+`kut.py`, whole:
+
+```python
+"""For each of torzero.py's 169 cases, write the larger end of its bound on
+(y - Ex) / Phat2 and of P -/ Phatx as a u + b u^2, u = 2^-53, a the whole
+number of u below it and b rounded up; check that its control's best is
+twice its own a; and count the bounds by the case's letters.
+Run as: python3 kut.py"""
+import collections
+import math
+import os
+import re
+from fractions import Fraction
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+U = Fraction(1, 2**53)
+
+
+def ends(out, goal):
+    m = re.search(r"^  " + goal + r" in \[(-?\d+)(?:b(-?\d+))? \{[^}]*\}, (-?\d+)(?:b(-?\d+))? \{", out, re.M)
+    lo = Fraction(int(m.group(1))) * Fraction(2) ** int(m.group(2) or 0)
+    hi = Fraction(int(m.group(3))) * Fraction(2) ** int(m.group(4) or 0)
+    return max(-lo, hi)
+
+
+def ku(x):
+    a = math.floor(x / U)
+    return a, math.ceil((x - a * U) / U**2)
+
+
+cases = sorted(f[:-2] for f in os.listdir(".") if f.startswith("torz_") and f.endswith(".g"))
+by = collections.Counter()
+mismatch = []
+worst = (0, 0)
+for c in cases:
+    out = open(f"{c}.out").read()
+    y = ku(ends(out, r"\([^\n]*? - Ex\) / [^\n]*?"))
+    p = ku(ends(out, r"[^\n]*? -/ [^\n]*?"))
+    ctl = open(f"c_{c}_half.out").read()
+    best = re.search(r"best: \[-?(\d+), (\d+)\]", ctl)
+    if not best or int(best.group(2)) != 2 * y[0]:
+        mismatch.append((c, y, best.group(0) if best else None))
+    letters = c.rsplit("_", 1)[1]
+    worst = max(worst, y)
+    by[(y, p, letters)] += 1
+    print(c, "y", f"{y[0]}u + {y[1]}u^2", "P", f"{p[0]}u + {p[1]}u^2", best.group(0) if best else "-")
+print("worst y", worst)
+print("controls whose best is not twice the case's u:", mismatch)
+groups = collections.defaultdict(list)
+for (y, p, letters), n in by.items():
+    groups[letters].append((y, p, n))
+for letters in sorted(groups):
+    print(letters, sorted(groups[letters]))
+```
+
+`samezt.py`, whole:
+
+```python
+"""Check that each script 464.32 appends whole is byte for byte the file that
+was run, in the directory given; that one.sh and one1.sh there are 464.13's
+and 464.15's blocks; and that torzero.py, run again in a fresh directory from
+the appended text, writes what was run.
+Run as: python3 samezt.py <doc> <dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, ran = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+sec = text[text.index("### 464.32"):]
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+blocks = FENCED.findall(sec)
+print("code blocks in 464.32:", len(blocks))
+marks = {
+    "torzero.py": '"""Write tor.g\'s cases where a difference or a direction component is zero',
+    "runzt.sh": "#!/bin/bash\n# torzero.py's 169 cases",
+    "start.sh": "#!/bin/bash\n# Start runzt.sh detached",
+    "tallyzt.py": '"""Tally runzt.txt',
+    "samezt.py": '"""Check that each script 464.32 appends whole',
+}
+found = {}
+for lang, body in blocks:
+    for name, mark in marks.items():
+        if body.startswith(mark):
+            assert name not in found, name
+            found[name] = body
+for name in marks:
+    if name not in found:
+        print(name, "not appended")
+        continue
+    path = os.path.abspath(__file__) if name == "samezt.py" else os.path.join(ran, name)
+    print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+for sub, end, name, mark in (("### 464.13", "### 464.14", "one.sh", "#!/bin/bash\n# Run one Gappa script under 464.4's pin"),
+                             ("### 464.15", "### 464.16", "one1.sh", "#!/bin/bash\n# one.sh with the timeout taken from T")):
+    s = text[text.index(sub):text.index(end)]
+    want = [body for lang, body in FENCED.findall(s) if body.startswith(mark)]
+    assert len(want) == 1, (name, len(want))
+    print(name, "is", sub[4:], "block:", open(os.path.join(ran, name)).read() == want[0])
+
+fresh = tempfile.mkdtemp()
+open(os.path.join(fresh, "torzero.py"), "w").write(found["torzero.py"])
+subprocess.run(["python3", "torzero.py"], cwd=fresh, check=True)
+written = sorted(f for f in os.listdir(fresh) if f.endswith(".g"))
+same = [f for f in written if os.path.exists(os.path.join(ran, f))
+        and filecmp.cmp(os.path.join(fresh, f), os.path.join(ran, f), shallow=False)]
+differ = [f for f in written if os.path.exists(os.path.join(ran, f)) and f not in same]
+absent = [f for f in written if not os.path.exists(os.path.join(ran, f))]
+extra = sorted(f for f in os.listdir(ran) if f.endswith(".g") and f not in written)
+print("written again:", len(written), "same as run:", len(same), "differ:", differ, "not run:", absent,
+      "run, not written:", extra)
+shutil.rmtree(fresh)
 ```
