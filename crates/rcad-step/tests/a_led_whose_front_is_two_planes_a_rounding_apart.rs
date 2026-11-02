@@ -80,10 +80,14 @@
 //! orders, and it gets past it now that Q3019's ordering is in (Q3027).
 //!
 //! A box on this LED's flat, and the far box of
-//! `LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step`, stop on the order along the
-//! loop a plane `x = c` cuts the rim in, between where the disc's plane and
-//! the flange's front cross it a rounding apart: the box's side `x = -1.33`
-//! here, a lead's side `x = -0.3` in the D3.
+//! `LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step`, stopped on the order along the
+//! straight line a plane `x = c` cuts the rim in, between where the disc's
+//! plane and the flange's front cross it, `8.0e-16` apart along it here: the
+//! box's side `x = -1.33` here, a lead's side `x = -0.3` in the D3. The two
+//! planes cross `x = c` in lines that lean apart by a rounding, so nothing
+//! read their order off the stored numbers. It is now read off which side of
+//! one plane the other's meet lies, and which way that plane faces along the
+//! line (Q3059).
 //!
 //! The last two, `LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step` and
 //! `LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step`, stopped on the flange's front,
@@ -96,10 +100,11 @@
 //! arrangement kept them as nodes of their own, with a sliver between them.
 //! Each place is now folded into the corner when the line and the circle stay
 //! within a rounding of each other all the way from it to the corner (Q3010).
-//! The far box of the D3 stops on the order along a crossing where its lead's
-//! side `x = -0.3` meets the rim below the axis. The D5's stopped on side of
-//! plane where its flat meets its rim above the axis, the same kind of corner
-//! as the one below, and gets past it the same two ways.
+//! The far box of the D3 stopped on the order along a crossing where its
+//! lead's side `x = -0.3` meets the rim below the axis, between the same two
+//! planes' meets, and gets past it the same way (Q3059). The D5's stopped on
+//! side of plane where its flat meets its rim above the axis, the same kind of
+//! corner as the one below, and gets past it the same two ways.
 //!
 //! The far boxes of this LED, of the two D5 LEDs whose axis is 15 up, of the
 //! D5 whose axis is 9 up and of the D3 whose axis is 2 up stopped then on the
@@ -119,9 +124,17 @@
 //! disc, three planes two of which are a rounding apart, and its box runs
 //! along the flat's line from `z = 1.02` to `3.52` here, round the corner. The
 //! `D5` LED with its front `y = -1.27` of
-//! `a_led_whose_flat_touches_its_body_at_a_corner.rs` stops there too.
+//! `a_led_whose_flat_touches_its_body_at_a_corner.rs` stops there too, and so
+//! does the box on this LED's flat.
 //!
-//! These tests pin all four stops.
+//! The far boxes of the two D3 LEDs stop on the order along that same line,
+//! between its two meets with the body's pipe, which the front draws twice,
+//! as the edge of its hole and as the pipe cut across it. Each meet is
+//! solved from the front, the disc and one writing of the pipe, and the two
+//! are worked out into one box: at `x = -0.2197`, above the axis, in the D3
+//! whose axis is 6 up, and at `x = 2.659`, below it, in the one 10 up.
+//!
+//! These tests pin both stops.
 
 use std::{env, fs, path::PathBuf};
 
@@ -139,7 +152,6 @@ const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 const THIS_ONE: Led = Led {
     file: "LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step",
     front: -6.35,
-    rim: 2.9,
     body: 2.5,
     axis: 3.0,
 };
@@ -162,7 +174,6 @@ const FOUR_MORE: [(Led, [f64; 3], [f64; 2]); 4] = [
         Led {
             file: "LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step",
             front: -3.81,
-            rim: 2.9,
             body: 2.5,
             axis: 15.0,
         },
@@ -173,7 +184,6 @@ const FOUR_MORE: [(Led, [f64; 3], [f64; 2]); 4] = [
         Led {
             file: "LED_D5.0mm_Horizontal_O6.35mm_Z15.0mm.step",
             front: -6.35,
-            rim: 2.9,
             body: 2.5,
             axis: 15.0,
         },
@@ -184,7 +194,6 @@ const FOUR_MORE: [(Led, [f64; 3], [f64; 2]); 4] = [
         Led {
             file: "LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step",
             front: -6.35,
-            rim: 2.9,
             body: 2.5,
             axis: 9.0,
         },
@@ -195,7 +204,6 @@ const FOUR_MORE: [(Led, [f64; 3], [f64; 2]); 4] = [
         Led {
             file: "LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step",
             front: -3.81,
-            rim: 1.9,
             body: 1.5,
             axis: 2.0,
         },
@@ -204,57 +212,49 @@ const FOUR_MORE: [(Led, [f64; 3], [f64; 2]); 4] = [
     ),
 ];
 
-/// Where the box on this LED's flat goes, and the plane its side nearer the
-/// flat's back lies in, `x = -1.33`.
-const ON_THE_FLAT: ([f64; 3], f64) = ([-1.23, -6.35, 3.0], -1.33);
+/// Where the box on this LED's flat goes, round its front corner.
+const ON_THE_FLAT: [f64; 3] = [-1.23, -6.35, 3.0];
 
-/// The LED file whose far box stops where the side of a lead, the plane `x =
-/// -0.3`, meets its rim on its flange's front.
-const BY_A_LEAD: (Led, f64) = (
+/// The D3 LED file whose far box stops where the line its flange's front
+/// crosses its body's front disc in meets its body's pipe above the axis, with
+/// the `x` of that place.
+const ITS_AXIS_6_UP: (Led, f64) = (
     Led {
         file: "LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step",
         front: -6.35,
-        rim: 1.9,
         body: 1.5,
         axis: 6.0,
     },
-    -0.3,
+    -0.21967713797085814,
 );
 
-/// The D3 LED file whose far box gets past the cells of its flange's front and
-/// stops where the side of a lead, the plane `x = -0.3`, meets its rim on its
-/// flange's front below the axis.
-const BY_A_LEAD_BELOW_THE_AXIS: (Led, f64) = (
+/// The D3 LED file whose far box stops where the line its flange's front
+/// crosses its body's front disc in meets its body's pipe below the axis, with
+/// the `x` of that place.
+const ITS_AXIS_10_UP: (Led, f64) = (
     Led {
         file: "LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step",
         front: -6.35,
-        rim: 1.9,
         body: 1.5,
         axis: 10.0,
     },
-    -0.3,
+    2.658993405157157,
 );
 
-/// An LED lying along `-y`, with its flange's front `y = front`, its flange's
-/// rim a pipe of radius `rim` and its body a pipe of radius `body`, both about
-/// the line `x = 1.27, z = axis`.
+/// An LED lying along `-y`, with its flange's front `y = front` and its body a
+/// pipe of radius `body` about the line `x = 1.27, z = axis`.
 struct Led {
     file: &'static str,
     front: f64,
-    rim: f64,
     body: f64,
     axis: f64,
 }
 
 impl Led {
     /// The two places on the flange's front where the plane `x = across` meets
-    /// its rim, above the axis and below it.
-    fn where_a_plane_across_meets_the_rim(&self, across: f64) -> [[f64; 3]; 2] {
-        self.where_a_plane_across_meets_a_pipe(self.rim, across)
-    }
-
-    fn where_a_plane_across_meets_a_pipe(&self, radius: f64, across: f64) -> [[f64; 3]; 2] {
-        let up = (radius.powi(2) - (1.27 - across).powi(2)).sqrt();
+    /// the body's pipe, above the axis and below it.
+    fn where_a_plane_across_meets_the_body(&self, across: f64) -> [[f64; 3]; 2] {
+        let up = (self.body.powi(2) - (1.27 - across).powi(2)).sqrt();
         [self.axis + up, self.axis - up].map(|z| [across, self.front, z])
     }
 
@@ -276,11 +276,13 @@ fn an_led_whose_disc_sits_inside_its_rim_gets_past_where_a_leads_side_meets_its_
 }
 
 #[test]
-fn a_box_on_the_flat_stops_where_its_side_meets_the_rim_on_the_two_front_planes() {
-    let (centre, side) = ON_THE_FLAT;
-    let [above, _] = THIS_ONE.where_a_plane_across_meets_the_rim(side);
-    every_fuse_refuses(THIS_ONE.file, &[centre], |error| {
-        the_one_record_is_undecidable_at(ALONG_A_CROSSING, above, error)
+fn a_box_on_the_flat_gets_past_where_its_side_meets_the_rim_and_stops_where_its_flat_meets_its_front_written_twice()
+ {
+    let (corner, meet) = THIS_ONES_FRONT_CORNER;
+    every_fuse_refuses(THIS_ONE.file, &[ON_THE_FLAT], |error| {
+        the_front_corner_and_where_the_flat_meets_the_front_written_twice_are_not_ordered(
+            &THIS_ONE, corner, meet, error,
+        )
     });
 }
 
@@ -297,19 +299,20 @@ fn four_more_leds_get_past_where_a_leads_side_meets_their_body_and_stop_where_th
 }
 
 #[test]
-fn a_d3_led_gets_past_its_front_corner_and_stops_where_a_leads_side_meets_its_rim() {
-    let (led, side) = &BY_A_LEAD;
-    let [above, _] = led.where_a_plane_across_meets_the_rim(*side);
+fn a_d3_led_gets_past_where_a_leads_side_meets_its_rim_and_stops_where_its_front_written_twice_meets_its_body()
+ {
+    let (led, across) = &ITS_AXIS_6_UP;
+    let [above, _] = led.where_a_plane_across_meets_the_body(*across);
     every_fuse_refuses(led.file, &[FAR_OFF], |error| {
         the_one_record_is_undecidable_at(ALONG_A_CROSSING, above, error)
     });
 }
 
 #[test]
-fn a_d3_led_gets_past_the_cells_of_its_front_and_stops_where_a_leads_side_meets_its_rim_below_the_axis()
+fn a_d3_led_gets_past_where_a_leads_side_meets_its_rim_and_stops_where_its_front_written_twice_meets_its_body_below_the_axis()
  {
-    let (led, side) = &BY_A_LEAD_BELOW_THE_AXIS;
-    let [_, below] = led.where_a_plane_across_meets_the_rim(*side);
+    let (led, across) = &ITS_AXIS_10_UP;
+    let [_, below] = led.where_a_plane_across_meets_the_body(*across);
     every_fuse_refuses(led.file, &[FAR_OFF], |error| {
         the_one_record_is_undecidable_at(ALONG_A_CROSSING, below, error)
     });
