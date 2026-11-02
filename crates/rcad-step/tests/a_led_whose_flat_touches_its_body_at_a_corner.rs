@@ -233,14 +233,25 @@
 //! width, and asked as a box the pipe could not tell; it is now asked as the
 //! point the box names (Q3020).
 //!
-//! The `Z15.0` LED stops now on its body's pipe, `Undecidable` with the one
+//! The `Z15.0` LED stopped then on its body's pipe, `Undecidable` with the one
 //! record `two ways out of a node along one line`, the far box included, at
 //! the back corner `(-1.23, -2.27, 15)`. One way out of it runs along `z`, on
 //! the circle the flange's back cuts in the pipe. The other is along the flat,
 //! which runs along the pipe there: the pipe's gradient is the flat's normal
 //! but for a rounding, so that way out is a box round nothing, `2.2e-16` either
 //! side of zero in `z`, and whether the two go the same way along one line was
-//! not decided. The tests pin both LEDs' stops.
+//! not decided. The corner stands for the two places where the circle crosses
+//! the ellipse the flat cuts in the pipe, at right angles, `1.67e-8` either
+//! side of `z = 15`, and the four ways out are now put in order by which of
+//! the two each leaves from (Q3043).
+//!
+//! The `Z15.0` LED stops now on its flange's flat, `Undecidable` with the one
+//! record `order along a crossing`, the far box included, between its front
+//! corner and its back corner round the ellipse the flat cuts in the body's
+//! pipe. The pipe's axis is written `5.6e-17` off square to the flat's normal,
+//! so that ellipse is about `9e16` long, it ends at the front corner, and the
+//! back corner, one along it, stands for a place on each of its two halves.
+//! The tests pin both LEDs' stops.
 
 use std::{env, fs, path::PathBuf};
 
@@ -254,7 +265,6 @@ const Z15: &str = "LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step";
 const D3: &str = "LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step";
 
 const ALONG_A_CROSSING: &str = "order along a crossing";
-const ALONG_ONE_LINE: &str = "two ways out of a node along one line";
 
 /// Half the side of the box put round each corner.
 const HALF: f64 = 0.1;
@@ -264,6 +274,12 @@ const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 /// The `Z3.0` LED's front corner.
 const Z3_FRONT_CORNER: [f64; 3] = [-1.23, -1.27, 3.0];
+
+/// The `Z15.0` LED's front corner.
+const Z15_FRONT_CORNER: [f64; 3] = [-1.23, -1.27, 15.0];
+
+/// The `Z15.0` LED's back corner.
+const Z15_BACK_CORNER: [f64; 3] = [-1.23, -2.27, 15.0];
 
 /// Where along `z` the box runs round the point where the `Z3.0` LED's flat
 /// meets the line its front's plane crosses its disc's in.
@@ -309,16 +325,18 @@ fn a_far_box_gets_past_where_the_flat_meets_the_front_circle_drawn_twice_and_sto
 /// Since Q2989 it puts in order the two points where `x = -0.3` meets the
 /// dome's rim at `y = -7.37`. Since Q3020 the one point its flange's flat
 /// touches its dome at is asked as that point, which is inside the body's
-/// pipe, so the flat, the dome and the pipe meet nowhere. It stops at its back
-/// corner, on whether the way out along the flat and the way out along the
-/// flange's back go the same way, the far box included.
+/// pipe, so the flat, the dome and the pipe meet nowhere. Since Q3043 the four
+/// ways out of its back corner on the body's pipe are put in order by the two
+/// places the corner stands for. It stops on its flange's flat, on the order of
+/// its front and back corners round the ellipse the flat cuts in the body's
+/// pipe, the far box included.
 #[test]
-fn a_z15_led_gets_past_where_its_flat_touches_its_dome_and_stops_on_two_ways_out_of_its_back_corner()
+fn a_z15_led_gets_past_its_back_corner_on_its_pipe_and_stops_on_its_corners_round_the_flats_ellipse()
  {
     every_fuse_refuses(
         Z15,
-        &a_box_round_each_of(&[[-1.23, -1.27, 15.0], [-1.23, -2.27, 15.0], FAR_OFF]),
-        which_way_two_ways_out_of_the_back_corner_go_is_undecidable,
+        &a_box_round_each_of(&[Z15_FRONT_CORNER, Z15_BACK_CORNER, FAR_OFF]),
+        |_, error| the_two_corners_of_the_flat_are_not_ordered_round_its_ellipse(error),
     );
 }
 
@@ -417,30 +435,23 @@ fn the_front_corner_and_where_the_flat_meets_the_front_written_twice_are_not_ord
             || (on_the_flats_line(one) && the_corner(other)))
 }
 
-/// Refused `Undecidable` with the one record `two ways out of a node along one
-/// line`, handed the back corner `(-1.23, -2.27, 15)` and the two ways out of
-/// it: one along `z` and one a box round nothing, each within `1e-9` of those.
-fn which_way_two_ways_out_of_the_back_corner_go_is_undecidable(_: &Model, error: &Error) -> bool {
+/// Refused `Undecidable` with the one record `order along a crossing`, handed
+/// the `Z15.0` LED's front corner and its back corner, each within `1e-9` of
+/// where it is, either way round.
+fn the_two_corners_of_the_flat_are_not_ordered_round_its_ellipse(error: &Error) -> bool {
     let Error::Undecidable { records } = error else {
         return false;
     };
     let [record] = records.records() else {
         return false;
     };
-    let [at, one, other] = record.inputs() else {
+    let [one, other] = record.inputs() else {
         return false;
     };
-    let along_z = |way: &Point| {
-        let [x, y, z] = way.enclosure();
-        [x, y]
-            .iter()
-            .all(|side| side.lo().abs() < 1e-9 && side.hi().abs() < 1e-9)
-            && z.lo() > 1.0
-    };
-    let round_nothing = |way: &Point| is_within_1e_9_of(way, [0.0; 3]);
-    record.predicate() == ALONG_ONE_LINE
-        && is_within_1e_9_of(at, [-1.23, -2.27, 15.0])
-        && ((along_z(one) && round_nothing(other)) || (round_nothing(one) && along_z(other)))
+    let is = |point: &Point, corner: [f64; 3]| is_within_1e_9_of(point, corner);
+    record.predicate() == ALONG_A_CROSSING
+        && ((is(one, Z15_FRONT_CORNER) && is(other, Z15_BACK_CORNER))
+            || (is(one, Z15_BACK_CORNER) && is(other, Z15_FRONT_CORNER)))
 }
 
 fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
