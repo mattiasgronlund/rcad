@@ -355,10 +355,13 @@ def gate(run, report):
 
     The second is a lane carried on from a base older than §397.4. Relays all
     but the one line each passing step prints, and returns whether the gate
-    passed and whether it left the slow tier out.
+    passed and whether it left the slow tier out. Seeds `numbers`' cache with
+    this command's own print, for a number whose text matches it verbatim (§385.3).
     """
     left_out_slow = run(JUST, "--show", "gate-lane")[0] == 0
-    rc, said = run(JUST, "gate-lane") if left_out_slow else run(JUST, "gate", "quiet")
+    cmd = (JUST, "gate-lane") if left_out_slow else (JUST, "gate", "quiet")
+    rc, said = run(*cmd)
+    run.seed(" ".join(cmd), rc, said)
     lines = said.splitlines()
     for line in lines:
         if not re.fullmatch(r"· \S+ \([0-9.]+ s\)", line):
@@ -607,7 +610,9 @@ def numbers(run, lane_numbers, report):
 
     A value the print does not hold goes in `number_mismatches` for the
     verifier to read. A command that writes to the repository or the queue is
-    not run at all.
+    not run at all. A command whose text matches an earlier one in this run at
+    the same clean-tree HEAD, including the run's own `gate-lane`, reads that
+    print instead of running again (§385.3).
     """
     report["number_mismatches"] = []
     for i, (what, value, command) in enumerate(lane_numbers, start=1):
@@ -617,7 +622,14 @@ def numbers(run, lane_numbers, report):
             left(report, f"number {i}, {what}: not run, since its command writes; re-run it by hand only if "
                          f"that is safe: {command}")
             continue
-        rc, said = run("bash", "-c", command, timeout=NUMBER_TIMEOUT)
+        kept = run.recall(command)
+        if kept is not None:
+            rc, said = kept
+            say(f"number {i}, {what}: `{command}` already ran at this commit; reading its kept print (exit {rc})")
+        else:
+            rc, said = run("bash", "-c", command, timeout=NUMBER_TIMEOUT)
+            if rc is not None:
+                run.seed(command, rc, said)
         if rc is None:
             say(f"number {i}, {what}: `{command}` did not end within {NUMBER_TIMEOUT} s")
             left(report, f"number {i}, {what}: its command did not end within {NUMBER_TIMEOUT} s: {command}")
@@ -640,11 +652,14 @@ class Runner:
     """Runs a command in a session of its own, keeps everything it printed in `full.log`, and hands back its output.
 
     A session of its own so that a number's command can be killed whole at its
-    timeout, children and all.
+    timeout, children and all. `cache` holds one print per command text and
+    clean-tree HEAD for the rest of a run: `gate` and `numbers` share it, so
+    the same command never runs twice at the same commit (§385.3).
     """
 
     def __init__(self, full_log):
         self.full_log = full_log
+        self.cache = {}
 
     def __call__(self, *cmd, timeout=None):
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -663,6 +678,21 @@ class Runner:
     def git(self, *args):
         rc, said = self("git", *args)
         return rc, said.strip()
+
+    def clean_head(self):
+        """HEAD, or None while the tree holds anything uncommitted: a kept print is never read or kept then."""
+        if self.git("status", "--porcelain")[1]:
+            return None
+        return self.git("rev-parse", "HEAD")[1]
+
+    def seed(self, command_text, rc, said):
+        head = self.clean_head()
+        if head is not None:
+            self.cache[(head, command_text)] = (rc, said)
+
+    def recall(self, command_text):
+        head = self.clean_head()
+        return None if head is None else self.cache.get((head, command_text))
 
 
 def read_input(path):
