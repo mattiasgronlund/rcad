@@ -4604,8 +4604,16 @@ impl<'f> Arrangement<'f> {
                     continue;
                 }
                 let order = self.nodes_along(crossing, on_it, policy, log)?;
+                let passed_twice = |node: usize| order.iter().filter(|&&at| at == node).count() > 1;
                 for pair in order.windows(2) {
                     let [one, next] = [pair[0], pair[1]];
+                    // A node the loop passes twice is on a plane its two
+                    // neighbours are each proved clear of
+                    // (`Arrangement::a_node_the_loop_passes_twice`), so the
+                    // pair is two points, and which comes first has no answer.
+                    if passed_twice(one) || passed_twice(next) {
+                        continue;
+                    }
                     match self.order_along(crossing, one, next, policy, log)? {
                         Decision::Zero => same.join(one, next),
                         Decision::Pos => {}
@@ -5239,11 +5247,15 @@ impl<'f> Arrangement<'f> {
                 if self.either_way_round_cuts_the_same_arcs(crossing, on_it)? {
                     return Ok(order);
                 }
+                let twice = self.a_node_the_loop_passes_twice(crossing, on_it);
                 // Every comparison is asked of the same three points whichever
                 // face is asking, so the order is the crossing's and not the
                 // asking face's.
-                let mut sorted: Vec<usize> = Vec::with_capacity(order.len());
+                let mut sorted: Vec<usize> = Vec::with_capacity(order.len() + 1);
                 for node in order {
+                    if twice.is_some_and(|(passed_twice, _, _)| passed_twice == node) {
+                        continue;
+                    }
                     let mut place = sorted.len();
                     for (index, &placed) in sorted.iter().enumerate() {
                         if self.order_along(crossing, node, placed, policy, log)? == Decision::Pos {
@@ -5253,10 +5265,123 @@ impl<'f> Arrangement<'f> {
                     }
                     sorted.insert(place, node);
                 }
+                if let Some((passed_twice, cut, the_start_is_on)) = twice {
+                    self.place_the_node_passed_twice(
+                        &mut sorted,
+                        passed_twice,
+                        &cut,
+                        the_start_is_on,
+                    );
+                }
                 order = sorted;
             }
         }
         Ok(order)
+    }
+
+    /// The node a loop a plane cuts a pipe or a ball in passes twice, the
+    /// plane that tells its two passes apart, and the side of that plane the
+    /// loop is counted from: `None` wherever any of that is not proved.
+    ///
+    /// **A node can stand for two places on the loop**
+    /// ([`Arrangement::stands_for_two_places_where_they_meet`]): two meets of
+    /// the face, the loop's partner and another plane, a rounding apart, one
+    /// on each side of a piece of the loop that holds other nodes. That plane
+    /// crosses the face's in a line, and a line crosses a loop that bulges
+    /// nowhere inwards at two places at most, which are these two. So the
+    /// nodes strictly on the side of it away from where the loop is counted
+    /// from are one run, and the node comes just before that run and just
+    /// after it ([`Arrangement::place_the_node_passed_twice`]).
+    ///
+    /// The flange's flat `x = -1.23` of
+    /// `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step` cuts the body's pipe in
+    /// an ellipse about `9e16` long, whose axis is written `5.6e-17` off
+    /// square to the flat's normal. The flat's back corner
+    /// `(-1.23, -2.27, 15)` stands for the two places where the back plane
+    /// crosses it, `1.67e-8` either side of `z = 15`, and the ellipse's end, a
+    /// unit along by the front corner, is between the two. Placed once, the
+    /// corner was asked whether it comes before a meet at that end, which no
+    /// answer makes true, and every certified fuse of the file was refused
+    /// `Undecidable` (Q3064).
+    ///
+    /// **Only on a face on a plane.** The argument holds for any face the
+    /// loop is drawn on, since the loop lies in its own plane whichever face
+    /// asks. But on the body's pipe of the same LED, the corner's four ways
+    /// out are put in order with the ellipse passing it once
+    /// ([`Arrangement::round_two_places_two_curves_cross`]), and no run has
+    /// yet shown the pipe face needing it passed twice.
+    fn a_node_the_loop_passes_twice(
+        &self,
+        crossing: usize,
+        on_it: &[usize],
+    ) -> Option<(usize, Surface, Decision)> {
+        let HowItRuns::RoundAClosedCurve {
+            from,
+            node: start,
+            named_the_start,
+            ref wound_as,
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        if self.surface.as_plane().is_none() || ALoopAPlaneCuts::of(wound_as).is_none() {
+            return None;
+        }
+        let mut passed_twice = on_it.iter().flat_map(|&node| {
+            self.nodes[node].crossings.iter().filter_map(move |&other| {
+                let cut = self.crossings[other].partner;
+                (other != crossing
+                    && cut.as_plane().is_some()
+                    && self.stands_for_two_places_where_they_meet(node, other, crossing))
+                .then_some((node, cut))
+            })
+        });
+        let (Some((twice, cut)), None) = (passed_twice.next(), passed_twice.next()) else {
+            return None;
+        };
+        let side = |point: PredicatePoint| {
+            let side = side_of_surface(&cut, point);
+            (side == Decision::Pos || side == Decision::Neg).then_some(side)
+        };
+        let the_start_is_on = side(from)?;
+        if side(named_the_start.unwrap_or(start))? != the_start_is_on {
+            return None;
+        }
+        let mut away = false;
+        for &node in on_it.iter().filter(|&&node| node != twice) {
+            away |= side(self.nodes[node].point)? != the_start_is_on;
+        }
+        away.then_some((twice, cut, the_start_is_on))
+    }
+
+    /// Put the node a loop passes twice
+    /// ([`Arrangement::a_node_the_loop_passes_twice`]) into the order of the
+    /// loop's other nodes twice: just before the run of them on the side of
+    /// `cut` away from where the loop is counted from, and just after it.
+    fn place_the_node_passed_twice(
+        &self,
+        sorted: &mut Vec<usize>,
+        twice: usize,
+        cut: &Surface,
+        the_start_is_on: Decision,
+    ) {
+        let away: Vec<bool> = sorted
+            .iter()
+            .map(|&node| side_of_surface(cut, self.nodes[node].point) != the_start_is_on)
+            .collect();
+        let (Some(first), Some(last)) = (
+            away.iter().position(|&away| away),
+            away.iter().rposition(|&away| away),
+        ) else {
+            unreachable!("a_node_the_loop_passes_twice found a node on the far side");
+        };
+        assert!(
+            away[first..=last].iter().all(|&away| away),
+            "a line crosses a loop that bulges nowhere inwards twice at most, so the nodes \
+             past it are one run round the loop, and node {twice} stands for both crossings"
+        );
+        sorted.insert(last + 1, twice);
+        sorted.insert(first, twice);
     }
 
     /// Whether the nodes on a crossing are two places round a loop that

@@ -245,13 +245,22 @@
 //! side of `z = 15`, and the four ways out are now put in order by which of
 //! the two each leaves from (Q3043).
 //!
-//! The `Z15.0` LED stops now on its flange's flat, `Undecidable` with the one
-//! record `order along a crossing`, the far box included, between its front
+//! The `Z15.0` LED stopped then on its flange's flat, `Undecidable` with the
+//! one record `order along a crossing`, the far box included, between its front
 //! corner and its back corner round the ellipse the flat cuts in the body's
 //! pipe. The pipe's axis is written `5.6e-17` off square to the flat's normal,
 //! so that ellipse is about `9e16` long, it ends at the front corner, and the
 //! back corner, one along it, stands for a place on each of its two halves.
-//! The tests pin both LEDs' stops.
+//! The ellipse now passes the back corner twice, once either side of the
+//! nodes past the back plane (Q3064).
+//!
+//! The `Z15.0` LED stops now on the same flat, `Undecidable` with the one
+//! record `order along a crossing`, the far box included, between two meets
+//! of the ellipse at its end, each within `1e-14` of the front corner. The
+//! front is written as two planes, the flange's and the body's front disc's,
+//! and the ellipse turns there on a radius of about `1e-16`, so each plane
+//! meets it in two places that no box tells apart. The tests pin both LEDs'
+//! stops.
 
 use std::{env, fs, path::PathBuf};
 
@@ -327,16 +336,17 @@ fn a_far_box_gets_past_where_the_flat_meets_the_front_circle_drawn_twice_and_sto
 /// touches its dome at is asked as that point, which is inside the body's
 /// pipe, so the flat, the dome and the pipe meet nowhere. Since Q3043 the four
 /// ways out of its back corner on the body's pipe are put in order by the two
-/// places the corner stands for. It stops on its flange's flat, on the order of
-/// its front and back corners round the ellipse the flat cuts in the body's
-/// pipe, the far box included.
+/// places the corner stands for. Since Q3064 the ellipse its flange's flat cuts
+/// in the body's pipe passes that corner twice, once either side of the front
+/// corner. It stops on that flat, on the order round the ellipse of two meets
+/// at its end by the front corner, one with each of the two planes the front is
+/// written as, the far box included.
 #[test]
-fn a_z15_led_gets_past_its_back_corner_on_its_pipe_and_stops_on_its_corners_round_the_flats_ellipse()
- {
+fn a_z15_led_gets_past_its_corners_round_the_flats_ellipse_and_stops_on_two_meets_at_its_end() {
     every_fuse_refuses(
         Z15,
         &a_box_round_each_of(&[Z15_FRONT_CORNER, Z15_BACK_CORNER, FAR_OFF]),
-        |_, error| the_two_corners_of_the_flat_are_not_ordered_round_its_ellipse(error),
+        |_, error| two_meets_at_the_end_of_the_flats_ellipse_are_not_ordered(error),
     );
 }
 
@@ -436,9 +446,12 @@ fn the_front_corner_and_where_the_flat_meets_the_front_written_twice_are_not_ord
 }
 
 /// Refused `Undecidable` with the one record `order along a crossing`, handed
-/// the `Z15.0` LED's front corner and its back corner, each within `1e-9` of
-/// where it is, either way round.
-fn the_two_corners_of_the_flat_are_not_ordered_round_its_ellipse(error: &Error) -> bool {
+/// two points within `1e-9` of the `Z15.0` LED's front corner, one whose box
+/// along `y` ends at the corner's `y` from in front and one whose box ends
+/// there from behind, either way round: the meet of the flat, the pipe and the
+/// body's front disc's plane, and the meet of the flat, the pipe and the
+/// flange's front.
+fn two_meets_at_the_end_of_the_flats_ellipse_are_not_ordered(error: &Error) -> bool {
     let Error::Undecidable { records } = error else {
         return false;
     };
@@ -448,10 +461,13 @@ fn the_two_corners_of_the_flat_are_not_ordered_round_its_ellipse(error: &Error) 
     let [one, other] = record.inputs() else {
         return false;
     };
-    let is = |point: &Point, corner: [f64; 3]| is_within_1e_9_of(point, corner);
+    let [_, y, _] = Z15_FRONT_CORNER;
+    let in_front = |point: &Point| point.enclosure()[1].lo() == y;
+    let behind = |point: &Point| point.enclosure()[1].hi() == y;
     record.predicate() == ALONG_A_CROSSING
-        && ((is(one, Z15_FRONT_CORNER) && is(other, Z15_BACK_CORNER))
-            || (is(one, Z15_BACK_CORNER) && is(other, Z15_FRONT_CORNER)))
+        && is_within_1e_9_of(one, Z15_FRONT_CORNER)
+        && is_within_1e_9_of(other, Z15_FRONT_CORNER)
+        && ((in_front(one) && behind(other)) || (behind(one) && in_front(other)))
 }
 
 fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
