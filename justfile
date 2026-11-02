@@ -4418,7 +4418,8 @@ check-lanes-workflow:
     diff_cache_3_set=''
     diff_cache_4_set=''
     scan() {
-        local n t at prev line types prog got same
+        local n t at prev line types prog got same found tt l content i
+        local -a types_arr lines merger_lines
         n=$(grep -cxF -- "$create" "$1" || true)
         if [ "$n" != 1 ]; then
             echo "$1 has the line '$create' $n times, expected once"
@@ -4440,14 +4441,31 @@ check-lanes-workflow:
             echo "an agent with no type never loads its file in $2 (§261.6)"
             return 4
         fi
+        mapfile -t types_arr <<<"$types"
         for t in lane verifier merger lander; do
-            if ! grep -qxF -- "$t" <<<"$types"; then
+            found=0
+            for tt in "${types_arr[@]}"; do
+                if [ "$tt" = "$t" ]; then
+                    found=1
+                    break
+                fi
+            done
+            if [ "$found" != 1 ]; then
                 echo "$1 sends no agent of type $t"
                 return 4
             fi
         done
         for t in $types; do
-            if ! grep -qxF -- "name: $t" "$2/$t.md" 2>/dev/null; then
+            lines=()
+            mapfile -t lines 2>/dev/null < "$2/$t.md"
+            found=0
+            for l in "${lines[@]}"; do
+                if [ "$l" = "name: $t" ]; then
+                    found=1
+                    break
+                fi
+            done
+            if [ "$found" != 1 ]; then
                 echo "$1 names the agent type $t, and no $2/$t.md defines it"
                 return 4
             fi
@@ -4460,14 +4478,22 @@ check-lanes-workflow:
             echo "expected one 'agent(MERGE(', one 'agent(LAND(', and '$serial' with 'lastMerge = run.catch(' on the next line (§266.4)"
             return 5
         fi
+        merger_lines=()
+        mapfile -t merger_lines < "$2/merger.md"
         prev=0
         for line in "${pushes[@]}"; do
-            n=$(grep -cxF -- "$line" "$2/merger.md" || true)
+            n=0
+            at=0
+            for i in "${!merger_lines[@]}"; do
+                if [ "${merger_lines[$i]}" = "$line" ]; then
+                    n=$((n + 1))
+                    at=$((i + 1))
+                fi
+            done
             if [ "$n" != 1 ]; then
                 echo "$2/merger.md has the line '$line' $n times, expected once"
                 return 6
             fi
-            at=$(grep -nxF -- "$line" "$2/merger.md" | cut -d: -f1)
             if [ "$at" -le "$prev" ]; then
                 echo "$2/merger.md has '$line' before a line it must follow: fetch, ancestor check, push, ff-main"
                 return 6
@@ -4517,11 +4543,12 @@ check-lanes-workflow:
             return 10
         fi
         for t in lane verifier merger lander; do
-            if ! grep -qF -- "$foreground_rule" "$2/$t.md"; then
+            content=$(<"$2/$t.md")
+            if [[ "$content" != *"$foreground_rule"* ]]; then
                 echo "$2/$t.md does not say every command stays in the foreground; a backgrounded gate or test run reports back before it finishes and nothing wakes this role for the result (Q216)"
                 return 11
             fi
-            if grep -nF -- 'run_in_background: true' "$2/$t.md"; then
+            if [[ "$content" == *'run_in_background: true'* ]]; then
                 echo "$2/$t.md tells this role to background a command on the lines above, against its own foreground rule (Q216)"
                 return 11
             fi
