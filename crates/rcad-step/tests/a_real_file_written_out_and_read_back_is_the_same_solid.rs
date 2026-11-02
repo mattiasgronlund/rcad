@@ -49,22 +49,39 @@ mod every_kicad_file_that_imports_round_trips_to_the_same_solid {
     /// name alone, so a file added to the corpus lands in exactly one test —
     /// by construction, not because somebody kept a list in step.
     ///
-    /// The three named here are the corpus's slow files, and nothing else
-    /// comes close: each is a **vertical, through-hole** pin header — named
+    /// Three vertical, through-hole pin headers — named
     /// `PinHeader_<n>x<pins>_P2.54mm_Vertical.step`, with no `_SMD_` in it —
-    /// whose round, drilled pins cost far more fuse work than every other
-    /// file put together. Timed alone on the base this split was measured
-    /// against (`docs/queue.md` Q1238), `PinHeader_1x39_P2.54mm_Vertical.step`
-    /// took about 156 s, `PinHeader_1x32_P2.54mm_Vertical.step` about 88 s and
-    /// `PinHeader_1x25_P2.54mm_Vertical.step` about 64 s — against roughly
-    /// 94 s for the other 162 files combined. Each of the three gets its own
-    /// test so no test runs much longer than the one dear file in it; the
-    /// rest, cheap even together, share `every_other_file`.
+    /// each got their own test with Q1238, when their round, drilled pins
+    /// cost far more fuse work than every other file put together: timed
+    /// alone on that base, `PinHeader_1x39_P2.54mm_Vertical.step` took about
+    /// 156 s, `PinHeader_1x32_P2.54mm_Vertical.step` about 88 s and
+    /// `PinHeader_1x25_P2.54mm_Vertical.step` about 64 s, against roughly
+    /// 94 s for the other 162 files combined.
+    ///
+    /// The fuse work everywhere else grew since then (Q1239 is why it grew,
+    /// not this enum), and by Q3040 `every_other_file` alone cost 756.6 s of
+    /// a 761.9 s test step — almost the whole wall of the gate. Timed alone
+    /// again, two more files stood out the same way the first three did:
+    /// `PinHeader_2x36_P2.54mm_Vertical.step` (about 220 s) and
+    /// `PinHeader_2x29_P2.54mm_Vertical.step` (about 101 s), so each gets its
+    /// own test too. Next heaviest, at about 108 s together, are the
+    /// eleven-position and twelve-position DIP switches —
+    /// `SW_DIP_SPSTx11_...` and `SW_DIP_SPSTx12_...`, in both their
+    /// spellings — which share `dip_switches_with_eleven_or_twelve_positions`;
+    /// the ten-position DIP switch down to the one-position one share
+    /// `dip_switches_with_ten_or_fewer_positions`, at about 109 s. Everything
+    /// left — every other pin header, every LED, relay, fuse and the
+    /// fuseholder — is still cheap even together, at about 131 s, and still
+    /// shares `every_other_file`.
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Group {
         PinHeader1x39,
         PinHeader1x32,
         PinHeader1x25,
+        PinHeader2x36,
+        PinHeader2x29,
+        DipSwitchesWithElevenOrTwelvePositions,
+        DipSwitchesWithTenOrFewerPositions,
         EveryOtherFile,
     }
 
@@ -73,6 +90,14 @@ mod every_kicad_file_that_imports_round_trips_to_the_same_solid {
             "PinHeader_1x39_P2.54mm_Vertical.step" => Group::PinHeader1x39,
             "PinHeader_1x32_P2.54mm_Vertical.step" => Group::PinHeader1x32,
             "PinHeader_1x25_P2.54mm_Vertical.step" => Group::PinHeader1x25,
+            "PinHeader_2x36_P2.54mm_Vertical.step" => Group::PinHeader2x36,
+            "PinHeader_2x29_P2.54mm_Vertical.step" => Group::PinHeader2x29,
+            _ if name.starts_with("SW_DIP_SPSTx11_") || name.starts_with("SW_DIP_SPSTx12_") => {
+                Group::DipSwitchesWithElevenOrTwelvePositions
+            }
+            _ if name.starts_with("SW_DIP_SPSTx10_") || name.starts_with("SW_DIP_SPSTx0") => {
+                Group::DipSwitchesWithTenOrFewerPositions
+            }
             _ => Group::EveryOtherFile,
         }
     }
@@ -80,9 +105,13 @@ mod every_kicad_file_that_imports_round_trips_to_the_same_solid {
     const PIN_HEADER_1X39_IMPORTS: usize = 1;
     const PIN_HEADER_1X32_IMPORTS: usize = 1;
     const PIN_HEADER_1X25_IMPORTS: usize = 1;
-    const EVERY_OTHER_FILE_IMPORTS: usize = 162;
+    const PIN_HEADER_2X36_IMPORTS: usize = 1;
+    const PIN_HEADER_2X29_IMPORTS: usize = 1;
+    const DIP_SWITCHES_WITH_ELEVEN_OR_TWELVE_POSITIONS_IMPORTS: usize = 4;
+    const DIP_SWITCHES_WITH_TEN_OR_FEWER_POSITIONS_IMPORTS: usize = 19;
+    const EVERY_OTHER_FILE_IMPORTS: usize = 137;
 
-    // The four groups must add up to the 165 KiCad files that import — the
+    // The eight groups must add up to the 165 KiCad files that import — the
     // same number `every_kicad_file_that_imports_round_trips_to_the_same_solid`
     // pinned as one test's `denominator`. Checked by the compiler so a group
     // added or resized without updating another cannot pass silently.
@@ -90,6 +119,10 @@ mod every_kicad_file_that_imports_round_trips_to_the_same_solid {
         PIN_HEADER_1X39_IMPORTS
             + PIN_HEADER_1X32_IMPORTS
             + PIN_HEADER_1X25_IMPORTS
+            + PIN_HEADER_2X36_IMPORTS
+            + PIN_HEADER_2X29_IMPORTS
+            + DIP_SWITCHES_WITH_ELEVEN_OR_TWELVE_POSITIONS_IMPORTS
+            + DIP_SWITCHES_WITH_TEN_OR_FEWER_POSITIONS_IMPORTS
             + EVERY_OTHER_FILE_IMPORTS
             == 165
     );
@@ -118,6 +151,42 @@ mod every_kicad_file_that_imports_round_trips_to_the_same_solid {
             "pin_header_1x25",
             Group::PinHeader1x25,
             PIN_HEADER_1X25_IMPORTS,
+        );
+    }
+
+    #[test]
+    fn pin_header_2x36() {
+        round_trips_a_group(
+            "pin_header_2x36",
+            Group::PinHeader2x36,
+            PIN_HEADER_2X36_IMPORTS,
+        );
+    }
+
+    #[test]
+    fn pin_header_2x29() {
+        round_trips_a_group(
+            "pin_header_2x29",
+            Group::PinHeader2x29,
+            PIN_HEADER_2X29_IMPORTS,
+        );
+    }
+
+    #[test]
+    fn dip_switches_with_eleven_or_twelve_positions() {
+        round_trips_a_group(
+            "dip_switches_with_eleven_or_twelve_positions",
+            Group::DipSwitchesWithElevenOrTwelvePositions,
+            DIP_SWITCHES_WITH_ELEVEN_OR_TWELVE_POSITIONS_IMPORTS,
+        );
+    }
+
+    #[test]
+    fn dip_switches_with_ten_or_fewer_positions() {
+        round_trips_a_group(
+            "dip_switches_with_ten_or_fewer_positions",
+            Group::DipSwitchesWithTenOrFewerPositions,
+            DIP_SWITCHES_WITH_TEN_OR_FEWER_POSITIONS_IMPORTS,
         );
     }
 
