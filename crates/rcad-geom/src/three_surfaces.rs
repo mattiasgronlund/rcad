@@ -503,6 +503,84 @@ impl MeetOfThree {
         let sign = how_the_quadric_leans_where_the_line_reaches(planes, &written, axis, along);
         sign == Some(Decision::Pos) || sign == Some(Decision::Neg)
     }
+
+    /// The sign of `asked`'s own expression at the one place inside `near`
+    /// where the line `planes` cross in meets `met`, worked out exactly: above
+    /// nothing where that place is outside `asked`, below where it is inside,
+    /// nothing where it is on it. `None` where that place is not shown to be
+    /// the one meet inside `near` along any axis, where the line runs along a
+    /// ruling of `met`, or where a product falls out of range.
+    ///
+    /// **The place itself is never worked out.** Along an axis the line is not
+    /// square to, its point with coordinate `s` is `(α + β s) / E`, for
+    /// `β = n₁ × n₂` and `E` its part along that axis, and each quadric's
+    /// expression there, times `E²`, is `A s² + 2B s + C`
+    /// ([`the_quadratic_along_the_line`]). Write `met`'s three with a `1` and
+    /// `asked`'s with a `2`. At a root `s₀` of the first, `A₁ s₀²` is
+    /// `−2B₁ s₀ − C₁`, so `A₁` times the second there is
+    /// `2(A₁B₂ − A₂B₁) s₀ + (A₁C₂ − A₂C₁)`, which is linear in `s₀`, and `A₁ s₀`
+    /// is `−B₁ ± √(B₁² − A₁C₁)`, with `+` exactly where the first climbs
+    /// through `s₀`. So `A₁²` times the second at `s₀` is
+    /// `plain + rooted·√under`, whose sign is asked exactly
+    /// ([`the_sign_with_a_root_in_it`]). Which root is inside `near`, and
+    /// whether the first climbs through it, is read from the first's signs at
+    /// the two ends of `near`'s side, as
+    /// [`MeetOfThree::which_way_a_line_runs_through_a_quadric`] reads it.
+    ///
+    /// **What it is for.** Where two quadrics meet a line a rounding apart,
+    /// the two boxes overlap and no box puts them in order along the line. The
+    /// sign of the second quadric at the first meet says which side of the
+    /// second meet the first one is, since the line runs into the second
+    /// quadric at one of its meets and out at the other. `rcad-topo`'s
+    /// arrangement orders two such meets by it.
+    #[must_use]
+    pub fn how_one_quadric_leans_where_the_line_meets_another(
+        planes: [&Plane; 2],
+        met: &Surface,
+        asked: &Surface,
+        near: PredicatePoint,
+    ) -> Option<Decision> {
+        let PredicatePoint::Constructed(boxed) = near else {
+            return None;
+        };
+        let (met, asked) = (
+            how_a_surface_is_written(met)?,
+            how_a_surface_is_written(asked)?,
+        );
+        (0..3).find_map(|axis| {
+            let (low, high) = (boxed[axis].lo(), boxed[axis].hi());
+            if !(low.is_finite() && high.is_finite()) {
+                return None;
+            }
+            let met_at = |along: f64| {
+                how_the_quadric_leans_where_the_line_reaches(planes, &met, axis, along)
+            };
+            let at_the_high_end = met_at(high)?;
+            if low == high && at_the_high_end == Decision::Zero {
+                return how_the_quadric_leans_where_the_line_reaches(planes, &asked, axis, high);
+            }
+            if !one_root_between(met_at(low)?, at_the_high_end) {
+                return None;
+            }
+            let [a1, b1, c1] = the_quadratic_along_the_line(planes, &met, axis)?;
+            let [a2, b2, c2] = the_quadratic_along_the_line(planes, &asked, axis)?;
+            if !matches!(a1.sign(), Decision::Pos | Decision::Neg) {
+                return None;
+            }
+            let apart = a1.times(&b2)?.minus(&a2.times(&b1)?);
+            let twice_apart = apart.plus(&apart);
+            let plain = a1
+                .times(&a1.times(&c2)?.minus(&a2.times(&c1)?))?
+                .minus(&b1.times(&twice_apart)?);
+            let rooted = if at_the_high_end == Decision::Pos {
+                twice_apart
+            } else {
+                Exact::of(0.0).minus(&twice_apart)
+            };
+            let under = b1.times(&b1)?.minus(&a1.times(&c1)?);
+            the_sign_with_a_root_in_it(&plain, &rooted, &under)
+        })
+    }
 }
 
 /// Where three surfaces meet.
@@ -1718,6 +1796,48 @@ fn how_the_quadric_leans_where_the_line_reaches(
         Decision::Undecidable { .. } => None,
         other => unreachable!("an exact sign is a sign or a refusal: {other:?}"),
     }
+}
+
+/// `A`, `B` and `C` of `A s² + 2B s + C`, which is
+/// [`how_the_quadric_leans_where_the_line_reaches`]'s sum with `along` left as
+/// the unknown `s`, worked out exactly: the line's point is `(α + β s) / E`,
+/// for `β = n₁ × n₂` and `E` its part along `axis`, and `α` its point at
+/// `s = 0` times `E`. `None` where a product falls out of range.
+fn the_quadratic_along_the_line(
+    [one, other]: [&Plane; 2],
+    quadric: &HowASurfaceIsWritten,
+    axis: usize,
+) -> Option<[Exact; 3]> {
+    let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+    let (mine, theirs) = (one.normal().components(), other.normal().components());
+    let apart = |a: f64, b: f64, c: f64, d: f64| {
+        Some(Exact::product_of(a, b)?.minus(&Exact::product_of(c, d)?))
+    };
+    let mut runs: [Exact; 3] = core::array::from_fn(|_| Exact::of(0.0));
+    runs[axis] = apart(mine[next], theirs[after], mine[after], theirs[next])?;
+    runs[next] = apart(mine[after], theirs[axis], mine[axis], theirs[after])?;
+    runs[after] = apart(mine[axis], theirs[next], mine[next], theirs[axis])?;
+    let mut starts: [Exact; 3] = core::array::from_fn(|_| Exact::of(0.0));
+    starts[next] = apart(one.offset(), theirs[after], other.offset(), mine[after])?;
+    starts[after] = apart(other.offset(), mine[next], one.offset(), theirs[next])?;
+    let pulled = |by: &[Exact; 3]| -> Option<[Exact; 3]> {
+        let mut rows: [Exact; 3] = core::array::from_fn(|_| Exact::of(0.0));
+        for (row, entries) in rows.iter_mut().zip(&quadric.squared) {
+            *row = Exact::dot_of_two_exact(entries, by)?;
+        }
+        Some(rows)
+    };
+    let across = &runs[axis];
+    let pulled_runs = pulled(&runs)?;
+    let squared = Exact::dot_of_two_exact(&runs, &pulled_runs)?;
+    let half_linear = Exact::dot_of_two_exact(&starts, &pulled_runs)?
+        .plus(&across.times(&Exact::dot_of_two_exact(&quadric.half_linear, &runs)?)?);
+    let linear_at_the_start =
+        across.times(&Exact::dot_of_two_exact(&quadric.half_linear, &starts)?)?;
+    let constant = Exact::dot_of_two_exact(&starts, &pulled(&starts)?)?
+        .plus(&linear_at_the_start.plus(&linear_at_the_start))
+        .plus(&across.times(across)?.times(&quadric.constant)?);
+    Some([squared, half_linear, constant])
 }
 
 /// What a third surface leaves of two planes that never cross in a line.
@@ -7818,6 +7938,54 @@ mod tests {
             None,
             "a box round the middle holds no meet"
         );
+    }
+
+    /// The `x` axis meets a ball of radius one at the origin at `x = ±1`. A
+    /// ball centred at `x = 3` holds neither meet at radius one, has the one
+    /// at `1` on its skin at radius two, and holds it at radius three, and the
+    /// meet at `−1` is outside all three. The line `y = x` in the floor meets
+    /// a ball of radius five at the origin at `x = ±5/√2`, which no `f64` is,
+    /// and the one at `+3.536` is `0.47` outside a ball of radius `3.5` at
+    /// `x = 4` and `0.24` inside one of radius `3.6`.
+    #[test]
+    fn a_ball_is_asked_where_a_line_meets_another_ball_without_the_meet_being_worked_out() {
+        let floor = Plane::from_coefficients([0.0, 1.0, 0.0, 0.0]).expect("a plane");
+        let wall = Plane::from_coefficients([0.0, 0.0, 1.0, 0.0]).expect("a plane");
+        let ball_at = |x: f64, radius: f64| {
+            Surface::Sphere(Sphere::new(Point::new(x, 0.0, 0.0), radius).expect("a radius"))
+        };
+        let near = |at: [f64; 3]| {
+            PredicatePoint::Constructed(
+                at.map(|at| Interval::new(at - 1e-9, at + 1e-9).expect("a range")),
+            )
+        };
+        let asked = |planes: [&Plane; 2], met: &Surface, other: &Surface, at: [f64; 3]| {
+            MeetOfThree::how_one_quadric_leans_where_the_line_meets_another(
+                planes,
+                met,
+                other,
+                near(at),
+            )
+        };
+        let unit = ball_at(0.0, 1.0);
+        for planes in [[&floor, &wall], [&wall, &floor]] {
+            let at =
+                |x: f64, radius: f64| asked(planes, &unit, &ball_at(3.0, radius), [x, 0.0, 0.0]);
+            assert_eq!(at(1.0, 1.0), Some(Decision::Pos));
+            assert_eq!(at(1.0, 2.0), Some(Decision::Zero));
+            assert_eq!(at(1.0, 3.0), Some(Decision::Neg));
+            assert_eq!(at(-1.0, 3.0), Some(Decision::Pos));
+            assert_eq!(at(0.0, 3.0), None, "a box round the middle holds no meet");
+        }
+
+        let slant = Plane::from_coefficients([1.0, -1.0, 0.0, 0.0]).expect("a plane");
+        let big = ball_at(0.0, 5.0);
+        let out = 5.0 / f64::sqrt(2.0);
+        let on_the_slant =
+            |radius: f64, x: f64| asked([&slant, &wall], &big, &ball_at(4.0, radius), [x, x, 0.0]);
+        assert_eq!(on_the_slant(3.5, out), Some(Decision::Pos));
+        assert_eq!(on_the_slant(3.6, out), Some(Decision::Neg));
+        assert_eq!(on_the_slant(3.6, -out), Some(Decision::Pos));
     }
 
     /// §244.3's block edge, `y = 1` and `z = −2⁻²⁵`, grazing a ball of radius
