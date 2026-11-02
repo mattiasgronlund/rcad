@@ -21851,8 +21851,10 @@ verify-lane *args:
 # to finish and `just verify-lane wait` to read its verdict back; a test name
 # with a space in it, the form nextest's own FAIL line reports one in, which no
 # revert can run and which is left to you by name instead of silently deciding
-# nothing (Q1347); and every line the run writes to its log carrying its own
-# UTC timestamp (Q1378).
+# nothing (Q1347); a number whose command text matches an earlier number's, or
+# the run's own `gate-lane`, which reads that print rather than running the
+# command again (§385.3); and every line the run writes to its log carrying
+# its own UTC timestamp (Q1378).
 #
 # The JSON's fields are held to `verdictSchema` in `lanes.js`, read out of that
 # file, so a field the schema renames fails here and not in a verifier's report.
@@ -22238,6 +22240,23 @@ check-verify-lane-selftest:
     no_test_ran
     back_at_the_tip
 
+    fixture cached-numbers
+    printf 'fixed\n' >"$at/lane/src/lib.txt"
+    lane_commit
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ \
+        + number 'a stubbed test, run once' 'PASS always_passes' "$dir/bin/just t always_passes" \
+        + number 'the same stubbed test again' 'PASS always_passes' "$dir/bin/just t always_passes" \
+        + number 'the gate-lane the run already ran' 'gate: PASS' "$dir/bin/just gate-lane"
+    run
+    [ "$(grep -cxF 'just t always_passes' "$at/stub/log")" = 1 ] \
+        || fail "a number repeating an earlier number's command ran the stub again: $(grep -c 'just t always_passes' "$at/stub/log") time(s)"
+    [ "$(grep -cxF 'just gate-lane' "$at/stub/log")" = 1 ] \
+        || fail "a number repeating the run's own gate-lane ran the stub again: $(grep -c 'just gate-lane' "$at/stub/log") time(s)"
+    [ "$(grep -cF 'already ran at this commit' <<<"$got")" = 2 ] \
+        || fail "it did not say, for both repeats, that it read a kept print instead of running the command again"
+    [ "$(field number_mismatches)" = "[]" ] || fail "a kept print should still be read for its value: number_mismatches is $(field number_mismatches)"
+    back_at_the_tip
+
     fixture stamped
     printf 'fixed\n' >"$at/lane/src/lib.txt"
     lane_commit
@@ -22296,7 +22315,7 @@ check-verify-lane-selftest:
     got=$(python3 "$dir/exit_atomic_probe.py" "{{ justfile_directory() }}/tooling/verify-lane/verify_lane.py")
     [ "$got" = "OK" ] \
         || fail "a reader polling os.path.exists while the exit file was written with an artificial 0.3 s delay saw $got instead of a complete line"
-    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 19 arms"
+    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 20 arms"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #
