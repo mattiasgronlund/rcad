@@ -2038,16 +2038,23 @@ fn a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_floor() {
 /// `(4, 2, 4)`, the bar's seam corner, or `(0, 2, 4)`, across the foot from
 /// it.
 ///
-/// **Every rule answers, every decision proved, and every face of the union
-/// is one loop.** The union is one solid of eight faces, `64 + 2π`, the
-/// intersection no solid, and each difference the first solid whole. The fuse
-/// cuts the top's edge at the touch and writes the foot's circle into the
-/// top's outline there, one loop through the touch twice, with the circle's
-/// corner moved to the touch. So no face of the answer holds two loops, one's
-/// corner on the other's side, which `the_narrowest_a_face_is` reads as a neck
-/// of no width and refuses `DynamicRangeTooWide`.
+/// **Every rule answers, every decision proved, every flat face of the union
+/// is one loop, and the pipe is the band between its two circles.** The union
+/// is one solid of eight faces, `64 + 2π`, the intersection no solid, and each
+/// difference the first solid whole. The fuse cuts the top's edge at the touch
+/// and writes the foot's circle into the top's outline there, one loop through
+/// the touch twice, with the circle's corner moved to the touch. So no flat
+/// face of the answer holds two loops, one's corner on the other's side, which
+/// `the_narrowest_a_face_is` reads as a neck of no width and refuses
+/// `DynamicRangeTooWide`.
 /// [`a_top_whose_hole_touches_its_outline_at_a_point_is_refused_as_too_thin`]
 /// pins the one way such a face is made.
+///
+/// The pipe touches the block's side `x = 4`, or `x = 0`, along the line
+/// `y = 2`, but the side lies below `z = 4` and the pipe above it, so the line
+/// meets the side at the touch alone. The fuse leaves the line out, and the
+/// pipe is the band between its foot and its top, two loops, as for a bar
+/// standing anywhere else on the top (queue row Q3048).
 #[test]
 fn a_bar_standing_on_a_blocks_top_flush_with_its_edge_answers_every_rule() {
     for at in [[3.0, 2.0, 4.0], [1.0, 2.0, 4.0]] {
@@ -2062,7 +2069,7 @@ fn a_bar_standing_on_a_blocks_top_flush_with_its_edge_answers_every_rule() {
                 &mut ProvenanceLog::new(),
             );
             let union = union.expect("the union of a bar standing on a block answers");
-            let loops_of_each_face: Vec<usize> = union
+            let flat_and_loops_of_each_face: Vec<(bool, usize)> = union
                 .solids()
                 .iter()
                 .flat_map(|&solid| {
@@ -2071,13 +2078,21 @@ fn a_bar_standing_on_a_blocks_top_flush_with_its_edge_answers_every_rule() {
                         .expect("this model made the key")
                         .shells()
                         .flat_map(|shell| shell.faces())
-                        .map(|face| face.wire_count())
+                        .map(|face| {
+                            (
+                                matches!(face.surface(), Surface::Plane(_)),
+                                face.wire_count(),
+                            )
+                        })
                 })
                 .collect();
             assert!(
-                loops_of_each_face.iter().all(|&loops| loops == 1),
-                "the bar from {at:?}, bar first {bar_first}: the union's faces have \
-                 {loops_of_each_face:?} loops, and the fuse writes each as one"
+                flat_and_loops_of_each_face
+                    .iter()
+                    .all(|&(flat, loops)| loops == if flat { 1 } else { 2 }),
+                "the bar from {at:?}, bar first {bar_first}: the union's faces, flat or not, have \
+                 {flat_and_loops_of_each_face:?} loops, and the fuse writes each flat face as one \
+                 and the pipe as two"
             );
         }
     }
