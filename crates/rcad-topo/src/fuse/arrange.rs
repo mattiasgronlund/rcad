@@ -5348,9 +5348,11 @@ impl<'f> Arrangement<'f> {
     /// line's two meets each node is
     /// ([`Arrangement::as_the_two_meets_of_one_line_say`]), the same meet
     /// of a line two pairs of planes name
-    /// ([`Arrangement::as_three_planes_through_one_line_say`]) and two meets on
+    /// ([`Arrangement::as_three_planes_through_one_line_say`]), two meets on
     /// one line in the flat surface halfway between two mirror cones
     /// ([`Arrangement::as_a_line_in_the_cut_halfway_between_mirror_cones_says`])
+    /// and the sign of one quadric where a line meets another
+    /// ([`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`])
     /// are not asked: no ray here has been shown to need any of them.
     fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         if let Some(read) = self.as_read_round_a_corner(crossing, first, second) {
@@ -5387,6 +5389,10 @@ impl<'f> Arrangement<'f> {
     /// one line in the flat surface halfway between two cones that are mirror
     /// images held apart
     /// ([`Arrangement::as_a_line_in_the_cut_halfway_between_mirror_cones_says`]),
+    /// a meet of two planes' line with a ball, a pipe or a cone against the
+    /// crossing's meet with another of those, read off the sign of the other's
+    /// expression at the first
+    /// ([`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`]),
     /// two meets of a plane's line on a pipe with two planes that cross it in
     /// parallel lines
     /// ([`Arrangement::as_two_cuts_crossing_the_plane_in_parallel_lines_say`]),
@@ -5569,6 +5575,12 @@ impl<'f> Arrangement<'f> {
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) =
                 self.as_a_line_in_the_cut_halfway_between_mirror_cones_says(first, second)
+        {
+            decided = proved;
+        }
+        if matches!(decided, Decision::Undecidable { .. })
+            && let Some(proved) =
+                self.as_the_sign_of_a_quadric_at_a_meet_of_a_line_says(crossing, first, second)
         {
             decided = proved;
         }
@@ -6599,6 +6611,221 @@ impl<'f> Arrangement<'f> {
             cross_of_intervals(normal(&line[0]), normal(&line[1])),
         );
         settled(climbs).then_some(Decision::Zero)
+    }
+
+    /// Which of two nodes on a crossing comes first along it, where one is a
+    /// meet of two planes' line with a ball, a pipe or a cone and the other is
+    /// the crossing's meet with another of those: `None` everywhere else.
+    ///
+    /// **Which side of the second quadric the first meet is says which way to
+    /// go from the second meet to reach it.** Call the node on the line `Y`,
+    /// its quadric `Q_Y`, the other node `X` and its quadric `Q_X`. The sign of
+    /// `Q_X`'s own expression at `Y` is worked out exactly, from the line and
+    /// the two quadrics and never from `Y`'s box
+    /// ([`MeetOfThree::how_one_quadric_leans_where_the_line_meets_another`]).
+    /// Where `∇Q_X` keeps one sign along the crossing over the arc from `X` to
+    /// `Y`, `Q_X` is nothing at `X` and climbs or falls the whole way, so `Y`
+    /// lies forward of `X` just where the two signs agree.
+    ///
+    /// **Along a line** the arc is the stretch between the two, inside the box
+    /// round both. **Round a closed curve** of a plane and a ball, a pipe or a
+    /// cone, which is an ellipse, it is proved inside a box `R` that is the box
+    /// round both, grown along every axis but the one the curve climbs fastest
+    /// there by twice that box's width along it: over `R` the curve's way along
+    /// that axis keeps one sign and is at least half its way along each other
+    /// one. From `Y` the curve then reaches `X`'s height on that axis before it
+    /// can leave `R`, and the point it reaches is `X`, since an ellipse is at
+    /// any height at two points, where it climbs and where it falls. The start
+    /// must lie outside `R`, so it is not on that arc either.
+    ///
+    /// **What it is for.** The funnel file's two pointed cones, the second
+    /// turned `0.3` about `x` through `(0, 0, 4)`, meet `z = 8` and the
+    /// leaning cap's plane in four points a rounding apart near
+    /// `(−3.9541, −0.6045, 8)`: where the line the two caps' planes cross in
+    /// meets each cone, and where each cap's plane meets both cones. The first
+    /// two lie between two neighbouring `f64` along `x`, so no box put them in
+    /// order along that line, nor the meet with both caps against the meet
+    /// with both cones round the leaning cap's rim, and every fuse of the two
+    /// was refused (Q2961, `tests/a_funnel_with_a_leaning_spout.rs`).
+    fn as_the_sign_of_a_quadric_at_a_meet_of_a_line_says(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        if let Some(forward) = self.lies_forward_of_the_other(crossing, second, first) {
+            return Some(forward);
+        }
+        let backward = self.lies_forward_of_the_other(crossing, first, second)?;
+        Some(match backward {
+            Decision::Pos => Decision::Neg,
+            Decision::Neg => Decision::Pos,
+            Decision::Zero | Decision::Undecidable { .. } | _ => backward,
+        })
+    }
+
+    /// [`Decision::Pos`] where `on_the_line`, a meet of two planes and a ball,
+    /// a pipe or a cone, is proved to lie forward of `other` along the
+    /// crossing, [`Decision::Neg`] behind it, and [`Decision::Zero`] at it, as
+    /// [`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`]
+    /// reads it.
+    fn lies_forward_of_the_other(
+        &self,
+        crossing: usize,
+        on_the_line: usize,
+        other: usize,
+    ) -> Option<Decision> {
+        let ((surfaces, _), (named_too, _)) = (
+            self.the_one_meet_it_stands_for(on_the_line)?,
+            self.the_one_meet_it_stands_for(other)?,
+        );
+        let (line, round) = two_planes_and_a_quadric(&surfaces)?;
+        let the_curve = match &self.crossings[crossing].order {
+            HowItRuns::RoundAClosedCurve { wound_as, .. } => [wound_as[0], wound_as[1]],
+            HowItRuns::AlongAnAxis { .. } => {
+                let planes = [self.surface, self.crossings[crossing].partner];
+                if !matches!(planes, [Surface::Plane(_), Surface::Plane(_)]) {
+                    return None;
+                }
+                planes
+            }
+            HowItRuns::AlongABend { .. } | HowItRuns::RoundAPointOnItsChord { .. } => return None,
+        };
+        if the_curve[0] == the_curve[1]
+            || the_curve
+                .iter()
+                .any(|surface| !surfaces.contains(surface) || !named_too.contains(surface))
+        {
+            return None;
+        }
+        let mut theirs = named_too
+            .iter()
+            .filter(|surface| !the_curve.contains(surface));
+        let (Some(asked), None) = (theirs.next(), theirs.next()) else {
+            return None;
+        };
+        if *asked == round
+            || !matches!(
+                asked,
+                Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+            )
+        {
+            return None;
+        }
+        let ways =
+            self.the_curves_way_from_one_to_the_other(crossing, [on_the_line, other], asked)?;
+        let [one, other_plane] = &line;
+        let leans = [
+            self.nodes[on_the_line].point,
+            self.narrowed_box_of(on_the_line),
+        ]
+        .into_iter()
+        .find_map(|near| {
+            MeetOfThree::how_one_quadric_leans_where_the_line_meets_another(
+                [one, other_plane],
+                &round,
+                asked,
+                near,
+            )
+        })?;
+        match leans {
+            Decision::Zero => Some(Decision::Zero),
+            Decision::Pos | Decision::Neg => Some(if leans == ways {
+                Decision::Pos
+            } else {
+                Decision::Neg
+            }),
+            Decision::Undecidable { .. } | _ => None,
+        }
+    }
+
+    /// The sign of `∇asked` along the crossing, run forward, over the whole
+    /// arc between the two nodes, as
+    /// [`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`]
+    /// proves it: `None` where it is not one sign there.
+    fn the_curves_way_from_one_to_the_other(
+        &self,
+        crossing: usize,
+        nodes: [usize; 2],
+        asked: &Surface,
+    ) -> Option<Decision> {
+        let both = the_box_round_both(self.nodes[nodes[0]].point, self.nodes[nodes[1]].point);
+        let strict = |value: Interval| match value.sign() {
+            sign @ (Decision::Pos | Decision::Neg) => Some(sign),
+            Decision::Zero | Decision::Undecidable { .. } | _ => None,
+        };
+        let way_over = |pair: [&Surface; 2], over: PredicatePoint| {
+            cross_of_intervals(
+                gradient_at(pair[0], over).enclosure(),
+                gradient_at(pair[1], over).enclosure(),
+            )
+        };
+        let climbs = |way: [Interval; 3], over: PredicatePoint| {
+            strict(dot_of(gradient_at(asked, over).enclosure(), way))
+        };
+        match &self.crossings[crossing].order {
+            HowItRuns::AlongAnAxis {
+                axis,
+                forward_climbs_the_axis,
+            } => {
+                let partner = self.crossings[crossing].partner;
+                let way = way_over([&self.surface, &partner], both);
+                let up = strict(way[*axis])? == Decision::Pos;
+                let along_the_way = climbs(way, both)?;
+                Some(if up == *forward_climbs_the_axis {
+                    along_the_way
+                } else if along_the_way == Decision::Pos {
+                    Decision::Neg
+                } else {
+                    Decision::Pos
+                })
+            }
+            HowItRuns::RoundAClosedCurve {
+                from,
+                node,
+                named_the_start,
+                wound_as,
+            } => {
+                let pair = [&wound_as[0], &wound_as[1]];
+                if !matches!(
+                    pair,
+                    [
+                        Surface::Plane(_),
+                        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+                    ] | [
+                        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+                        Surface::Plane(_)
+                    ]
+                ) {
+                    return None;
+                }
+                let most = |side: Interval| side.lo().abs().max(side.hi().abs());
+                let at_both = way_over(pair, both);
+                let steepest = (0..3)
+                    .max_by(|&one, &other| most(at_both[one]).total_cmp(&most(at_both[other])))?;
+                let sides = both.enclosure();
+                let reach = 2.0 * sides[steepest].width();
+                let grown_by = Interval::new(-reach, reach).ok()?;
+                let room = PredicatePoint::Constructed(core::array::from_fn(|axis| {
+                    if axis == steepest {
+                        sides[axis]
+                    } else {
+                        sides[axis] + grown_by
+                    }
+                }));
+                let way = way_over(pair, room);
+                strict(way[steepest])?;
+                let least = way[steepest].lo().abs().min(way[steepest].hi().abs());
+                if (0..3).any(|axis| axis != steepest && most(way[axis]) > 2.0 * least)
+                    || boxes_overlap(room, *from)
+                    || boxes_overlap(room, named_the_start.unwrap_or(*node))
+                {
+                    return None;
+                }
+                climbs(way, room)
+            }
+            HowItRuns::AlongABend { .. } | HowItRuns::RoundAPointOnItsChord { .. } => None,
+        }
     }
 
     /// Which of two nodes on a line a plane cuts a pipe in comes first along
@@ -12126,6 +12353,13 @@ impl<'f> Arrangement<'f> {
     /// one of them, and with the part below the lower halves, about every
     /// closed curve (queue row Q2464). Only the part above is on the loop's
     /// side of both planes.
+    ///
+    /// **A node where the line two planes cross in meets a ball, a pipe or a
+    /// cone is read against another of those exactly, where its box cannot
+    /// tell** ([`Arrangement::side_of_a_quadric_where_a_line_meets_another`]).
+    /// The funnel file's two pointed cones, one leaning off the other, have
+    /// such a node a rounding off the leaning cone, and asked its box alone
+    /// every fuse of the two was refused `Undecidable` (Q2961).
     fn which_side_of_everything(
         &self,
         cycle: usize,
@@ -12199,6 +12433,9 @@ impl<'f> Arrangement<'f> {
                             })
                             .or_else(|| {
                                 Self::side_of_a_ball_at_a_point_of_a_pipe(&on, at, &partner)
+                            })
+                            .or_else(|| {
+                                Self::side_of_a_quadric_where_a_line_meets_another(node, &partner)
                             })
                             .unwrap_or(undecided)
                     }
@@ -12329,6 +12566,59 @@ impl<'f> Arrangement<'f> {
                 .contains(&side)
                 .then(|| the_other_way(side))
         })
+    }
+
+    /// Which side of `partner`, a ball, a pipe or a cone, a node is that
+    /// stands for one meet of two planes and another of those: `Pos` outside,
+    /// `Neg` inside and `Zero` on it, or `None` where the node is no such
+    /// meet or the arithmetic cannot tell.
+    ///
+    /// The sign is worked out exactly from the line the two planes cross in
+    /// and the two quadrics, never from the node's box
+    /// ([`MeetOfThree::how_one_quadric_leans_where_the_line_meets_another`]).
+    /// The box only says which of the line's two meets with the node's own
+    /// quadric it is, and it holds that meet because the node is placed
+    /// where exactly its three surfaces meet ([`Node::made_of`]).
+    ///
+    /// The funnel file's two pointed cones, the second turned `0.3` about `x`
+    /// through `(0, 0, 4)`, meet `z = 8` and the leaning cap's plane in four
+    /// points a rounding apart near `(−3.9541, −0.6045, 8)`. The line the two
+    /// caps' planes cross in meets the upright cone there, and that meet is a
+    /// node of a walk on `z = 8` a rounding off the leaning cone, and inside
+    /// it. Its box is `5.7e−15` wide along `x`, the leaning cone's value over
+    /// it spans `6.6e−14`, and every fuse of the two was refused (Q2961,
+    /// `tests/a_funnel_with_a_leaning_spout.rs`).
+    fn side_of_a_quadric_where_a_line_meets_another(
+        node: &Node,
+        partner: &Surface,
+    ) -> Option<Decision> {
+        let Node {
+            vertex: None,
+            made_of: Some((surfaces, _)),
+            also,
+            half_way_round: false,
+            ..
+        } = node
+        else {
+            return None;
+        };
+        let (line, round) = two_planes_and_a_quadric(surfaces)?;
+        if !also.is_empty()
+            || *partner == round
+            || !matches!(
+                partner,
+                Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+            )
+        {
+            return None;
+        }
+        let [one, other] = &line;
+        MeetOfThree::how_one_quadric_leans_where_the_line_meets_another(
+            [one, other],
+            &round,
+            partner,
+            node.point,
+        )
     }
 
     /// Which side of the plane the half ellipse `crossing` lies in `at` is:
@@ -16521,8 +16811,8 @@ fn every_point_between_lies_within(surface: &Surface, ends: [[Interval; 3]; 2], 
 ///
 /// **Round a cone it parts two meets of a cap's rim a rounding apart.** The
 /// upright cone of
-/// `two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule` in
-/// `tests/a_funnel_with_a_leaning_spout.rs`, of slope a half up `z`, has its
+/// `two_pointed_cones_one_leaning_off_the_other_are_refused_ordering_along_a_branch`
+/// in `tests/a_funnel_with_a_leaning_spout.rs`, of slope a half up `z`, has its
 /// cap's rim, where `z = 8` cuts it, walked from `(0, 4, 8)`. Near `(−3.9541,
 /// −0.6045, 8)` the leaning cone crosses that rim, and the leaning cone's cap
 /// plane crosses it `4.15e-16` further round. Their tighter boxes share `x`,
@@ -17728,6 +18018,22 @@ fn two_planes_and_a_ball_or_a_pipe(surfaces: &[Surface; 3]) -> Option<([Plane; 2
     let round = surfaces
         .iter()
         .find(|surface| matches!(surface, Surface::Sphere(_) | Surface::Cylinder(_)))?;
+    Some(([*one, *other], *round))
+}
+
+/// The two planes and the ball, the pipe or the cone a meet is of: `None`
+/// unless its three surfaces are two planes and one of those.
+fn two_planes_and_a_quadric(surfaces: &[Surface; 3]) -> Option<([Plane; 2], Surface)> {
+    let mut planes = surfaces.iter().filter_map(Surface::as_plane);
+    let (Some(one), Some(other), None) = (planes.next(), planes.next(), planes.next()) else {
+        return None;
+    };
+    let round = surfaces.iter().find(|surface| {
+        matches!(
+            surface,
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+        )
+    })?;
     Some(([*one, *other], *round))
 }
 
@@ -30718,7 +31024,7 @@ mod two_loops_of_two_leaning_pipes {
 #[cfg(test)]
 mod two_points_a_rounding_apart_on_a_cone_caps_rim {
     //! The rim of the upright cone's cap in
-    //! `two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule`
+    //! `two_pointed_cones_one_leaning_off_the_other_are_refused_ordering_along_a_branch`
     //! in `tests/a_funnel_with_a_leaning_spout.rs`: the cone of slope a half
     //! up `z` from the origin, cut by `z = 8` in a circle of radius 4, walked
     //! from `(0, 4, 8)`. Two of its nodes are a rounding apart near
