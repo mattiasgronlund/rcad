@@ -9484,6 +9484,9 @@ impl<'f> Arrangement<'f> {
         if half_edges.len() < 2 {
             return Ok(half_edges.to_vec());
         }
+        if let Some(sorted) = self.round_two_places_two_curves_cross(node, half_edges) {
+            return Ok(sorted);
+        }
         let reference = Direction {
             crossing: half_edges
                 .iter()
@@ -9538,6 +9541,156 @@ impl<'f> Arrangement<'f> {
             sorted.insert(place, half_edge);
         }
         Ok(sorted)
+    }
+
+    /// The four ways out of a node that stands for two places two curves cross
+    /// at ([`Arrangement::stands_for_two_places_where_they_meet`]), in
+    /// anticlockwise order, read off the two places: `None` where any step of
+    /// that reading is not proved, and for every other node.
+    ///
+    /// Each curve leaves the node twice, once from each place, so no one
+    /// direction at the node says where a way out goes, and two that leave
+    /// from different places can run along one line.
+    /// [`Arrangement::turns_anticlockwise`] reads such a pair as `Zero`, and
+    /// where the curves cross at an angle at each place, no derivative of how
+    /// they bend parts them either.
+    ///
+    /// **Which place a way out leaves from.** Write `P` and `Q` for the two
+    /// crossings, `S` for the face's surface, and `dᵢ` for the sign of
+    /// `det(∇S, ∇P, ∇Q)` at place `Tᵢ`. A way along `P` runs along
+    /// `f·(∇S × ∇P)` for its forward flag `f = ±1`
+    /// ([`Arrangement::way_out_of`]), and `∇Q · (∇S × ∇P) = det(∇S, ∇P, ∇Q)`,
+    /// so just past `Tᵢ` it is on side `f·dᵢ` of `Q`. A way along `Q` is on
+    /// side `−f·dᵢ` of `P` the same way. The three surfaces meet at `T₀` and
+    /// `T₁` and nowhere else, and both are inside the node, so a way stays on
+    /// that side all the way to the node at its far end, and the side that
+    /// node is on says which place the way left from. The two curves cross
+    /// each other at both places, so `d₀ = −d₁`, and that is asked rather
+    /// than assumed: it is also what tells the two places apart.
+    ///
+    /// **The order.** For `P₀` and `Q₀` the ways out of `T₀`, and `a` the sign
+    /// of `f(P₀)·f(Q₀)·d₀`, it is `P₀, Q₀, Q₁, P₁` where `a` is `Pos` and
+    /// `P₀, P₁, Q₁, Q₀` where it is `Neg`. Draw the short piece of `P` from
+    /// `T₀` to `T₁` down to a point: round `T₀` the order is `P₀`, `Q₀`, then
+    /// `P` and `Q` going on towards `T₁`; at `T₁` the sign is `−a`, so there
+    /// it is `P₁`, `Q` coming in from `T₀`, `P` coming in from `T₀`, `Q₁`.
+    /// Joined across the drawn-down piece of `P`, and with the loop the piece
+    /// of `Q` between the two places becomes taken out, that is
+    /// `P₀, Q₀, Q₁, P₁`.
+    ///
+    /// The body pipe of `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step` is the
+    /// shape. Its back corner `(−1.23, −2.27, 15)` stands for both places where
+    /// the circle the flange back cuts in the pipe crosses the ellipse the
+    /// flat `x = −1.23` cuts in it, at right angles, `1.67e-8` either side of
+    /// `z = 15`. The two ways out along the ellipse both leave along `−y`, and
+    /// every certified fuse of the file was refused `Undecidable` on whether
+    /// the two went the same way along one line (Q3043).
+    ///
+    /// It is worked out under [`Policy::certified`] whatever the caller's
+    /// policy, so it answers only with what it proved, and where it does not
+    /// answer the general sort runs.
+    fn round_two_places_two_curves_cross(
+        &self,
+        node: usize,
+        half_edges: &[usize],
+    ) -> Option<Vec<usize>> {
+        if half_edges.len() != 4 {
+            return None;
+        }
+        let crossings = half_edges
+            .iter()
+            .map(|&half_edge| self.direction(half_edge).crossing);
+        let (one, other) = (crossings.clone().min()?, crossings.max()?);
+        if one == other
+            || !self.stands_for_two_places_where_they_meet(node, one, other)
+            || self.has_a_way_of_its_own(node, one)
+            || self.has_a_way_of_its_own(node, other)
+        {
+            return None;
+        }
+        let the_way = |crossing: usize, forward: bool| {
+            let mut found = half_edges
+                .iter()
+                .copied()
+                .filter(|&half_edge| self.direction(half_edge) == Direction { crossing, forward });
+            let (Some(half_edge), None) = (found.next(), found.next()) else {
+                return None;
+            };
+            Some(half_edge)
+        };
+        let ways = [
+            [the_way(one, true)?, the_way(one, false)?],
+            [the_way(other, true)?, the_way(other, false)?],
+        ];
+        let partners = [one, other].map(|crossing| self.crossings[crossing].partner);
+        let asked = three_planes_faced_the_one_way([self.surface, partners[0], partners[1]]);
+        let asked = [&asked[0], &asked[1], &asked[2]];
+        let meet =
+            meet_of_three_surfaces(asked, &Policy::certified(), &mut ProvenanceLog::new()).ok()?;
+        let MeetOfThree::At(places) = meet.boxed_tight(asked) else {
+            return None;
+        };
+        let [here, there] = places[..] else {
+            return None;
+        };
+        let origin = PredicatePoint::from([0.0; 3]);
+        let [turn_here, turn_there] = [here, there].map(|place| {
+            let at = as_exact_as_it_is(place);
+            orient3d_of_points(
+                gradient_at(&self.surface, at),
+                gradient_at(&partners[0], at),
+                gradient_at(&partners[1], at),
+                origin,
+            )
+        });
+        let proved = |sign: Decision| sign == Decision::Pos || sign == Decision::Neg;
+        if !proved(turn_here) || turn_there != the_other_way(turn_here) {
+            return None;
+        }
+        let leaves_from = |which: usize, half_edge: usize| {
+            let far = self.to(half_edge);
+            if far == node {
+                return None;
+            }
+            let side = side_of_surface(&partners[1 - which], self.nodes[far].point);
+            if !proved(side) {
+                return None;
+            }
+            let forward = self.direction(half_edge).forward;
+            [turn_here, turn_there].iter().position(|&turn| {
+                let just_past = if (which == 0) == forward {
+                    turn
+                } else {
+                    the_other_way(turn)
+                };
+                just_past == side
+            })
+        };
+        let [mine, theirs] = [0, 1].map(|which| {
+            let [forward, back] = ways[which];
+            let (from_forward, from_back) =
+                (leaves_from(which, forward)?, leaves_from(which, back)?);
+            if from_forward == from_back {
+                return None;
+            }
+            Some(if from_forward == 0 {
+                [forward, back]
+            } else {
+                [back, forward]
+            })
+        });
+        let ([one_here, one_there], [other_here, other_there]) = (mine?, theirs?);
+        let mut turn = turn_here;
+        for half_edge in [one_here, other_here] {
+            if !self.direction(half_edge).forward {
+                turn = the_other_way(turn);
+            }
+        }
+        Some(if turn == Decision::Pos {
+            vec![one_here, other_here, other_there, one_there]
+        } else {
+            vec![one_here, one_there, other_there, other_here]
+        })
     }
 
     /// Which half of the turn starting at `reference` a direction is in: `0` for
@@ -9693,7 +9846,12 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::the_corner_that_is_this_place`]). Read off the corner,
     /// the four ways out sorted flat, circle, flat, circle, a winding spread
     /// out of range, and the front was refused `CannotTellTheCellsOfAFaceApart`
-    /// (Q2982).
+    /// (Q2982). Where the two curves cross at an angle at each place instead,
+    /// two ways out that leave from different places can run along one line,
+    /// and nothing about how they bend parts them, so
+    /// [`Arrangement::sorted_anticlockwise`] reads the order off the two places
+    /// before it asks this at all
+    /// ([`Arrangement::round_two_places_two_curves_cross`], Q3043).
     fn turns_anticlockwise(
         &self,
         node: usize,
