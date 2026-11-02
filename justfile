@@ -2757,6 +2757,158 @@ check-gate-verdicts-selftest:
         && fail "a tooling/queue/rows.py change was reported as served"
     g reset -q --hard "$base"
 
+    # The five steps that build with cargo, served off a key of what they read
+    # rather than the whole tree, so a commit that changes no Rust is served
+    # them (docs/decisions.d/337 §337.11). Driven like the case above, through
+    # a copy of this justfile committed as `$repo/justfile`, with fast stubs
+    # standing in for the five. Two print a nextest summary, so the counts can
+    # be followed into the record and out of it. `check-release-build` fails
+    # while RUST_SELFTEST_FAIL is set, which nothing in the key reads: the same
+    # inputs giving a different answer is what a violation is.
+    rust_steps="check check-ignored test test-slow check-release-build"
+    for step in $rust_steps; do
+        grep -qx "$step" <<<"$reusable" \
+            || fail "$step is not in gate_reusable_steps, so the cargo steps' key below would serve nothing real"
+    done
+    rust_store="$repo/.git/rcad-verdicts-rust"
+    rust_fingerprint() { (cd "$repo" && "$j" _code-fingerprint rust); }
+    rust_gate() {
+        (cd "$repo" && "$j" --set gate_steps "$1" --set gate_reusable_steps "$rust_steps" \
+            --set gate_log "$dir/gate.log" gate quiet "${@:2}" 2>&1)
+    }
+    test_count='tests: Summary [   0.300s] 5 tests run: 5 passed, 0 skipped'
+    slow_count='tests: Summary [   0.200s] 2 tests run: 2 passed, 0 skipped'
+    cp '{{ justfile() }}' "$repo/justfile"
+    printf '%s\n' '' 'set allow-duplicate-recipes' '' \
+        'check:' '    @true' '' 'check-ignored:' '    @true' '' \
+        'test:' '    @echo "     Summary [   0.300s] 5 tests run: 5 passed, 0 skipped"' '' \
+        'test-slow:' '    @echo "     Summary [   0.200s] 2 tests run: 2 passed, 0 skipped"' '' \
+        'check-release-build:' '    @[ -z "${RUST_SELFTEST_FAIL:-}" ]' >>"$repo/justfile"
+    printf '[workspace]\n' >"$repo/Cargo.toml"
+    g add -A
+    g commit -q -m 'cargo steps fixture files'
+    rust_commit1=$(g rev-parse HEAD)
+    [[ "$rust_commit1" != 0* ]] || fail "the cargo steps' fixture commit starts with 0, so every serving case below is an audit"
+    rust_fp1=$(rust_fingerprint)
+    [[ "$rust_fp1" =~ ^[0-9a-f]{64}$ ]] || fail "the cargo steps' own fingerprint did not come back as a hash: $rust_fp1"
+    tree_fp1=$(fingerprint)
+
+    got=$(rust_gate "$rust_steps") || fail "the first gate of the cargo steps failed"
+    grep -q '^· test (' <<<"$got" || fail "the first gate of the cargo steps did not run test"
+    [ -f "$rust_store/$rust_fp1" ] || fail "a passing gate of the cargo steps recorded nothing under their own store"
+    [ -f "$store/$tree_fp1" ] && fail "a gate of the cargo steps recorded them under the whole-tree store"
+    grep -qx "commit $rust_commit1" "$rust_store/$rust_fp1" \
+        || fail "the cargo steps' record does not name the commit that was gated"
+    grep -qx "steps $rust_steps" "$rust_store/$rust_fp1" \
+        || fail "the cargo steps' record does not name the five steps it passed"
+    grep -qxF "$test_count" "$rust_store/$rust_fp1" || fail "the cargo steps' record does not hold test's counts"
+
+    # A commit that changes only the justfile, outside the recipes the five
+    # run, is the case the key is for: Q3053's ran test fresh for 842 s.
+    printf '\n# a comment, which no cargo step reads\n' >>"$repo/justfile"
+    g add -A
+    g commit -q -m 'a justfile-only change'
+    [[ "$(g rev-parse HEAD)" != 0* ]] || fail "the justfile-only commit starts with 0, so this case would be an audit"
+    [ "$(fingerprint)" != "$tree_fp1" ] \
+        || fail "a justfile-only commit left the whole-tree fingerprint where it was, so the case below would prove nothing"
+    [ "$(rust_fingerprint)" = "$rust_fp1" ] \
+        || fail "a commit that added only a comment to the justfile moved the cargo steps' fingerprint"
+    got=$(rust_gate "$rust_steps") || fail "a gate of a justfile-only change failed"
+    grep -q "^· served: $rust_steps from ${rust_commit1:0:8}'s gate at " <<<"$got" \
+        || fail "a justfile-only commit was not served the cargo steps' green from the commit under it"
+    grep -q '^· test (' <<<"$got" && fail "a served test ran anyway"
+    grep -qxF "$test_count (served from ${rust_commit1:0:8})" <<<"$got" \
+        || fail "a gate served test did not show the counts of the gate that served it"
+    grep -qx 'tests: not reached' <<<"$got" && fail "a gate served test said no tests were reached"
+
+    # A change to the kernel, or to the recipe of a step, runs the five again.
+    g reset -q --hard "$rust_commit1"
+    printf '// kernel change\n' >>"$repo/crates/a.rs"
+    g add -A
+    g commit -q -m 'a kernel change, cargo steps case'
+    [ "$(rust_fingerprint)" != "$rust_fp1" ] || fail "a commit that touched crates/a.rs left the cargo steps' fingerprint where it was"
+    got=$(rust_gate "$rust_steps") || fail "a gate of the cargo steps after a kernel change failed"
+    grep -q '^· test (' <<<"$got" || fail "a kernel change was served test instead of running it"
+    grep -q '^· served:' <<<"$got" && fail "a kernel change was served a cargo step"
+    g reset -q --hard "$rust_commit1"
+    sed -i 's/5 tests run: 5 passed/6 tests run: 6 passed/' "$repo/justfile"
+    grep -q '6 tests run: 6 passed' "$repo/justfile" || fail "the edit meant to change test's recipe matched nothing"
+    g commit -q -am 'a change to the test recipe'
+    [ "$(rust_fingerprint)" != "$rust_fp1" ] || fail "a commit that changed test's own recipe left the cargo steps' fingerprint where it was"
+    got=$(rust_gate "$rust_steps") || fail "a gate of the cargo steps after a change to test's recipe failed"
+    grep -q '^· test (' <<<"$got" || fail "a change to test's own recipe was served test instead of running it"
+    g reset -q --hard "$rust_commit1"
+
+    # What the traces found the five reading moves the key, and nothing else
+    # in the tree does.
+    for path in Cargo.lock .cargo/config.toml .config/nextest.toml rust-toolchain.toml mise.toml \
+                fuzz/step.dict fuzz/corpus/a/1 corpus/manifest.sha256 crates/b/src/lib.rs; do
+        mkdir -p "$repo/$(dirname "$path")"
+        printf 'moved\n' >>"$repo/$path"
+        g add -A
+        g commit -q -m "$path"
+        [ "$(rust_fingerprint)" != "$rust_fp1" ] || fail "a commit touching $path left the cargo steps' fingerprint where it was"
+        g reset -q --hard "$rust_commit1"
+    done
+    for path in tooling/a.py docs/notes.txt crates/x/NOTES.md .github/workflows/ci.yml deny.toml; do
+        mkdir -p "$repo/$(dirname "$path")"
+        printf 'moved\n' >>"$repo/$path"
+        g add -A
+        g commit -q -m "$path"
+        [ "$(rust_fingerprint)" = "$rust_fp1" ] || fail "a commit touching only $path moved the cargo steps' fingerprint"
+        g reset -q --hard "$rust_commit1"
+    done
+    [ "$(RCAD_SOAK_SEED=7 rust_fingerprint)" != "$rust_fp1" ] \
+        || fail "RCAD_SOAK_SEED changes what the suite draws, and the cargo steps' fingerprint did not move"
+    [ "$(RCAD_STEP_CORPUS=/elsewhere rust_fingerprint)" = "$rust_fp1" ] \
+        || fail "moving RCAD_STEP_CORPUS changed the cargo steps' fingerprint"
+
+    # The rules of §337.4 hold on this key too: fresh serves nothing, a run
+    # that leaves test-slow out records what it ran, a record two days old is
+    # run again, and so is a sha starting with 0.
+    got=$(rust_gate "$rust_steps" fresh) || fail "a fresh gate of the cargo steps failed"
+    grep -q '^· test (' <<<"$got" || fail "a fresh gate was served test"
+    grep -q "^· verdicts: fresh, so ${rust_commit1:0:8}'s green for the cargo steps" <<<"$got" \
+        || fail "a fresh gate did not say why the cargo steps' green was not served"
+    rm "$rust_store/$rust_fp1"
+    got=$(rust_gate 'check check-ignored test check-release-build') || fail "a gate that left out test-slow failed"
+    grep -qx 'steps check check-ignored test check-release-build' "$rust_store/$rust_fp1" \
+        || fail "a run that left out test-slow did not record the cargo steps it ran"
+    got=$(rust_gate "$rust_steps") || fail "a partly served gate of the cargo steps failed"
+    grep -q "^· served: check check-ignored test check-release-build from ${rust_commit1:0:8}'s gate at " <<<"$got" \
+        || fail "a gate was not served the cargo steps its record names"
+    grep -q '^· test-slow (' <<<"$got" || fail "test-slow, which the record does not name, was not run"
+    grep -qxF "$test_count (served from ${rust_commit1:0:8})" <<<"$got" && grep -qxF "$slow_count" <<<"$got" \
+        || fail "a partly served gate did not show test's counts as served and test-slow's as its own"
+    grep -qx 'steps check check-ignored test check-release-build test-slow' "$rust_store/$rust_fp1" \
+        || fail "a partly served pass did not add test-slow to the cargo steps' record"
+    old=$(date -u -d '2 days ago' +%Y-%m-%dT%H:%M:%SZ)
+    sed -i "s/^date .*/date $old/" "$rust_store/$rust_fp1"
+    got=$(rust_gate "$rust_steps") || fail "a gate over an expired record of the cargo steps failed"
+    grep -q '^· test (' <<<"$got" || fail "a record of the cargo steps two days old was served"
+    grep -q 'not the last day' <<<"$got" || fail "an expired record of the cargo steps did not say why it was not served"
+    n=0
+    while [[ "$(g rev-parse HEAD)" != 0* ]]; do
+        n=$((n + 1))
+        [ "$n" -le 400 ] || fail "400 amended commits found no sha starting with 0"
+        g commit -q --amend -m "cargo steps audit $n"
+    done
+    [ "$(rust_fingerprint)" = "$rust_fp1" ] || fail "amending the message moved the cargo steps' fingerprint"
+    got=$(rust_gate "$rust_steps") || fail "an audited gate of the cargo steps failed"
+    grep -q '^· test (' <<<"$got" || fail "a commit whose sha starts with 0 was served test"
+    grep -q '^· verdicts: audit, since this sha starts with 0: .* the cargo steps' <<<"$got" \
+        || fail "an audit of the cargo steps did not say it was one"
+    g reset -q --hard "$rust_commit1"
+
+    # A violation: check-release-build fails on inputs its record passed.
+    got=$(RUST_SELFTEST_FAIL=1 rust_gate "$rust_steps" fresh) && fail "a gate whose check-release-build fails exited 0"
+    grep -q '^!!! verdict violated: check-release-build failed' <<<"$got" \
+        || fail "check-release-build failed on inputs the cargo steps' record passed, and nothing said so"
+    [ -f "$rust_store/$rust_fp1" ] && fail "a violated record of the cargo steps was kept, so the next gate would serve it"
+    grep -q " $rust_fp1 check-release-build " "$repo/.git/rcad-verdict-violations" \
+        || fail "the cargo steps' violation was not written down"
+    g reset -q --hard "$base"
+
     # The steps that check the machine, each served off a key of its own: the
     # code's fingerprint and what the step reads outside the tree (§337.9).
     # `check-questions-selftest` stands in for the four, since it is the one
