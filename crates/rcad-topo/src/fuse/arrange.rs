@@ -6683,11 +6683,10 @@ impl<'f> Arrangement<'f> {
         let the_curve = match &self.crossings[crossing].order {
             HowItRuns::RoundAClosedCurve { wound_as, .. } => [wound_as[0], wound_as[1]],
             HowItRuns::AlongAnAxis { .. } => {
-                let planes @ [Surface::Plane(_), Surface::Plane(_)] =
-                    [self.surface, self.crossings[crossing].partner]
-                else {
+                let planes = [self.surface, self.crossings[crossing].partner];
+                if !matches!(planes, [Surface::Plane(_), Surface::Plane(_)]) {
                     return None;
-                };
+                }
                 planes
             }
             HowItRuns::AlongABend { .. } | HowItRuns::RoundAPointOnItsChord { .. } => return None,
@@ -6805,12 +6804,13 @@ impl<'f> Arrangement<'f> {
                 let steepest = (0..3)
                     .max_by(|&one, &other| most(at_both[one]).total_cmp(&most(at_both[other])))?;
                 let sides = both.enclosure();
-                let reach = sides[steepest] - sides[steepest];
+                let reach = 2.0 * sides[steepest].width();
+                let grown_by = Interval::new(-reach, reach).ok()?;
                 let room = PredicatePoint::Constructed(core::array::from_fn(|axis| {
                     if axis == steepest {
                         sides[axis]
                     } else {
-                        sides[axis] + reach + reach
+                        sides[axis] + grown_by
                     }
                 }));
                 let way = way_over(pair, room);
