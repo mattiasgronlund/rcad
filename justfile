@@ -14214,7 +14214,7 @@ mark-finished +trees:
 # checks again, at the delete, that each branch is merged into `main` and
 # checked out nowhere. That is why a branch only `origin/main` holds waits for
 # `ff-main`, and why the recipe fails when no tree holds `main`.
-[doc("Remove lane worktrees that are clean, landed on main, unlocked, and idle for an hour or marked finished; then delete the branches main holds that no tree or queue row uses.")]
+[doc("Remove lane worktrees that are clean, landed on main, unlocked, and idle for an hour or marked finished, clearing each removed tree's build directories too; then delete the branches main holds that no tree or queue row uses.")]
 prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-fuzz.service"):
     #!/usr/bin/env bash
     set -euo pipefail
@@ -14258,6 +14258,39 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
         done <<<"$all_trees"
         return 1
     }
+    # Asked while the tree can still answer: once `git worktree remove` runs,
+    # its manifest is gone. `build_directory` is `<tree>/target` with
+    # build-dir unset, which already goes with the tree, so only a build
+    # directory outside the tree is cleared here, and never
+    # `/var/cache/zram/kache`, which is kache's own store, not cargo's. A
+    # tree whose cargo cannot answer still goes; this prints which build
+    # directory it could not find (docs/decisions.d/474-build-output-goes-to-zram.md 474.10).
+    clear_build_dir() {
+        local label="$1" in_dir="$2"
+        shift 2
+        local metadata
+        if ! metadata=$(cd "$in_dir" 2>/dev/null && "$@" 2>/dev/null); then
+            echo "cargo metadata failed in $in_dir, so $tree's $label build directory could not be found"
+            return
+        fi
+        local build
+        build=$(python3 -c 'import json, sys; print(json.load(sys.stdin)["build_directory"])' <<<"$metadata" 2>/dev/null) || {
+            echo "cargo metadata named no build_directory in $in_dir, so $tree's $label build directory could not be found"
+            return
+        }
+        case "$build" in
+        "$tree" | "$tree"/*)
+            return
+            ;;
+        /var/cache/zram/kache | /var/cache/zram/kache/*)
+            echo "cargo metadata in $in_dir named kache's own store, $build, which prune-worktrees never clears"
+            return
+            ;;
+        esac
+        if [ -d "$build" ]; then
+            rm -rf "$build"
+        fi
+    }
     # The first entry is the hub, which `git worktree remove` refuses. `branch`
     # is last because a detached tree has none, and `read` folds two tabs in a
     # row into one, which would shift every field after an empty one.
@@ -14287,6 +14320,8 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
         elif printf '%s\n' "$cwds" | awk -v p="$tree" '$0 == p || index($0, p "/") == 1 { found = 1 } END { exit !found }'; then
             keep "a process is running in it"
         else
+            clear_build_dir root "$tree" cargo metadata --no-deps --offline --format-version 1
+            clear_build_dir fuzz "$tree/fuzz" cargo +nightly metadata --no-deps --format-version 1
             git -C "$here" worktree remove "$tree"
             echo "removed: $tree [${branch#refs/heads/}${branch:+ }at ${head:0:8}]"
         fi
@@ -14338,6 +14373,15 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
 # other already removed, and the one that loses the race for the lock must
 # still report the twelve kept trees, with nothing left for it to remove or
 # delete.
+#
+# A stub cargo on PATH stands in for the real one, so `merged` and `runner`
+# each get a build directory outside the tree, named from their own `$PWD`
+# the way build-dir actually does, and `finished`'s names kache's own store.
+# `merged`'s goes with the tree when it is removed; `runner`'s stays because
+# the tree is kept; `finished`'s is never touched; and none of the fixtures
+# has a `fuzz/` workspace, so every removed tree's fuzz build directory comes
+# back as not found (docs/decisions.d/474-build-output-goes-to-zram.md
+# 474.10).
 [private]
 check-prune-worktrees-selftest:
     #!/usr/bin/env bash
@@ -14410,6 +14454,37 @@ check-prune-worktrees-selftest:
         || fail "a live tree alongside a gone one was not marked"
     (cd "$dir/busy/" && exec sleep 300) &
     busy=$!
+    # A stub cargo, on PATH for both sweeps below, whose `metadata` answers
+    # with a build directory derived from its own working directory -- so a
+    # removed tree (`merged`) and a kept one (`runner`) each get a build
+    # directory of their own to check afterwards, outside either tree, the
+    # way build-dir actually puts one outside the tree it builds (474.10).
+    # `finished`'s answers kache's own store instead, to check that one is
+    # never cleared.
+    mkdir -p "$dir/bin"
+    cat > "$dir/bin/cargo" <<'SH'
+    #!/usr/bin/env bash
+    arg=$1
+    [ "$arg" = +nightly ] && arg=$2
+    [ "$arg" = metadata ] || exit 1
+    if [ "$PWD" = "$STUB_KACHE_TREE" ]; then
+        printf '{"build_directory": "/var/cache/zram/kache/pretend"}\n'
+    else
+        safe=$(printf '%s' "$PWD" | tr '/' '_')
+        printf '{"build_directory": "%s"}\n' "$STUB_BUILD_ROOT/$safe"
+    fi
+    SH
+    chmod +x "$dir/bin/cargo"
+    merged_build=$(printf '%s' "$dir/merged" | tr '/' '_')
+    merged_build="$dir/builds/$merged_build"
+    runner_build=$(printf '%s' "$dir/runner" | tr '/' '_')
+    runner_build="$dir/builds/$runner_build"
+    mkdir -p "$merged_build" "$runner_build"
+    echo marker >"$merged_build/marker"
+    echo marker >"$runner_build/marker"
+    [ -d "$merged_build" ] && [ -d "$runner_build" ] \
+        || fail "the stub build directories were not set up before the sweep"
+    export PATH="$dir/bin:$PATH" STUB_BUILD_ROOT="$dir/builds" STUB_KACHE_TREE="$dir/finished"
     # Two sweeps started together, the shape of two runs whose rows land in
     # one push sending their pruners at once (§315). The lock serializes
     # them: whichever reaches it first does the real removal and deletion,
@@ -14454,6 +14529,14 @@ check-prune-worktrees-selftest:
         grep -qF "removed: $dir/$name " <<<"$got" || fail "the $name tree was not reported as removed"
     done
     [ "$(grep -c '^removed' <<<"$got")" = 4 ] || fail "more than the four finished trees were removed"
+    [ ! -d "$merged_build" ] \
+        || fail "merged's build directory, outside the tree, was not cleared when the tree was removed"
+    [ -d "$runner_build" ] \
+        || fail "runner's build directory was cleared even though the tree was kept"
+    grep -qF "cargo metadata in $dir/finished named kache's own store, /var/cache/zram/kache/pretend, which prune-worktrees never clears" <<<"$got" \
+        || fail "a build directory under kache's own store was not reported as never cleared"
+    grep -qF "cargo metadata failed in $dir/merged/fuzz, so $dir/merged's fuzz build directory could not be found" <<<"$got" \
+        || fail "a tree with no fuzz/ workspace did not say its fuzz build directory could not be found"
     for branch in main runner held unlanded origin-only; do
         git -C "$dir/hub" rev-parse -q --verify "refs/heads/$branch" >/dev/null || fail "the $branch branch was deleted"
     done
