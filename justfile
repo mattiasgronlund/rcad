@@ -10947,13 +10947,13 @@ check-timing-hooked-calls-selftest:
         || { echo "$got"; echo "timing-hooked-calls.py exited non-zero against a fixture with no hooked call at all"; exit 1; }
 
     leave_line="  calls or tail jumps in rcad_fuzz_timing through a computed pointer that can leave the function: 3"
-    printf '%s\n' "$got" | grep -qxF "$leave_line" || {
+    grep -qxF "$leave_line" <<<"$got" || {
         echo "$got"
         echo "expected the line above (3: the bare jmp, the near miss, and the call)"
         exit 1
     }
     stays_line="  tail jumps in rcad_fuzz_timing through a relative jump table, staying inside their own function: 1"
-    printf '%s\n' "$got" | grep -qxF "$stays_line" || {
+    grep -qxF "$stays_line" <<<"$got" || {
         echo "$got"
         echo "expected the line above (1: only the real jump table)"
         exit 1
@@ -10990,13 +10990,13 @@ check-timing-hooked-calls-selftest:
         exit 1
     fi
     offender_line="  calls from rcad_fuzz_timing reaching a hooked function through another function outside the crate: 1"
-    printf '%s\n' "$offender_got" | grep -qxF "$offender_line" || {
+    grep -qxF "$offender_line" <<<"$offender_got" || {
         echo "$offender_got"
         echo "expected the line above (1: rcad_fuzz_timing_reaches_out, through outside_the_crate_helper, to bcmp)"
         exit 1
     }
     chain_line="    rcad_fuzz_timing_reaches_out -> outside_the_crate_helper -> bcmp"
-    printf '%s\n' "$offender_got" | grep -qxF "$chain_line" || {
+    grep -qxF "$chain_line" <<<"$offender_got" || {
         echo "$offender_got"
         echo "expected the chain line above"
         exit 1
@@ -11024,7 +11024,7 @@ check-timing-hooked-calls-selftest:
     computed_got=$(fuzz/timing-hooked-calls.py "$dir/computed") \
         || { echo "$computed_got"; echo "timing-hooked-calls.py exited non-zero against a fixture where the only thing reached is a computed call, never a hook — a call this scan cannot see past is not itself an offender"; exit 1; }
     computed_line="  calls or tail jumps in rcad_fuzz_timing through a computed pointer that can leave the function: 1"
-    printf '%s\n' "$computed_got" | grep -qxF "$computed_line" || {
+    grep -qxF "$computed_line" <<<"$computed_got" || {
         echo "$computed_got"
         echo "expected the line above (1: helper_with_a_computed_call's call *%rax, reached from rcad_fuzz_timing_computed_through_helper)"
         exit 1
@@ -11068,13 +11068,13 @@ check-timing-hooked-calls-selftest:
         exit 1
     fi
     gotslot_line="  calls from rcad_fuzz_timing reaching a hooked function through another function outside the crate: 1"
-    printf '%s\n' "$gotslot_got" | grep -qxF "$gotslot_line" || {
+    grep -qxF "$gotslot_line" <<<"$gotslot_got" || {
         echo "$gotslot_got"
         echo "expected the line above (1: rcad_fuzz_timing_got_slot, through outside_the_crate_through_a_slot, to bcmp)"
         exit 1
     }
     gotslot_chain_line="    rcad_fuzz_timing_got_slot -> outside_the_crate_through_a_slot -> bcmp"
-    printf '%s\n' "$gotslot_got" | grep -qxF "$gotslot_chain_line" || {
+    grep -qxF "$gotslot_chain_line" <<<"$gotslot_got" || {
         echo "$gotslot_got"
         echo "expected the chain line above"
         exit 1
@@ -11130,7 +11130,7 @@ check-timing-hooked-calls-selftest:
         exit 1
     fi
     pointer_line="  calls from rcad_fuzz_timing reaching a hooked function through a function pointer: 2"
-    printf '%s\n' "$pointer_got" | grep -qxF "$pointer_line" || {
+    grep -qxF "$pointer_line" <<<"$pointer_got" || {
         echo "$pointer_got"
         echo "expected the line above (2: the plain function pointer and the vtable slot)"
         exit 1
@@ -11138,7 +11138,7 @@ check-timing-hooked-calls-selftest:
     for chain in \
         "    rcad_fuzz_timing_fn_pointer -> &taken_by_a_pointer -> bcmp" \
         "    rcad_fuzz_timing_dyn_call -> &behind_a_vtable -> bcmp"; do
-        printf '%s\n' "$pointer_got" | grep -qxF "$chain" || {
+        grep -qxF "$chain" <<<"$pointer_got" || {
             echo "$pointer_got"
             echo "expected the chain line: $chain"
             exit 1
@@ -11204,12 +11204,12 @@ check-timing-hooked-calls-selftest:
         exit 1
     fi
     not_entered_line="  calls from rcad_fuzz_timing reaching a hooked function through another function outside the crate: 1"
-    printf '%s\n' "$not_entered_got" | grep -qxF "$not_entered_line" || {
+    grep -qxF "$not_entered_line" <<<"$not_entered_got" || {
         echo "$not_entered_got"
         echo "expected the line above (1: the default hook; none through panic_with_hook, rust_oom or AsanInitInternal)"
         exit 1
     }
-    printf '%s\n' "$not_entered_got" | grep -qF "panicking::default_hook -> bcmp" || {
+    grep -qF "panicking::default_hook -> bcmp" <<<"$not_entered_got" || {
         echo "$not_entered_got"
         echo "expected a chain through std's default panic hook to bcmp"
         exit 1
