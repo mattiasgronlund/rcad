@@ -1738,8 +1738,8 @@ def has_a_tree(branch, branches, trees, claimed, left):
     return False
 
 
-def row_on_branch(here, ref, branch):
-    """The id of the row `lane:<branch>` was ever written for, read from main's own history, or `None` (§263.4).
+def row_on_branch(here, ref, branch, windows):
+    """The id of the row `lane:<branch>` was last written for, read from main's own history, or `None` (§263.4).
 
     `git log -S` on that exact state text finds only the handful of commits
     where it was added or removed, where walking every commit the file has
@@ -1751,15 +1751,25 @@ def row_on_branch(here, ref, branch):
     commit that happens to land while a merge is still pending, is invisible
     to it; `-m` has `log` diff a merge against each parent in turn, which
     pickaxe then searches like any other commit.
+
+    Pickaxe still reads both sides of every commit it walks, and the file is
+    megabytes long with thousands of commits behind it: on 2026-10-29 three
+    lane trees cost 159 s that way (Q2977). So the history is read only in
+    `windows` (`history_windows`), the `git log` date limits of the parts
+    that can hold the state, newest part first. Each part lists its commits
+    newest first, as the whole history would, so the first match found is
+    the newest match the whole history holds.
     """
     lane_state = f"lane:{branch}"
-    shas = git("log", "-S", lane_state, "-m", "--format=%H", ref, "--", here.relative, cwd=here.top).split()
-    for sha in shas:
-        text = git("show", f"{sha}:{here.relative}", cwd=here.top, check=False)
-        if lane_state in text:
-            for row in Queue(text).rows:
-                if row.state == lane_state:
-                    return row.id
+    for window in windows:
+        shas = git("log", "-S", lane_state, "-m", *window, "--format=%H", ref, "--", here.relative,
+                   cwd=here.top).split()
+        for sha in shas:
+            text = git("show", f"{sha}:{here.relative}", cwd=here.top, check=False)
+            if lane_state in text:
+                for row in Queue(text).rows:
+                    if row.state == lane_state:
+                        return row.id
     return None
 
 
@@ -1776,14 +1786,48 @@ def stale_lane_trees(here, ref, trees):
     if ref is None:
         return closed
     current = Queue(git("show", f"{ref}:{here.relative}", cwd=here.top, check=False))
+    taken, began = first_takes(Claims(here.claims).events())
     for tree in trees:
         if not (tree.is_lane and tree.branch.startswith("lane-")):
             continue
-        row_id = row_on_branch(here, ref, tree.branch)
+        row_id = row_on_branch(here, ref, tree.branch, history_windows(taken.get(tree.branch), began))
         row = current.find(row_id) if row_id else None
         if row is not None and row.is_closed():
             closed[tree.branch] = (row, tree.path)
     return closed
+
+
+def first_takes(events):
+    """The earliest `take` the claims file holds for each branch, and the time of its earliest event: `({branch: time}, time)` (§263.4).
+
+    The times are `now()`'s fixed-width UTC text, so the smallest string is
+    the earliest time. The second is `None` when the file holds no event.
+    """
+    first = {}
+    for event in events:
+        if event[0] == "take":
+            branch, time = event[4], event[2]
+            first[branch] = min(first.get(branch, time), time)
+    return first, min((event[2] for event in events), default=None)
+
+
+def history_windows(first_take, began):
+    """The `git log` date limits of the parts of main's history that can hold `lane:<branch>`, newest part first (§263.4).
+
+    Once the claims file has begun, only `take` writes `lane:<branch>`, and
+    it appends its event, stamped on this machine's clock, before any commit
+    carries the state. So no commit between `began` and the branch's first
+    take holds it, and only the commits since that take, and those from
+    before the claims file began, are read; a branch never taken has only
+    the latter. The first part grows with the tree's own life and the second
+    not at all, where the commits between them are almost the whole
+    history. With no claims file at all there is no gap, and the whole
+    history is read.
+    """
+    if began is None:
+        return [[]]
+    before = [f"--until={began}"]
+    return [[f"--since={first_take}"], before] if first_take else [before]
 
 
 def running(here, args):
