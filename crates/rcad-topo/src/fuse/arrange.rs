@@ -5436,6 +5436,13 @@ impl<'f> Arrangement<'f> {
     /// apart, which a tolerant policy reads as one point; its doc says what
     /// that broke (Q2988).
     ///
+    /// **Two meets of a plane's line on a pipe with two planes that cross the
+    /// plane in lines that are not parallel are read only where the policy
+    /// would refuse too**
+    /// ([`Arrangement::as_two_cuts_across_a_line_along_a_pipe_say`]). The two
+    /// planes it was written for are one plane written twice, and their meets
+    /// are a rounding apart.
+    ///
     /// **Where the policy refuses the own boxes' answer, a length, it is asked
     /// how far apart a point of one tighter box may be from a point of the
     /// other, where the two overlap**
@@ -5719,6 +5726,7 @@ impl<'f> Arrangement<'f> {
     ) -> Option<Decision> {
         self.as_two_cuts_through_one_corner_say(crossing, first, second)
             .or_else(|| self.as_two_cuts_through_the_axis_say(crossing, first, second))
+            .or_else(|| self.as_two_cuts_across_a_line_along_a_pipe_say(crossing, first, second))
             .or_else(|| {
                 self.as_a_corner_beside_a_flat_cut_through_the_loop_says(crossing, first, second)
             })
@@ -6934,6 +6942,104 @@ impl<'f> Arrangement<'f> {
         );
         let theirs_further_along_w =
             signs_multiplied([expansion_sign(&apart), mine_runs, theirs_runs])?;
+        Some(if (along[axis] > 0.0) == forward_climbs_the_axis {
+            theirs_further_along_w
+        } else {
+            the_other_way(theirs_further_along_w)
+        })
+    }
+
+    /// Which of two nodes on a line a plane cuts a pipe in comes first along
+    /// it, where each is that line's meet with one more plane: read off which
+    /// side of one node's plane the other node is on. `None` everywhere else,
+    /// and wherever a sign it reads is not proved.
+    ///
+    /// **A plane that crosses the line changes side where it meets it.** The
+    /// line runs along the pipe's axis direction `w`
+    /// ([`Arrangement::as_two_cuts_crossing_the_plane_in_parallel_lines_say`]).
+    /// Write `c · x = k` for the second node's plane. On the line `p + t w`
+    /// through the first node `p`, `c · x − k` is `(c · p − k) + t (c · w)`,
+    /// which is nought at the second node. So the second lies further along
+    /// `w` where `c · p − k` and `c · w` have opposite signs, behind where they
+    /// have one sign, and at the first where `c · p − k` is nought. `c · w` is
+    /// a sign of the stored numbers, worked out exactly. The first node is
+    /// where the line the face's plane and its own plane share crosses the
+    /// pipe, so `c · p − k` is
+    /// [`Arrangement::side_of_a_plane_where_a_line_crosses_a_pipe`]'s. Where
+    /// the first's box does not say which of that line's two crossings it is,
+    /// the two are read the other way round, and the answer turned round.
+    ///
+    /// This reads two planes that cross the face's plane in lines that are
+    /// not parallel, which
+    /// [`Arrangement::as_two_cuts_crossing_the_plane_in_parallel_lines_say`]
+    /// leaves. The flange's front of
+    /// `LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step`, normal
+    /// `(−1.02e−16, 1, −1.065e−15)` at offset `−6.350000000000003`, and its
+    /// body's front disc, normal `(5.55e−17, 1, 0)` at `−6.35`, are one plane
+    /// written twice. A box's side `x = −1.33` cuts the flange's rim, a pipe
+    /// of radius `2.9` along `(0, 1, −1.11e−15)`, in two lines, and the two
+    /// planes cross it in lines `1e−15` apart in direction. Their meets with
+    /// one of those lines are `8.0e−16` apart along it, in boxes that overlap,
+    /// and every fuse of the two was refused on their order (Q3031,
+    /// `tests/a_led_whose_front_is_two_planes_a_rounding_apart.rs`).
+    ///
+    /// **It is asked only where the policy would refuse**
+    /// ([`Arrangement::order_along`]), so a tolerant policy still reads two
+    /// meets a rounding apart as one point first.
+    ///
+    /// Only a node that stands for one meet is read, as in
+    /// [`Arrangement::as_the_quadric_says`].
+    fn as_two_cuts_across_a_line_along_a_pipe_say(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::AlongAnAxis {
+            axis,
+            forward_climbs_the_axis,
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let partner = self.crossings[crossing].partner;
+        let ((Surface::Plane(flat), Surface::Cylinder(pipe))
+        | (Surface::Cylinder(pipe), Surface::Plane(flat))) = (&self.surface, &partner)
+        else {
+            return None;
+        };
+        let the_cut = |node: usize| {
+            let (surfaces, _) = self.the_one_meet_it_stands_for(node)?;
+            if !surfaces.contains(&self.surface) || !surfaces.contains(&partner) {
+                return None;
+            }
+            let mut others = surfaces
+                .iter()
+                .filter(|surface| **surface != self.surface && **surface != partner);
+            let (Some(cut), None) = (others.next(), others.next()) else {
+                return None;
+            };
+            cut.as_plane().copied()
+        };
+        let [mine, theirs] = [the_cut(first)?, the_cut(second)?];
+        let along = pipe.axis().direction().components();
+        // Whether the meet with `other` lies further along `w` than node `one`.
+        let further_along_w = |one: usize, its_own: &Plane, other: &Plane| {
+            let way = expansion_sign(&exactly_dotted(other.normal().components(), along)?);
+            if !matches!(way, Decision::Pos | Decision::Neg) {
+                return None;
+            }
+            let side = Self::side_of_a_plane_where_a_line_crosses_a_pipe(
+                other,
+                flat,
+                its_own,
+                pipe,
+                self.nodes[one].point,
+            )?;
+            Some(the_other_way(signs_multiplied([side, way, Decision::Pos])?))
+        };
+        let theirs_further_along_w = further_along_w(first, &mine, &theirs)
+            .or_else(|| further_along_w(second, &theirs, &mine).map(the_other_way))?;
         Some(if (along[axis] > 0.0) == forward_climbs_the_axis {
             theirs_further_along_w
         } else {
