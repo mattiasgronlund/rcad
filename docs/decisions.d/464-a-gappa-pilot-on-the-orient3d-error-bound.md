@@ -34,7 +34,9 @@ is Q2748, which runs it with one difference and one minor at zero. 464.27 is
 Q2760, on the side of a flat surface through a point with every product
 anywhere, and 464.28 is Q2771, on the side of rcad-geom's cylinder with a zero
 factor. 464.29 is Q2773, on that cylinder with a checked product below the
-normals. 464.30 is Q2781, on the side of rcad-geom's cone with a zero factor.*
+normals. 464.30 is Q2781, on the side of rcad-geom's cone with a zero factor.
+464.31 is Q2782, on that cone with a checked product below the normals, and
+464.32 is Q2786, on the side of rcad-geom's torus with a zero factor.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -66,6 +68,8 @@ normals. 464.30 is Q2781, on the side of rcad-geom's cone with a zero factor.*
   464.28  The side of rcad-geom's cylinder with a zero factor
   464.29  The side of rcad-geom's cylinder with a checked product below the normals
   464.30  The side of rcad-geom's cone with a zero factor
+  464.31  The side of rcad-geom's cone with a checked product below the normals
+  464.32  The side of rcad-geom's torus with a zero factor
 
 ### 464.1 The bugs a bound prover is for
 
@@ -9566,8 +9570,12 @@ below the normals or zero. Coq checks each proof, modulo its hints, one of
 them only at its second certificate (8). On `y` the bound needs about a `u`
 less than the code's `18u` (3). The claim on `value` itself was not tried, and
 `decide` does not need it (4). The branches where a difference or a direction
-component is zero, which `product_is_normal` lets through, are not run, and a
-point on the axis of an axis-aligned torus is one. And the comments claim more
+component is zero, which `product_is_normal` lets through, were not run here,
+and a point on the axis of an axis-aligned torus is one. 464.32 has since run
+each zero difference and direction component, and each proves at the code's
+constant; a direction zero in all three components does not reach
+`on_floats`, and at the centre a `hollow` below the normals makes it return
+`None`. And the comments claim more
 than is proved. The doc comment on the constant writes `153ε` where it means
 `153ε²`, miscounts its own terms, and reaches its seventeen roundings by two
 slips that cancel. It also says `on_floats` enforces the bottom end product by
@@ -10080,7 +10088,7 @@ Against what is proved:
   the zero and its `vi` can fall below the normals or round to zero, and where
   all three cancel, `P2` can too. Unlike the cone's, the bound holds in each of
   those (6). The branches where a difference or a direction component is zero
-  are not run (10).
+  were not run here (10). 464.32 has since run them, and each proves.
 - "One of them in the subnormals and this level certifies a wrong sign" is
   false of each reach square `vi` and of `P2`, below the normals or zero: by 6
   each of those proves. `brr` and `P1` never fall there (2). For the products
@@ -10178,7 +10186,8 @@ round as Rust's do. A point on the axis of a torus whose axis is `(1, 1, 1)` is
 `cccnn`, and one off it at `(1, 1, 2)` is `nncnn`: shapes a designer makes, and
 both are proved. A point on the axis of the axis-aligned torus whose axis is
 `(1, 0, 0)` has four zero factors, which no case takes, and passes every check
-`on_floats` makes (10). It prints:
+`on_floats` makes (10). 464.32 has since run it, as `torz_fyfzdydz_nb.g` and
+`torz_fyfzdydz_eb.g`, and both prove. `shapes.py` prints:
 
 ```text
 on the axis (1, 0, 0): direction [1.0, 0.0, 0.0], from_centre [2.0, 0.0, 0.0], halves [(0.0, 0.0), (0.0, 0.0), (0.0, 0.0)]
@@ -11389,7 +11398,9 @@ each from Q2682:
   the cone. `product_is_normal(a, b)` is true when `a` or `b` is zero
   (`cascade.rs:67-69`), so these cases pass every check `on_floats` makes, as
   `shapes.py`'s first shape does, and no script here covers them. Not run, so
-  no class (§360.5).
+  no class (§360.5). Done, in 464.32: each of the 169 cases proves at the
+  code's constant; a direction with all three components zero does not reach
+  `on_floats`, and at the centre a `hollow` below the normals returns `None`.
 - Run `torsplit.py` with one, two and three of the products `on_floats` checks
   below the normals, as 464.14's 6 ran the sphere's squares. Then say whether
   `on_floats` needs its `product_is_normal` checks, and restate
@@ -22052,15 +22063,16 @@ one.
 ### 464.32 The side of rcad-geom's torus with a zero factor
 
 Q2786 ran 464.17's `tor.g` where a difference or a direction component is
-zero, in four lanes on 2026-11-02, at `37bc60af`. The first committed
-nothing, the second wrote `torzero.py`, the third tried it and ran it, and
-the fourth wrote `hollowapart.py` and this. The bound is proved on `y`, the
-sum before `value`'s last rounding, at the code's constant in each of the 169
-cases, and Coq checks each proof, modulo its hints, one of them only at its
-second certificate. Each control at `u / 2` fails, and no case prints
-"pointless". A direction with all three components zero, and a zero radius,
-do not reach `on_floats`, and at the centre a `hollow` below the normals
-returns `None`. So with 464.17 every pattern of zero differences and
+zero, in five lanes on 2026-11-02, at `37bc60af`. The first committed
+nothing, the second wrote `torzero.py`, the third tried it and ran it, the
+fourth wrote `hollowapart.py` and this, and the fifth put each print below
+its script and had `samezt.py` check the prints too. The bound is proved on
+`y`, the sum before `value`'s last rounding, at the code's constant in each
+of the 169 cases, and Coq checks each proof, modulo its hints, one of them
+only at its second certificate. Each control at `u / 2` fails, and no case
+prints "pointless". A direction with all three components zero, and a zero
+radius, do not reach `on_floats`, and at the centre a `hollow` below the
+normals returns `None`. So with 464.17 every pattern of zero differences and
 direction components that reaches level 1's comparison is run, and the bound
 holds on `y` in each, at most `16u + 83u²` of the permanent, below the
 `17u + 95u²` 464.17 proves where no factor is zero. The torus about `x`, a
@@ -22257,8 +22269,10 @@ cases and their controls, 20 at once, found nothing: each case exited 0, each
 control 1, and none printed a warning. To run them again, save `torzero.py`,
 `runzt.sh`, `start.sh` and `runzt2.sh` beside 464.13's `one.sh` and 464.15's
 `one1.sh`, and run `./start.sh`; it writes `runzt.txt`, which ends `done`.
-Then run `./runzt2.sh`. `python3 tallyzt.py` and `python3 kut.py` count them.
-`samezt.py` checks that each block here is the file that ran.
+Then run `./runzt2.sh`. `python3 tallyzt.py` and `python3 kut.py` count them,
+and `python3 hollowapart.py` needs none of the rest. `samezt.py` checks that
+each block here is the file that ran, with each print saved beside it as
+`tallyzt.txt`, `kut.txt` and `hollowapart.txt`.
 
 `torzero.py`, whole:
 
@@ -22973,43 +22987,6 @@ assert count == 169, count
 print("cases written:", count)
 ```
 
-Draft, left by Q2786's third lane for the lane after it: the run below is
-done, and the write-up still replaces these draft paragraphs. `runzt.sh` ran
-the 169 cases with `gappa -Bcoq` and `coqc`, and their 169 controls, 20 at a
-time, started by `start.sh`. `tallyzt.py` printed, after its line for each
-case:
-
-```text
-y bounds {'[-1.77636e-15, 1.77636e-15]': 24, '[-1.66533e-15, 1.66533e-15]': 30, '[-1.55431e-15, 1.55431e-15]': 48, '[-1.44329e-15, 1.44329e-15]': 24, '[-1.33227e-15, 1.33227e-15]': 18, '[-1.22125e-15, 1.22125e-15]': 18, '[-9.99201e-16, 9.99201e-16]': 1, '[-8.88178e-16, 8.88178e-16]': 3, '[-7.77156e-16, 7.77156e-16]': 3}
-P bounds {'[-7.77156e-16, 7.77156e-16]': 150, '[-6.66134e-16, 6.66134e-16]': 12, '[-4.44089e-16, 4.44089e-16]': 7}
-control bests {'[-32, 32]': 24, '[-30, 30]': 30, '[-28, 28]': 48, '[-26, 26]': 24, '[-24, 24]': 18, '[-22, 22]': 18, '[-18, 18]': 1, '[-16, 16]': 3, '[-14, 14]': 3}
-cases printing pointless: 0 []
-cases exit 0: 169 of 169
-controls at u/2 exit 1: 169 of 169
-case times (1.1, 'torz_fxfyfzdydz_nb') (31.3, 'torz_fy_nen')
-coq ok: 168 of 169
-coq smallest (5281, 18, 'torz_fxfyfzdydz_nb') largest (20070, 62, 'torz_fz_nen') times 4.57 48.18
-files with a line other than results, 'pointless' and 'assumed to be nonzero': ['torz_dy_cen.coqc']
-```
-
-`torz_dy_cen.coqc` ends `The term "eq_refl" has type "true = true" while it
-is expected to have type "intersect_helper (upper i156) (lower i156) i155 =
-true".`, at `torz_dy_cen.v` line 8382, `apply intersect with (1 := h1) (2 :=
-h2)`, where `h1` and `h2` are the same lemma, `l481 h0`: the fault of
-464.17's `tor_cusen.g` (464.17's 8). `runzt2.sh` printed:
-
-```text
-torz_dy_cen2.g is torz_dy_cen.g
-torz_dy_cen2 exit 0 11.95s
-torz_dy_cen2 coq -Bcoq exit 0 coqc exit 0 14.67s lines 18456 hints 61
-coqc printed:
-done
-```
-
-`kut.py` writes each case's bound on `y` as `a u + b u²`: the largest is
-`16u + 83u²`, in the 24 cases of the sets `{dx}`, `{dy}` and `{dz}`, below
-464.17's `17u + 95u²`, and each control's best is twice its case's `a`.
-
 `runzt.sh`, whole:
 
 ```sh
@@ -23066,6 +23043,18 @@ cp torz_dy_cen.g again/torz_dy_cen2.g
   echo done
 } > runzt2.txt 2>&1
 ```
+
+It wrote, in `runzt2.txt`:
+
+```text
+torz_dy_cen2.g is torz_dy_cen.g
+torz_dy_cen2 exit 0 11.95s
+torz_dy_cen2 coq -Bcoq exit 0 coqc exit 0 14.67s lines 18456 hints 61
+coqc printed:
+done
+```
+
+`coqc` printed nothing on the second certificate.
 
 `tallyzt.py`, whole:
 
@@ -23144,6 +23133,26 @@ warn = [f for f in os.listdir(".") if f.startswith("torz_") and f.endswith((".ou
 print("files with a line other than results, 'pointless' and 'assumed to be nonzero':", sorted(warn))
 ```
 
+After its line for each case, `python3 tallyzt.py` prints:
+
+```text
+y bounds {'[-1.77636e-15, 1.77636e-15]': 24, '[-1.66533e-15, 1.66533e-15]': 30, '[-1.55431e-15, 1.55431e-15]': 48, '[-1.44329e-15, 1.44329e-15]': 24, '[-1.33227e-15, 1.33227e-15]': 18, '[-1.22125e-15, 1.22125e-15]': 18, '[-9.99201e-16, 9.99201e-16]': 1, '[-8.88178e-16, 8.88178e-16]': 3, '[-7.77156e-16, 7.77156e-16]': 3}
+P bounds {'[-7.77156e-16, 7.77156e-16]': 150, '[-6.66134e-16, 6.66134e-16]': 12, '[-4.44089e-16, 4.44089e-16]': 7}
+control bests {'[-32, 32]': 24, '[-30, 30]': 30, '[-28, 28]': 48, '[-26, 26]': 24, '[-24, 24]': 18, '[-22, 22]': 18, '[-18, 18]': 1, '[-16, 16]': 3, '[-14, 14]': 3}
+cases printing pointless: 0 []
+cases exit 0: 169 of 169
+controls at u/2 exit 1: 169 of 169
+case times (1.1, 'torz_fxfyfzdydz_nb') (31.3, 'torz_fy_nen')
+coq ok: 168 of 169
+coq smallest (5281, 18, 'torz_fxfyfzdydz_nb') largest (20070, 62, 'torz_fz_nen') times 4.57 48.18
+files with a line other than results, 'pointless' and 'assumed to be nonzero': ['torz_dy_cen.coqc']
+```
+
+The `y` and `P` bounds are Gappa's, rounded to six figures, so the 150 at
+`7.77156e-16` are both of `kut.py`'s `7u + 23u²` and `7u + 22u²`. The one
+`coq` that is not ok is `torz_dy_cen`'s first certificate, and `runzt2.sh`
+above is its second.
+
 `kut.py`, whole:
 
 ```python
@@ -23199,13 +23208,76 @@ for letters in sorted(groups):
     print(letters, sorted(groups[letters]))
 ```
 
+After its line for each case, `python3 kut.py` prints:
+
+```text
+worst y (16, 83)
+controls whose best is not twice the case's u: []
+ceb [((14, 60), (7, 22), 3)]
+cen [((14, 60), (7, 23), 3), ((15, 71), (7, 23), 3), ((16, 83), (7, 23), 3)]
+cnb [((14, 60), (7, 22), 3)]
+cnn [((14, 60), (7, 23), 3), ((15, 71), (7, 23), 3), ((16, 83), (7, 23), 3)]
+eb [((11, 29), (6, 16), 3)]
+en [((11, 29), (7, 23), 6), ((12, 37), (7, 23), 9), ((13, 46), (7, 23), 3), ((13, 50), (7, 23), 9), ((14, 60), (7, 23), 6), ((15, 71), (7, 23), 3)]
+nb [((7, 11), (4, 7), 3), ((8, 15), (4, 7), 3), ((9, 20), (4, 7), 1), ((11, 33), (6, 16), 3)]
+nen [((14, 60), (7, 23), 3), ((15, 71), (7, 23), 3), ((16, 83), (7, 23), 3)]
+nn [((11, 33), (7, 23), 6), ((12, 41), (7, 23), 9), ((13, 50), (7, 23), 12), ((14, 60), (7, 23), 6), ((15, 71), (7, 23), 3)]
+nnn [((14, 60), (7, 23), 3), ((15, 71), (7, 23), 3), ((16, 83), (7, 23), 3)]
+seb [((14, 60), (7, 22), 3)]
+sen [((14, 60), (7, 23), 3), ((15, 71), (7, 23), 3), ((16, 83), (7, 23), 3)]
+snb [((14, 60), (7, 22), 3)]
+snn [((14, 60), (7, 23), 3), ((15, 71), (7, 23), 3), ((16, 83), (7, 23), 3)]
+ueb [((14, 60), (6, 16), 3)]
+uen [((15, 71), (7, 23), 3), ((16, 83), (7, 23), 3)]
+unb [((14, 60), (6, 16), 3)]
+unn [((15, 71), (7, 23), 3), ((16, 83), (7, 23), 3)]
+```
+
+Each line after the second is the letters after a case's last `_`, its state,
+`hollow` and `P2`, or its `hollow` and `P2` where no component keeps both
+halves, and then, for the cases with those letters, each pair of bounds on
+`y` and on `P`, as `(a, b)` for `a u + b u²`, with how many cases have it.
+
+`hollowapart.py`, whole:
+
+```python
+"""Check that the squares of two neighbouring doubles round apart: for tube a
+double and ring the next one up, rnd(ring^2) > rnd(tube^2), so hollow = rnd(RR -
+rr) is not zero for any torus Torus::new accepts. Rounding is monotone, so a
+wider ring only widens the gap, and scaling by a power of two leaves the
+mantissas alone while both squares stay normal, so tube's mantissa in [1, 2)
+is the whole question. This tries the 2^20 mantissas next to each end of [1, 2)
+and to sqrt(2), where a square crosses into the next binade, and 2^20 more at
+random. Run as: python3 hollowapart.py"""
+import math
+import random
+
+random.seed(2786)
+STEP = 2.0**-52
+tubes = [1.0 + i * STEP for i in range(2**20)]
+tubes += [2.0 - (i + 1) * STEP for i in range(2**20)]
+root = math.sqrt(2.0)
+tubes += [root + i * STEP for i in range(-2**19, 2**19)]
+tubes += [1.0 + random.getrandbits(52) * STEP for _ in range(2**20)]
+assert all(1.0 <= t < 2.0 for t in tubes)
+together = [t for t in tubes if math.nextafter(t, 3.0) * math.nextafter(t, 3.0) <= t * t]
+print("tubes tried:", len(tubes), "with the next ring up squaring to the same double:", together)
+```
+
+It prints:
+
+```text
+tubes tried: 4194304 with the next ring up squaring to the same double: []
+```
+
 `samezt.py`, whole:
 
 ```python
 """Check that each script 464.32 appends whole is byte for byte the file that
-was run, in the directory given; that one.sh and one1.sh there are 464.13's
-and 464.15's blocks; and that torzero.py, run again in a fresh directory from
-the appended text, writes what was run.
+was run, in the directory given; that each print 464.32 appends is the print
+saved there, less tallyzt.py's and kut.py's line for each case; that one.sh
+and one1.sh there are 464.13's and 464.15's blocks; and that torzero.py, run
+again in a fresh directory from the appended text, writes what was run.
 Run as: python3 samezt.py <doc> <dir>"""
 import filecmp
 import os
@@ -23225,7 +23297,10 @@ marks = {
     "torzero.py": '"""Write tor.g\'s cases where a difference or a direction component is zero',
     "runzt.sh": "#!/bin/bash\n# torzero.py's 169 cases",
     "start.sh": "#!/bin/bash\n# Start runzt.sh detached",
+    "runzt2.sh": "#!/bin/bash\n# gappa -Bcoq and coqc again on torz_dy_cen.g",
     "tallyzt.py": '"""Tally runzt.txt',
+    "kut.py": '"""For each of torzero.py\'s 169 cases',
+    "hollowapart.py": '"""Check that the squares of two neighbouring doubles round apart',
     "samezt.py": '"""Check that each script 464.32 appends whole',
 }
 found = {}
@@ -23240,6 +23315,14 @@ for name in marks:
         continue
     path = os.path.abspath(__file__) if name == "samezt.py" else os.path.join(ran, name)
     print(name, "same" if open(path).read() == found[name] else "DIFFERS")
+
+prints = [body for lang, body in blocks if lang == "text"]
+for name in ("runzt2.txt", "hollowapart.txt"):
+    print(name, "is a block:", open(os.path.join(ran, name)).read() in prints)
+for name in ("tallyzt.txt", "kut.txt"):
+    lines = open(os.path.join(ran, name)).read().split("\n")
+    rest = "\n".join(line for line in lines if not line.startswith("torz_"))
+    print(name, "less a line for each case is a block:", rest in prints)
 
 for sub, end, name, mark in (("### 464.13", "### 464.14", "one.sh", "#!/bin/bash\n# Run one Gappa script under 464.4's pin"),
                              ("### 464.15", "### 464.16", "one1.sh", "#!/bin/bash\n# one.sh with the timeout taken from T")):
@@ -23261,3 +23344,30 @@ print("written again:", len(written), "same as run:", len(same), "differ:", diff
       "run, not written:", extra)
 shutil.rmtree(fresh)
 ```
+
+It prints:
+
+```text
+cases written: 169
+code blocks in 464.32: 13
+torzero.py same
+runzt.sh same
+start.sh same
+runzt2.sh same
+tallyzt.py same
+kut.py same
+hollowapart.py same
+samezt.py same
+runzt2.txt is a block: True
+hollowapart.txt is a block: True
+tallyzt.txt less a line for each case is a block: True
+kut.txt less a line for each case is a block: True
+one.sh is 464.13 block: True
+one1.sh is 464.15 block: True
+written again: 338 same as run: 338 differ: [] not run: [] run, not written: []
+```
+
+Its first line is `torzero.py`'s own, run again in the fresh directory; the
+parent's lines come after it because its output is buffered when it is not a
+terminal. The thirteen blocks are the eight scripts and five prints:
+`runzt2.sh`'s, `tallyzt.py`'s, `kut.py`'s, `hollowapart.py`'s and this one.
