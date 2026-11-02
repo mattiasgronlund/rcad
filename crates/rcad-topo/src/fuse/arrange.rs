@@ -2712,6 +2712,10 @@ impl<'f> Arrangement<'f> {
                     [self.surface, across]
                         .into_iter()
                         .all(|other| self.a_curve_of_two_lies_past(other, third, &places, side))
+                }) || self.the_sides_its_flat_faces_lie_in(third).any(|side| {
+                    [self.surface, across]
+                        .into_iter()
+                        .all(|other| self.its_faces_lie_across_the_plane_of(other, side))
                 })
             })
     }
@@ -3707,7 +3711,9 @@ impl<'f> Arrangement<'f> {
             self.the_sides_its_faces_lie_in(*surface).any(|side| {
                 self.lies_wholly_past(crossing, side, log)
                     || self.its_faces_lie_apart_from(self.surface, side)
-            })
+            }) || self
+                .the_sides_its_flat_faces_lie_in(*surface)
+                .any(|side| self.its_faces_lie_across_the_plane_of(self.surface, side))
         })
     }
 
@@ -4350,6 +4356,14 @@ impl<'f> Arrangement<'f> {
                 past_across = true;
             }
         }
+        for side in self.the_sides_its_flat_faces_lie_in(cut) {
+            if self.its_faces_lie_across_the_plane_of(across, side) {
+                if self.its_faces_lie_across_the_plane_of(self.surface, side) {
+                    return false;
+                }
+                past_across = true;
+            }
+        }
         past_across
     }
 
@@ -4362,6 +4376,22 @@ impl<'f> Arrangement<'f> {
     ) -> impl Iterator<Item = ASideOfAPlane> + '_ {
         self.face
             .sides_the_faces_of_each_cut_lie_in
+            .iter()
+            .filter(move |(carried, _)| *carried == surface)
+            .flat_map(|(_, sides)| sides.iter().copied())
+    }
+
+    /// The sides of planes every flat face carrying `surface` lies in by its
+    /// boundary, as
+    /// [`BakedFace::sides_the_flat_faces_of_each_cut_lie_in`] holds them, the
+    /// face's own surface among them: read only to say a face lies across the
+    /// plane from them ([`Arrangement::its_faces_lie_across_the_plane_of`]).
+    fn the_sides_its_flat_faces_lie_in(
+        &self,
+        surface: Surface,
+    ) -> impl Iterator<Item = ASideOfAPlane> + '_ {
+        self.face
+            .sides_the_flat_faces_of_each_cut_lie_in
             .iter()
             .filter(move |(carried, _)| *carried == surface)
             .flat_map(|(_, sides)| sides.iter().copied())
@@ -4389,8 +4419,18 @@ impl<'f> Arrangement<'f> {
     }
 
     /// Whether every face carrying `surface` lies in a side of a plane that
-    /// shares no point with `side` ([`two_sides_share_no_point`]), or in the
-    /// other closed side of `side`'s own plane.
+    /// shares no point with `side` ([`two_sides_share_no_point`]), or across
+    /// `side`'s own plane from it
+    /// ([`Arrangement::its_faces_lie_across_the_plane_of`]).
+    fn its_faces_lie_apart_from(&self, surface: Surface, side: ASideOfAPlane) -> bool {
+        self.the_sides_its_faces_lie_in(surface)
+            .any(|theirs| two_sides_share_no_point(theirs, side))
+            || self.its_faces_lie_across_the_plane_of(surface, side)
+    }
+
+    /// Whether every face carrying `surface` lies in the other closed side of
+    /// `side`'s own plane, by the sides of a curved face or a flat one
+    /// ([`BakedFace::lies_in_as_a_flat_face`]).
     ///
     /// **The other closed side shares the plane, and the inside of no face in
     /// it is on the plane** ([`BakedFace::lies_in`]): so no point of a face in
@@ -4398,11 +4438,10 @@ impl<'f> Arrangement<'f> {
     /// on their boundaries. A flat along a pipe's side, ending on the plane the
     /// pipe ends on, is the shape (Q3048): its crossing with the pipe runs on
     /// past the pipe's end, where no face of the flat reaches it.
-    fn its_faces_lie_apart_from(&self, surface: Surface, side: ASideOfAPlane) -> bool {
-        self.the_sides_its_faces_lie_in(surface).any(|theirs| {
-            two_sides_share_no_point(theirs, side)
-                || the_other_closed_side_of_its_plane(theirs, side)
-        })
+    fn its_faces_lie_across_the_plane_of(&self, surface: Surface, side: ASideOfAPlane) -> bool {
+        self.the_sides_its_faces_lie_in(surface)
+            .chain(self.the_sides_its_flat_faces_lie_in(surface))
+            .any(|theirs| the_other_closed_side_of_its_plane(theirs, side))
     }
 
     /// A closed crossing with no node on it still needs one.

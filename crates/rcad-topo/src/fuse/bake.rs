@@ -230,8 +230,23 @@ pub(crate) struct BakedFace {
     /// Sides of planes the whole face is proved to lie in, closed: a plane
     /// may hold points of its boundary but none of its inside. Empty for
     /// every face but a pipe's or a ring's, one input face with a closed edge
-    /// across a plane ([`the_sides_of_planes_it_lies_in`]).
+    /// across a plane, or a ring of edges across one round a pipe
+    /// ([`the_sides_of_planes_it_lies_in`]).
     pub(crate) lies_in: SmallVec<[ASideOfAPlane; 2]>,
+    /// For a flat face, the sides of planes across its straight edges that
+    /// its boundary, and so the whole face, lies in, closed as
+    /// [`BakedFace::lies_in`] is ([`the_sides_a_flat_face_lies_in`]); empty for
+    /// every other face.
+    ///
+    /// **Kept apart from `lies_in`, and read only where a face lies in the
+    /// other closed side of one of these planes** (Q3048), so that no point of
+    /// the inside of either face is on the other. Read as `lies_in` is, to say
+    /// a crossing lies wholly past one, that the face's own crossings miss
+    /// it, or that two faces meet on their boundaries alone, these sides
+    /// changed what 24 fuses of boxes and bars gave, among them ones that were
+    /// refused `ResultIsNotManifold`: the faces across a crossing did not agree
+    /// on what to leave out.
+    pub(crate) lies_in_as_a_flat_face: SmallVec<[ASideOfAPlane; 2]>,
     /// The cuts every face carrying which meets this one on its boundary
     /// alone, filled in by the gathering step. A crossing with one of these
     /// crosses no boundary of either solid inside the face, and the
@@ -244,6 +259,11 @@ pub(crate) struct BakedFace {
     /// place a meet on lies wholly past one of them, so that no face of the cut
     /// reaches it (Q1909).
     pub(crate) sides_the_faces_of_each_cut_lie_in: Vec<(Surface, SmallVec<[ASideOfAPlane; 2]>)>,
+    /// The same for [`BakedFace::lies_in_as_a_flat_face`]: for each flat cut,
+    /// the sides of planes every face carrying it lies in by its boundary,
+    /// filled in by the gathering step, the face's own surface among them.
+    pub(crate) sides_the_flat_faces_of_each_cut_lie_in:
+        Vec<(Surface, SmallVec<[ASideOfAPlane; 2]>)>,
     /// Each cap this face is, or has a side along, that is square to its own
     /// pipe's axis through where the axis starts, as stored, with that pipe
     /// ([`the_cap_through_the_start_of_its_axis`]). Empty for every face but a
@@ -980,8 +1000,10 @@ fn bake_the_joined_faces(
             cuts: Vec::new(),
             bounds: round_this_face,
             lies_in: SmallVec::new(),
+            lies_in_as_a_flat_face: SmallVec::new(),
             cuts_that_reach_only_its_boundary: Vec::new(),
             sides_the_faces_of_each_cut_lie_in: Vec::new(),
+            sides_the_flat_faces_of_each_cut_lie_in: Vec::new(),
             caps_through_the_start_of_their_axis: Vec::new(),
             corners_of_the_solids_cutting_it: Vec::new(),
         });
@@ -2095,12 +2117,15 @@ fn bake_one_face(
         cuts: Vec::new(),
         bounds,
         lies_in: SmallVec::new(),
+        lies_in_as_a_flat_face: SmallVec::new(),
         cuts_that_reach_only_its_boundary: Vec::new(),
         sides_the_faces_of_each_cut_lie_in: Vec::new(),
+        sides_the_flat_faces_of_each_cut_lie_in: Vec::new(),
         caps_through_the_start_of_their_axis: caps,
         corners_of_the_solids_cutting_it: Vec::new(),
     };
     baked.lies_in = the_sides_of_planes_it_lies_in(&baked);
+    baked.lies_in_as_a_flat_face = the_sides_a_flat_face_lies_in(&baked);
     Ok(baked)
 }
 
@@ -2142,16 +2167,14 @@ fn the_cap_through_the_start_of_its_axis(
 }
 
 /// The side of each plane across a closed edge of a pipe's or a ring's face,
-/// or round a pipe's face in a ring of edges, or across a straight edge of a
-/// flat face, that the whole face lies on, where that is proved, and nothing
-/// for any other face.
+/// or round a pipe's face in a ring of edges, that the whole face lies on,
+/// where that is proved, and nothing for any other face. A flat face's are
+/// kept apart ([`BakedFace::lies_in_as_a_flat_face`]).
 ///
-/// **One input face, or nothing, for a curved face.** A face of the model is
-/// in one piece, and so its inside, which misses each plane below, lies on
-/// one side of it. A group joined from several faces need not be: a bar with
-/// a groove round it has its wall in two pieces either side of the groove. A
-/// flat face is asked of its boundary alone, which holds for a group as well
-/// ([`the_sides_a_flat_face_lies_in`]).
+/// **One input face, or nothing.** A face of the model is in one piece, and
+/// so its inside, which misses each plane below, lies on one side of it. A
+/// group joined from several faces need not be: a bar with a groove round it
+/// has its wall in two pieces either side of the groove.
 ///
 /// **A pipe's.** A plane that crosses a pipe in a closed curve leans to its
 /// axis, so it crosses the pipe in that one ellipse and nowhere else. The
@@ -2173,9 +2196,6 @@ fn the_cap_through_the_start_of_its_axis(
 /// A ball's or a cone's face between planes would be sound to do too, and
 /// nothing needs it yet (§13).
 fn the_sides_of_planes_it_lies_in(face: &BakedFace) -> SmallVec<[ASideOfAPlane; 2]> {
-    if let Surface::Plane(flat) = face.surface {
-        return the_sides_a_flat_face_lies_in(face, &flat);
-    }
     if face.keys.len() != 1 {
         return SmallVec::new();
     }
@@ -2222,7 +2242,8 @@ fn the_sides_of_planes_it_lies_in(face: &BakedFace) -> SmallVec<[ASideOfAPlane; 
 }
 
 /// The side of each plane across a straight edge of a flat face that the
-/// whole face lies on, where its boundary proves it.
+/// whole face lies on, where its boundary proves it, and nothing for any
+/// other face ([`BakedFace::lies_in_as_a_flat_face`]).
 ///
 /// **A flat region lies in a closed side of another plane exactly when its
 /// boundary does.** Through a point of it strictly past the plane runs a line
@@ -2235,7 +2256,10 @@ fn the_sides_of_planes_it_lies_in(face: &BakedFace) -> SmallVec<[ASideOfAPlane; 
 ///
 /// Each edge stays in the side ([`stays_in_the_side`]), and a corner off the
 /// plane says which side that is.
-fn the_sides_a_flat_face_lies_in(face: &BakedFace, flat: &Plane) -> SmallVec<[ASideOfAPlane; 2]> {
+fn the_sides_a_flat_face_lies_in(face: &BakedFace) -> SmallVec<[ASideOfAPlane; 2]> {
+    let Surface::Plane(flat) = face.surface else {
+        return SmallVec::new();
+    };
     let edges: Vec<&BakedEdge> = face.wires.iter().flatten().collect();
     let mut asked: Vec<Plane> = Vec::new();
     let mut sides: SmallVec<[ASideOfAPlane; 2]> = SmallVec::new();
