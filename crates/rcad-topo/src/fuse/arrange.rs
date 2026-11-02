@@ -6707,18 +6707,22 @@ impl<'f> Arrangement<'f> {
         {
             return None;
         }
-        let ways = self.the_curves_way_from_one_to_the_other(crossing, [on_the_line, other], asked)?;
+        let ways =
+            self.the_curves_way_from_one_to_the_other(crossing, [on_the_line, other], asked)?;
         let [one, other_plane] = &line;
-        let leans = [self.nodes[on_the_line].point, self.narrowed_box_of(on_the_line)]
-            .into_iter()
-            .find_map(|near| {
-                MeetOfThree::how_one_quadric_leans_where_the_line_meets_another(
-                    [one, other_plane],
-                    &round,
-                    asked,
-                    near,
-                )
-            })?;
+        let leans = [
+            self.nodes[on_the_line].point,
+            self.narrowed_box_of(on_the_line),
+        ]
+        .into_iter()
+        .find_map(|near| {
+            MeetOfThree::how_one_quadric_leans_where_the_line_meets_another(
+                [one, other_plane],
+                &round,
+                asked,
+                near,
+            )
+        })?;
         match leans {
             Decision::Zero => Some(Decision::Zero),
             Decision::Pos | Decision::Neg => Some(if leans == ways {
@@ -6780,8 +6784,13 @@ impl<'f> Arrangement<'f> {
                 let pair = [&wound_as[0], &wound_as[1]];
                 if !matches!(
                     pair,
-                    [Surface::Plane(_), Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)]
-                        | [Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_), Surface::Plane(_)]
+                    [
+                        Surface::Plane(_),
+                        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+                    ] | [
+                        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_),
+                        Surface::Plane(_)
+                    ]
                 ) {
                     return None;
                 }
@@ -12381,6 +12390,9 @@ impl<'f> Arrangement<'f> {
                             .or_else(|| {
                                 Self::side_of_a_ball_at_a_point_of_a_pipe(&on, at, &partner)
                             })
+                            .or_else(|| {
+                                Self::side_of_a_quadric_where_a_line_meets_another(node, &partner)
+                            })
                             .unwrap_or(undecided)
                     }
                     (side, _) => side,
@@ -12493,6 +12505,59 @@ impl<'f> Arrangement<'f> {
                 .contains(&side)
                 .then(|| the_other_way(side))
         })
+    }
+
+    /// Which side of `partner`, a ball, a pipe or a cone, a node is that
+    /// stands for one meet of two planes and another of those: `Pos` outside,
+    /// `Neg` inside and `Zero` on it, or `None` where the node is no such
+    /// meet or the arithmetic cannot tell.
+    ///
+    /// The sign is worked out exactly from the line the two planes cross in
+    /// and the two quadrics, never from the node's box
+    /// ([`MeetOfThree::how_one_quadric_leans_where_the_line_meets_another`]).
+    /// The box only says which of the line's two meets with the node's own
+    /// quadric it is, and it holds that meet because the node is placed
+    /// where exactly its three surfaces meet ([`Node::made_of`]).
+    ///
+    /// The funnel file's two pointed cones, the second turned `0.3` about `x`
+    /// through `(0, 0, 4)`, meet `z = 8` and the leaning cap's plane in four
+    /// points a rounding apart near `(−3.9541, −0.6045, 8)`. The line the two
+    /// caps' planes cross in meets the upright cone there, and that meet is a
+    /// node of a walk on `z = 8` that is about `4e−16` off the leaning cone.
+    /// Its box is `5.7e−15` wide along `x`, the cone's value over it spans
+    /// `6.6e−14`, and every fuse of the two was refused (Q2961,
+    /// `tests/a_funnel_with_a_leaning_spout.rs`).
+    fn side_of_a_quadric_where_a_line_meets_another(
+        node: &Node,
+        partner: &Surface,
+    ) -> Option<Decision> {
+        let Node {
+            vertex: None,
+            made_of: Some((surfaces, _)),
+            also,
+            half_way_round: false,
+            ..
+        } = node
+        else {
+            return None;
+        };
+        let (line, round) = two_planes_and_a_quadric(surfaces)?;
+        if !also.is_empty()
+            || *partner == round
+            || !matches!(
+                partner,
+                Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+            )
+        {
+            return None;
+        }
+        let [one, other] = &line;
+        MeetOfThree::how_one_quadric_leans_where_the_line_meets_another(
+            [one, other],
+            &round,
+            partner,
+            node.point,
+        )
     }
 
     /// Which side of the plane the half ellipse `crossing` lies in `at` is:
