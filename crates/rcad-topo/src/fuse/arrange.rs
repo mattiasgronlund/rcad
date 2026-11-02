@@ -6973,8 +6973,9 @@ impl<'f> Arrangement<'f> {
     /// Which of two nodes on the line the face's plane and a partner plane
     /// cross in comes first, where one is a meet of that line and a pipe and
     /// the other an exact point on the line or a meet of it and a pipe too,
-    /// read exactly off where the line crosses the pipe: `None` everywhere
-    /// else, and wherever a product would round.
+    /// read off where the line crosses the pipe, as exactly as `f64` holds it
+    /// ([`NearlyExact`]): `None` everywhere else, and wherever a sign is not
+    /// proved.
     ///
     /// **One circle written twice is two pipes a rounding apart.** The flange
     /// front of `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step`, normal
@@ -7057,21 +7058,25 @@ impl<'f> Arrangement<'f> {
         ) else {
             return None;
         };
-        let exact = |vector: [f64; 3]| vector.map(|component| vec![component]);
+        let exact = |vector: [f64; 3]| vector.map(NearlyExact::exactly);
         let [flat_normal, partner_normal] =
             [flat, partner].map(|plane| exact(plane.normal().components()));
-        let line =
-            exactly_crossed(&flat_normal, &partner_normal)?.map(|component| packed(&component));
-        let length_squared = packed(&exactly_dotted_across(&line, &line)?);
-        if expansion_sign(&length_squared) != Decision::Pos {
+        let line = NearlyExact::crossed(&flat_normal, &partner_normal)?;
+        let length_squared = NearlyExact::dotted(&line, &line)?;
+        if length_squared.sign() != Decision::Pos {
             return None;
         }
-        let foot = exactly_added_across(
-            &exactly_scaled_across(&exactly_crossed(&partner_normal, &line)?, &[flat.offset()])?,
-            &exactly_scaled_across(&exactly_crossed(&line, &flat_normal)?, &[partner.offset()])?,
-        )
-        .map(|component| packed(&component));
-        let climbs = expansion_sign(&line[axis]);
+        let foot = NearlyExact::added_across(
+            &NearlyExact::scaled_across(
+                &NearlyExact::crossed(&partner_normal, &line)?,
+                &NearlyExact::exactly(flat.offset()),
+            )?,
+            &NearlyExact::scaled_across(
+                &NearlyExact::crossed(&line, &flat_normal)?,
+                &NearlyExact::exactly(partner.offset()),
+            )?,
+        );
+        let climbs = line[axis].sign();
         // Compared rather than matched: only a proved sign is read, and every
         // other answer leaves the pair as it was (§40).
         if !(climbs == Decision::Pos || climbs == Decision::Neg) {
@@ -7079,13 +7084,9 @@ impl<'f> Arrangement<'f> {
         }
         let along_the_line = |pipe: &Cylinder| {
             let [inside, lean, curve] =
-                Self::a_pipe_along_a_line(pipe, &foot, &length_squared, &line)?;
-            let root_squared = packed(&exactly_added(
-                &exactly_multiplied(&lean, &lean)?,
-                &negated(&exactly_multiplied(&inside, &curve)?),
-            ));
-            (expansion_sign(&curve) == Decision::Pos
-                && expansion_sign(&root_squared) == Decision::Pos)
+                Self::a_pipe_nearly_along_a_line(pipe, &foot, &length_squared, &line)?;
+            let root_squared = lean.times(&lean)?.minus(&inside.times(&curve)?);
+            (curve.sign() == Decision::Pos && root_squared.sign() == Decision::Pos)
                 .then_some(([inside, lean, curve], root_squared))
         };
         let further_as_a_sign = |further: bool| {
@@ -7104,25 +7105,14 @@ impl<'f> Arrangement<'f> {
         let (value, slope) = match self.on_the_line(one, axis, [flat, partner], &line)? {
             OnTheLine::At(at) => {
                 let climb = &line[axis];
-                let reach = packed(&exactly_added(
-                    &exactly_scaled(&length_squared, at)?,
-                    &negated(&foot[axis]),
-                ));
-                let value = expansion_sign(&exactly_added(
-                    &exactly_added(
-                        &exactly_multiplied(&g0, &packed(&exactly_multiplied(climb, climb)?))?,
-                        &exactly_scaled(
-                            &exactly_multiplied(&g1, &packed(&exactly_multiplied(climb, &reach)?))?,
-                            2.0,
-                        )?,
-                    ),
-                    &exactly_multiplied(&g2, &packed(&exactly_multiplied(&reach, &reach)?))?,
-                ));
+                let reach = length_squared.scaled(at)?.minus(&foot[axis]);
+                let value = g0
+                    .times(&climb.times(climb)?)?
+                    .plus(&g1.times(&climb.times(&reach)?)?.scaled(2.0)?)
+                    .plus(&g2.times(&reach.times(&reach)?)?)
+                    .sign();
                 let slope = signs_multiplied([
-                    expansion_sign(&exactly_added(
-                        &exactly_multiplied(&g1, climb)?,
-                        &exactly_multiplied(&g2, &reach)?,
-                    )),
+                    g1.times(climb)?.plus(&g2.times(&reach)?).sign(),
                     climbs,
                     Decision::Pos,
                 ])?;
@@ -7133,26 +7123,14 @@ impl<'f> Arrangement<'f> {
                 further: its_further,
             } => {
                 let ([_, f1, f2], root_squared) = along_the_line(&its_pipe)?;
-                let lean = packed(&exactly_added(
-                    &exactly_multiplied(&g1, &f2)?,
-                    &negated(&exactly_multiplied(&g2, &f1)?),
-                ));
-                let base = packed(&exactly_added(
-                    &exactly_added(
-                        &exactly_multiplied(&g0, &packed(&exactly_multiplied(&f2, &f2)?))?,
-                        &negated(&exactly_scaled(
-                            &exactly_multiplied(&g1, &packed(&exactly_multiplied(&f1, &f2)?))?,
-                            2.0,
-                        )?),
-                    ),
-                    &exactly_multiplied(
-                        &g2,
-                        &exactly_added(&root_squared, &packed(&exactly_multiplied(&f1, &f1)?)),
-                    )?,
-                ));
+                let lean = g1.times(&f2)?.minus(&g2.times(&f1)?);
+                let base = g0
+                    .times(&f2.times(&f2)?)?
+                    .minus(&g1.times(&f1.times(&f2)?)?.scaled(2.0)?)
+                    .plus(&g2.times(&root_squared.plus(&f1.times(&f1)?))?);
                 let which = further_as_a_sign(its_further);
                 (
-                    sign_with_a_root(&base, which, &exactly_scaled(&lean, 2.0)?, &root_squared)?,
+                    sign_with_a_root(&base, which, &lean.scaled(2.0)?, &root_squared)?,
                     sign_with_a_root(&lean, which, &g2, &root_squared)?,
                 )
             }
@@ -7190,7 +7168,7 @@ impl<'f> Arrangement<'f> {
         node: usize,
         axis: usize,
         [flat, partner]: [&Plane; 2],
-        line: &[Vec<f64>; 3],
+        line: &[NearlyExact; 3],
     ) -> Option<OnTheLine> {
         let held = self.narrowed_box_of(node).enclosure();
         if held[axis].lo() == held[axis].hi() {
@@ -7221,16 +7199,14 @@ impl<'f> Arrangement<'f> {
             .axis()
             .direction()
             .components()
-            .map(|component| vec![component]);
-        let up_the_slope = exactly_added_across(
-            &exactly_scaled_across(line, &exactly_dotted_across(&along, &along)?)?,
-            &exactly_scaled_across(&along, &negated(&exactly_dotted_across(line, &along)?))?,
+            .map(NearlyExact::exactly);
+        let up_the_slope = NearlyExact::added_across(
+            &NearlyExact::scaled_across(line, &NearlyExact::dotted(&along, &along)?)?,
+            &NearlyExact::scaled_across(&along, &NearlyExact::dotted(line, &along)?.negated())?,
         );
         let origin = pipe.axis().origin().coordinates();
         let read = dot_of(
-            up_the_slope
-                .each_ref()
-                .map(|component| held_as_an_interval(component)),
+            up_the_slope.each_ref().map(NearlyExact::held),
             core::array::from_fn(|at| held[at] - Interval::exactly(origin[at])),
         )
         .sign();
@@ -14458,40 +14434,50 @@ impl<'f> Arrangement<'f> {
     /// `[G₀, G₁, G₂]` for `pipe`, through `o` along `w` with radius `r`, along
     /// the line through `Y` along `e`, given as `foot = D·Y` and
     /// `length_squared = D = e·e`: `D²·(|(p − o) × w|² − r²·|w|²)` at
-    /// `p = Y + t·e` is `G₀ + 2·G₁·(t·D) + G₂·(t·D)²`, each worked out exactly
-    /// and packed. `None` where a product would round.
+    /// `p = Y + t·e` is `G₀ + 2·G₁·(t·D) + G₂·(t·D)²`, each worked out exactly.
+    /// `None` where a product would round.
     fn a_pipe_along_a_line(
         pipe: &Cylinder,
         foot: &[Vec<f64>; 3],
         length_squared: &[f64],
         line: &[Vec<f64>; 3],
     ) -> Option<[Vec<f64>; 3]> {
-        let exact = |vector: [f64; 3]| vector.map(|component| vec![component]);
+        let [inside, lean, curve] = Self::a_pipe_nearly_along_a_line(
+            pipe,
+            &foot.each_ref().map(|component| NearlyExact::of(component)),
+            &NearlyExact::of(length_squared),
+            &line.each_ref().map(|component| NearlyExact::of(component)),
+        )?;
+        Some([inside.exact()?, lean.exact()?, curve.exact()?])
+    }
+
+    /// [`Arrangement::a_pipe_along_a_line`], each worked out as exactly as
+    /// `f64` holds it: `None` where a product would overflow.
+    fn a_pipe_nearly_along_a_line(
+        pipe: &Cylinder,
+        foot: &[NearlyExact; 3],
+        length_squared: &NearlyExact,
+        line: &[NearlyExact; 3],
+    ) -> Option<[NearlyExact; 3]> {
+        let exact = |vector: [f64; 3]| vector.map(NearlyExact::exactly);
         let along = exact(pipe.axis().direction().components());
-        let off_the_axis = exactly_added_across(
+        let off_the_axis = NearlyExact::added_across(
             foot,
-            &exactly_scaled_across(
+            &NearlyExact::scaled_across(
                 &exact(pipe.axis().origin().coordinates()),
-                &negated(length_squared),
+                &length_squared.negated(),
             )?,
         );
-        let square_to_the_axis =
-            exactly_crossed(&off_the_axis, &along)?.map(|component| packed(&component));
-        let across = exactly_crossed(line, &along)?.map(|component| packed(&component));
-        let skin = exactly_multiplied(
-            &exactly_multiplied(
-                &exactly_scaled(&[pipe.radius()], pipe.radius())?,
-                &exactly_dotted_across(&along, &along)?,
-            )?,
-            &packed(&exactly_multiplied(length_squared, length_squared)?),
-        )?;
+        let square_to_the_axis = NearlyExact::crossed(&off_the_axis, &along)?;
+        let across = NearlyExact::crossed(line, &along)?;
+        let skin = NearlyExact::exactly(pipe.radius())
+            .scaled(pipe.radius())?
+            .times(&NearlyExact::dotted(&along, &along)?)?
+            .times(&length_squared.times(length_squared)?)?;
         Some([
-            packed(&exactly_added(
-                &exactly_dotted_across(&square_to_the_axis, &square_to_the_axis)?,
-                &negated(&skin),
-            )),
-            packed(&exactly_dotted_across(&square_to_the_axis, &across)?),
-            packed(&exactly_dotted_across(&across, &across)?),
+            NearlyExact::dotted(&square_to_the_axis, &square_to_the_axis)?.minus(&skin),
+            NearlyExact::dotted(&square_to_the_axis, &across)?,
+            NearlyExact::dotted(&across, &across)?,
         ])
     }
 
@@ -19117,11 +19103,16 @@ enum OnTheLine {
     At(f64),
 }
 
-/// The sign of `a + s·b·√c`, for `c` above nought and `s` a sign, each worked
-/// out exactly: `None` where a sign is not proved or a product would round.
-fn sign_with_a_root(a: &[f64], s: Decision, b: &[f64], c: &[f64]) -> Option<Decision> {
-    let first = expansion_sign(a);
-    let second = signs_multiplied([s, expansion_sign(b), Decision::Pos])?;
+/// The sign of `a + s·b·√c`, for `c` above nought and `s` a sign: `None`
+/// where a sign is not proved or a product would overflow.
+fn sign_with_a_root(
+    a: &NearlyExact,
+    s: Decision,
+    b: &NearlyExact,
+    c: &NearlyExact,
+) -> Option<Decision> {
+    let first = a.sign();
+    let second = signs_multiplied([s, b.sign(), Decision::Pos])?;
     if !(first == Decision::Pos || first == Decision::Neg || first == Decision::Zero) {
         return None;
     }
@@ -19131,10 +19122,7 @@ fn sign_with_a_root(a: &[f64], s: Decision, b: &[f64], c: &[f64]) -> Option<Deci
     if first == Decision::Zero {
         return Some(second);
     }
-    let larger = expansion_sign(&exactly_added(
-        &exactly_multiplied(a, a)?,
-        &negated(&exactly_multiplied(&packed(&exactly_multiplied(b, b)?), c)?),
-    ));
+    let larger = a.times(a)?.minus(&b.times(b)?.times(c)?).sign();
     if larger == Decision::Pos {
         Some(first)
     } else if larger == Decision::Neg {
@@ -19143,6 +19131,169 @@ fn sign_with_a_root(a: &[f64], s: Decision, b: &[f64], c: &[f64]) -> Option<Deci
         Some(Decision::Zero)
     } else {
         None
+    }
+}
+
+/// A value worked out exactly as far as `f64` holds it: the true value is
+/// within `slack` of what `kept` adds up to. A product too small for
+/// [`product_is_exact`] cannot be held, so it is left out of `kept` and its
+/// size, rounded up, added to `slack`.
+///
+/// The meets of a line and a pipe written a rounding off another plane need
+/// this. The line two such planes cross in has entries down to `1e−199` in
+/// the `D3.0` LED, and the square of one is below the bottom of the range, so
+/// worked out exactly the order of the two meets came back as nothing at all.
+/// What it drops there is about `1e−300` against a value near `1e−15`.
+#[derive(Clone, Debug)]
+struct NearlyExact {
+    kept: Vec<f64>,
+    slack: f64,
+}
+
+impl NearlyExact {
+    fn exactly(value: f64) -> Self {
+        Self {
+            kept: vec![value],
+            slack: 0.0,
+        }
+    }
+
+    fn of(expansion: &[f64]) -> Self {
+        Self {
+            kept: expansion.to_vec(),
+            slack: 0.0,
+        }
+    }
+
+    /// What `kept` adds up to where nothing was dropped, `None` otherwise.
+    fn exact(self) -> Option<Vec<f64>> {
+        (self.slack == 0.0).then_some(self.kept)
+    }
+
+    /// Its sign: worked out exactly where nothing was dropped, and otherwise
+    /// the sign of an interval round the sum wide enough to hold the slack,
+    /// which is never [`Decision::Zero`].
+    fn sign(&self) -> Decision {
+        if self.slack == 0.0 {
+            expansion_sign(&self.kept)
+        } else {
+            self.held().sign()
+        }
+    }
+
+    /// An interval holding the true value.
+    fn held(&self) -> Interval {
+        held_as_an_interval(&self.kept)
+            + Interval::new(-self.slack, self.slack).unwrap_or(Interval::ENTIRE)
+    }
+
+    fn plus(&self, other: &Self) -> Self {
+        Self {
+            kept: packed(&exactly_added(&self.kept, &other.kept)),
+            slack: (Interval::exactly(self.slack) + Interval::exactly(other.slack)).hi(),
+        }
+    }
+
+    fn minus(&self, other: &Self) -> Self {
+        self.plus(&other.negated())
+    }
+
+    fn negated(&self) -> Self {
+        Self {
+            kept: negated(&self.kept),
+            slack: self.slack,
+        }
+    }
+
+    /// `None` where a product would overflow.
+    fn scaled(&self, factor: f64) -> Option<Self> {
+        let product = Self::a_product(&self.kept, factor)?;
+        Some(Self {
+            slack: (Interval::exactly(product.slack)
+                + Interval::exactly(self.slack) * Interval::exactly(factor.abs()))
+            .hi(),
+            ..product
+        })
+    }
+
+    /// `None` where a product would overflow.
+    fn times(&self, other: &Self) -> Option<Self> {
+        let size = |value: &Self| {
+            value
+                .kept
+                .iter()
+                .fold(Interval::exactly(0.0), |so_far, entry| {
+                    so_far + Interval::exactly(entry.abs())
+                })
+        };
+        let (mine, theirs) = (
+            Interval::exactly(self.slack),
+            Interval::exactly(other.slack),
+        );
+        let carried = size(self) * theirs + size(other) * mine + mine * theirs;
+        other.kept.iter().try_fold(
+            Self {
+                kept: Vec::new(),
+                slack: carried.hi(),
+            },
+            |total, &factor| Some(total.plus(&Self::a_product(&self.kept, factor)?)),
+        )
+    }
+
+    /// `expansion` times `factor`, every entry whose product is exact kept
+    /// and every other one dropped into the slack: `None` where a product
+    /// overflows, since only one that is too small to hold is dropped.
+    fn a_product(expansion: &[f64], factor: f64) -> Option<Self> {
+        let mut kept = Vec::with_capacity(expansion.len());
+        let mut dropped = Interval::exactly(0.0);
+        for &entry in expansion {
+            if product_is_exact(entry, factor) {
+                kept.push(entry);
+            } else if (entry * factor).is_finite() {
+                dropped =
+                    dropped + Interval::exactly(entry.abs()) * Interval::exactly(factor.abs());
+            } else {
+                return None;
+            }
+        }
+        let mut out = vec![0.0; 2 * kept.len()];
+        let used = scale_expansion(&kept, factor, &mut out);
+        out.truncate(used);
+        Some(Self {
+            kept: packed(&out),
+            slack: dropped.hi(),
+        })
+    }
+
+    /// `one × other`; `None` where a product would overflow.
+    fn crossed(one: &[Self; 3], other: &[Self; 3]) -> Option<[Self; 3]> {
+        let [x, y, z] = [0, 1, 2].map(|axis| {
+            let (next, last) = ((axis + 1) % 3, (axis + 2) % 3);
+            Some(
+                one[next]
+                    .times(&other[last])?
+                    .minus(&one[last].times(&other[next])?),
+            )
+        });
+        Some([x?, y?, z?])
+    }
+
+    /// `one·other`; `None` where a product would overflow.
+    fn dotted(one: &[Self; 3], other: &[Self; 3]) -> Option<Self> {
+        (0..3).try_fold(Self::of(&[]), |total, axis| {
+            Some(total.plus(&one[axis].times(&other[axis])?))
+        })
+    }
+
+    /// Each component of `vector` times `factor`; `None` where a product would
+    /// overflow.
+    fn scaled_across(vector: &[Self; 3], factor: &Self) -> Option<[Self; 3]> {
+        let [x, y, z] = vector.each_ref().map(|component| component.times(factor));
+        Some([x?, y?, z?])
+    }
+
+    fn added_across(one: &[Self; 3], other: &[Self; 3]) -> [Self; 3] {
+        core::array::from_fn(|axis| one[axis].plus(&other[axis]))
     }
 }
 
