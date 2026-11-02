@@ -102,13 +102,24 @@
 //! as the one below, and gets past it the same two ways.
 //!
 //! The far boxes of this LED, of the two D5 LEDs whose axis is 15 up, of the
-//! D5 whose axis is 9 up and of the D3 whose axis is 2 up now stop on the order
-//! along a crossing of two points within `1.1e-14` of each other, where the
-//! side of a lead meets the body's pipe on the flange's front below the axis:
-//! `x = -0.3` in the four D5 LEDs, `x = 2.24` in the D3. The front draws the
-//! circle it meets the body's pipe in twice, as the edge of its hole and as
-//! the pipe cut across it, and in the D5 LEDs the lead's side meets the two a
-//! rounding apart (Q3021, Q3031); in the D3, which two it meets is not traced.
+//! D5 whose axis is 9 up and of the D3 whose axis is 2 up stopped then on the
+//! order along a crossing of two points within `1.1e-14` of each other, where
+//! the side of a lead meets the body's pipe on the flange's front below the
+//! axis: `x = -0.3` in the four D5 LEDs, `x = 2.24` in the D3. The front draws
+//! the circle it meets the body's pipe in twice, as the edge of its hole and
+//! as the pipe cut across it, and in the D5 LEDs the lead's side meets the two
+//! a rounding apart (Q3021, Q3031). Which of two such points comes first is
+//! now read off where the line crosses each pipe, worked out as exactly as
+//! `f64` holds it (Q3054).
+//!
+//! All five stop now on the order along the straight line where the flange's
+//! front crosses the body's front disc, one plane written twice: between the
+//! front corner, where the flat touches the body's pipe, and where the flat
+//! meets that line. That point is solved from the flat, the front and the
+//! disc, three planes two of which are a rounding apart, and its box runs
+//! along the flat's line from `z = 1.02` to `3.52` here, round the corner. The
+//! `D5` LED with its front `y = -1.27` of
+//! `a_led_whose_flat_touches_its_body_at_a_corner.rs` stops there too.
 //!
 //! These tests pin all four stops.
 
@@ -133,15 +144,20 @@ const THIS_ONE: Led = Led {
     axis: 3.0,
 };
 
-/// The side of a lead nearer the flange's flat in a D5 LED, the plane `x =
-/// -0.3`.
-const A_D5_LEADS_SIDE: f64 = -0.3;
+/// This LED's front corner, and where along `z` the box runs round the point
+/// where its flat meets the line its flange's front crosses its body's front
+/// disc in.
+const THIS_ONES_FRONT_CORNER: ([f64; 3], [f64; 2]) = (
+    [-1.23, -6.35, 3.0],
+    [1.0159855138272087, 3.5178905065694237],
+);
 
-/// The four other LED files whose far box stops where the side of a lead, the
-/// plane `x = across`, meets the body's pipe on the flange's front below the
-/// axis, as this one's does: three that refused on their rim and front disc
-/// as this one did, and one whose front's cells could not be told apart.
-const FOUR_MORE: [(Led, f64); 4] = [
+/// The four other LED files whose far box stops at the front corner as this
+/// one's does, each with its corner and where along `z` the box runs round
+/// the point where its flat meets the line its flange's front crosses its
+/// body's front disc in: three that refused on their rim and front disc as
+/// this one did, and one whose front's cells could not be told apart.
+const FOUR_MORE: [(Led, [f64; 3], [f64; 2]); 4] = [
     (
         Led {
             file: "LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step",
@@ -150,7 +166,8 @@ const FOUR_MORE: [(Led, f64); 4] = [
             body: 2.5,
             axis: 15.0,
         },
-        A_D5_LEADS_SIDE,
+        [-1.23, -3.81, 15.0],
+        [13.97439790159237, 15.129461804142746],
     ),
     (
         Led {
@@ -160,7 +177,8 @@ const FOUR_MORE: [(Led, f64); 4] = [
             body: 2.5,
             axis: 15.0,
         },
-        A_D5_LEADS_SIDE,
+        [-1.23, -6.35, 15.0],
+        [12.6915421466242, 15.193447139366423],
     ),
     (
         Led {
@@ -170,7 +188,8 @@ const FOUR_MORE: [(Led, f64); 4] = [
             body: 2.5,
             axis: 9.0,
         },
-        A_D5_LEADS_SIDE,
+        [-1.23, -6.35, 9.0],
+        [6.617952095277471, 9.953825418933762],
     ),
     (
         Led {
@@ -180,7 +199,8 @@ const FOUR_MORE: [(Led, f64); 4] = [
             body: 1.5,
             axis: 2.0,
         },
-        2.24,
+        [-0.23, -3.81, 1.999999956464],
+        [0.7779733548260698, 1.9283960606686874],
     ),
 ];
 
@@ -233,24 +253,25 @@ impl Led {
         self.where_a_plane_across_meets_a_pipe(self.rim, across)
     }
 
-    /// The two places on the flange's front where the plane `x = across` meets
-    /// the body's pipe, above the axis and below it.
-    fn where_a_plane_across_meets_the_body(&self, across: f64) -> [[f64; 3]; 2] {
-        self.where_a_plane_across_meets_a_pipe(self.body, across)
-    }
-
     fn where_a_plane_across_meets_a_pipe(&self, radius: f64, across: f64) -> [[f64; 3]; 2] {
         let up = (radius.powi(2) - (1.27 - across).powi(2)).sqrt();
         [self.axis + up, self.axis - up].map(|z| [across, self.front, z])
     }
+
+    /// The flange's flat, the plane `x = 1.27 - body` the body's pipe touches.
+    fn flat(&self) -> f64 {
+        1.27 - self.body
+    }
 }
 
 #[test]
-fn an_led_whose_disc_sits_inside_its_rim_gets_past_where_its_flat_meets_its_rim_and_stops_where_a_leads_side_meets_its_body()
+fn an_led_whose_disc_sits_inside_its_rim_gets_past_where_a_leads_side_meets_its_body_and_stops_where_its_flat_meets_its_front_written_twice()
  {
-    let [_, below] = THIS_ONE.where_a_plane_across_meets_the_body(A_D5_LEADS_SIDE);
+    let (corner, meet) = THIS_ONES_FRONT_CORNER;
     every_fuse_refuses(THIS_ONE.file, &[FAR_OFF], |error| {
-        the_one_record_is_undecidable_at(ALONG_A_CROSSING, below, error)
+        the_front_corner_and_where_the_flat_meets_the_front_written_twice_are_not_ordered(
+            &THIS_ONE, corner, meet, error,
+        )
     });
 }
 
@@ -264,12 +285,13 @@ fn a_box_on_the_flat_stops_where_its_side_meets_the_rim_on_the_two_front_planes(
 }
 
 #[test]
-fn four_more_leds_get_past_where_their_flat_meets_their_rim_and_stop_where_a_leads_side_meets_their_body()
+fn four_more_leds_get_past_where_a_leads_side_meets_their_body_and_stop_where_their_flat_meets_their_front_written_twice()
  {
-    for (led, side) in &FOUR_MORE {
-        let [_, below] = led.where_a_plane_across_meets_the_body(*side);
+    for (led, corner, meet) in &FOUR_MORE {
         every_fuse_refuses(led.file, &[FAR_OFF], |error| {
-            the_one_record_is_undecidable_at(ALONG_A_CROSSING, below, error)
+            the_front_corner_and_where_the_flat_meets_the_front_written_twice_are_not_ordered(
+                led, *corner, *meet, error,
+            )
         });
     }
 }
@@ -330,6 +352,26 @@ fn the_one_record_is_undecidable_at(predicate: &str, at: [f64; 3], error: &Error
     !points.is_empty() && points.iter().all(|point| is_within_1e_9_of(point, at))
 }
 
+/// Refused `Undecidable` with the one record `order along a crossing`, handed
+/// `corner` and a point on `led`'s flat on its flange's front, `x` and `y`
+/// within `1e-9` of those, in a box along `z` from `meet[0]` to `meet[1]`,
+/// each within `1e-9`. That point is where the flat meets the line the
+/// flange's front crosses the body's front disc in.
+fn the_front_corner_and_where_the_flat_meets_the_front_written_twice_are_not_ordered(
+    led: &Led,
+    corner: [f64; 3],
+    meet: [f64; 2],
+    error: &Error,
+) -> bool {
+    let [one, other] = the_points_of_the_one_record(ALONG_A_CROSSING, error) else {
+        return false;
+    };
+    let on_the_flat =
+        |point: &Point| is_within_1e_9_of_the_box(point, [[led.flat(); 2], [led.front; 2], meet]);
+    let the_corner = |point: &Point| is_within_1e_9_of(point, corner);
+    (the_corner(one) && on_the_flat(other)) || (on_the_flat(one) && the_corner(other))
+}
+
 /// The points of the one record of an `Undecidable` refusal, when it is one
 /// on `predicate`, and none otherwise.
 fn the_points_of_the_one_record<'a>(predicate: &str, error: &'a Error) -> &'a [Point] {
@@ -343,11 +385,17 @@ fn the_points_of_the_one_record<'a>(predicate: &str, error: &'a Error) -> &'a [P
 }
 
 fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
+    is_within_1e_9_of_the_box(point, at.map(|at| [at, at]))
+}
+
+/// Whether each side of `point`'s box ends within `1e-9` of where the same
+/// side of `sides` ends, `[lo, hi]` along each axis.
+fn is_within_1e_9_of_the_box(point: &Point, sides: [[f64; 2]; 3]) -> bool {
     point
         .enclosure()
         .iter()
-        .zip(at)
-        .all(|(side, at)| (side.lo() - at).abs() < 1e-9 && (side.hi() - at).abs() < 1e-9)
+        .zip(sides)
+        .all(|(side, [lo, hi])| (side.lo() - lo).abs() < 1e-9 && (side.hi() - hi).abs() < 1e-9)
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
