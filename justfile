@@ -18666,9 +18666,16 @@ check-queue-api-selftest:
     # so it never again competes for the same "no tree yet" line these cases
     # check for; the filler proves that holds regardless of where the id
     # counter has reached.
-    for i in 1 2 3 4 5 6 7 8 9 10; do
-        q "$hub" add 2 opus - "from/- a filler row pushing the id counter past Q19 §230" >/dev/null 2>&1
-    done
+    q "$hub" apply add 2 opus - "from/- a filler row pushing the id counter past Q19 §230" \
+        + add 2 opus - "from/- a filler row pushing the id counter past Q19 §230" \
+        + add 2 opus - "from/- a filler row pushing the id counter past Q19 §230" \
+        + add 2 opus - "from/- a filler row pushing the id counter past Q19 §230" \
+        + add 2 opus - "from/- a filler row pushing the id counter past Q19 §230" \
+        + add 2 opus - "from/- a filler row pushing the id counter past Q19 §230" \
+        + add 2 opus - "from/- a filler row pushing the id counter past Q19 §230" \
+        + add 2 opus - "from/- a filler row pushing the id counter past Q19 §230" \
+        + add 2 opus - "from/- a filler row pushing the id counter past Q19 §230" \
+        + add 2 opus - "from/- a filler row pushing the id counter past Q19 §230" >/dev/null 2>&1
 
     # §299: once a lane hands off, its own tree can be gone while its
     # verifier's (detached, no branch) is still held; `running` must count
@@ -18896,8 +18903,10 @@ check-queue-api-selftest:
     # names here.
     batch_wt="$root/rcad-worktrees/batch"
     g "$hub" worktree add -q -b apply-batch "$batch_wt" main
-    row_a=$(q "$batch_wt" add 2 opus - "from/- a row this batch takes in step 1 §230") || fail "add for row_a failed"
-    row_b=$(q "$batch_wt" add 2 opus - "from/- a row this batch takes in step 2 §230") || fail "add for row_b failed"
+    got=$(q "$batch_wt" apply add 2 opus - "from/- a row this batch takes in step 1 §230" \
+        + add 2 opus - "from/- a row this batch takes in step 2 §230" 2>&1) || fail "add for row_a and row_b failed"
+    row_a=$(sed -n '1p' <<<"$got")
+    row_b=$(sed -n '2p' <<<"$got")
 
     before_queue=$(md5sum "$batch_wt/docs/queue.md" | cut -d' ' -f1)
     before_claims=$(md5sum "$claims_file" | cut -d' ' -f1)
@@ -18915,12 +18924,11 @@ check-queue-api-selftest:
     # of this same apply -- Q679 (after:Q686) and Q788 (after:Q756) could
     # have been bundled with the rows they waited on this way, instead of
     # closed by hand with done.
-    waited_q945=$(q "$batch_wt" add 2 opus - "from/- a row another row waits on, taken in the same apply §230") \
-        || fail "add for the Q945 waited-on row failed"
-    waiter_q945=$(q "$batch_wt" add 2 opus - "from/- a row that waits on it, bundled onto the same branch §230") \
-        || fail "add for the Q945 waiting row failed"
-    got=$(q "$batch_wt" after "$waiter_q945" "$waited_q945" 2>&1) \
-        || fail "after refused to set up the Q945 fixture's wait"
+    got=$(q "$batch_wt" apply add 2 opus - "from/- a row another row waits on, taken in the same apply §230" \
+        + add 2 opus - "from/- a row that waits on it, bundled onto the same branch §230" + after @2 @1 2>&1) \
+        || fail "add + add + after for the Q945 same-branch fixture failed"
+    waited_q945=$(sed -n '1p' <<<"$got")
+    waiter_q945=$(sed -n '2p' <<<"$got")
     got=$(q "$batch_wt" apply take "$waited_q945" lane-q945-bundle + take "$waiter_q945" lane-q945-bundle 2>&1) \
         || fail "take refused a row whose after: names a row being taken onto the same branch in the same apply"
     grep -qF "$waiter_q945: after:$waited_q945 -> lane:lane-q945-bundle" <<<"$got" \
@@ -18931,12 +18939,11 @@ check-queue-api-selftest:
     # The same wait still refuses when the earlier take lands on a different
     # branch: "being taken onto the same branch" is the whole condition, not
     # merely "taken somewhere in this apply".
-    other_waited_q945=$(q "$batch_wt" add 2 opus - "from/- a row taken onto a different branch in the same apply §230") \
-        || fail "add for the second Q945 waited-on row failed"
-    other_waiter_q945=$(q "$batch_wt" add 2 opus - "from/- waits on a row taken onto a different branch §230") \
-        || fail "add for the second Q945 waiting row failed"
-    got=$(q "$batch_wt" after "$other_waiter_q945" "$other_waited_q945" 2>&1) \
-        || fail "after refused to set up the Q945 different-branch fixture's wait"
+    got=$(q "$batch_wt" apply add 2 opus - "from/- a row taken onto a different branch in the same apply §230" \
+        + add 2 opus - "from/- waits on a row taken onto a different branch §230" + after @2 @1 2>&1) \
+        || fail "add + add + after for the Q945 different-branch fixture failed"
+    other_waited_q945=$(sed -n '1p' <<<"$got")
+    other_waiter_q945=$(sed -n '2p' <<<"$got")
     got=$(q "$batch_wt" apply take "$other_waited_q945" lane-q945-a + take "$other_waiter_q945" lane-q945-b 2>&1) \
         && fail "take accepted a row whose after: names a row taken onto a different branch in the same apply"
     grep -qF "$other_waiter_q945 is not ready: it waits on $other_waited_q945 (lane:lane-q945-a)" <<<"$got" \
@@ -19054,8 +19061,10 @@ check-queue-api-selftest:
     grep -qF 'the class wrong/B ranks tier 1 and tier 5 rows only, and this row is tier 2' <<<"$got" \
         || fail "add's refusal did not carry check-queue's reason"
 
-    first_small=$(q "$tag_wt" add 2 sonnet - "small from/- the first row of a bundle §230") || fail "add for the first small row failed"
-    second_small=$(q "$tag_wt" add 2 sonnet - "small from/- the second row of a bundle §230") || fail "add for the second small row failed"
+    got=$(q "$tag_wt" apply add 2 sonnet - "small from/- the first row of a bundle §230" \
+        + add 2 sonnet - "small from/- the second row of a bundle §230" 2>&1) || fail "add for the bundle's two small rows failed"
+    first_small=$(sed -n '1p' <<<"$got")
+    second_small=$(sed -n '2p' <<<"$got")
     before=$(q "$tag_wt" running --count) || fail "running --count failed before the bundle was taken"
     got=$(q "$tag_wt" apply take "$first_small" lane-bundle + take "$second_small" lane-bundle 2>&1) \
         || fail "one branch could not take two small rows"
@@ -19069,8 +19078,10 @@ check-queue-api-selftest:
     # answers False there rather than None, and the two are counted apart.
     unlanded=$(g "$hub" commit-tree -p main -m "a bundle's own commit" 'main^{tree}') || fail "commit-tree failed"
     g "$hub" branch lane-bundle-2 "$unlanded"
-    third_small=$(q "$tag_wt" add 2 sonnet - "small from/- the first row of a second bundle §230") || fail "add for the third small row failed"
-    fourth_small=$(q "$tag_wt" add 2 sonnet - "small from/- the second row of a second bundle §230") || fail "add for the fourth small row failed"
+    got=$(q "$tag_wt" apply add 2 sonnet - "small from/- the first row of a second bundle §230" \
+        + add 2 sonnet - "small from/- the second row of a second bundle §230" 2>&1) || fail "add for the second bundle's two small rows failed"
+    third_small=$(sed -n '1p' <<<"$got")
+    fourth_small=$(sed -n '2p' <<<"$got")
     got=$(q "$tag_wt" apply take "$third_small" lane-bundle-2 + take "$fourth_small" lane-bundle-2 2>&1) \
         || fail "a branch with no tree could not take two small rows"
     again=$(q "$tag_wt" running --count) || fail "running --count failed after the second bundle was taken"
@@ -19082,9 +19093,12 @@ check-queue-api-selftest:
     tier1() { awk '/^## / { h = $0 } h == "## Tier 1" && /^[TDQ][0-9]/ { printf "%s ", $1 }' "$pin_wt/docs/queue.md"; }
     pinword() { awk -v id="$1" '$1 == id { print $2, $6 }' "$pin_wt/docs/queue.md"; }
     first_three() { awk 'NR <= 3 { printf "%s ", $1 }' <<<"$got"; }
-    classed=$(q "$pin_wt" add 1 opus - "wrong/A from/- a defect the pinned rows go ahead of §230") || fail "add for the wrong/A row failed"
-    first=$(q "$pin_wt" add 1 opus - "from/- a tier 1 row Mattias pins first §230") || fail "add for the first row to pin failed"
-    second=$(q "$pin_wt" add 2 opus - "from/- a tier 2 row Mattias pins second §230") || fail "add for the second row to pin failed"
+    got=$(q "$pin_wt" apply add 1 opus - "wrong/A from/- a defect the pinned rows go ahead of §230" \
+        + add 1 opus - "from/- a tier 1 row Mattias pins first §230" \
+        + add 2 opus - "from/- a tier 2 row Mattias pins second §230" 2>&1) || fail "add for the pin fixture's three rows failed"
+    classed=$(sed -n '1p' <<<"$got")
+    first=$(sed -n '2p' <<<"$got")
+    second=$(sed -n '3p' <<<"$got")
     got=$(q "$pin_wt" pin "$first" "$second" 2>&1) || fail "pin refused a tier 1 row and a tier 2 row"
     [ "$(pinword "$first")" = "1 pinned/1" ] || fail "pin did not put pinned/1 on $first"
     [ "$(pinword "$second")" = "1 pinned/2" ] || fail "pin did not move $second to tier 1 as pinned/2"
@@ -19147,9 +19161,11 @@ check-queue-api-selftest:
     g "$hub" worktree add -q -b wait "$wait_wt" main
     sits() { awk -v id="$1" '/^## / { h = $0 } $1 == id { print h ": " $2 " " $3 }' "$wait_wt/docs/queue.md"; }
     mattias="which of the two moves is Mattias's to set (§435.4)"
-    x=$(q "$wait_wt" add 1 opus - "from/- a row that comes to wait on a tier 5 row §230") || fail "add for the row to wait failed"
-    c5=$(q "$wait_wt" add 5 opus - "refuses/C from/- a tier 5 row other rows wait on §230") || fail "add for the tier 5 row failed"
-    got=$(q "$wait_wt" after "$x" "$c5" 2>&1) || fail "after refused a row with no class waiting on a tier 5 row"
+    got=$(q "$wait_wt" apply add 1 opus - "from/- a row that comes to wait on a tier 5 row §230" \
+        + add 5 opus - "refuses/C from/- a tier 5 row other rows wait on §230" \
+        + after @1 @2 2>&1) || fail "add + add + after for the tier 5 wait fixture failed"
+    x=$(sed -n '1p' <<<"$got")
+    c5=$(sed -n '2p' <<<"$got")
     grep -qxF "$x: todo -> after:$c5, tier 1 -> 5, beside $c5, which it waits on" <<<"$got" \
         || fail "after did not say it moved the row down beside the tier 5 row it waits on"
     [ "$(sits "$x")" = "## Tier 5: 5 after:$c5" ] || fail "after did not move the row under ## Tier 5"
@@ -19159,19 +19175,24 @@ check-queue-api-selftest:
         || fail "after did not name both rows and leave the order to Mattias"
     [ "$(sits "$w")" = "## Tier 1: 1 todo" ] || fail "a refused after wrote the file anyway"
 
-    p=$(q "$wait_wt" add 2 opus - "from/- a tier 2 row two rows wait on in a chain §230") || fail "add for the head of the chain failed"
-    f=$(q "$wait_wt" add 2 opus - "from/- a tier 2 row that waits on the head §230") || fail "add for the second of the chain failed"
-    gg=$(q "$wait_wt" add 2 opus - "from/- a tier 2 row that waits on the second §230") || fail "add for the third of the chain failed"
-    got=$(q "$wait_wt" apply after "$f" "$p" + after "$gg" "$f" 2>&1) || fail "after refused a wait within one tier"
+    got=$(q "$wait_wt" apply add 2 opus - "from/- a tier 2 row two rows wait on in a chain §230" \
+        + add 2 opus - "from/- a tier 2 row that waits on the head §230" \
+        + add 2 opus - "from/- a tier 2 row that waits on the second §230" \
+        + after @2 @1 + after @3 @2 2>&1) || fail "add x3 + after + after for the wait chain fixture failed"
+    p=$(sed -n '1p' <<<"$got")
+    f=$(sed -n '2p' <<<"$got")
+    gg=$(sed -n '3p' <<<"$got")
     grep -qxF "$f: todo -> after:$p" <<<"$got" || fail "after moved a row that waits on a row of its own tier"
     got=$(q "$wait_wt" tier "$p" 3 2>&1) || fail "tier refused to move the head of a chain down"
     grep -qxF "$p: tier 2 -> 3, at the foot of ## Tier 3, takes $f along, tier 2 -> 3, takes $gg along, tier 2 -> 3" <<<"$got" \
         || fail "tier did not take the rows that wait on the moved row along, down the chain"
     [ "$(sits "$gg")" = "## Tier 3: 3 after:$f" ] || fail "tier did not move the foot of the chain under ## Tier 3"
 
-    r=$(q "$wait_wt" add 1 opus - "from/- a tier 1 row a tag moves to tier 5 and back §230") || fail "add for the row to tag failed"
-    s=$(q "$wait_wt" add 1 opus - "from/- a tier 1 row that waits on the row a tag moves §230") || fail "add for its follower failed"
-    got=$(q "$wait_wt" after "$s" "$r" 2>&1) || fail "after refused a wait within tier 1"
+    got=$(q "$wait_wt" apply add 1 opus - "from/- a tier 1 row a tag moves to tier 5 and back §230" \
+        + add 1 opus - "from/- a tier 1 row that waits on the row a tag moves §230" \
+        + after @2 @1 2>&1) || fail "add + add + after for the tag-moves-chain fixture failed"
+    r=$(sed -n '1p' <<<"$got")
+    s=$(sed -n '2p' <<<"$got")
     got=$(q "$wait_wt" tag "$r" crash/C 2>&1) || fail "tag refused a C class on a row another row waits on"
     grep -qxF "$r: tag - -> crash/C, tier 1 -> 5, at the foot of ## Tier 5, takes $s along, tier 1 -> 5" <<<"$got" \
         || fail "tag did not take the row that waits on it along to tier 5"
@@ -19206,9 +19227,12 @@ check-queue-api-selftest:
     grep -qxF "queue pin: $z waits on $p, which is tier 3, and a pinned row is tier 1, which the fill reaches first (§435)" <<<"$got" \
         || fail "pin did not name the row the pinned row would wait on"
 
-    gone5=$(q "$wait_wt" add 5 opus - "crash/C from/- a tier 5 row done while a row waits on it §230") || fail "add for the tier 5 row to close failed"
-    y=$(q "$wait_wt" add 1 opus - "from/- a row that sits in tier 5 with no class until a pin §230") || fail "add for the row to pin out of tier 5 failed"
-    y2=$(q "$wait_wt" add 1 opus - "from/- a row that follows it out of tier 5 §230") || fail "add for its follower failed"
+    got=$(q "$wait_wt" apply add 5 opus - "crash/C from/- a tier 5 row done while a row waits on it §230" \
+        + add 1 opus - "from/- a row that sits in tier 5 with no class until a pin §230" \
+        + add 1 opus - "from/- a row that follows it out of tier 5 §230" 2>&1) || fail "add x3 for the done-frees-tier-5 fixture failed"
+    gone5=$(sed -n '1p' <<<"$got")
+    y=$(sed -n '2p' <<<"$got")
+    y2=$(sed -n '3p' <<<"$got")
     gone5_sha=$(g "$wait_wt" rev-parse HEAD)
     got=$(q "$wait_wt" apply after "$y2" "$y" + after "$y" "$gone5" + done "$gone5" "$gone5_sha" 2>&1) || fail "the steps that leave a tier 5 row with no class failed"
     grep -qxF "$y: todo -> after:$gone5, tier 1 -> 5, beside $gone5, which it waits on, takes $y2 along, tier 1 -> 5" <<<"$got" \
@@ -19224,10 +19248,11 @@ check-queue-api-selftest:
     # and in another copy that sees it only through the claims file.
     narrow_wt="$root/rcad-worktrees/narrow"
     g "$hub" worktree add -q -b narrow "$narrow_wt" main
-    wide=$(q "$narrow_wt" add 2 opus tooling/queue/ "from/- a row taken on a whole directory §230") \
-        || fail "add for the row to narrow failed"
-    beside=$(q "$narrow_wt" add 2 opus tooling/queue/rows.py "from/- a row on one file under that directory §230") \
-        || fail "add for the row beside it failed"
+    got=$(q "$narrow_wt" apply add 2 opus tooling/queue/ "from/- a row taken on a whole directory §230" \
+        + add 2 opus tooling/queue/rows.py "from/- a row on one file under that directory §230" 2>&1) \
+        || fail "add for the narrow fixture's two rows failed"
+    wide=$(sed -n '1p' <<<"$got")
+    beside=$(sed -n '2p' <<<"$got")
     g "$narrow_wt" commit -qam "two rows, one on a directory and one on a file under it"
     far="$root/rcad-worktrees/narrow-far"
     g "$hub" worktree add -q -b narrow-far "$far" narrow
@@ -19276,10 +19301,11 @@ check-queue-api-selftest:
     # (Q2875 onto Q2773's branch, §424.7), and the two rows may share a file.
     bundle2_wt="$root/rcad-worktrees/bundle2"
     g "$hub" worktree add -q -b bundle2 "$bundle2_wt" main
-    first_of_two=$(q "$bundle2_wt" add 2 opus docs/a.md "from/- the first row taken onto a later bundle's branch §230") \
-        || fail "add for the first row of the later bundle failed"
-    second_of_two=$(q "$bundle2_wt" add 2 opus docs/a.md "from/- a row a dispatcher bundles onto the same branch later §230") \
-        || fail "add for the second row of the later bundle failed"
+    got=$(q "$bundle2_wt" apply add 2 opus docs/a.md "from/- the first row taken onto a later bundle's branch §230" \
+        + add 2 opus docs/a.md "from/- a row a dispatcher bundles onto the same branch later §230" 2>&1) \
+        || fail "add for the later-bundle fixture's two rows failed"
+    first_of_two=$(sed -n '1p' <<<"$got")
+    second_of_two=$(sed -n '2p' <<<"$got")
     g "$bundle2_wt" commit -qam "two rows sharing docs/a.md for the later-bundle take"
     got=$(q "$bundle2_wt" take "$first_of_two" lane-bundle-later 2>&1) \
         || fail "take refused the first row of the later bundle"
@@ -19294,10 +19320,11 @@ check-queue-api-selftest:
     # alone onto a new branch.
     retake_wt="$root/rcad-worktrees/retake"
     g "$hub" worktree add -q -b retake "$retake_wt" main
-    retake_first=$(q "$retake_wt" add 2 opus docs/c.md "from/- the first row of a bundle, retaken alone onto a new branch §230") \
-        || fail "add for the first row of the retake pair failed"
-    retake_second=$(q "$retake_wt" add 2 opus docs/c.md "from/- the second row of that bundle, left on the old branch §230") \
-        || fail "add for the second row of the retake pair failed"
+    got=$(q "$retake_wt" apply add 2 opus docs/c.md "from/- the first row of a bundle, retaken alone onto a new branch §230" \
+        + add 2 opus docs/c.md "from/- the second row of that bundle, left on the old branch §230" 2>&1) \
+        || fail "add for the retake fixture's two rows failed"
+    retake_first=$(sed -n '1p' <<<"$got")
+    retake_second=$(sed -n '2p' <<<"$got")
     g "$retake_wt" commit -qam "two rows sharing docs/c.md for the retake test"
     got=$(q "$retake_wt" apply take "$retake_first" lane-retake-old + take "$retake_second" lane-retake-old 2>&1) \
         || fail "the first bundle take, in one apply, was refused"
@@ -19314,10 +19341,11 @@ check-queue-api-selftest:
     # yet carry the first step's own take within the same apply.
     rebundle_wt="$root/rcad-worktrees/rebundle"
     g "$hub" worktree add -q -b rebundle "$rebundle_wt" main
-    rebundle_first=$(q "$rebundle_wt" add 2 opus docs/d.md "from/- the first row of a two-row bundle, retaken together §230") \
-        || fail "add for the first row of the rebundle failed"
-    rebundle_second=$(q "$rebundle_wt" add 2 opus docs/d.md "from/- the second row of that bundle, retaken together §230") \
-        || fail "add for the second row of the rebundle failed"
+    got=$(q "$rebundle_wt" apply add 2 opus docs/d.md "from/- the first row of a two-row bundle, retaken together §230" \
+        + add 2 opus docs/d.md "from/- the second row of that bundle, retaken together §230" 2>&1) \
+        || fail "add for the rebundle fixture's two rows failed"
+    rebundle_first=$(sed -n '1p' <<<"$got")
+    rebundle_second=$(sed -n '2p' <<<"$got")
     g "$rebundle_wt" commit -qam "two rows sharing docs/d.md for the rebundle test"
     got=$(q "$rebundle_wt" apply take "$rebundle_first" lane-rebundle-old + take "$rebundle_second" lane-rebundle-old 2>&1) \
         || fail "the first bundle take, in one apply, was refused"
@@ -19337,10 +19365,11 @@ check-queue-api-selftest:
     # against every hold anywhere, not just this worktree's own.
     writes_wt="$root/rcad-worktrees/writes"
     g "$hub" worktree add -q -b writes "$writes_wt" main
-    wrongly_filed=$(q "$writes_wt" add 2 opus - "from/- a row filed with the wrong write set §230") \
-        || fail "add for the wrongly filed row failed"
-    beside_filed=$(q "$writes_wt" add 2 opus docs/decisions.d/230-one-queue.md "from/- a row on a file under the directory the fix widens into §230") \
-        || fail "add for the row beside it failed"
+    got=$(q "$writes_wt" apply add 2 opus - "from/- a row filed with the wrong write set §230" \
+        + add 2 opus docs/decisions.d/230-one-queue.md "from/- a row on a file under the directory the fix widens into §230" 2>&1) \
+        || fail "add for the writes fixture's two rows failed"
+    wrongly_filed=$(sed -n '1p' <<<"$got")
+    beside_filed=$(sed -n '2p' <<<"$got")
     g "$writes_wt" commit -qam "two rows for writes"
     got=$(q "$writes_wt" writes "$wrongly_filed" docs/decisions.d/ 2>&1) \
         || fail "writes refused to set a todo row's write set"
@@ -19430,10 +19459,11 @@ check-queue-api-selftest:
     # none of their rows was ever committed in that state either.
     give_wt="$root/rcad-worktrees/give"
     g "$hub" worktree add -q -b give "$give_wt" main
-    head_row=$(q "$give_wt" add 2 opus - "from/- a row another row waits on, for give to restore §230") \
-        || fail "add for the head row failed"
-    waiter=$(q "$give_wt" add 2 opus - "from/- a row give restores to its after: list §230") \
-        || fail "add for the waiting row failed"
+    got=$(q "$give_wt" apply add 2 opus - "from/- a row another row waits on, for give to restore §230" \
+        + add 2 opus - "from/- a row give restores to its after: list §230" 2>&1) \
+        || fail "add for the give fixture's head and waiter rows failed"
+    head_row=$(sed -n '1p' <<<"$got")
+    waiter=$(sed -n '2p' <<<"$got")
     q "$give_wt" after "$waiter" "$head_row" >/dev/null || fail "after refused the row give restores"
     g "$give_wt" add -A && g "$give_wt" commit -qam "give_wt base rows"
     head_sha=$(g "$give_wt" rev-parse HEAD)
@@ -19498,16 +19528,17 @@ check-queue-api-selftest:
     # row with no class (§435.5 reads its after: list as why it sits there).
     donefrees_wt="$root/rcad-worktrees/done-frees"
     g "$hub" worktree add -q -b done-frees "$donefrees_wt" main
-    head_1755=$(q "$donefrees_wt" add 1 opus - "from/- a row other rows wait on, for done to free them §230") \
-        || fail "add for the Q1755 head row failed"
-    plain_1755=$(q "$donefrees_wt" add 1 opus - "from/- a plain row done frees to todo §230") \
-        || fail "add for the plain waiter failed"
-    pinned_1755=$(q "$donefrees_wt" add 1 opus - "from/- a pinned row done leaves waiting §230") \
-        || fail "add for the pinned waiter failed"
-    c5_1755=$(q "$donefrees_wt" add 5 opus - "refuses/C from/- a tier 5 row beside the pinned waiter §230") \
-        || fail "add for the tier 5 row to wait on failed"
-    tier5_1755=$(q "$donefrees_wt" add 1 opus - "from/- a row that sits in tier 5 with no class until done frees it §230") \
-        || fail "add for the tier-5-no-class waiter failed"
+    got=$(q "$donefrees_wt" apply add 1 opus - "from/- a row other rows wait on, for done to free them §230" \
+        + add 1 opus - "from/- a plain row done frees to todo §230" \
+        + add 1 opus - "from/- a pinned row done leaves waiting §230" \
+        + add 5 opus - "refuses/C from/- a tier 5 row beside the pinned waiter §230" \
+        + add 1 opus - "from/- a row that sits in tier 5 with no class until done frees it §230" 2>&1) \
+        || fail "add x5 for the Q1755 done-frees fixture failed"
+    head_1755=$(sed -n '1p' <<<"$got")
+    plain_1755=$(sed -n '2p' <<<"$got")
+    pinned_1755=$(sed -n '3p' <<<"$got")
+    c5_1755=$(sed -n '4p' <<<"$got")
+    tier5_1755=$(sed -n '5p' <<<"$got")
     got=$(q "$donefrees_wt" apply after "$plain_1755" "$head_1755" + after "$pinned_1755" "$head_1755" \
         + after "$tier5_1755" "$c5_1755,$head_1755" 2>&1) \
         || fail "the waits for the Q1755 done-frees fixture were refused"
