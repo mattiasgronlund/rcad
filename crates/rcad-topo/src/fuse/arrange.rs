@@ -12090,6 +12090,26 @@ impl<'f> Arrangement<'f> {
     /// thin pipe runs through it. Asked the box alone here, every fuse of the
     /// two was refused `Undecidable` (Q2763).
     ///
+    /// **A node whose side cannot be told is passed over**, as a node on the
+    /// partner is, and the walk read off another. Every node of the walk is on
+    /// the walk's side of a crossing it does not run along, or on the
+    /// crossing, so whichever node can tell answers for all. Only where no
+    /// node and neither reading after the nodes says is the policy asked, of
+    /// the first node that could not tell. The plane `y = 0.2` of
+    /// `LED_D5.0mm-3.step` is written twice a rounding apart, each writing
+    /// leaning `6.7e-16` off the body pipe's axis, so each cuts the pipe in an
+    /// ellipse reaching `3.4e15` up it. A walk `1.8e15` up the pipe had its first
+    /// node on one writing, and that box could not say its side of the other;
+    /// asked the policy there, every fuse of the LED was refused, though the
+    /// walk's next node, on the ellipse of `y = −0.2`, reads `Neg` (Q3009).
+    ///
+    /// **A tolerant policy reads the same sides as it did.** It reads a node
+    /// whose box is narrow enough for its budget as on the partner, `Zero`,
+    /// and the loop passed over that node then as well; it is no longer
+    /// logged when another node tells, since the side is then proved. A node
+    /// whose box is too wide for the budget was refused, and is now passed
+    /// over as under a certified policy.
+    ///
     /// **Each half of an ellipse drawn whole with its other half says which
     /// side of the ellipse's plane the walk is on**
     /// ([`Arrangement::whole_ellipses`]). No half closes, so none is drawn in
@@ -12129,6 +12149,7 @@ impl<'f> Arrangement<'f> {
                 continue;
             }
             let partner = self.crossings[crossing].partner;
+            let mut first_undecided = None;
             for &half_edge in &self.cycles[cycle] {
                 let node = &self.nodes[self.arcs[half_edge / 2].ends[half_edge % 2]];
                 match self.whether_past_the_picker(crossing, node.point) {
@@ -12183,6 +12204,10 @@ impl<'f> Arrangement<'f> {
                     }
                     (side, _) => side,
                 };
+                if matches!(read, Decision::Undecidable { .. }) {
+                    first_undecided.get_or_insert((read, at));
+                    continue;
+                }
                 let found = must_decide(
                     read,
                     name_of_surface(&partner),
@@ -12202,6 +12227,19 @@ impl<'f> Arrangement<'f> {
                     .or_else(|| {
                         self.side_off_the_other_circle_a_plane_cuts_a_ring_in(cycle, &partner)
                     });
+            }
+            if side.is_none()
+                && let Some((undecided, at)) = first_undecided
+            {
+                let settled = must_decide(
+                    undecided,
+                    name_of_surface(&partner),
+                    &[at],
+                    Measures::Length,
+                    policy,
+                    log,
+                )?;
+                *side = (settled != Decision::Zero).then_some(settled);
             }
         }
         for &ellipse in &self.whole_ellipses {
