@@ -677,3 +677,175 @@ once, cold, at 335.0 s — there was no record yet for this exact fingerprint �
 beside `test`'s own 844.6 s. A later gate on a commit that moves nothing under
 `justfile`, `tooling/`, `.gitattributes` or `mise.toml` is served this step's
 green instead of running it again.
+
+### 337.11 The five cargo steps, served on a key of what they read
+
+*Q3076, 2026-11-02: `check`, `check-ignored`, `test`, `test-slow` and
+`check-release-build` were keyed on the whole-tree fingerprint, which holds the
+justfile and `tooling/`. So Q3053, whose one commit `99cb631e7` changed only
+the justfile, ran `test` fresh for 842.3 s in its lane gate, and its land gate
+ran it again.*
+
+**What it costs.** `test` took a median of 804 s over the 19 fresh gates of
+2026-11-02, as the row counted them. It is the step a gate waits on longest.
+§337.9 kept the machine steps on the whole-tree key because none of them cost
+enough to pay for a trace of what it reads in the tree. `test` does.
+
+**What they read.** The first lane on the row traced each of the five once,
+with `strace -f --seccomp-bpf -qq -s 256 -e trace=%file -e signal=none -o
+<file> mise exec -- just <step>`. Each exited 0. `test` took 558.8 s (4694
+tests, 79 skipped), `check` 20.1 s, `check-ignored` 54.1 s, `test-slow` 111.0 s
+and `check-release-build` 3.1 s. Inside the tree, outside `target/`:
+
+- All five opened only `.cargo/config.toml`, `Cargo.toml`, `Cargo.lock`,
+  `crates/`, `rust-toolchain.toml`, `mise.toml`, `mise.lock`, the justfile,
+  `tooling/hub-align` and `.git`.
+- `test` also read 4736 files under `fuzz/corpus`. Tests in
+  `crates/rcad-topo/tests/` and in
+  `crates/rcad-step/tests/a_solid_the_writer_harness_judges_alone.rs` reach
+  them as `crates/<crate>/../../fuzz/corpus/...`, so the first count of the
+  paths filed them under `crates/`. A second count, which resolves the `..`,
+  found them.
+- `fuzz/step.dict` is read by an `include_str!` in
+  `crates/rcad-step/src/names.rs`. The trace saw only a probe of it, because
+  kache served the compile.
+- They looked for `.config/nextest.toml`, `.config/mise*`, `.mise*`,
+  `.tool-versions`, `.kache.toml`, `rust-toolchain` and `crates/*/README.md`,
+  and found none of them. These names are in the key, so a commit that adds one
+  moves it.
+- Nothing under `docs/`, `.github/`, `.claude/`, `corpus/`, `deny.toml`, or
+  `tooling/` beyond `hub-align`.
+
+`tooling/hub-align` is read by `hub_aligned := shell(... || true)` at the top
+of the justfile, which every `just` runs as it parses the file. No recipe reads
+the value, and the `|| true` swallows a failure, so it cannot change what a
+step answers. It is left out of the key. No `.md` file is read, since cargo's
+`README.md` probes feed no build, so the key drops `*.md` as §337.3 does.
+
+**The key**, `_code-fingerprint rust`. It hashes:
+
+- `git ls-tree -r --full-tree HEAD` of the cargo, toolchain, mise and kache
+  names above, found or not, and of `crates`, `fuzz` and `corpus`, all without
+  `*.md`. `corpus/` is in for `corpus/manifest.sha256`, which pins what
+  `RCAD_STEP_CORPUS` points at (§337.3);
+- of the justfile, only what the five run: `just --show` of their recipes and
+  of `_slow-tests-filter`, the `set` and `export` lines every recipe gets, and
+  the values of `slow_tests` and `ignored_tests`;
+- the same environment block as the whole-tree key.
+
+The `--show`s run before the hash, so a recipe that cannot be shown stops the
+recipe with no hash printed, rather than giving a hash that left it out. With no
+argument `_code-fingerprint` hashes the same bytes it did before, so the
+whole-tree records written before this change still serve. Any other argument
+exits 2.
+
+The record is `<git common dir>/rcad-verdicts-rust/<fingerprint>`, beside
+`rcad-verdicts/` and the stores of §337.9 and §337.10. It has the whole-tree
+record's shape, with the steps line that a partial run adds to and that keeps
+its date (§397.4). It keeps §337.4's rules: a day, `fresh`, and the audit of a
+sha starting with `0`. A failure over a record is a violation, and the record
+is deleted (§337.6). `gate` leaves the five out of the whole-tree `$reusable`
+loop, and writes both records back through the same two functions,
+`record_green` and `record_violation`.
+
+**The counts.** A record holds the counts its steps printed, and one run can
+now write two records. So `counts_of` reads only the logs of the record's own
+steps, where the whole-tree record used to read the whole log. Only `test`,
+`test-slow` and `check-release-build` print counts: a read of three real gate
+logs found no other step that does, and the first lane gate on the new key
+agrees. Its cargo record, `15b8a2a94404`, holds `test`'s summary,
+`check-release-build`'s 3 tests and the doc tests' 30, and its whole-tree record
+holds no counts.
+
+`_gate-summary` takes one served record. When the cargo steps were served, the
+summary takes theirs, since that is where the counts are. A run served both
+records notes each count of the whole-tree record that it left out, as `·
+verdicts: not in the summary, which shows the cargo steps' counts: <line>
+(served from <sha>)`. No whole-tree step prints a count today, so the note is
+for one that starts to. Taking more than one record has no consumer, so it is
+not built (§13).
+
+**An old whole-tree record with `test`'s counts is never served beside a run
+of `test`.** Before this change the whole-tree record held `test`'s counts,
+and a gate that served it while running `test` would show them twice. But the
+whole-tree key holds the justfile, and `just gate` runs the tree's own
+justfile. So every whole-tree key the new gate takes holds the new justfile,
+which no old gate recorded.
+
+**Left on the whole-tree key**: `check-fuzz-builds`, `check-wildcards`,
+`lint`, `check-fmt` and `check-t-selftest`. In the first lane gate on the new
+key they took 7.4 s, 1.8 s, 0.3 s, 4.9 s and 0.7 s. None was traced, and on
+§337.9's argument none costs enough to pay for a trace. `check-fuzz-builds`
+builds `fuzz/` with its own `Cargo.lock`, outside the workspace. `lint` is
+`cargo clippy`, which reads a `clippy.toml` when there is one, and its 0.3 s
+came after `pre-gate` had run it. `check-t-selftest` drives justfile recipes.
+
+**The demonstration.** `check-gate-verdicts-selftest` drives the whole `gate`
+against a scratch repository, through a copy of this justfile with fast stubs
+for the five under `set allow-duplicate-recipes`. `test` and `test-slow` print
+a nextest summary, so the counts can be followed into a record and out of it.
+`check-release-build` fails while `RUST_SELFTEST_FAIL` is set, which nothing in
+the key reads. It asserts:
+
+- `_code-fingerprint rusty` exits 2 and names what it refused;
+- the first gate records the five under their own store and not the whole-tree
+  one, with the steps line and `test`'s counts;
+- a commit that adds a comment to the justfile moves the whole-tree key and
+  not this one, is served all five, and shows `test`'s counts as served;
+- a commit to `crates/a.rs` runs them, and so does one that changes `test`'s
+  recipe;
+- `Cargo.lock`, `.cargo/config.toml`, `.config/nextest.toml`,
+  `rust-toolchain.toml`, `mise.toml`, `fuzz/step.dict`, a file under
+  `fuzz/corpus`, `corpus/manifest.sha256` and `crates/b/src/lib.rs` each move
+  the key, and `tooling/a.py`, `docs/notes.txt`, `crates/x/NOTES.md`,
+  `.github/workflows/ci.yml` and `deny.toml` each leave it where it was;
+- `RCAD_SOAK_SEED` moves it, and `RCAD_STEP_CORPUS` does not;
+- `fresh`, a record two days old and a sha starting with `0` each run them, and
+  say why;
+- a run that leaves out `test-slow` records the four it ran, and the next run
+  is served those four, runs `test-slow`, shows both counts, and adds it to the
+  record's steps line;
+- a failure of `check-release-build` over its record is a violation: the record
+  is deleted and the violation is written down;
+- one run that writes both records puts in each only its own steps' counts,
+  and the next run, served both, notes the whole-tree count it left out of the
+  summary.
+
+The selftest failed before each part it checks was there. At `f993d78fd`, with
+the cases and no key, it failed on ``Justfile does not contain recipe `rust` ``.
+At `92a0187fc`, with the both-records case and no note, it failed on "a gate
+served both records left the whole-tree record's counts out without saying
+so".
+
+The selftest's fixture commits each hold a copy of the justfile, and their
+dates are pinned, so their shas follow from the justfile's bytes. About one
+justfile in sixteen gives a sha starting with `0`, and a case that needs a step
+served then gets an audit instead. The lane gate on `d1c36af40`, which changed
+only comments, failed that way, on "the cargo steps' fixture commit starts with
+0". So `commit_served` amends the message of each commit whose case needs
+serving until its sha does not start with `0`.
+
+**The real run.** Three `just pre-gate gate-lane` runs on the row's branch, on
+2026-11-02:
+
+- On `15e1bfe71`, the first gate on the new key, with no record for it yet.
+  `test` ran in 417.5 s (4696 tests, 13 slow, 79 skipped), `check` in 19.2 s,
+  `check-ignored` in 48.2 s and `check-release-build` in 1.2 s. It passed and
+  recorded the four as `15b8a2a94404`. `gate-lane` leaves `test-slow` to the
+  land gate (§397.4), so the steps line names four.
+- `d1c36af40` changed only comments in the justfile, outside the five's
+  recipes. `_code-fingerprint rust` gave the same `15b8a2a9440436fe…`, and the
+  whole-tree key moved. Its gate printed `· served: check check-ignored test
+  check-release-build from 15e1bfe7's gate at 2026-11-02T22:56:30Z`, and failed
+  only on the selftest's sha above.
+- On `1776e22e1`, which changed only the selftest, the gate was served the same
+  four and passed in 286 s, from 23:04:22Z to 23:09:08Z, at a load of 3.03 to
+  7.31.
+
+On a commit like these two, the longest step is now `check-queue-api-selftest`,
+at 290.6 s and 284.1 s, since §337.10's key holds the whole justfile.
+
+**What this leaves.** One row: key `check-queue-api-selftest` on the justfile
+recipes it runs rather than the whole justfile, as `_code-fingerprint rust`
+does for the five, so that a commit that changes only the justfile is served
+it too.
