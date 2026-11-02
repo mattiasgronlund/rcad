@@ -2469,3 +2469,59 @@ fn the_side_of_an_leds_lead_across_its_domes_rim_meets_both_at_four_corners() {
         }
     }
 }
+
+/// **The flat of an LED's flange, touching its dome a hair inside its body**
+/// (Q3020, from `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step`, where every fuse
+/// split the body's pipe on these three). The flat is exactly `x = −1.23`, the
+/// dome a ball of radius 2.5 about `(1.27, −7.37, 15)` and the body a pipe of
+/// radius 2.5 along `−y` through `(1.27, −1.27, 15)`. The `f64`s nearest `1.27`
+/// and `1.23` add up to exactly 2.5, so the flat touches the ball at one point,
+/// `(−1.23, −7.37, 15)`, which every `f64` names. Drawn, that point is on the
+/// pipe too. Stored, the pipe's axis leans `5.6e−17` off `y`, so 6.1 along it
+/// the axis has drifted toward `−x`, and the point is `3.39e−16` inside the
+/// pipe, worked out over the rationals the stored numbers name: the three meet
+/// nowhere.
+///
+/// The touch came back as a box of no width, and asked as a box, the pipe's
+/// own arithmetic could not tell `3.4e−16` from zero, so the three were
+/// refused. Asked as the point it is, the pipe's exact level says inside. The
+/// fuse asked the three at half the size and `2⁴⁹⁷` times it as well.
+#[test]
+fn the_flat_of_an_leds_flange_touches_its_dome_inside_its_body_and_meets_both_nowhere() {
+    for scale in [1.0, 0.5, 2f64.powi(497)] {
+        let flat = Plane::from_point_and_normal_as_written(
+            Point::new(-1.23 * scale, 0.0, 0.0),
+            Vector::new(-1.0, 0.0, 0.0),
+        )
+        .expect("a normal with length");
+        assert_eq!(
+            (flat.normal().components(), flat.offset()),
+            ([-1.0, 0.0, 0.0], 1.23 * scale),
+            "the flat the file stores"
+        );
+        let flat = Surface::Plane(flat);
+        let dome = ball([1.27 * scale, -7.37 * scale, 15.0 * scale], 2.5 * scale);
+        let body = Surface::Cylinder(
+            Cylinder::new(
+                Axis::as_written(
+                    Point::new(1.27 * scale, -1.27 * scale, 15.0 * scale),
+                    Vector::new(-5.551115123126e-17, -1.0, 0.0),
+                )
+                .expect("a direction with length"),
+                2.5 * scale,
+            )
+            .expect("a radius"),
+        );
+        let touch = PredicatePoint::Exact([-1.23 * scale, -7.37 * scale, 15.0 * scale]);
+        assert_eq!(which_side_of(&flat, touch), Decision::Zero);
+        assert_eq!(which_side_of(&dome, touch), Decision::Zero);
+        assert_eq!(which_side_of(&body, touch), Decision::Neg);
+        for order in every_order([&flat, &dome, &body]) {
+            assert_eq!(
+                meet(order),
+                Ok(MeetOfThree::Nowhere),
+                "at {scale}: {order:?}"
+            );
+        }
+    }
+}
