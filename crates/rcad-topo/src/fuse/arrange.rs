@@ -5406,8 +5406,11 @@ impl<'f> Arrangement<'f> {
     /// and where a plane of its own cuts a plane's loop at either node, read
     /// off which side of that plane the other node and the start lie and which
     /// way the loop runs across it at each
-    /// ([`Arrangement::as_the_side_of_one_cut_the_other_is_on_says`]), is
-    /// asked only where the policy would refuse.** Asked before the policy,
+    /// ([`Arrangement::as_the_side_of_one_cut_the_other_is_on_says`]), and
+    /// where a node is a meet of the line two planes cross in and a pipe, read
+    /// off where the line crosses the pipe
+    /// ([`Arrangement::as_the_pipes_a_line_crosses_say`]), is asked only where
+    /// the policy would refuse.** Asked before the policy,
     /// the second kept a tolerant fuse of a cube whose edges run through a
     /// frustum's far rim from answering: it put the corner and the meet a
     /// rounding apart where the policy reads them as one point, and the fuse
@@ -5711,6 +5714,7 @@ impl<'f> Arrangement<'f> {
                 self.as_a_corner_between_the_two_meets_of_one_cut_says(crossing, first, second)
             })
             .or_else(|| self.as_the_side_of_one_cut_the_other_is_on_says(crossing, first, second))
+            .or_else(|| self.as_the_pipes_a_line_crosses_say(crossing, first, second))
     }
 
     /// Which of two nodes on a crossing comes first along it, from their boxes
@@ -6963,6 +6967,296 @@ impl<'f> Arrangement<'f> {
             }
         } else {
             runs != side
+        })
+    }
+
+    /// Which of two nodes on the line the face's plane and a partner plane
+    /// cross in comes first, where one is a meet of that line and a pipe and
+    /// the other an exact point on the line or a meet of it and a pipe too,
+    /// read exactly off where the line crosses the pipe: `None` everywhere
+    /// else, and wherever a product would round.
+    ///
+    /// **One circle written twice is two pipes a rounding apart.** The flange
+    /// front of `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step`, normal
+    /// `(0, 1, −1.158e−15)`, has its hole's edge on the body pipe written along
+    /// `(0, −1, 1.11e−15)`, and the body pipe cuts it again as written along
+    /// `(−5.55e−17, −1, 0)`, both of radius `1.5` from `(1.27, −3.81, 6)`. The
+    /// lead's side `x = 2.24` crosses the front in a line that meets each pipe
+    /// in one box at `(2.24, −3.81, 4.8558)`, and every fuse of the LED was
+    /// refused on the order of the two meets (Q3014). In
+    /// `LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step` the flange's flat
+    /// `x = −1.23` runs along the rim of the front's circle of radius `2.5`,
+    /// and its corner on the front, `(−1.23, −1.27, 3)`, could not be put in
+    /// order with the meet of that line and the pipe written the other way,
+    /// `1.8e−15` from it (Q3015). In the far boxes of the D5 LEDs the lead's
+    /// side `x = −0.3` meets the two pipes a rounding apart on the front too
+    /// (Q3024).
+    ///
+    /// **The line is `Y + t·e`**, for `e = n_f × n_p` the two normals crossed,
+    /// `D = e·e`, and `Y` its point with `e·Y = 0`, so that
+    /// `D·Y = d_f·(n_p × e) + d_p·(e × n_f)`. Along it each pipe is
+    /// `G₀ + 2·G₁·u + G₂·u²` at `u = t·D`
+    /// ([`Arrangement::a_pipe_along_a_line`]), with `G₂` above nought where the
+    /// line is not along the pipe's axis. Its two meets are at
+    /// `u = (−G₁ ± √S) / G₂`, for `S = G₁² − G₀·G₂`, the one further along `e`
+    /// with `+`, and there the pipe's value climbs. So with `G` the pipe of
+    /// the meet, a node where `G` is above nought comes before both meets
+    /// where `G` falls there, and after both where it climbs; one where `G` is
+    /// below nought lies between the two; and one where `G` is nought is that
+    /// meet where `G` climbs as it does at the meet, and the other meet
+    /// otherwise. Where the node is a meet of another pipe `F`, the sign of
+    /// `G` there times `F₂²` is that of `B + 2·σ·L·√S_F`, and the sign of its
+    /// slope times `F₂` that of `L + σ·G₂·√S_F`, for `σ` which meet of `F` it
+    /// is, `L = G₁·F₂ − G₂·F₁` and `B = G₀·F₂² − 2·G₁·F₁·F₂ + G₂·(S_F + F₁²)`
+    /// ([`sign_with_a_root`]).
+    ///
+    /// **Which meet a node is** is read off its box as
+    /// [`Arrangement::side_of_a_plane_where_a_line_crosses_a_pipe`] reads it,
+    /// and where the box straddles the middle of the chord, off the number
+    /// [`meet_of_three_surfaces`] gave it, as
+    /// [`Arrangement::as_the_two_meets_of_one_line_say`] reads it.
+    ///
+    /// **It is asked only where the policy would refuse**
+    /// ([`Arrangement::order_along`]), and reads two meets whose boxes have
+    /// one middle too, as [`Arrangement::as_the_side_of_one_cut_the_other_is_on_says`]
+    /// does: by then a tolerant policy has folded the two and a certified one
+    /// has refused their order.
+    fn as_the_pipes_a_line_crosses_say(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        self.as_a_meet_of_a_line_and_a_pipe_says(crossing, first, second)
+            .or_else(|| {
+                self.as_a_meet_of_a_line_and_a_pipe_says(crossing, second, first)
+                    .map(the_other_way)
+            })
+    }
+
+    /// Whether `one` comes before `meet` along `crossing`, as
+    /// [`Arrangement::as_the_pipes_a_line_crosses_say`] reads it with `meet` a
+    /// meet of the crossing's line and a pipe: [`Decision::Pos`] where `one`
+    /// comes first, [`Decision::Zero`] where the two are one point.
+    fn as_a_meet_of_a_line_and_a_pipe_says(
+        &self,
+        crossing: usize,
+        one: usize,
+        meet: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::AlongAnAxis {
+            axis,
+            forward_climbs_the_axis,
+        } = self.crossings[crossing].order
+        else {
+            return None;
+        };
+        let (Some(flat), Some(partner)) = (
+            self.surface.as_plane(),
+            self.crossings[crossing].partner.as_plane(),
+        ) else {
+            return None;
+        };
+        let exact = |vector: [f64; 3]| vector.map(|component| vec![component]);
+        let [flat_normal, partner_normal] =
+            [flat, partner].map(|plane| exact(plane.normal().components()));
+        let line =
+            exactly_crossed(&flat_normal, &partner_normal)?.map(|component| packed(&component));
+        let length_squared = packed(&exactly_dotted_across(&line, &line)?);
+        if expansion_sign(&length_squared) != Decision::Pos {
+            return None;
+        }
+        let foot = exactly_added_across(
+            &exactly_scaled_across(&exactly_crossed(&partner_normal, &line)?, &[flat.offset()])?,
+            &exactly_scaled_across(&exactly_crossed(&line, &flat_normal)?, &[partner.offset()])?,
+        )
+        .map(|component| packed(&component));
+        let climbs = expansion_sign(&line[axis]);
+        // Compared rather than matched: only a proved sign is read, and every
+        // other answer leaves the pair as it was (§40).
+        if !(climbs == Decision::Pos || climbs == Decision::Neg) {
+            return None;
+        }
+        let along_the_line = |pipe: &Cylinder| {
+            let [inside, lean, curve] =
+                Self::a_pipe_along_a_line(pipe, &foot, &length_squared, &line)?;
+            let root_squared = packed(&exactly_added(
+                &exactly_multiplied(&lean, &lean)?,
+                &negated(&exactly_multiplied(&inside, &curve)?),
+            ));
+            (expansion_sign(&curve) == Decision::Pos
+                && expansion_sign(&root_squared) == Decision::Pos)
+                .then_some(([inside, lean, curve], root_squared))
+        };
+        let further_as_a_sign = |further: bool| {
+            if further {
+                Decision::Pos
+            } else {
+                Decision::Neg
+            }
+        };
+        let OnTheLine::AMeetWith { pipe, further } =
+            self.on_the_line(meet, axis, [flat, partner], &line)?
+        else {
+            return None;
+        };
+        let ([g0, g1, g2], _) = along_the_line(&pipe)?;
+        let (value, slope) = match self.on_the_line(one, axis, [flat, partner], &line)? {
+            OnTheLine::At(at) => {
+                let climb = &line[axis];
+                let reach = packed(&exactly_added(
+                    &exactly_scaled(&length_squared, at)?,
+                    &negated(&foot[axis]),
+                ));
+                let value = expansion_sign(&exactly_added(
+                    &exactly_added(
+                        &exactly_multiplied(&g0, &packed(&exactly_multiplied(climb, climb)?))?,
+                        &exactly_scaled(
+                            &exactly_multiplied(&g1, &packed(&exactly_multiplied(climb, &reach)?))?,
+                            2.0,
+                        )?,
+                    ),
+                    &exactly_multiplied(&g2, &packed(&exactly_multiplied(&reach, &reach)?))?,
+                ));
+                let slope = signs_multiplied([
+                    expansion_sign(&exactly_added(
+                        &exactly_multiplied(&g1, climb)?,
+                        &exactly_multiplied(&g2, &reach)?,
+                    )),
+                    climbs,
+                    Decision::Pos,
+                ])?;
+                (value, slope)
+            }
+            OnTheLine::AMeetWith {
+                pipe: its_pipe,
+                further: its_further,
+            } => {
+                let ([_, f1, f2], root_squared) = along_the_line(&its_pipe)?;
+                let lean = packed(&exactly_added(
+                    &exactly_multiplied(&g1, &f2)?,
+                    &negated(&exactly_multiplied(&g2, &f1)?),
+                ));
+                let base = packed(&exactly_added(
+                    &exactly_added(
+                        &exactly_multiplied(&g0, &packed(&exactly_multiplied(&f2, &f2)?))?,
+                        &negated(&exactly_scaled(
+                            &exactly_multiplied(&g1, &packed(&exactly_multiplied(&f1, &f2)?))?,
+                            2.0,
+                        )?),
+                    ),
+                    &exactly_multiplied(
+                        &g2,
+                        &exactly_added(&root_squared, &packed(&exactly_multiplied(&f1, &f1)?)),
+                    )?,
+                ));
+                let which = further_as_a_sign(its_further);
+                (
+                    sign_with_a_root(&base, which, &exactly_scaled(&lean, 2.0)?, &root_squared)?,
+                    sign_with_a_root(&lean, which, &g2, &root_squared)?,
+                )
+            }
+        };
+        if !(value == Decision::Pos || value == Decision::Neg || value == Decision::Zero) {
+            return None;
+        }
+        if value == Decision::Zero && slope == further_as_a_sign(further) {
+            return Some(Decision::Zero);
+        }
+        let before_along_the_line = if value == Decision::Pos {
+            assert_ne!(
+                slope,
+                Decision::Zero,
+                "a pipe a line crosses twice is below nought where it is level along the line"
+            );
+            slope == Decision::Neg
+        } else {
+            further
+        };
+        let lower_on_the_axis = before_along_the_line == (climbs == Decision::Pos);
+        Some(if lower_on_the_axis == forward_climbs_the_axis {
+            Decision::Pos
+        } else {
+            Decision::Neg
+        })
+    }
+
+    /// Where `node` is on the line `flat` and `partner` cross in, along
+    /// `line`, their normals crossed: at one value on `axis`, where its box is
+    /// that thin there, or a meet of the line and a pipe, and which of the two.
+    /// `None` where it is neither, or where nothing says which meet it is.
+    fn on_the_line(
+        &self,
+        node: usize,
+        axis: usize,
+        [flat, partner]: [&Plane; 2],
+        line: &[Vec<f64>; 3],
+    ) -> Option<OnTheLine> {
+        let held = self.narrowed_box_of(node).enclosure();
+        if held[axis].lo() == held[axis].hi() {
+            return Some(OnTheLine::At(held[axis].lo()));
+        }
+        let (surfaces, which) = self.the_one_meet_it_stands_for(node)?;
+        if which > 1 {
+            return None;
+        }
+        let mut planes = surfaces.iter().filter_map(Surface::as_plane);
+        let (Some(one), Some(other), None) = (planes.next(), planes.next(), planes.next()) else {
+            return None;
+        };
+        let in_order = if (one, other) == (flat, partner) {
+            true
+        } else if (one, other) == (partner, flat) {
+            false
+        } else {
+            return None;
+        };
+        let pipe = surfaces.iter().find_map(|surface| {
+            let Surface::Cylinder(pipe) = surface else {
+                return None;
+            };
+            Some(*pipe)
+        })?;
+        let along = pipe
+            .axis()
+            .direction()
+            .components()
+            .map(|component| vec![component]);
+        let up_the_slope = exactly_added_across(
+            &exactly_scaled_across(line, &exactly_dotted_across(&along, &along)?)?,
+            &exactly_scaled_across(&along, &negated(&exactly_dotted_across(line, &along)?))?,
+        );
+        let origin = pipe.axis().origin().coordinates();
+        let read = dot_of(
+            up_the_slope
+                .each_ref()
+                .map(|component| held_as_an_interval(component)),
+            core::array::from_fn(|at| held[at] - Interval::exactly(origin[at])),
+        )
+        .sign();
+        if read == Decision::Pos || read == Decision::Neg {
+            return Some(OnTheLine::AMeetWith {
+                pipe,
+                further: read == Decision::Pos,
+            });
+        }
+        let the_higher = (surfaces, 1);
+        if which == 0
+            && !self
+                .nodes
+                .iter()
+                .any(|node| node.made_of == Some(the_higher) || node.also.contains(&the_higher))
+        {
+            return None;
+        }
+        let (way, _) = the_way_two_planes_line_runs(one, other)?;
+        // The meets come back lower first along `way` times `one × other`
+        // (`as_the_two_meets_of_one_line_say`), and `one × other` is the line
+        // where the two are the face's plane and the partner in that order.
+        let numbered_along_the_line = (way == Decision::Pos) == in_order;
+        Some(OnTheLine::AMeetWith {
+            pipe,
+            further: (which == 1) == numbered_along_the_line,
         })
     }
 
@@ -18811,6 +19105,45 @@ fn signs_multiplied(signs: [Decision; 3]) -> Option<Decision> {
             (_, Decision::Undecidable { .. } | _) => return None,
         })
     })
+}
+
+/// Where a node is on the line two planes cross in
+/// ([`Arrangement::on_the_line`]).
+enum OnTheLine {
+    /// A meet of the line and `pipe`: the one further along the line where
+    /// `further`, the nearer otherwise.
+    AMeetWith { pipe: Cylinder, further: bool },
+    /// The point at this value on the axis the crossing is ordered on.
+    At(f64),
+}
+
+/// The sign of `a + s·b·√c`, for `c` above nought and `s` a sign, each worked
+/// out exactly: `None` where a sign is not proved or a product would round.
+fn sign_with_a_root(a: &[f64], s: Decision, b: &[f64], c: &[f64]) -> Option<Decision> {
+    let first = expansion_sign(a);
+    let second = signs_multiplied([s, expansion_sign(b), Decision::Pos])?;
+    if !(first == Decision::Pos || first == Decision::Neg || first == Decision::Zero) {
+        return None;
+    }
+    if second == Decision::Zero || first == second {
+        return Some(first);
+    }
+    if first == Decision::Zero {
+        return Some(second);
+    }
+    let larger = expansion_sign(&exactly_added(
+        &exactly_multiplied(a, a)?,
+        &negated(&exactly_multiplied(&packed(&exactly_multiplied(b, b)?), c)?),
+    ));
+    if larger == Decision::Pos {
+        Some(first)
+    } else if larger == Decision::Neg {
+        Some(second)
+    } else if larger == Decision::Zero {
+        Some(Decision::Zero)
+    } else {
+        None
+    }
 }
 
 /// `expansion` times `factor`, exactly; `None` where one of the products would
