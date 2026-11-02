@@ -94,12 +94,22 @@
 //! read as where the line the two planes share crosses the pipe (Q3017).
 //! Either alone gets both boxes past that point.
 //!
-//! Every box, the far one included, stops now on `order along a crossing`
+//! Every box, the far one included, stopped then on `order along a crossing`
 //! between the front corner and a point within `1.8e-15` of it, the shape
 //! Q2959 folds into the corner, not folded here (Q3015). The front draws the
 //! circle it meets the body's pipe in twice, as the edge of its hole and as
-//! the pipe cut across it, and the flat's line meets the two a rounding apart
-//! (Q3021).
+//! the pipe cut across it, and the flat's line meets the two a rounding apart.
+//! Which of two such points comes first is now read off where the line
+//! crosses each pipe, worked out as exactly as `f64` holds it, with a bound on
+//! every product too small to hold (Q3054).
+//!
+//! Every box, the far one included, stops now on `order along a crossing` on
+//! the straight line where the front's plane crosses the body's front disc's,
+//! `(-3.6e-32, 1, -1.15e-15)` and `(5.6e-17, 1, 0)`, one plane written twice.
+//! It is between the front corner, a corner of both faces, and where the flat
+//! meets that line: solved from the flat, the front and the disc, three planes
+//! two of which are a rounding apart, its box runs along the flat's line from
+//! `z = 2.56` to `3.14`, round the corner.
 //!
 //! These tests pin that. When it answers, each turns back
 //! into the volume check of commit `f179ca02a`: what the box and the LED share
@@ -206,11 +216,14 @@
 //! crossing, so a node that cannot tell is now passed over and the walk read
 //! off a node that can (Q3009). Reading a node solved from a pipe and two
 //! planes as where the line the two planes share crosses the pipe gets it past
-//! too, on its own (Q3017). It stops now `Undecidable` with the one record
+//! too, on its own (Q3017). It stopped then `Undecidable` with the one record
 //! `order along a crossing`, the far box included, between two points a
 //! rounding apart on the front where `x = 2.24` crosses the body's pipe, near
 //! `(2.24, -3.81, 4.856)`: one where the front's hole meets it, and one where
-//! the body's pipe, as a cut, does.
+//! the body's pipe, as a cut, does (Q3014). The two are read as the `Z3.0`
+//! LED's are (Q3054), and it stops where that one does: on the line the
+//! front's plane crosses the disc's in, between its front corner and where
+//! its flat meets that line, near `(-0.23, -3.81, 6.1466)`.
 //!
 //! The `Z15.0` LED stopped on its body's pipe, `Undecidable` with the one
 //! record `where three surfaces meet`, the far box included, handed the
@@ -249,24 +262,39 @@ const HALF: f64 = 0.1;
 /// Where the box that misses the LED goes.
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
+/// The `Z3.0` LED's front corner.
+const Z3_FRONT_CORNER: [f64; 3] = [-1.23, -1.27, 3.0];
+
+/// Where along `z` the box runs round the point where the `Z3.0` LED's flat
+/// meets the line its front's plane crosses its disc's in.
+const Z3_FLAT_MEETS_THE_FRONT_WRITTEN_TWICE: [f64; 2] = [2.561835480531503, 3.1393674318066886];
+
 #[test]
-fn a_box_round_either_corner_gets_past_the_side_of_a_point_on_its_rim_and_stops_on_the_order_of_two_points_at_the_front_corner()
+fn a_box_round_either_corner_gets_past_where_the_flat_meets_the_front_circle_drawn_twice_and_stops_where_it_meets_the_front_written_twice()
  {
     every_fuse_refuses(
         Z3,
-        &a_box_round_each_of(&[[-1.23, -1.27, 3.0], [-1.23, -2.27, 3.0]]),
-        the_order_of_the_front_corner_and_a_point_beside_it_is_undecidable,
+        &a_box_round_each_of(&[Z3_FRONT_CORNER, [-1.23, -2.27, 3.0]]),
+        |_, error| {
+            the_front_corner_and_where_the_flat_meets_the_front_written_twice_are_not_ordered(
+                Z3_FRONT_CORNER,
+                Z3_FLAT_MEETS_THE_FRONT_WRITTEN_TWICE,
+                error,
+            )
+        },
     );
 }
 
 #[test]
-fn a_far_box_gets_past_a_meet_far_along_the_flat_and_stops_on_the_order_of_two_points_at_the_front_corner()
+fn a_far_box_gets_past_where_the_flat_meets_the_front_circle_drawn_twice_and_stops_where_it_meets_the_front_written_twice()
  {
-    every_fuse_refuses(
-        Z3,
-        &a_box_round_each_of(&[FAR_OFF]),
-        the_order_of_the_front_corner_and_a_point_beside_it_is_undecidable,
-    );
+    every_fuse_refuses(Z3, &a_box_round_each_of(&[FAR_OFF]), |_, error| {
+        the_front_corner_and_where_the_flat_meets_the_front_written_twice_are_not_ordered(
+            Z3_FRONT_CORNER,
+            Z3_FLAT_MEETS_THE_FRONT_WRITTEN_TWICE,
+            error,
+        )
+    });
 }
 
 /// The `Z15.0` LED gets past its body's pipe since Q2940, and past where its
@@ -298,16 +326,25 @@ fn a_z15_led_gets_past_where_its_flat_touches_its_dome_and_stops_on_two_ways_out
 /// it puts in order the two points where `z = 5.7` crosses its flange's rim
 /// at the front, one on the flange's front and one on the body's front disc,
 /// the one plane written twice. Since Q3009 a walk on the rim whose node
-/// cannot tell its side of the disc is read off another node. It stops on the
-/// order of two points where `x = 2.24` crosses the body's pipe on the front,
-/// the far box included.
+/// cannot tell its side of the disc is read off another node. Since Q3054 it
+/// puts in order the two points where `x = 2.24` crosses the body's pipe on
+/// the front. It stops on the order of its front corner and where its flat
+/// meets the line its front's plane crosses its disc's in, the far box
+/// included.
 #[test]
-fn a_d3_led_gets_past_the_side_of_a_point_on_its_rim_and_stops_where_x_2_24_crosses_its_body_on_its_front()
+fn a_d3_led_gets_past_where_x_2_24_crosses_its_body_on_its_front_and_stops_where_its_flat_meets_its_front_written_twice()
  {
+    let front_corner = [-0.23, -3.81, 5.999999956464];
     every_fuse_refuses(
         D3,
-        &a_box_round_each_of(&[[-0.23, -3.81, 5.999999956464], [-0.23, -4.81, 6.0], FAR_OFF]),
-        the_order_of_two_meets_of_x_2_24_and_the_body_on_the_front_is_undecidable,
+        &a_box_round_each_of(&[front_corner, [-0.23, -4.81, 6.0], FAR_OFF]),
+        |_, error| {
+            the_front_corner_and_where_the_flat_meets_the_front_written_twice_are_not_ordered(
+                front_corner,
+                [6.14661264875828, 6.146612648758283],
+                error,
+            )
+        },
     );
 }
 
@@ -352,10 +389,14 @@ fn every_fuse_refuses(
     }
 }
 
-/// Refused `Undecidable` with the one record `order along a crossing`, its two
-/// points within `1e-9` of the front corner `(-1.23, -1.27, 3)`.
-fn the_order_of_the_front_corner_and_a_point_beside_it_is_undecidable(
-    _: &Model,
+/// Refused `Undecidable` with the one record `order along a crossing`, handed
+/// `front_corner` and a point on the flat's line on the front: its `x` and `y`
+/// within `1e-9` of the corner's, and its box along `z` from `along_z[0]` to
+/// `along_z[1]`, each within `1e-9`. That point is where the flat meets the
+/// line the front's plane crosses the body's front disc's in.
+fn the_front_corner_and_where_the_flat_meets_the_front_written_twice_are_not_ordered(
+    front_corner: [f64; 3],
+    along_z: [f64; 2],
     error: &Error,
 ) -> bool {
     let Error::Undecidable { records } = error else {
@@ -367,34 +408,13 @@ fn the_order_of_the_front_corner_and_a_point_beside_it_is_undecidable(
     let [one, other] = record.inputs() else {
         return false;
     };
-    let the_front_corner = [-1.23, -1.27, 3.0];
+    let [x, y, _] = front_corner;
+    let on_the_flats_line =
+        |point: &Point| is_within_1e_9_of_the_box(point, [[x, x], [y, y], along_z]);
+    let the_corner = |point: &Point| is_within_1e_9_of(point, front_corner);
     record.predicate() == ALONG_A_CROSSING
-        && is_within_1e_9_of(one, the_front_corner)
-        && is_within_1e_9_of(other, the_front_corner)
-}
-
-/// Refused `Undecidable` with the one record `order along a crossing`, its
-/// two points within `1e-9` of where `x = 2.24` crosses the body's circle of
-/// radius 1.5 about `x = 1.27, z = 6` on the front `y = -3.81`, below the
-/// axis.
-fn the_order_of_two_meets_of_x_2_24_and_the_body_on_the_front_is_undecidable(
-    _: &Model,
-    error: &Error,
-) -> bool {
-    let Error::Undecidable { records } = error else {
-        return false;
-    };
-    let [record] = records.records() else {
-        return false;
-    };
-    let [one, other] = record.inputs() else {
-        return false;
-    };
-    let below_the_axis = 6.0 - (1.5_f64.powi(2) - (2.24_f64 - 1.27).powi(2)).sqrt();
-    let the_meet = [2.24, -3.81, below_the_axis];
-    record.predicate() == ALONG_A_CROSSING
-        && is_within_1e_9_of(one, the_meet)
-        && is_within_1e_9_of(other, the_meet)
+        && ((the_corner(one) && on_the_flats_line(other))
+            || (on_the_flats_line(one) && the_corner(other)))
 }
 
 /// Refused `Undecidable` with the one record `two ways out of a node along one
@@ -424,11 +444,17 @@ fn which_way_two_ways_out_of_the_back_corner_go_is_undecidable(_: &Model, error:
 }
 
 fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
+    is_within_1e_9_of_the_box(point, at.map(|at| [at, at]))
+}
+
+/// Whether each side of `point`'s box ends within `1e-9` of where the same
+/// side of `sides` ends, `[lo, hi]` along each axis.
+fn is_within_1e_9_of_the_box(point: &Point, sides: [[f64; 2]; 3]) -> bool {
     point
         .enclosure()
         .iter()
-        .zip(at)
-        .all(|(side, at)| (side.lo() - at).abs() < 1e-9 && (side.hi() - at).abs() < 1e-9)
+        .zip(sides)
+        .all(|(side, [lo, hi])| (side.lo() - lo).abs() < 1e-9 && (side.hi() - hi).abs() < 1e-9)
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
