@@ -1298,7 +1298,124 @@ fn the_point_a_surface_sits_at(surface: &Surface) -> PredicatePoint {
 /// exactly as a refusal is, which is what
 /// `three_planes_meeting_past_the_top_of_the_range_are_refused_rather_than_placed_nowhere`
 /// demonstrates.
+///
+/// **Two planes that are plainly parallel and apart are answered before any of
+/// that**, because the answer is already in their numbers and the long way to
+/// it costs several times what a corner does, and a fuse placing the corners
+/// of a face cut by many walls asks it of every pair of parallel walls.
+/// [`two_of_them_are_plainly_apart`] says when that holds and why the long way
+/// answers the same.
 fn where_three_planes_meet(
+    one: &Plane,
+    other: &Plane,
+    last: &Plane,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<MeetOfThree> {
+    if two_of_them_are_plainly_apart(one, other, last) {
+        return Ok(MeetOfThree::Nowhere);
+    }
+    where_three_planes_meet_the_long_way(one, other, last, policy, log)
+}
+
+/// Whether the stored numbers alone show that two of the three planes are
+/// parallel and apart, so the three meet nowhere.
+///
+/// It holds when every one of the twelve numbers is in the range
+/// [`nothing_the_long_way_multiplies_out_rounds`] names, and either `one` and
+/// `other` are parallel and apart, or `one` and `other` are not parallel and
+/// `last` is parallel to one of them and apart from it. Parallel and apart is
+/// [`parallel_and_apart`]: the same normal by value with another offset, or the
+/// normal turned round with an offset that is not the other turned round.
+///
+/// **This gives the long way's own answer, bit for bit and with nothing
+/// logged**, which is what lets it go first. In that range every product the
+/// long way forms is an exact product above `2⁻⁹⁶⁹`, so it rounds nothing,
+/// loses nothing off the bottom and settles every sign at the exact level,
+/// which logs nothing under any policy:
+///
+/// - Cramer's rule refuses, at both scales, because the three normals'
+///   determinant is exactly zero and a power of two on a row keeps it zero.
+/// - Where `one` and `other` are parallel and apart, every minor of their
+///   normals is exactly zero, so they cross in no line, and
+///   [`Plane::agreement_with`] finds the minor `aₖ·d₂ − d₁·a₂ₖ`, which is
+///   `aₖ·(d₂ ∓ d₁)` and not zero for a `k` with `aₖ` not zero. They are
+///   different planes, and that is [`MeetOfThree::Nowhere`].
+/// - Where they are not parallel, the line they cross in is found, it runs
+///   square to `last`'s normal, so the step along it is exactly zero, and it
+///   sits in a plane parallel to `last` and apart from it, so the reach is
+///   not zero. The line misses `last`, and that is
+///   [`MeetOfThree::Nowhere`] too.
+///
+/// **What it leaves to the long way** is everything else: two planes that may
+/// be one plane, where the long way asks [`intersect`] about the third; two
+/// normals that are parallel without being equal by value, as two normals
+/// [`Plane::from_point_and_normal_as_written`] keeps can be; and a number
+/// outside the range. `a_meet_answered_at_once_is_the_one_the_long_way_gives`
+/// checks the two against each other.
+fn two_of_them_are_plainly_apart(one: &Plane, other: &Plane, last: &Plane) -> bool {
+    let [mine, theirs, its] = [one, other, last].map(Plane::coefficients);
+    if ![mine, theirs, its]
+        .iter()
+        .flatten()
+        .all(|&number| nothing_the_long_way_multiplies_out_rounds(number))
+    {
+        return false;
+    }
+    if parallel_and_apart(mine, theirs) {
+        return true;
+    }
+    normals_proved_not_parallel(mine, theirs)
+        && (parallel_and_apart(mine, its) || parallel_and_apart(theirs, its))
+}
+
+/// Whether `number` is zero, or sits between `2⁻¹⁵⁰` and `2¹⁵⁰` either side of
+/// it.
+///
+/// Every `f64` in that range is a whole multiple of `2⁻²⁰²`, so every entry of
+/// an exact sum of products of two of them is a whole multiple of `2⁻⁴⁰⁴`, and
+/// one that is not zero is at least that big. The long way multiplies such an
+/// entry by a stored number, or by another such entry, and never anything
+/// longer, so every product it forms that is not zero is at least `2⁻⁸⁰⁸`.
+/// That is above [`product_is_exact`]'s `2⁻⁹⁶⁹`, and the largest, about
+/// `2⁶⁰⁴`, is far below the top of the range.
+///
+/// [`product_is_exact`]: rcad_predicates::expansion::product_is_exact
+fn nothing_the_long_way_multiplies_out_rounds(number: f64) -> bool {
+    const SMALLEST: f64 = f64::from_bits((1023 - 150) << 52);
+    const LARGEST: f64 = f64::from_bits((1023 + 150) << 52);
+    number == 0.0 || (SMALLEST..=LARGEST).contains(&number.abs())
+}
+
+/// Whether two planes `[a, b, c, d]` are parallel and apart, read off their
+/// numbers by value.
+///
+/// By value and not by bits, so that a `-0.0` in one normal and a `0.0` in the
+/// other are the same component, as they are to the arithmetic.
+fn parallel_and_apart(mine: [f64; 4], theirs: [f64; 4]) -> bool {
+    let same_way = (0..3).all(|axis| theirs[axis] == mine[axis]);
+    let turned_round = (0..3).all(|axis| theirs[axis] == -mine[axis]);
+    (same_way && theirs[3] != mine[3]) || (turned_round && theirs[3] != -mine[3])
+}
+
+/// Whether two planes' normals are shown not to be parallel by a minor whose
+/// two products round to different `f64`.
+///
+/// Rounding never turns a larger number into a smaller one, so two products
+/// that are equal round to the same `f64`, and two that round apart differ.
+/// That minor of the two normals is then not zero, and the normals are not
+/// parallel. The converse does not hold, and a pair this cannot show apart is
+/// left to the long way.
+fn normals_proved_not_parallel(mine: [f64; 4], theirs: [f64; 4]) -> bool {
+    (0..3).any(|axis| {
+        let (across, and) = ((axis + 1) % 3, (axis + 2) % 3);
+        mine[across] * theirs[and] != mine[and] * theirs[across]
+    })
+}
+
+/// [`where_three_planes_meet`] for three planes the stored numbers alone do
+/// not settle.
+fn where_three_planes_meet_the_long_way(
     one: &Plane,
     other: &Plane,
     last: &Plane,
@@ -7612,6 +7729,125 @@ mod tests {
         };
         assert_eq!(points.len(), 1);
         assert!(points[0].uncertainty().is_finite());
+    }
+
+    /// Every triple of planes [`two_of_them_are_plainly_apart`] answers at once
+    /// is one the long way answers [`MeetOfThree::Nowhere`] with nothing logged,
+    /// under a certified policy and a tolerant one, and every other triple gets
+    /// the long way's own answer and records.
+    ///
+    /// The planes are walls along each axis, both ways round, a floor and a
+    /// ceiling, walls on a slant, walls a rounding and a millionth off
+    /// parallel, a wall whose normal is kept as written a rounding short of
+    /// length one, which is parallel to the unit one without being equal to
+    /// it, and walls whose numbers are outside the range the answer at once
+    /// takes. Every ordered triple of them is asked, so every pair is in every
+    /// place, and each plane is also paired with itself.
+    #[test]
+    fn a_meet_answered_at_once_is_the_one_the_long_way_gives() {
+        let unit = |normal: [f64; 3], through: [f64; 3]| {
+            Plane::from_point_and_normal(
+                Point::new(through[0], through[1], through[2]),
+                Vector::new(normal[0], normal[1], normal[2]),
+            )
+            .expect("a normal with length")
+        };
+        let as_written = |normal: [f64; 3], through: [f64; 3]| {
+            Plane::from_point_and_normal_as_written(
+                Point::new(through[0], through[1], through[2]),
+                Vector::new(normal[0], normal[1], normal[2]),
+            )
+            .expect("a normal with length")
+        };
+        let slant = core::f64::consts::FRAC_1_SQRT_2;
+        let floor = unit([0.0, 0.0, 1.0], [0.0, 0.0, 1.6]);
+        let wall = unit([1.0, 0.0, 0.0], [1.5, 0.0, 0.0]);
+        let wall_apart = unit([1.0, 0.0, 0.0], [-7.3, 0.0, 0.0]);
+        let wall_turned_round = unit([-1.0, 0.0, 0.0], [4.0, 0.0, 0.0]);
+        let wall_as_written = as_written([1.0 - f64::EPSILON / 2.0, 0.0, 0.0], [1.5, 0.0, 0.0]);
+        let wall_far_out = unit([1.0, 0.0, 0.0], [1e200, 0.0, 0.0]);
+        assert_ne!(
+            wall_as_written.normal().components()[0],
+            1.0,
+            "the normal is kept as it was written"
+        );
+        let planes = [
+            floor,
+            wall,
+            wall_apart,
+            wall_turned_round,
+            wall_as_written,
+            wall_far_out,
+            wall.reversed(),
+            unit([1.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+            unit([1.0, 0.0, 0.0], [1e-200, 0.0, 0.0]),
+            unit([0.0, 1.0, 0.0], [0.0, 0.32, 0.0]),
+            unit([0.0, 1.0, 0.0], [0.0, -0.32, 0.0]),
+            unit([0.0, -1.0, 0.0], [0.0, 2.54, 0.0]),
+            unit([0.0, 0.0, 1.0], [0.0, 0.0, 2.1]),
+            unit([0.0, 0.0, -1.0], [0.0, 0.0, -3.0]),
+            unit([slant, 0.0, slant], [1.0, 0.0, 0.0]),
+            unit([slant, 0.0, slant], [2.0, 0.0, 0.0]),
+            unit([0.0, -slant, -slant], [0.0, 1.0, 0.0]),
+            unit([0.0, slant, slant], [0.0, -1.0, 0.0]),
+            unit([slant, 0.0, -slant], [0.0, 0.0, 0.0]),
+            as_written([1.0, 2f64.powi(-60), 0.0], [3.0, 0.0, 0.0]),
+            as_written([1.0, 1e-200, 0.0], [3.0, 0.0, 0.0]),
+            unit([1.0, 1e-6, 0.0], [3.0, 0.0, 0.0]),
+            unit([0.0, 0.0, 1.0], [0.0, 0.0, 1e-200]),
+        ];
+        let policies = [Policy::certified(), Policy::tolerant(1.0)];
+        let mut answered_at_once = 0usize;
+        for one in &planes {
+            for other in &planes {
+                for last in &planes {
+                    let at_once = two_of_them_are_plainly_apart(one, other, last);
+                    answered_at_once += usize::from(at_once);
+                    for policy in &policies {
+                        let mut long_records = ProvenanceLog::new();
+                        let long = where_three_planes_meet_the_long_way(
+                            one,
+                            other,
+                            last,
+                            policy,
+                            &mut long_records,
+                        );
+                        let mut records = ProvenanceLog::new();
+                        let answer =
+                            where_three_planes_meet(one, other, last, policy, &mut records);
+                        let planes = [one, other, last].map(Plane::coefficients);
+                        assert_eq!(
+                            format!("{answer:?} {records:?}"),
+                            format!("{long:?} {long_records:?}"),
+                            "{planes:?} under {policy:?}"
+                        );
+                        if at_once {
+                            assert_eq!(long, Ok(MeetOfThree::Nowhere), "{planes:?}");
+                            assert!(long_records.records().is_empty(), "{planes:?}");
+                        }
+                    }
+                }
+            }
+        }
+
+        for [one, other, last] in [
+            [&wall, &wall_apart, &floor],
+            [&floor, &wall, &wall_apart],
+            [&wall_apart, &floor, &wall],
+            [&wall, &floor, &wall_turned_round],
+        ] {
+            assert!(two_of_them_are_plainly_apart(one, other, last));
+        }
+        for [one, other, last] in [
+            [&wall, &wall, &floor],
+            [&wall, &wall.reversed(), &floor],
+            [&wall, &wall_as_written, &floor],
+            [&floor, &wall, &wall_as_written],
+            [&wall, &wall_far_out, &floor],
+        ] {
+            assert!(!two_of_them_are_plainly_apart(one, other, last));
+        }
+        assert!(answered_at_once > 0);
     }
 
     /// A floor and two walls a millionth off parallel: Cramer's box round

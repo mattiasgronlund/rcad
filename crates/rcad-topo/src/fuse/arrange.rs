@@ -2485,6 +2485,7 @@ impl<'f> Arrangement<'f> {
         let mut set_aside: Vec<(usize, usize, MeetOfThree)> = Vec::new();
         let mut folded_into_a_corner: Vec<usize> = Vec::new();
         let mut held: Option<rcad_geom::Error> = None;
+        let corners_on = self.the_corners_on_each_crossing();
         for first in 0..self.crossings.len() {
             for second in (first + 1)..self.crossings.len() {
                 if !self.crossings[first].reaches_the_face
@@ -2555,6 +2556,7 @@ impl<'f> Arrangement<'f> {
                     first,
                     second,
                     &[first, second],
+                    &Self::on_both_of(&corners_on, first, second),
                     meet,
                     &mut folded_into_a_corner,
                 );
@@ -2590,8 +2592,20 @@ impl<'f> Arrangement<'f> {
                     continue;
                 }
             }
-            self.place_where_the_partners_meet(first, second, &on, meet, &mut folded_into_a_corner);
+            self.place_where_the_partners_meet(
+                first,
+                second,
+                &on,
+                &Self::on_both_of(&corners_on, first, second),
+                meet,
+                &mut folded_into_a_corner,
+            );
         }
+        assert_eq!(
+            corners_on,
+            self.the_corners_on_each_crossing(),
+            "placing the meets puts no corner of the face on another crossing"
+        );
         for crossing in left_out {
             self.crossings[crossing].reaches_the_face = false;
             let drawn_by: Vec<Surface> = self.crossings[crossing]
@@ -2607,6 +2621,42 @@ impl<'f> Arrangement<'f> {
         self.place_the_middle_of_each_half();
         self.place_the_middle_of_each_arc_of_two_cones();
         Ok(())
+    }
+
+    /// The corners of the face on each crossing, as
+    /// [`Arrangement::place_the_corners`] put them there, in the order
+    /// `node_of_corner` holds them.
+    ///
+    /// **Read once for every pair, because looking through every corner for
+    /// each meet was half of what placing the meets cost.** The 1x25 pin
+    /// header's body has a face with 252 corners and 264 crossings, which
+    /// places 25 713 meets, and each looked through all 252 corners twice:
+    /// once for whether one is on both crossings and once for which one is the
+    /// place. Each crossing is on a few corners, so the corners on both are
+    /// read off two short lists here instead.
+    fn the_corners_on_each_crossing(&self) -> Vec<SmallVec<[usize; 4]>> {
+        let mut on = vec![SmallVec::new(); self.crossings.len()];
+        for &corner in self.node_of_corner.iter().flatten() {
+            for &crossing in &self.nodes[corner].crossings {
+                on[crossing].push(corner);
+            }
+        }
+        on
+    }
+
+    /// The corners of the face on both `first` and `second`, read off
+    /// [`Arrangement::the_corners_on_each_crossing`], in the order
+    /// [`Arrangement::the_corners_on_both`] finds them.
+    fn on_both_of(
+        corners_on: &[SmallVec<[usize; 4]>],
+        first: usize,
+        second: usize,
+    ) -> SmallVec<[usize; 2]> {
+        corners_on[first]
+            .iter()
+            .copied()
+            .filter(|corner| corners_on[second].contains(corner))
+            .collect()
     }
 
     /// Whether a place where `meet` has the face's surface and the partners of
@@ -2722,11 +2772,14 @@ impl<'f> Arrangement<'f> {
     /// it, or a corner of the face already is that place
     /// ([`Arrangement::the_corner_that_is_this_place`]), which then stands for
     /// it and is noted in `folded_into_a_corner`. None when `on` is empty.
+    /// `on_both` is what [`Arrangement::the_corners_on_both`] says of `first`
+    /// and `second`.
     fn place_where_the_partners_meet(
         &mut self,
         first: usize,
         second: usize,
         on: &[usize],
+        on_both: &[usize],
         meet: MeetOfThree,
         folded_into_a_corner: &mut Vec<usize>,
     ) {
@@ -2746,7 +2799,7 @@ impl<'f> Arrangement<'f> {
         // (`Arrangement::narrowed_box_of`). Working it out for every
         // meet of three planes was 11 of 22 samples taken in placing
         // the meets of a cut through the 1x39 pin header (§200.1).
-        let tight = if self.a_corner_is_on_both(first, second) {
+        let tight = if !on_both.is_empty() {
             meet.boxed_tight(asked)
         } else {
             meet.clone()
@@ -2776,7 +2829,8 @@ impl<'f> Arrangement<'f> {
             }
             let mut sorted = surfaces;
             sorted.sort_by_key(name_of_surface_bits);
-            let folded = self.the_corner_that_is_this_place(first, second, which, &places, &tight);
+            let folded =
+                self.the_corner_that_is_this_place(on_both, first, second, which, &places, &tight);
             let which = u8::try_from(which).expect("three surfaces meet at most twice");
             if let Some(corner) = folded {
                 self.nodes[corner].stands_for_too((sorted, which));
@@ -2929,8 +2983,9 @@ impl<'f> Arrangement<'f> {
         meet: &WhereTwoLoopsMeet,
     ) {
         let named = where_two_halves_meet(&self.surface, &self.crossings[first].partner);
+        let on_both = self.the_corners_on_both(first, second);
         if let Some(corner) =
-            self.the_corner_that_is_this_place(first, second, 0, &[meet.at], &[meet.at])
+            self.the_corner_that_is_this_place(&on_both, first, second, 0, &[meet.at], &[meet.at])
         {
             self.nodes[corner].stands_for_too((named, 6));
         } else {
@@ -2998,13 +3053,19 @@ impl<'f> Arrangement<'f> {
         });
     }
 
-    /// Whether some corner of the face is on both crossings, which is where
+    /// The corners of the face on both crossings, in the order
+    /// `node_of_corner` holds them, which is where
     /// [`Arrangement::the_corner_that_is_this_place`] looks.
-    fn a_corner_is_on_both(&self, first: usize, second: usize) -> bool {
-        self.node_of_corner.iter().flatten().any(|&corner| {
-            let through = &self.nodes[corner].crossings;
-            through.contains(&first) && through.contains(&second)
-        })
+    fn the_corners_on_both(&self, first: usize, second: usize) -> SmallVec<[usize; 2]> {
+        self.node_of_corner
+            .iter()
+            .flatten()
+            .copied()
+            .filter(|&corner| {
+                let through = &self.nodes[corner].crossings;
+                through.contains(&first) && through.contains(&second)
+            })
+            .collect()
     }
 
     /// The node where two curves of one pair cross, for the two pairs here that
@@ -3055,7 +3116,9 @@ impl<'f> Arrangement<'f> {
                 && nothing_rules_the_point_out(self.crossings[second].picked_by(), apex),
             "each of the rulings a plane or a cone cuts through a cone's apex holds the apex"
         );
-        if let Some(corner) = self.the_corner_that_is_this_place(first, second, 0, &[apex], &[apex])
+        let on_both = self.the_corners_on_both(first, second);
+        if let Some(corner) =
+            self.the_corner_that_is_this_place(&on_both, first, second, 0, &[apex], &[apex])
         {
             self.nodes[corner].stands_for_too((named, 0));
             return;
@@ -3351,7 +3414,9 @@ impl<'f> Arrangement<'f> {
         places: &[PredicatePoint],
         name: ([Surface; 3], u8),
     ) {
-        if let Some(corner) = self.the_corner_that_is_this_place(first, second, at, places, places)
+        let on_both = self.the_corners_on_both(first, second);
+        if let Some(corner) =
+            self.the_corner_that_is_this_place(&on_both, first, second, at, places, places)
         {
             self.nodes[corner].stands_for_too(name);
             return;
@@ -3908,8 +3973,11 @@ impl<'f> Arrangement<'f> {
     /// there were meets placed before it: a face of the 1x39 pin header's body
     /// cut by its 332 planes placed 38 116 meets, and looking each one up among
     /// the others was 12 of 31 samples of a cut through that header (§200.1).
+    /// Nor every corner: only `on_both`, the corners on both crossings, as
+    /// [`Arrangement::the_corners_on_both`] finds them, in that order.
     fn the_corner_that_is_this_place(
         &self,
+        on_both: &[usize],
         first: usize,
         second: usize,
         which: usize,
@@ -3921,56 +3989,51 @@ impl<'f> Arrangement<'f> {
             tight.len(),
             "each place of the meet has the tightest box known to hold it"
         );
-        self.node_of_corner
-            .iter()
-            .flatten()
-            .copied()
-            .find(|&corner| {
-                let node = &self.nodes[corner];
-                if !(node.crossings.contains(&first) && node.crossings.contains(&second)) {
-                    return false;
-                }
-                let room = if self.bake_placed_the_corner_on_the_three_planes(node, first, second) {
-                    self.the_baked_corner_of(node)
-                        .room_its_planes_were_asked_with
-                        .expect(
-                            "a corner with three or more surfaces round it was asked about each",
-                        )
-                } else {
-                    super::bake::what_writing_the_corner_down_cost(node.point.enclosure())
-                };
-                let allowed = super::bake::grown_by(node.point, room);
-                let reaches_the_room = |other: &PredicatePoint| boxes_overlap(allowed, *other);
-                let reaching: SmallVec<[usize; 2]> = (0..places.len())
-                    .filter(|&other| reaches_the_room(&places[other]))
-                    .collect();
-                if reaching.is_empty() {
-                    return self.a_touch_the_rounding_split_reaches(
-                        node.point,
-                        [first, second],
-                        tight[which],
-                        room,
-                    );
-                }
-                let room = allowed.enclosure();
-                let inside_the_room = |meet: &PredicatePoint| {
-                    let meet = meet.enclosure();
-                    (0..3).all(|axis| {
-                        room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
-                    })
-                };
-                let one_touch_at_the_corner = || {
-                    reaching.iter().all(|&one| {
-                        inside_the_room(&tight[one])
-                            && reaching
-                                .iter()
-                                .all(|&other| boxes_overlap(tight[one], tight[other]))
-                    })
-                };
-                reaches_the_room(&places[which])
-                    && inside_the_room(&tight[which])
-                    && (reaching.len() == 1 || one_touch_at_the_corner())
-            })
+        on_both.iter().copied().find(|&corner| {
+            let node = &self.nodes[corner];
+            assert!(
+                node.crossings.contains(&first) && node.crossings.contains(&second),
+                "each corner looked through is on both crossings"
+            );
+            let room = if self.bake_placed_the_corner_on_the_three_planes(node, first, second) {
+                self.the_baked_corner_of(node)
+                    .room_its_planes_were_asked_with
+                    .expect("a corner with three or more surfaces round it was asked about each")
+            } else {
+                super::bake::what_writing_the_corner_down_cost(node.point.enclosure())
+            };
+            let allowed = super::bake::grown_by(node.point, room);
+            let reaches_the_room = |other: &PredicatePoint| boxes_overlap(allowed, *other);
+            let reaching: SmallVec<[usize; 2]> = (0..places.len())
+                .filter(|&other| reaches_the_room(&places[other]))
+                .collect();
+            if reaching.is_empty() {
+                return self.a_touch_the_rounding_split_reaches(
+                    node.point,
+                    [first, second],
+                    tight[which],
+                    room,
+                );
+            }
+            let room = allowed.enclosure();
+            let inside_the_room = |meet: &PredicatePoint| {
+                let meet = meet.enclosure();
+                (0..3).all(|axis| {
+                    room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
+                })
+            };
+            let one_touch_at_the_corner = || {
+                reaching.iter().all(|&one| {
+                    inside_the_room(&tight[one])
+                        && reaching
+                            .iter()
+                            .all(|&other| boxes_overlap(tight[one], tight[other]))
+                })
+            };
+            reaches_the_room(&places[which])
+                && inside_the_room(&tight[which])
+                && (reaching.len() == 1 || one_touch_at_the_corner())
+        })
     }
 
     /// Whether [`Arrangement::the_corner_that_is_this_place`] finds a corner,
@@ -3984,7 +4047,8 @@ impl<'f> Arrangement<'f> {
         places: &[PredicatePoint],
         tight: &[PredicatePoint],
     ) -> bool {
-        self.the_corner_that_is_this_place(first, second, which, places, tight)
+        let on_both = self.the_corners_on_both(first, second);
+        self.the_corner_that_is_this_place(&on_both, first, second, which, places, tight)
             .is_some()
     }
 
