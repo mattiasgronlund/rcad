@@ -22051,10 +22051,216 @@ one.
 
 ### 464.32 The side of rcad-geom's torus with a zero factor
 
-Draft, left by Q2786's second lane for the lane after it: `torzero.py` below
-writes 169 cases and their 169 controls. The third lane ran them, and its
-draft after `torzero.py` says what they printed. The lane that writes this
-section up replaces both drafts.
+Q2786 ran 464.17's `tor.g` where a difference or a direction component is
+zero, in four lanes on 2026-11-02, at `37bc60af`. The first committed
+nothing, the second wrote `torzero.py`, the third tried it and ran it, and
+the fourth wrote `hollowapart.py` and this. The bound is proved on `y`, the
+sum before `value`'s last rounding, at the code's constant in each of the 169
+cases, and Coq checks each proof, modulo its hints, one of them only at its
+second certificate. Each control at `u / 2` fails, and no case prints
+"pointless". A direction with all three components zero, and a zero radius,
+do not reach `on_floats`, and at the centre a `hollow` below the normals
+returns `None`. So with 464.17 every pattern of zero differences and
+direction components that reaches level 1's comparison is run, and the bound
+holds on `y` in each, at most `16u + 83u²` of the permanent, below the
+`17u + 95u²` 464.17 proves where no factor is zero. The torus about `x`, a
+point on its axis and its centre are among them. The doc comment on the
+constant says these branches have not been run, which is a row (6).
+
+**1. Which zeros get through.** `product_is_normal(a, b)` is `a == 0.0 || b
+== 0.0 || (a * b).abs() >= f64::MIN_POSITIVE` (`cascade.rs:67-69` at
+`37bc60af`). So `on_floats` (`torus.rs:336-398`) lets a zero factor through
+every check it makes: in `stays_accurate` (`torus.rs:350-359`) the squares of
+each difference, each direction component and each component of the cross
+product, the six halves, and `R²` and `r²`; and after it
+(`torus.rs:373-377`) `bulge²`, `axis_squared` with `bulge²`, and `4R²` with
+`across`. A half whose two factors are not zero is normal, which the checks
+enforce, so it is zero exactly when one of its factors is. Of the eight
+factors:
+
+- A difference `f = rnd(p − o)` is zero exactly when `p` and the centre's `o`
+  are the same double, as 464.11's `diffzero.g` writes it, so its true value
+  is zero too. A half with it as a factor is exactly zero, and so is its true
+  product.
+- A direction component is zero when the axis is written so, as the torus
+  about `x`, `d = (1, 0, 0)`, has two.
+- All three direction components at once do not reach `on_floats`. The doc on
+  `Torus::basis` (`torus.rs:170-175`) names each route a `Torus` gets its axis
+  by, and why none of them gives a direction with no length, pointing at the
+  doc on `Cylinder::basis` for the long form.
+- The two radii do not reach it at zero. `Torus::new` refuses a radius that is
+  not above zero (`torus.rs:105-109`) and a tube as wide as the ring or wider
+  (`torus.rs:110-115`). `Deserialize` goes through `TryFrom`, which calls
+  `new` (`torus.rs:82`, `539-545`), `transformed` copies both radii
+  (`torus.rs:152-158`), and the fields are private.
+- All three differences at once do reach it: the point is the centre. Then
+  every half is zero, so `across`, `spread` and `P2` are `0`, `out_and_back`
+  is `0`, `bulge` is `hollow` exactly, and the permanent is `W (RR + rr)²`,
+  which is not zero. Unlike the cone's apex (464.30's 1), there is a bound to
+  prove against.
+
+`hollow` is never zero. A difference of two doubles rounds to zero only when
+they are equal, and `RR` is above `rr`. Write the tube `m · 2ᵉ`, with `1 ≤ m <
+2`. The ring is at least the next double up, so the ring's square is above the
+tube's by more than `2 · tube · ulp(tube)`, which is `m · 2^(2e−51)`. The
+check holds `rr` normal, and rounding a value between `2^(2e)` and
+`2^(2e+2)` moves it by at most `2^(2e−52)`, so the two roundings close at
+most `2^(2e−51)` of that gap, and a wider ring only widens it. `hollowapart.py`
+(7) tries it on 4194304 tubes, the mantissas next to `1`, `√2` and `2` and as
+many again at random, and finds none whose next double up squares to the same
+double.
+
+So at the centre with `hollow` below the normals, `bulge` is not zero and its
+square is below the normals: `product_is_normal(bulge, bulge)` is false and
+`on_floats` returns `None` (`torus.rs:373-377`). The centre is run with
+`hollow` normal only. Away from it `out_and_back` is at least one difference's
+square, which the check holds normal, so `bulge` is normal and above zero.
+
+So of the 63 sets of zero factors, the 8 that hold all three direction
+components are left out, which leaves 55. In 7 of them the point is the
+centre.
+
+**2. The cases.** Each zero factor zeroes one half in each of two components
+of the cross product: `fx` the right half of `y` and the left half of `z`,
+`dx` the left half of `y` and the right half of `z`, and so on round. Each
+component is then `h`, its right half zero, so that it is its left half
+exactly; `k`, its left half zero; `0`, both; or one of 464.17's four states
+with both halves live: `n`, it does not cancel; `c`, it cancels with its
+reach square normal; `s`, below the normals and not zero; and `u`, rounding
+to zero (464.17's 6). A component with one half zero has a square in
+`across` that `stays_accurate` holds normal, and its reach square is that
+same double. One with both halves zero drops out of `y`, `P` and the error.
+
+A component keeps both halves only when none of its four factors is zero, so
+with any factor zero at most one does: in 9 sets, `{fa}`, `{da}` and
+`{fa, da}` for each axis `a`. Beside the state go `torsplit.py`'s two other
+letters (464.17's 6): `hollow` normal (`n`) or below the normals (`e`), and
+`P2` normal (`n`) or below the normals or zero (`b`), `b` also where `spread`
+is zero and `P` is `P1`. Where a component's square is in `across`, `P2` is
+at least `right`, which the check holds normal, so `n` is its only state.
+That makes:
+
+- 84 cases in the 9 sets. Each of `{fa}` and `{da}` gives 8, its four states
+  by two `hollow`s, with `P2` normal from its `h` and `k` components. Each
+  `{fa, da}` gives 12: its other two components are `0`, so `P2` is `n` for
+  the state `n`, `n` or `b` for `c` and `s`, and `b` for `u`, by two
+  `hollow`s.
+- 78 in the 39 other sets that leave the point off the centre, two `hollow`s
+  each.
+- 7 at the centre, `hollow` normal only (1).
+
+That is 169, written `torz_<zeros>_<state><hollow><P2>.g`, the state left out
+where no component keeps both halves, each with a control
+`c_torz_<zeros>_<state><hollow><P2>_half.g` at `B = 1b-54;`.
+
+The torus about `x`, `d = (1, 0, 0)`, is the set `{dy, dz}`: `x` is `0`, `y`
+is `h` (`fz · dx`) and `z` is `k` (`fy · dx`), so it is `torz_dydz_nn.g` and
+`torz_dydz_en.g`. With the point on its axis every component is `0`, so
+`across`, `spread` and `P2` are zero: `torz_fyfzdydz_nb.g` and
+`torz_fyfzdydz_eb.g`. Its centre is `torz_fxfyfzdydz_nb.g`.
+
+How `torzero.py` (7) writes a zero is how `cylzero.py` does (464.28's 2): a
+zero difference as the point's own coordinate, a zero direction component as
+the double `0`, and a product of a zero, or a zero added on, unrounded or
+left out (464.11's `refl.g`). Its two blocks of pieces are `tor.g`'s (464.17's
+2), cut down to the pieces that are not zero: at the centre the `w·w bulge²`
+block is the three pieces of `(RR − rr)²`, and a component with one half zero
+gives one piece in the `4R²` block. Its cancelling states and their hints are
+`torsplit.py`'s.
+
+**3. What they print.** `runzt.sh` (7) ran the 169 cases with `gappa -Bcoq`
+and `coqc`, and their 169 controls, 20 at a time, against `torus.rs` and
+`cascade.rs` at `37bc60af`. `start.sh` (7) started it. `tallyzt.py` (7) counts
+them, and `kut.py` (7) writes each bound as `a u + b u²`, `a` the whole number
+of `u` below it and `b` rounded up:
+
+- Each of the 169 exits 0 at the code's `B`, in 1.1 s (`torz_fxfyfzdydz_nb`)
+  to 31.3 s (`torz_fy_nen`). None prints "pointless".
+- `(y − Ex) / Phat2` is within `16u + 83u²` in 24 cases, the sets `{dx}`,
+  `{dy}` and `{dz}`, eight each. It is within `15u + 71u²` in 30: the sets
+  `{fx}`, `{fy}` and `{fz}`, eight each, and two each of `{dx, dy}`,
+  `{dx, dz}` and `{dy, dz}`, the torus about `x` among them. It is within
+  `14u + 60u²` in 48: the 36 of `{fa, da}`, and two each of the six sets of
+  one difference and one direction component on other axes.
+- Within `13u + 50u²` in 21 and `13u + 46u²` in 3, one difference with two
+  direction components, and two differences. Within `12u + 41u²` in 9 and
+  `12u + 37u²` in 9, two differences with one direction component, `hollow`
+  normal and below the normals. Within `11u + 33u²` in 9 and `11u + 29u²` in
+  9, two differences with two direction components, a point on the axis of
+  the torus about `x` among them.
+- At the centre, within `9u + 20u²` with no direction component zero,
+  `8u + 15u²` in the 3 with one, and `7u + 11u²` in the 3 with two.
+- `P −/ Phatx` is within `7u + 23u²` in 138 cases, `7u + 22u²` in 12, the
+  `c` and `s` states of `{fa, da}` with `P2` below the normals or zero,
+  `6u + 16u²` in 12, the `u` states of `{fa, da}` and the sets of two
+  differences and two direction components with the components on the axes
+  of the differences, and `4u + 7u²` in the 7 at the centre.
+- `coqc` accepts 168 at their first certificate: 5281 lines with 18 hints
+  (`torz_fxfyfzdydz_nb`) to 20070 lines with 62 hints (`torz_fz_nen`), in
+  4.57 to 48.18 s each.
+- No `.out`, `.bcoq` or `.coqc` of the 169 has a line other than its results,
+  "pointless" and "assumed to be nonzero" warnings, but `torz_dy_cen.coqc`.
+
+`torz_dy_cen.g`'s first certificate `coqc` refused. `torz_dy_cen.coqc` ends
+`The term "eq_refl" has type "true = true" while it is expected to have type
+"intersect_helper (upper i156) (lower i156) i155 = true".`, at `torz_dy_cen.v`
+line 8382, `apply intersect with (1 := h1) (2 := h2)`, where `h1` and `h2` are
+the same lemma, `l481 h0`. That is the fault of 464.17's `tor_cusen.g`
+(464.17's 8): Gappa's certificate there is wrong, not its bound, since the
+same script's Gappa run exited 0. `runzt2.sh` (7) runs `one.sh` with `coq` on
+a copy, and `coqc` accepts the second certificate, 18456 lines with 61 hints
+from the same bytes, so it accepts a certificate for each of the 169. The
+second run's bounds are the first's.
+
+Gappa does not write the same proof each run (464.4), so the sizes are this
+run's. Each proof stands on its hints and on what Gappa took to be nonzero, as
+464.15's 8 says of its own.
+
+**4. The controls.** At `B = 1b-54;`, `u / 2`, each of the 169 must fail, and
+each exits 1. Gappa's best for a goal it does not prove can change from one
+run to the next (464.26), so these are this run's figures, each a bound Gappa
+found on the size of `(y − Ex) / eb` and not an exact value: `[-32, 32]` in
+24 controls, `[-30, 30]` in 30, `[-28, 28]` in 48, `[-26, 26]` in 24,
+`[-24, 24]` in 18, `[-22, 22]` in 18, `[-18, 18]` in 1, `[-16, 16]` in 3 and
+`[-14, 14]` in 3. `kut.py` checks that each is twice its case's `a`: its
+case's own bound on `y` over `u / 2`. So none of the 169 proofs came from a
+contradiction in its hypotheses.
+
+**5. The shapes.** None of these cases was run as Rust input. By hand
+arithmetic, not run: with the centre at 0, the direction `(1, 0, 0)`, the
+ring 3 and the tube 1, the point `(2, 3, 4)` has the differences
+`(2, 3, 4)`, the halves `(0, 0)`, `(4, 0)` and `(0, 3)`, and `hollow` 8, so
+that is `torz_dydz_nn`. The point `(5, 0, 0)` is `torz_fyfzdydz_nb`, and
+`(0, 0, 0)` is `torz_fxfyfzdydz_nb`. Each is a shape a designer makes: a ring
+about `x`, a point on its axis, and its centre. Every case proves, so there
+is no wrong sign to look for.
+
+**6. What this leaves.**
+
+- A row, small: the doc on `SIDE_OF_TORUS_ERROR_BOUND` (`torus.rs:519-521`)
+  says "The proof covers no zero difference or direction component, which
+  have not been run; a point on the axis of a torus whose axis is a coordinate
+  axis is one." By 1 to 4 each is run and proves, and a direction zero in all
+  three components does not reach `on_floats`, nor a centre with `hollow`
+  below the normals. It is a comment that claims less than is proved, not a
+  wrong answer.
+- Not a row: Q2787 runs `torsplit.py` with the checked products below the
+  normals, which this section does not. Q2700 moves into `proofs/gappa/` each
+  script a row of 464 appended, and this section's are among them.
+  `torz_dy_cen.g`'s first certificate is Gappa's fault, as `tor_cusen.g`'s is
+  (464.17's 10).
+
+**7. The scripts.** The second lane's `torzero.py` ran as it was written: the
+third lane added a line to its docstring and changed none of the scripts it
+writes. A trial before the run, under `one1.sh` at `T=120`, of nine of the
+cases and their controls, 20 at once, found nothing: each case exited 0, each
+control 1, and none printed a warning. To run them again, save `torzero.py`,
+`runzt.sh`, `start.sh` and `runzt2.sh` beside 464.13's `one.sh` and 464.15's
+`one1.sh`, and run `./start.sh`; it writes `runzt.txt`, which ends `done`.
+Then run `./runzt2.sh`. `python3 tallyzt.py` and `python3 kut.py` count them.
+`samezt.py` checks that each block here is the file that ran.
+
+`torzero.py`, whole:
 
 ```python
 """Write tor.g's cases where a difference or a direction component is zero,
