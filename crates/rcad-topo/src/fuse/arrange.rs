@@ -10027,6 +10027,14 @@ impl<'f> Arrangement<'f> {
         {
             return Ok(Decision::Zero);
         }
+        if matches!(turn, Decision::Undecidable { .. }) {
+            turn = orient3d_of_points(
+                gradient_of_a_pipe_crossed_twice(&self.surface, at),
+                gradient_of_a_pipe_crossed_twice(&first_partner, at),
+                gradient_of_a_pipe_crossed_twice(&second_partner, at),
+                PredicatePoint::from([0.0; 3]),
+            );
+        }
         let decision = must_decide(
             turn,
             ORIENT3D,
@@ -18341,6 +18349,29 @@ fn gradient_at(surface: &Surface, at: PredicatePoint) -> PredicatePoint {
         }
         other => panic!("a surface whose gradient nothing here knows: {other:?}"),
     }
+}
+
+/// [`gradient_at`], but for a pipe worked out as `w × ((x − o) × w)`.
+///
+/// That is `|w|²(x − o) − (w·(x − o))w` again, one vector rounded another
+/// way. Far up a pipe whose axis runs near a coordinate axis, `x − o` is
+/// nearly all that one coordinate, and `gradient_at` takes two products of
+/// it apart to leave the gradient's small part along the axis. Here that
+/// coordinate is only ever multiplied by the axis's two small parts, so it
+/// never meets itself. `7.5e14` up the pipe of radius `1.5` of
+/// `LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step`, whose axis is `(−5.6e-17,
+/// −1, 0)`, `gradient_at` boxes that part in `[−0.25, 0.625]`, and the turn
+/// [`Arrangement::turns_anticlockwise`] reads there straddled nothing; read
+/// with these gradients it is proved (Q3058).
+fn gradient_of_a_pipe_crossed_twice(surface: &Surface, at: PredicatePoint) -> PredicatePoint {
+    let Surface::Cylinder(pipe) = surface else {
+        return gradient_at(surface, at);
+    };
+    let origin = pipe.axis().origin().coordinates();
+    let along = pipe.axis().direction().components().map(Interval::exactly);
+    let box_of_it = at.enclosure();
+    let step = [0, 1, 2].map(|axis| box_of_it[axis] - Interval::exactly(origin[axis]));
+    PredicatePoint::Constructed(cross_of_intervals(along, cross_of_intervals(step, along)))
 }
 
 /// The sign of `det(∇S, ∇Q₁, ∇Q₂)` at `at` for three surfaces two of which are
