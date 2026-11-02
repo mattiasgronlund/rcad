@@ -13956,160 +13956,297 @@ fmt:
     cargo fmt --all
     taplo fmt
 
-# Strip `target/` from every worktree git knows about, once nobody has written in
-# it for three hours. kache holds the compilation, so a cleaned worktree refills
-# from the cache instead of rebuilding.
+# Clear every cargo build directory on the zram disk that nothing has changed in
+# for 30 minutes and nothing is using (docs/decisions.md §474.5, §474.11). kache
+# holds the compilation, so a cleared directory refills from it by reflink
+# instead of rebuilding.
 #
-# **Three hours untouched, because a lane's `target/` holds more than the
-# compilation.** A measuring lane's probe logs and CSVs are gitignored and live
-# there, and its verifier and merger read them after the lane has stopped
-# writing. Across 174 lanes, the merger finished at most 53 minutes after its
-# lane stopped (§371.5). The newest file anywhere under the tree's `target/`
-# directories decides, never `target/`'s own time, which moves only when its own
-# entries do. One fresh `target/` keeps the whole tree, and so does a walk that
-# `find` could not finish, since then nobody knows how old the tree is.
+# **A build directory, not a tree's `target/`.** `~/.cargo/config.toml` sets
+# cargo's `build-dir` to `/var/cache/zram/targets/{workspace-path-hash}`
+# (§474.9), so each build directory sits two levels under `root`. What is left
+# in `target/` is the tooling's evidence (§371.2), which is small, and it goes
+# when `prune-worktrees` removes the tree. So this never asks which tree a build
+# directory belongs to, and needs no queue: a waiting row's tree, an idle
+# session, a dead one and a finished lane are all just idle directories.
 #
-# Separate from `prune-worktrees` on purpose (docs/decisions.md §50.8). That one
-# can only run once the work is merged; this one can run any time, and merging
-# the two would make the safe half inherit the unsafe half's ceremony until
-# nobody ran either. 38 worktrees held 166 GB of `target/` before this existed.
+# **Kept, each for its own reason:**
 #
-# **Asked git rather than guessed from a path.** This used to build the string
-# `$(dirname $(git rev-parse --show-toplevel))/rcad-worktrees`, which is only the
-# right answer when it is run from the hub — run from a lane it landed on
-# `rcad-worktrees/rcad-worktrees`, found nothing there, and said *"there is
-# nothing here to clean"*, which reads exactly like a tidy machine. Now that
-# nobody works in the hub (§60) that was every run. The listing also reaches the
-# sibling trees the glob never covered and the hub's own `target/`, which was the
-# single largest at 14 GB.
+# - **Anything in it changed in the last 30 minutes.** The newest file or
+#   directory anywhere under it decides, never the directory's own time.
+# - **A cargo is building in it.** Cargo 1.96 holds a `flock` on a
+#   `.cargo-build-lock` beside each profile it builds, a target triple's
+#   included, from start to exit (§474.11). Each one found anywhere under the
+#   directory is taken here without waiting, and one refused is a cargo at work.
+#   They stay taken until the directory has been renamed away, so a cargo that
+#   starts meanwhile waits, then builds in a fresh directory.
+# - **A program in it is running.** `cargo test` and nextest run the test
+#   binaries from the build directory after cargo has let go of its lock, and a
+#   long run can pass 30 minutes without writing there. Clearing it then fails
+#   every test not yet started.
+# - **No `.cargo-build-lock` in it**, since then nothing says whether a cargo is
+#   building there; **or `find` could not read all of it**, since then nobody
+#   knows how long it has been idle.
 #
-# Three are skipped, and for the same reasons as `prune-worktrees`: the tree
-# you are standing in, because you are using it; the tree the overnight fuzz
-# unit runs in, because a night deleting its own `fuzz/target` mid-run is the
-# same interruption; and any **locked** tree, because a lock means an agent is
-# working in there and deleting its `target/` mid-build is exactly the
-# interruption the lock exists to prevent.
-[doc("Strip target/ from worktrees nobody has written in for three hours. Skips locked ones.")]
-clean-targets dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-fuzz.service"):
+# **Never kache's store**, which sits beside `targets/` on the same disk. A
+# `root` that holds the store or sits inside it is refused, and nothing is
+# touched but the directories two levels under `root` and this recipe's own
+# `.clearing-*` leftovers.
+#
+# **Renamed, then deleted.** The rename takes the directory out of cargo's way
+# at once, while its locks are held. The delete takes as long as the directory
+# is big, so it runs after. A run killed between the two leaves a
+# `.clearing-*` directory, and the next run removes it. Two runs at once would
+# each delete the other's leftovers mid-delete, so a run takes a lock on `root`
+# first and leaves it to the run that holds it.
+#
+# **A missing `root` fails.** It is the disk not being mounted, and a run that
+# said "nothing to clear" there would read like a tidy machine.
+#
+# The sizes are `du`'s, which counts a file kache restored by reflink in full,
+# so they overstate what the disk gets back (§474.10).
+[doc("Clear build directories under /var/cache/zram/targets that are idle 30 minutes and unused. Never kache's store.")]
+clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache":
     #!/usr/bin/env bash
     set -euo pipefail
-    listing=$(git -C "{{dir}}" worktree list --porcelain)
-    here=$(git -C "{{dir}}" rev-parse --show-toplevel)
-    fuzz_tree=$(sed -n "s|^WorkingDirectory=%h|$HOME|p; s|^WorkingDirectory=/|/|p" "{{fuzz_unit}}")
-    [ -n "$fuzz_tree" ] || { echo "{{fuzz_unit}} names no WorkingDirectory, so the overnight fuzz tree cannot be kept"; exit 2; }
-    locked=$(awk '/^worktree /{tree = $2} /^locked/{print tree}' <<<"$listing")
-    reclaimed=0
+    shopt -s nullglob
+    root=$(realpath -e -- "{{root}}" 2>/dev/null) || {
+        echo "{{root}} does not exist, so there is no build directory to clear. Is the zram disk mounted (docs/decisions.md §474.9)?"
+        exit 1
+    }
+    store=$(realpath -m -- "{{kache_store}}")
+    case "$store/" in "$root/"*)
+        echo "kache's store $store is inside $root, and clean-targets never touches it (§474.7)"
+        exit 1 ;;
+    esac
+    case "$root/" in "$store/"*)
+        echo "$root is inside kache's store $store, and clean-targets never touches it (§474.7)"
+        exit 1 ;;
+    esac
+    exec {whole}<"$root"
+    if ! flock -n "$whole"; then
+        echo "another clean-targets is clearing $root, so this one leaves it be"
+        exit 0
+    fi
+    for left in "$root"/.clearing-*; do
+        rm -rf -- "$left"
+        echo "removed what an earlier run left half-cleared: $left"
+    done
+    cleared=0
     kept=0
-    for tree in $(awk '/^worktree /{print $2}' <<<"$listing"); do
-        [ -d "$tree" ] || continue
-        if [ "$tree" = "$here" ]; then
-            echo "kept (you are standing in it): $tree"
-            kept=$((kept + 1))
-            continue
-        fi
-        if [ "$tree" = "$fuzz_tree" ]; then
-            echo "kept (the overnight fuzz unit runs in it): $tree"
-            kept=$((kept + 1))
-            continue
-        fi
-        if grep -qxF "$tree" <<<"$locked"; then
-            echo "kept (locked, an agent is using it): $tree"
-            kept=$((kept + 1))
-            continue
-        fi
-        mapfile -t targets < <(find "$tree" -maxdepth 2 -type d -name target -prune)
-        [ "${#targets[@]}" -gt 0 ] || continue
-        if ! recent=$(find "${targets[@]}" -mmin -180 -print -quit 2>/dev/null); then
-            echo "kept (find could not read all of its target/, so how old it is is unknown): $tree"
-            kept=$((kept + 1))
+    held=()
+    keep() {
+        echo "kept ($1): $build"
+        kept=$((kept + 1))
+    }
+    release() {
+        for fd in "${held[@]}"; do
+            exec {fd}<&-
+        done
+        held=()
+    }
+    for build in "$root"/*/*/; do
+        build=${build%/}
+        if ! recent=$(find "$build" -mmin -30 -print -quit 2>/dev/null) \
+            || ! locks=$(find "$build" -name .cargo-build-lock 2>/dev/null); then
+            keep "find could not read all of it, so how long it has been idle is unknown"
             continue
         fi
         if [ -n "$recent" ]; then
-            echo "kept (its target/ was written in the last three hours): $tree"
-            kept=$((kept + 1))
+            keep "something in it changed in the last 30 minutes"
             continue
         fi
-        size=$(du -sb --total -- "${targets[@]}" | awk '/total$/{print $1}')
-        rm -rf -- "${targets[@]}"
-        echo "swept $(numfmt --to=iec "$size"): $tree"
-        reclaimed=$((reclaimed + size))
+        if [ -z "$locks" ]; then
+            keep "no .cargo-build-lock in it, so whether a cargo is building in it cannot be read"
+            continue
+        fi
+        busy=""
+        while read -r lock; do
+            if ! { exec {fd}<"$lock"; } 2>/dev/null; then
+                busy="its $lock went away while this run read it"
+                break
+            fi
+            held+=("$fd")
+            if ! flock -n "$fd"; then
+                busy="a cargo is building in it, holding $lock"
+                break
+            fi
+        done <<<"$locks"
+        if [ -n "$busy" ]; then
+            release
+            keep "$busy"
+            continue
+        fi
+        # find's own exit is no answer here: it cannot read other users'
+        # processes, nor one that exits while it walks, and neither can be
+        # running a program from a build directory of ours.
+        running=$(find /proc -mindepth 2 -maxdepth 2 -name exe -lname "$build/*" -printf '%h\n' -quit 2>/dev/null || true)
+        if [ -n "$running" ]; then
+            release
+            keep "process ${running#/proc/} is running a program from it"
+            continue
+        fi
+        size=$(du -sb -- "$build" | cut -f1)
+        trash="$root/.clearing-$(basename "$(dirname "$build")")-$(basename "$build")"
+        mv -T -- "$build" "$trash"
+        release
+        rm -rf -- "$trash"
+        echo "cleared $(numfmt --to=iec "$size"): $build"
+        cleared=$((cleared + size))
     done
-    echo "$(numfmt --to=iec "$reclaimed") reclaimed; $kept worktree(s) kept"
+    echo "$(numfmt --to=iec "$cleared") cleared; $kept build directories kept"
 
-# Pins the trees `clean-targets` must not touch, and the one it used to miss.
+# Pins which build directories `clean-targets` clears, which it keeps, and that
+# it never touches kache's store (§474.11).
 #
 # A sweep that deletes too much is noticed within the minute; a sweep that
 # deletes too little says "nothing to clean" and is believed for a month, which
-# is what happened. So the fixture puts a `target/` in all four trees and runs
-# the sweep from the lane: the **hub's** must go, because it is the biggest and
-# the old path glob never reached it, the **locked** one must survive, the tree
-# a fixture fuzz unit names must survive unlocked (§205.4), and the tree the
-# sweep is standing in must survive.
+# is what happened to the old one. So the fixture is a zram disk in miniature,
+# `targets/` and `kache/` side by side, every build directory in it four hours
+# old, and each one is kept or cleared for a reason of its own. A cargo that is
+# building is stood in for by holding its `.cargo-build-lock` from this shell,
+# the way cargo 1.96 holds it (`flock`, §474.11), and a test that is running by
+# a copy of `sleep` started from inside the build directory.
 [private]
 check-clean-targets-selftest:
     #!/usr/bin/env bash
     set -euo pipefail
-    dir=$(mktemp -d)
-    trap 'git -C "$dir/main" worktree unlock "$dir/held" 2>/dev/null || true; rm -rf "$dir"' EXIT
-    git init -q -b main "$dir/main"
-    git -C "$dir/main" -c user.email=t@t -c user.name=t commit -q --allow-empty -m root
-    git -C "$dir/main" worktree add -q "$dir/held" -b held
-    git -C "$dir/main" worktree add -q "$dir/free" -b free
-    git -C "$dir/main" worktree lock --reason "agent-abc since 2026-09-06T00:00:00Z" "$dir/held"
-    git -C "$dir/main" worktree add -q "$dir/nightly" -b nightly
-    git -C "$dir/main" worktree add -q "$dir/busy" -b busy
-    git -C "$dir/main" worktree add -q "$dir/twofold" -b twofold
-    printf '[Service]\nWorkingDirectory=%s\n' "$dir/nightly" >"$dir/rcad-fuzz.service"
-    # Every target/ starts four hours old, so each tree below is kept or swept
-    # for its own reason and not because the fixture wrote it a moment ago.
-    for tree in main held free nightly busy twofold; do
-        mkdir -p "$dir/$tree/target/debug/deps"
-        head -c 4096 /dev/zero >"$dir/$tree/target/debug/artifact"
-        find "$dir/$tree/target" -exec touch -d '4 hours ago' {} +
+    # Resolved, because the kernel names a running program by its real path and
+    # the recipe prints the paths it resolved.
+    dir=$(realpath -e "$(mktemp -d)")
+    running=""
+    trap '[ -z "$running" ] || kill "$running" 2>/dev/null || true; rm -rf "$dir"' EXIT
+    root="$dir/zram/targets"
+    store="$dir/zram/kache"
+    old() { find "$1" -exec touch -d '4 hours ago' {} +; }
+    # A build directory as cargo 1.96 leaves one: a lock file beside each
+    # profile it built, and the output under deps/.
+    build() {
+        local at="$root/$1"
+        shift
+        for profile in "$@"; do
+            mkdir -p "$at/$profile/deps"
+            : >"$at/$profile/.cargo-build-lock"
+            head -c 4096 /dev/zero >"$at/$profile/deps/artifact"
+        done
+        old "$at"
+    }
+    mkdir -p "$store/store/ab"
+    head -c 4096 /dev/zero >"$store/store/ab/entry"
+    old "$store"
+
+    build 0a/idle debug
+    # Only a target triple's profile, the way the fuzz workspace builds.
+    build 0b/fuzz x86_64-unknown-linux-gnu/release
+    build 0c/fresh debug
+    # Written a moment ago, three levels down. The build directory's own time
+    # stays four hours old, because a directory's time moves only when its own
+    # entries do.
+    printf 'fingerprint\n' >"$root/0c/fresh/debug/deps/fresh"
+    build 0d/building debug
+    exec {building}<"$root/0d/building/debug/.cargo-build-lock"
+    flock -n "$building"
+    # check-wildcards builds into a build directory of its own inside the tree's
+    # (§474.9), so a lock held two levels down is a cargo building in it too.
+    build 0e/nested debug wildcards/debug
+    exec {nested}<"$root/0e/nested/wildcards/debug/.cargo-build-lock"
+    flock -n "$nested"
+    build 0f/testing debug
+    prog="$root/0f/testing/debug/deps/testing-0123456789abcdef"
+    cp /bin/sleep "$prog"
+    old "$root/0f/testing"
+    ( exec -a sleep "$prog" 300 ) &
+    running=$!
+    for _ in $(seq 100); do
+        [ "$(readlink "/proc/$running/exe" 2>/dev/null || true)" = "$prog" ] && break
+        sleep 0.05
     done
-    # Written a moment ago, three levels down. target/'s own time stays four
-    # hours old, because a directory's time moves only when its own entries do.
-    printf 'probe log\n' >"$dir/busy/target/debug/deps/fresh"
-    mkdir -p "$dir/twofold/fuzz/target"
-    printf 'corpus\n' >"$dir/twofold/fuzz/target/fresh"
+    [ "$(readlink "/proc/$running/exe" 2>/dev/null || true)" = "$prog" ] || {
+        echo "clean-targets-selftest: the copy of sleep never ran from $prog, so the running-test case cannot be built"
+        exit 1
+    }
+    mkdir -p "$root/10/lockless/debug/deps"
+    old "$root/10/lockless"
     # Stands in for a file a build deletes while find is walking past it: either
-    # way find cannot say how old the tree is, and says so with its exit code.
-    git -C "$dir/main" worktree add -q "$dir/sealed" -b sealed
-    mkdir -p "$dir/sealed/target/debug/unreadable"
-    find "$dir/sealed/target" -exec touch -d '4 hours ago' {} +
-    chmod 000 "$dir/sealed/target/debug/unreadable"
-    if find "$dir/sealed/target" >/dev/null 2>&1; then
+    # way find cannot say how long the directory has been idle, and says so with
+    # its exit code.
+    build 11/sealed debug
+    mkdir -p "$root/11/sealed/debug/unreadable"
+    old "$root/11/sealed"
+    chmod 000 "$root/11/sealed/debug/unreadable"
+    if find "$root/11/sealed" >/dev/null 2>&1; then
         echo "clean-targets-selftest: find read a directory with mode 000, so this is running as root and the unreadable case cannot be built"
         exit 1
     fi
-    got=$(just clean-targets "$dir/free" "$dir/rcad-fuzz.service")
+    # What a run killed between its rename and its rm leaves behind.
+    mkdir -p "$root/.clearing-1a-half/debug/deps"
+    old "$root/.clearing-1a-half"
+
+    got=""
     fail() {
         echo "clean-targets drifted from its own fixtures: $1"
         echo "--- got ---"; echo "$got"
         exit 1
     }
-    [ ! -d "$dir/main/target" ] || fail "the hub's target/ survived, which is the case the old path glob missed"
-    [ -d "$dir/held/target" ] || fail "a locked worktree was swept while an agent was working in it"
-    [ -d "$dir/free/target" ] || fail "the sweep deleted the target/ of the tree it was standing in"
-    [ -d "$dir/nightly/target" ] || fail "the sweep deleted the target/ of the tree the overnight fuzz unit runs in"
-    grep -qF "kept (locked, an agent is using it): $dir/held" <<<"$got" \
-        || fail "the locked worktree was not reported as kept"
-    grep -qF "kept (you are standing in it): $dir/free" <<<"$got" \
-        || fail "the current worktree was not reported as kept"
-    grep -qF "kept (the overnight fuzz unit runs in it): $dir/nightly" <<<"$got" \
-        || fail "the overnight fuzz tree was not reported as kept"
-    [ -f "$dir/busy/target/debug/deps/fresh" ] \
-        || fail "an unlocked tree was swept with a file in its target/ written a moment ago (§371.5)"
-    grep -qF "kept (its target/ was written in the last three hours): $dir/busy" <<<"$got" \
-        || fail "the tree with a fresh target/ was not reported as kept"
-    [ -d "$dir/twofold/target" ] && [ -d "$dir/twofold/fuzz/target" ] \
-        || fail "a tree with one fresh target/ and one old one was partly swept; a fresh one anywhere keeps the tree whole"
-    [ -d "$dir/sealed/target" ] \
-        || fail "a tree find could not read all of was swept, as if it had read it and found it old"
-    grep -qF "kept (find could not read all of its target/, so how old it is is unknown): $dir/sealed" <<<"$got" \
-        || fail "the tree find could not read was not reported as kept"
-    grep -qE "^[0-9.]+K reclaimed; 6 worktree\(s\) kept$" <<<"$got" \
-        || fail "the tally is wrong, so a sweep that found nothing would read like a tidy machine"
+
+    exec {whole}<"$root"
+    flock -n "$whole"
+    got=$(just clean-targets "$root" "$store" 2>&1) \
+        || fail "a run that found another run clearing the same disk exited non-zero"
+    grep -qxF "another clean-targets is clearing $root, so this one leaves it be" <<<"$got" \
+        || fail "a run that found another run clearing the same disk did not say so"
+    [ -d "$root/0a/idle" ] || fail "a run cleared a build directory while another run held the disk"
+    exec {whole}<&-
+
+    if got=$(just clean-targets "$dir/zram" "$store" 2>&1); then
+        fail "a run over the directory that holds kache's store did not refuse"
+    fi
+    grep -qF "kache's store $store is inside $dir/zram" <<<"$got" \
+        || fail "a run over the directory that holds kache's store did not say why it refused"
+    if got=$(just clean-targets "$store/store" "$store" 2>&1); then
+        fail "a run over a directory inside kache's store did not refuse"
+    fi
+    grep -qF "$store/store is inside kache's store $store" <<<"$got" \
+        || fail "a run over a directory inside kache's store did not say why it refused"
+    if got=$(just clean-targets "$dir/unmounted" "$store" 2>&1); then
+        fail "a run over a disk that is not there exited 0, which reads like a tidy machine"
+    fi
+    grep -qF "$dir/unmounted does not exist" <<<"$got" \
+        || fail "a run over a disk that is not there did not say so"
+
+    got=$(just clean-targets "$root" "$store" 2>&1) || fail "the ordinary run exited non-zero"
+    [ -f "$store/store/ab/entry" ] || fail "kache's store lost a file (§474.7)"
+    [ ! -e "$root/0a/idle" ] || fail "an idle build directory, no lock held and no program running from it, was kept"
+    grep -qE "^cleared [0-9.]+K: $root/0a/idle$" <<<"$got" \
+        || fail "the idle build directory was not reported as cleared"
+    [ ! -e "$root/0b/fuzz" ] || fail "an idle build directory whose only lock is under a target triple was kept"
+    [ -f "$root/0c/fresh/debug/deps/fresh" ] \
+        || fail "a build directory was cleared with a file in it written a moment ago (§474.5)"
+    grep -qxF "kept (something in it changed in the last 30 minutes): $root/0c/fresh" <<<"$got" \
+        || fail "the build directory with a fresh file was not reported as kept"
+    [ -f "$root/0d/building/debug/deps/artifact" ] \
+        || fail "a build directory was cleared while a cargo held its .cargo-build-lock"
+    grep -qxF "kept (a cargo is building in it, holding $root/0d/building/debug/.cargo-build-lock): $root/0d/building" <<<"$got" \
+        || fail "the build directory a cargo was building in was not reported as kept"
+    [ -f "$root/0e/nested/debug/deps/artifact" ] \
+        || fail "a build directory was cleared while a cargo held a lock two levels down in it"
+    grep -qxF "kept (a cargo is building in it, holding $root/0e/nested/wildcards/debug/.cargo-build-lock): $root/0e/nested" <<<"$got" \
+        || fail "the build directory with a lock held two levels down was not reported as kept"
+    [ -f "$prog" ] || fail "a build directory was cleared while a test was running from it"
+    grep -qxF "kept (process $running is running a program from it): $root/0f/testing" <<<"$got" \
+        || fail "the build directory a test was running from was not reported as kept"
+    [ -d "$root/10/lockless" ] \
+        || fail "a directory with no .cargo-build-lock in it was cleared, though nothing could say whether a cargo was building there"
+    grep -qxF "kept (no .cargo-build-lock in it, so whether a cargo is building in it cannot be read): $root/10/lockless" <<<"$got" \
+        || fail "the directory with no .cargo-build-lock was not reported as kept"
+    [ -d "$root/11/sealed" ] \
+        || fail "a build directory find could not read all of was cleared, as if it had read it and found it idle"
+    grep -qxF "kept (find could not read all of it, so how long it has been idle is unknown): $root/11/sealed" <<<"$got" \
+        || fail "the build directory find could not read was not reported as kept"
+    [ ! -e "$root/.clearing-1a-half" ] || fail "what an earlier run left half-cleared is still there"
+    grep -qxF "removed what an earlier run left half-cleared: $root/.clearing-1a-half" <<<"$got" \
+        || fail "the half-cleared leftover was not reported"
+    grep -qE "^[0-9.]+K cleared; 6 build directories kept$" <<<"$got" \
+        || fail "the tally is wrong, so a run that found nothing would read like a tidy machine"
 
 # Mark worktrees whose run is over, so `prune-worktrees` removes them without
 # waiting out its hour (§315.2).
