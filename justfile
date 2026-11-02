@@ -7717,7 +7717,13 @@ fuzz-overnight window="28800" pause_start="" pause_end="":
         fi
     fi
 
-    deadline=$(( $(date +%s) + {{window}} ))
+    # Kept, not just folded into `deadline`, because the pause decision below
+    # (docs/decisions.d/475) needs the moment the night began and not the
+    # moment it happens to ask — the build and the two checks after it sit
+    # between the two, and on a loaded machine that gap is not small enough
+    # to ignore.
+    night_started=$(date +%s)
+    deadline=$(( night_started + {{window}} ))
     night="{{fuzz_log_root}}/$(date +%Y-%m-%d)"
     mkdir -p "$night"
 
@@ -8113,10 +8119,15 @@ fuzz-overnight window="28800" pause_start="" pause_end="":
     # The pause (docs/decisions.d/475) splits the window in two. A pause that
     # starts at or after the deadline, or has already ended, changes nothing;
     # one that ends at or after the deadline ends the night where it starts.
-    now=$(date +%s)
+    #
+    # Judged against `$night_started`, not a fresh clock read here: the build
+    # and the two checks after it (`_fuzz-timing-rlib-is-clean`, the
+    # `timing_check` script) sit between the two, and take however long they
+    # take. A fresh read here would call a pause already over, on a loaded
+    # machine, for a night that in fact started inside it.
     first_stop=$deadline
     second=""
-    if [ -n "$pause_from" ] && [ "$pause_from" -lt "$deadline" ] && [ "$pause_until" -gt "$now" ]; then
+    if [ -n "$pause_from" ] && [ "$pause_from" -lt "$deadline" ] && [ "$pause_until" -gt "$night_started" ]; then
         first_stop=$pause_from
         [ "$pause_until" -ge "$deadline" ] || second=1
     fi
