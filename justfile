@@ -2879,6 +2879,19 @@ check-gate-verdicts-selftest:
             --set gate_reusable_steps check-queue-api-selftest \
             --set gate_log "$dir/gate.log" gate quiet "$@" 2>&1)
     }
+    # From here a commit holds a copy of this justfile, so its sha moves with
+    # every edit to it, and one in sixteen starts with 0 and is audited. A
+    # commit a case needs served is amended until it does not, rather than
+    # leaving one justfile in sixteen to fail this selftest.
+    commit_served() {
+        local n=0
+        g commit -q "$@"
+        while [[ "$(g rev-parse HEAD)" == 0* ]]; do
+            n=$((n + 1))
+            [ "$n" -le 400 ] || fail "400 amended commits found no sha that does not start with 0"
+            g commit -q --amend -m "not an audit $n"
+        done
+    }
 
     mkdir -p "$repo/tooling/queue"
     cp '{{ justfile() }}' "$repo/justfile"
@@ -2888,7 +2901,7 @@ check-gate-verdicts-selftest:
     printf '[tools]\n' >"$repo/mise.toml"
     printf '[tools]\n' >"$repo/mise.lock"
     g add -A
-    g commit -q -m 'queue-api-selftest fixture files'
+    commit_served -m 'queue-api-selftest fixture files'
     qas_commit1=$(g rev-parse HEAD)
 
     got=$(qas_gate) || fail "the first narrow gate of check-queue-api-selftest failed"
@@ -2905,7 +2918,7 @@ check-gate-verdicts-selftest:
     # row's own first case — the narrow key must still serve it.
     printf '// kernel change\n' >>"$repo/crates/a.rs"
     g add -A
-    g commit -q -m 'a kernel-only change, queue-api-selftest case'
+    commit_served -m 'a kernel-only change, queue-api-selftest case'
     [ "$(qas_fingerprint)" = "$qas_fp1" ] \
         || fail "a commit that touched only crates/a.rs moved check-queue-api-selftest's own fingerprint"
     got=$(qas_gate) || fail "a narrow gate of a kernel-only change failed"
@@ -2959,9 +2972,8 @@ check-gate-verdicts-selftest:
         'check-release-build:' '    @[ -z "${RUST_SELFTEST_FAIL:-}" ]' >>"$repo/justfile"
     printf '[workspace]\n' >"$repo/Cargo.toml"
     g add -A
-    g commit -q -m 'cargo steps fixture files'
+    commit_served -m 'cargo steps fixture files'
     rust_commit1=$(g rev-parse HEAD)
-    [[ "$rust_commit1" != 0* ]] || fail "the cargo steps' fixture commit starts with 0, so every serving case below is an audit"
     rust_fp1=$(rust_fingerprint) || fail "the cargo steps' own fingerprint could not be taken: $rust_fp1"
     [[ "$rust_fp1" =~ ^[0-9a-f]{64}$ ]] || fail "the cargo steps' own fingerprint did not come back as a hash: $rust_fp1"
     rc=0
@@ -2985,8 +2997,7 @@ check-gate-verdicts-selftest:
     # run, is the case the key is for: Q3053's ran test fresh for 842 s.
     printf '\n# a comment, which no cargo step reads\n' >>"$repo/justfile"
     g add -A
-    g commit -q -m 'a justfile-only change'
-    [[ "$(g rev-parse HEAD)" != 0* ]] || fail "the justfile-only commit starts with 0, so this case would be an audit"
+    commit_served -m 'a justfile-only change'
     [ "$(fingerprint)" != "$tree_fp1" ] \
         || fail "a justfile-only commit left the whole-tree fingerprint where it was, so the case below would prove nothing"
     [ "$(rust_fingerprint)" = "$rust_fp1" ] \
