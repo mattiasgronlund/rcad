@@ -8780,7 +8780,47 @@ check-fuzz-overnight-selftest:
     # So this run clears every leftover before any arm runs, rather than
     # leaving the next run to inherit what a killed one did not finish
     # cleaning up.
-    rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*
+    #
+    # But up to three gates can share this tree's `fuzz/target` at once
+    # (§372), each running this same recipe, and a leftover from a sibling
+    # gate's own still-running selftest looks identical to one a SIGKILLed
+    # run left — both are a `selftest-*` directory that is not this run's
+    # own. A blanket sweep here deleted the sibling's directory outright:
+    # run beside a second real invocation of this recipe, started a few
+    # seconds in, the second one's unfiltered sweep took out the first
+    # one's live `selftest-one_and_two-…` and `selftest-ten-…` directories,
+    # and the first one failed arm Ten with "rcad-fuzz-timing's rlib was
+    # not found by name" — the exact failure Q244/Q437 this sweep exists to
+    # prevent, now caused by the sweep itself (Q2913).
+    #
+    # Every name this recipe ever writes under `selftest-` ends in
+    # `-<pid>-<random>` (`$tag` is `overnight-selftest-$$-${RANDOM}`, and
+    # `beside()` only ever prepends to it), so the second-to-last `-`-field
+    # is always the pid of the top-level run that owns it, whatever prefix
+    # an arm or a retry put in front. A live sibling's pid still answers to
+    # `kill -0`; a SIGKILLed run's does not, pid reuse inside one gate's
+    # wall-clock aside. So this sweeps only the names whose owning pid is
+    # gone, and leaves a name it cannot read a pid from alone rather than
+    # guess — this recipe is the only thing that ever writes here, and every
+    # name it writes parses, so that case does not arise in practice.
+    #
+    # Pulled out into its own function, the same way `filter_pattern` is in
+    # Twenty-nine below, so Forty-one can run this exact sweep against
+    # fixtures of its own rather than against two real, minutes-long
+    # invocations of this whole recipe.
+    sweep_stale_selftest() {
+        local leftover owner
+        for leftover in fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*; do
+            [ -e "$leftover" ] || continue
+            owner="${leftover%-*}"
+            owner="${owner##*-}"
+            if [[ "$owner" =~ ^[0-9]+$ ]] && kill -0 "$owner" 2>/dev/null; then
+                continue
+            fi
+            rm -rf "$leftover"
+        done
+    }
+    sweep_stale_selftest
     mkdir -p "$dir/bin"
 
     # A fixture for `RCAD_STEP_CORPUS`, standing in for the 375 MiB the real
@@ -10486,6 +10526,35 @@ check-fuzz-overnight-selftest:
         || fail "a stale sancov rlib under fuzz/target was read as this build's"
     }
 
+    # Forty-one: Q2913's fix to the unscoped pre-clean. `sweep_stale_selftest`
+    # must leave alone a `selftest-*` directory whose owning pid is still
+    # alive — a sibling gate's own, still running — and must still remove
+    # one whose owning pid is not, the way a SIGKILLed run's own leftovers
+    # never answer to `kill -0` again. Checked directly against planted
+    # fixtures, rather than against two real, minutes-long invocations of
+    # this whole recipe: that pair is what first showed the fault (run
+    # beside a second real invocation, started a few seconds in, its
+    # unfiltered sweep took out the first one's live directories and it
+    # failed arm Ten on a missing rlib), kept in Q2913's commit message and
+    # not as a standing arm, since doubling this whole recipe's own wall
+    # time on every gate buys nothing a planted fixture does not already
+    # answer.
+    forty_one() {
+    base="fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing"
+    live="$base/selftest-overnight-selftest-$$-11111"
+    mkdir -p "$live"
+    ( exit 0 ) & dead_pid=$!
+    wait "$dead_pid"
+    dead="$base/selftest-overnight-selftest-$dead_pid-22222"
+    mkdir -p "$dead"
+    sweep_stale_selftest
+    [ -d "$live" ] \
+        || fail "the sweep removed $live, owned by this still-running process ($$)"
+    [ ! -d "$dead" ] \
+        || fail "the sweep left $dead behind, owned by pid $dead_pid, which has already exited"
+    rm -rf "$live"
+    }
+
     # **Which arms run at once, and why each still asserts what it says.** Run
     # in turn they took 86 s, nearly all of it the stub's sleeps (Q709), so
     # most of them run beside each other.
@@ -10597,6 +10666,7 @@ check-fuzz-overnight-selftest:
     alone sixteen
     alone twenty_nine
     alone forty
+    alone forty_one
     alone twenty_three
     arm="after the last"
     head_did_not_move
