@@ -19627,6 +19627,45 @@ check-queue-api-selftest:
 
     exit 0
 
+# `check-queue-api-selftest`'s own fingerprint, narrower than
+# `_code-fingerprint`'s: a 90s `openat`-only trace of a real run, extended by a
+# second trace into the recipe's own loop of cases before it was cut off by its
+# timeout, found nothing it opens inside the tree outside `justfile`,
+# `tooling/`, `.gitattributes`, `mise.toml` and `mise.lock` — and nothing under
+# `docs/` outside its own scratch repository (docs/decisions.d/337 §337.10).
+# Same shape as `_code-fingerprint` — `git ls-tree` over the paths, then the
+# same environment block — so the two stay easy to compare by eye.
+#
+# `mise.lock` is here and `_timing-hooked-calls-fingerprint`'s four paths have
+# nothing like it: every `python3` this recipe runs resolves through mise's own
+# shim, which reads the project's `mise.toml` and `mise.lock` to pick a
+# version before it ever reaches `tooling/queue/queue.py`. `just` itself does
+# not: `just_executable()` already names the real binary, not a shim.
+#
+# `justfile` is one of the paths, so a change to this recipe's own text, or to
+# check-queue-api-selftest's, already moves the key on its own. There is no
+# `--show` of either to keep in step, unlike the narrower four paths above.
+[private]
+_queue-api-selftest-fingerprint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    git rev-parse --verify --quiet HEAD >/dev/null || { echo "there is no commit here"; exit 0; }
+    if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
+        echo "the tree has uncommitted or untracked files"
+        exit 0
+    fi
+    {
+        git ls-tree -r --full-tree HEAD -- justfile tooling .gitattributes mise.toml mise.lock
+        echo "-- environment"
+        for name in $(compgen -e | LC_ALL=C sort); do
+            case "$name" in
+                RCAD_STEP_CORPUS) ;;
+                RCAD_*|PROPTEST_*|NEXTEST_*|CARGO_BUILD_*|CARGO_PROFILE_*|RUSTFLAGS|RUSTDOCFLAGS|CARGO_ENCODED_RUSTFLAGS|RUSTC|RUSTUP_TOOLCHAIN|RUST_MIN_STACK)
+                    printf '%s=%s\0' "$name" "${!name}" ;;
+            esac
+        done
+    } | sha256sum | cut -d' ' -f1
+
 # The fuzz half of `status`: for the night `latest` names, how many of the
 # groups `fuzz-triage` found still failing on `main` no row names yet (§418.4).
 #
