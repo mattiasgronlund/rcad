@@ -127,17 +127,24 @@
 //! `a_led_whose_flat_touches_its_body_at_a_corner.rs` stops there too, and so
 //! does the box on this LED's flat.
 //!
-//! The far boxes of the two D3 LEDs stop on the order along that same line,
-//! between its two meets with the body's pipe, which the front draws twice,
-//! as the edge of its hole and as the pipe cut across it. Each meet is
+//! The far boxes of the two D3 LEDs stopped on the order along that same
+//! line, between its two meets with the body's pipe, which the front draws
+//! twice, as the edge of its hole and as the pipe cut across it. Each meet is
 //! solved from the front, the disc and one writing of the pipe, and the two
 //! are worked out into one box: at `x = -0.2197`, above the axis, in the D3
-//! whose axis is 6 up, and at `x = 2.659`, below it, in the one 10 up.
+//! whose axis is 6 up, and at `x = 2.659`, below it, in the one 10 up. A
+//! pipe's face now knows the side of a plane its edges go round it on in a
+//! ring (Q3048), and with that the far boxes of both, under intersection and
+//! under difference, stop refused `CannotTellTheCellsOfAFaceApart` on the
+//! flange's front, the plane `y = -6.35` with the body's pipe a hole in it:
+//! the stop of the D3 whose axis is 2 up, in
+//! `an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`. Untraced.
 //!
 //! These tests pin both stops.
 
 use std::{env, fs, path::PathBuf};
 
+use rcad_geom::Surface;
 use rcad_predicates::{Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
@@ -153,7 +160,6 @@ const THIS_ONE: Led = Led {
     file: "LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step",
     front: -6.35,
     body: 2.5,
-    axis: 3.0,
 };
 
 /// This LED's front corner, and where along `z` the box runs round the point
@@ -175,7 +181,6 @@ const FOUR_MORE: [(Led, [f64; 3], [f64; 2]); 4] = [
             file: "LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step",
             front: -3.81,
             body: 2.5,
-            axis: 15.0,
         },
         [-1.23, -3.81, 15.0],
         [13.97439790159237, 15.129461804142746],
@@ -185,7 +190,6 @@ const FOUR_MORE: [(Led, [f64; 3], [f64; 2]); 4] = [
             file: "LED_D5.0mm_Horizontal_O6.35mm_Z15.0mm.step",
             front: -6.35,
             body: 2.5,
-            axis: 15.0,
         },
         [-1.23, -6.35, 15.0],
         [12.6915421466242, 15.193447139366423],
@@ -195,7 +199,6 @@ const FOUR_MORE: [(Led, [f64; 3], [f64; 2]); 4] = [
             file: "LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step",
             front: -6.35,
             body: 2.5,
-            axis: 9.0,
         },
         [-1.23, -6.35, 9.0],
         [6.617952095277471, 9.953825418933762],
@@ -205,7 +208,6 @@ const FOUR_MORE: [(Led, [f64; 3], [f64; 2]); 4] = [
             file: "LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step",
             front: -3.81,
             body: 1.5,
-            axis: 2.0,
         },
         [-0.23, -3.81, 1.999999956464],
         [0.7779733548260698, 1.9283960606686874],
@@ -215,49 +217,31 @@ const FOUR_MORE: [(Led, [f64; 3], [f64; 2]); 4] = [
 /// Where the box on this LED's flat goes, round its front corner.
 const ON_THE_FLAT: [f64; 3] = [-1.23, -6.35, 3.0];
 
-/// The D3 LED file whose far box stops where the line its flange's front
-/// crosses its body's front disc in meets its body's pipe above the axis, with
-/// the `x` of that place.
-const ITS_AXIS_6_UP: (Led, f64) = (
-    Led {
-        file: "LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step",
-        front: -6.35,
-        body: 1.5,
-        axis: 6.0,
-    },
-    -0.21967713797085814,
-);
+/// The D3 LED file whose far box stopped where the line its flange's front
+/// crosses its body's front disc in meets its body's pipe above the axis.
+const ITS_AXIS_6_UP: Led = Led {
+    file: "LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step",
+    front: -6.35,
+    body: 1.5,
+};
 
-/// The D3 LED file whose far box stops where the line its flange's front
-/// crosses its body's front disc in meets its body's pipe below the axis, with
-/// the `x` of that place.
-const ITS_AXIS_10_UP: (Led, f64) = (
-    Led {
-        file: "LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step",
-        front: -6.35,
-        body: 1.5,
-        axis: 10.0,
-    },
-    2.658993405157157,
-);
+/// The D3 LED file whose far box stopped where the line its flange's front
+/// crosses its body's front disc in meets its body's pipe below the axis.
+const ITS_AXIS_10_UP: Led = Led {
+    file: "LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step",
+    front: -6.35,
+    body: 1.5,
+};
 
 /// An LED lying along `-y`, with its flange's front `y = front` and its body a
-/// pipe of radius `body` about the line `x = 1.27, z = axis`.
+/// pipe of radius `body` about a line `x = 1.27` along `y`.
 struct Led {
     file: &'static str,
     front: f64,
     body: f64,
-    axis: f64,
 }
 
 impl Led {
-    /// The two places on the flange's front where the plane `x = across` meets
-    /// the body's pipe, above the axis and below it.
-    fn where_a_plane_across_meets_the_body(&self, across: f64) -> [[f64; 3]; 2] {
-        let up = (self.body.powi(2) - (1.27 - across).powi(2)).sqrt();
-        [self.axis + up, self.axis - up].map(|z| [across, self.front, z])
-    }
-
     /// The flange's flat, the plane `x = 1.27 - body` the body's pipe touches.
     fn flat(&self) -> f64 {
         1.27 - self.body
@@ -268,7 +252,7 @@ impl Led {
 fn an_led_whose_disc_sits_inside_its_rim_gets_past_where_a_leads_side_meets_its_body_and_stops_where_its_flat_meets_its_front_written_twice()
  {
     let (corner, meet) = THIS_ONES_FRONT_CORNER;
-    every_fuse_refuses(THIS_ONE.file, &[FAR_OFF], |error| {
+    every_fuse_refuses(THIS_ONE.file, &[FAR_OFF], |_, error| {
         the_front_corner_and_where_the_flat_meets_the_front_written_twice_are_not_ordered(
             &THIS_ONE, corner, meet, error,
         )
@@ -279,7 +263,7 @@ fn an_led_whose_disc_sits_inside_its_rim_gets_past_where_a_leads_side_meets_its_
 fn a_box_on_the_flat_gets_past_where_its_side_meets_the_rim_and_stops_where_its_flat_meets_its_front_written_twice()
  {
     let (corner, meet) = THIS_ONES_FRONT_CORNER;
-    every_fuse_refuses(THIS_ONE.file, &[ON_THE_FLAT], |error| {
+    every_fuse_refuses(THIS_ONE.file, &[ON_THE_FLAT], |_, error| {
         the_front_corner_and_where_the_flat_meets_the_front_written_twice_are_not_ordered(
             &THIS_ONE, corner, meet, error,
         )
@@ -290,7 +274,7 @@ fn a_box_on_the_flat_gets_past_where_its_side_meets_the_rim_and_stops_where_its_
 fn four_more_leds_get_past_where_a_leads_side_meets_their_body_and_stop_where_their_flat_meets_their_front_written_twice()
  {
     for (led, corner, meet) in &FOUR_MORE {
-        every_fuse_refuses(led.file, &[FAR_OFF], |error| {
+        every_fuse_refuses(led.file, &[FAR_OFF], |_, error| {
             the_front_corner_and_where_the_flat_meets_the_front_written_twice_are_not_ordered(
                 led, *corner, *meet, error,
             )
@@ -299,29 +283,24 @@ fn four_more_leds_get_past_where_a_leads_side_meets_their_body_and_stop_where_th
 }
 
 #[test]
-fn a_d3_led_gets_past_where_a_leads_side_meets_its_rim_and_stops_where_its_front_written_twice_meets_its_body()
+fn two_d3_leds_get_past_where_their_front_written_twice_meets_their_body_and_stop_on_the_cells_of_their_flange_front()
  {
-    let (led, across) = &ITS_AXIS_6_UP;
-    let [above, _] = led.where_a_plane_across_meets_the_body(*across);
-    every_fuse_refuses(led.file, &[FAR_OFF], |error| {
-        the_one_record_is_undecidable_at(ALONG_A_CROSSING, above, error)
-    });
-}
-
-#[test]
-fn a_d3_led_gets_past_where_a_leads_side_meets_its_rim_and_stops_where_its_front_written_twice_meets_its_body_below_the_axis()
- {
-    let (led, across) = &ITS_AXIS_10_UP;
-    let [_, below] = led.where_a_plane_across_meets_the_body(*across);
-    every_fuse_refuses(led.file, &[FAR_OFF], |error| {
-        the_one_record_is_undecidable_at(ALONG_A_CROSSING, below, error)
-    });
+    for led in [&ITS_AXIS_6_UP, &ITS_AXIS_10_UP] {
+        every_fuse_refuses(led.file, &[FAR_OFF], |model, error| {
+            refused_on_the_cells_of_the_flange_front(led, model, error)
+        });
+    }
 }
 
 /// The LED in `file` and a box of side 0.2 centred on each of `centres`, fused
 /// under intersection and under difference, each refused as `the_refusal`
-/// takes.
-fn every_fuse_refuses(file: &str, centres: &[[f64; 3]], the_refusal: impl Fn(&Error) -> bool) {
+/// takes, handed the model it was refused in, which holds every face of the
+/// LED.
+fn every_fuse_refuses(
+    file: &str,
+    centres: &[[f64; 3]],
+    the_refusal: impl Fn(&Model, &Error) -> bool,
+) {
     let (led, solid) = the_led(file);
     for &centre in centres {
         for rule in [Rule::Intersection, Rule::Difference] {
@@ -335,7 +314,7 @@ fn every_fuse_refuses(file: &str, centres: &[[f64; 3]], the_refusal: impl Fn(&Er
                 &mut ProvenanceLog::new(),
             ) {
                 Err(error) => assert!(
-                    the_refusal(&error),
+                    the_refusal(&model, &error),
                     "{file}: {rule:?} with a box round {centre:?} refused {error:?}, which is not \
                      the refusal this pins"
                 ),
@@ -348,11 +327,21 @@ fn every_fuse_refuses(file: &str, centres: &[[f64; 3]], the_refusal: impl Fn(&Er
     }
 }
 
-/// Refused `Undecidable` with the one record `predicate`, every one of its
-/// points within `1e-9` of `at`.
-fn the_one_record_is_undecidable_at(predicate: &str, at: [f64; 3], error: &Error) -> bool {
-    let points = the_points_of_the_one_record(predicate, error);
-    !points.is_empty() && points.iter().all(|point| is_within_1e_9_of(point, at))
+/// Refused `CannotTellTheCellsOfAFaceApart` on `led`'s flange's front, the
+/// plane `y = led.front` with the body's pipe a hole in it.
+fn refused_on_the_cells_of_the_flange_front(led: &Led, model: &Model, error: &Error) -> bool {
+    let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
+        return false;
+    };
+    let face = model.face(*face).expect("the face is the LED's own");
+    let Surface::Plane(plane) = face.surface() else {
+        return false;
+    };
+    let [x, y, z, d] = plane.coefficients();
+    face.wire_count() == 2
+        && [x, y - 1.0, z, d + led.front]
+            .iter()
+            .all(|part| part.abs() < 1e-9)
 }
 
 /// Refused `Undecidable` with the one record `order along a crossing`, handed
