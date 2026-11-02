@@ -66,9 +66,6 @@ mod cones;
 
 use cones::{a_frustum, a_pointed_cone};
 
-/// What `fuse` says where one sign the answer needs could not be settled.
-const ONE_SIGN_NOT_SETTLED: &str = "could not settle 1 decisions the answer depends on";
-
 /// **A funnel with a leaning spout.** The funnel is a frustum of slope a half
 /// with its apex at the origin, cut two and eight up, so of radius one and
 /// four. The spout is a frustum of slope an eighth cut two and twelve up, so of
@@ -139,10 +136,10 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 /// the leaning cone is outside the upright cone. Worked out exactly it is, by
 /// `1.46e-15` read as the upright cone's equation `x² + y² − z²/4`.
 #[test]
-fn two_pointed_cones_one_leaning_off_the_other_are_refused_by_every_rule() {
+fn two_pointed_cones_one_leaning_off_the_other_answer_every_fuse() {
     assert_eq!(
         every_fuse_of(two_pointed_cones).refusals(),
-        [[Some(ONE_SIGN_NOT_SETTLED); 2]; 3]
+        [[None; 2]; 3]
     );
 }
 
