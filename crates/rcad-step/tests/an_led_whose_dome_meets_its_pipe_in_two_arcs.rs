@@ -162,9 +162,6 @@ const THE_FRONT_CORNER: [f64; 3] = [-0.23, -6.35, 1.999999956464];
 /// flat touches its body's pipe.
 const THE_BACK_CORNER: [f64; 3] = [-0.23, -7.35, 2.0];
 
-/// The radius of the D3 LED's body's pipe, about `x = 1.27, z = 2`.
-const THE_BODY_PIPES_RADIUS: f64 = 1.5;
-
 /// The radius of the D3 LED's flange's rim, a pipe about the same line.
 const THE_RIMS_RADIUS: f64 = 1.9;
 
@@ -201,26 +198,11 @@ fn a_d5_led_reads_a_walk_far_up_its_pipe_off_a_node_that_can_tell_and_stops_cutt
 }
 
 #[test]
-fn a_d3_led_gets_past_how_two_curves_bend_at_its_back_corner_and_stops_on_the_cells_of_its_body_pipe()
- {
-    every_fuse_refuses(
-        D3,
-        &both_rules_with_a_box_round_each_of(&[THE_BACK_CORNER]),
-        |model, error| {
-            let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
-                return false;
-            };
-            let face = model.face(*face).expect("the face is the LED's own");
-            matches!(face.surface(), Surface::Cylinder(pipe) if pipe.radius() == THE_BODY_PIPES_RADIUS)
-        },
-    );
-}
-
-#[test]
 fn a_d3_led_gets_past_its_back_corner_and_stops_where_a_plane_across_meets_its_rim_below_the_axis()
 {
     for (centre, across) in [
         (THE_FRONT_CORNER, THE_FRONT_CORNER[0] - HALF),
+        (THE_BACK_CORNER, THE_BACK_CORNER[0] - HALF),
         (FAR_OFF, A_LEADS_SIDE),
     ] {
         every_fuse_refuses(
