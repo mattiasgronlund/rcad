@@ -3058,6 +3058,28 @@ check-gate-verdicts-selftest:
     [ -f "$rust_store/$rust_fp1" ] && fail "a violated record of the cargo steps was kept, so the next gate would serve it"
     grep -q " $rust_fp1 check-release-build " "$repo/.git/rcad-verdict-violations" \
         || fail "the cargo steps' violation was not written down"
+
+    # One run that writes both records puts in each the counts of its own
+    # steps and no other's. The summary shows one record's counts, the cargo
+    # steps', so a run served both says which counts it left out.
+    both_gate() {
+        (cd "$repo" && "$j" --set gate_steps "$fast test" --set gate_reusable_steps "$fast test" \
+            --set gate_log "$dir/gate.log" gate quiet 2>&1)
+    }
+    [ ! -e "$store/$tree_fp1" ] || fail "the whole-tree record of the cargo steps' fixture exists before any gate wrote it"
+    got=$(both_gate) || fail "a gate of a whole-tree step and a cargo step failed"
+    grep -qxF "$fast_count" "$store/$tree_fp1" && ! grep -qxF "$test_count" "$store/$tree_fp1" \
+        || fail "the whole-tree record does not hold its own step's counts alone"
+    grep -qxF "$test_count" "$rust_store/$rust_fp1" && ! grep -qxF "$fast_count" "$rust_store/$rust_fp1" \
+        || fail "the cargo steps' record does not hold their own counts alone"
+    got=$(both_gate) || fail "a gate served both records failed"
+    grep -q "^· served: $fast from " <<<"$got" && grep -q "^· served: test from " <<<"$got" \
+        || fail "a gate was not served both records"
+    grep -qxF "$test_count (served from ${rust_commit1:0:8})" <<<"$got" \
+        || fail "a gate served both records did not show the cargo steps' counts"
+    grep -qxF "· verdicts: not in the summary, which shows the cargo steps' counts: $fast_count (served from ${rust_commit1:0:8})" <<<"$got" \
+        || fail "a gate served both records left the whole-tree record's counts out without saying so"
+    grep -qx 'tests: not reached' <<<"$got" && fail "a gate served both records said no tests were reached"
     g reset -q --hard "$base"
 
     # The steps that check the machine, each served off a key of its own: the
