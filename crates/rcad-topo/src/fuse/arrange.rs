@@ -1291,6 +1291,7 @@ impl<'f> Arrangement<'f> {
         let mut arrangement = Self::drawn(face, cuts, policy, log)?;
         arrangement.start_every_closed_crossing_that_has_no_node(log)?;
         arrangement.work_out_how_each_crossing_runs(log)?;
+        arrangement.fold_the_meets_by_a_corner_off_their_crossing_into_it()?;
         arrangement.merge_points_that_are_one_point(policy, log)?;
         arrangement.fold_the_straight_cuts_along_one_line();
         arrangement.cut_the_crossings_into_arcs(policy, log)?;
@@ -4066,7 +4067,10 @@ impl<'f> Arrangement<'f> {
     /// cut by its 332 planes placed 38 116 meets, and looking each one up among
     /// the others was 12 of 31 samples of a cut through that header (§200.1).
     /// Nor every corner: only `on_both`, the corners on both crossings, as
-    /// [`Arrangement::the_corners_on_both`] finds them, in that order.
+    /// [`Arrangement::the_corners_on_both`] finds them, in that order. The
+    /// meets by a corner that is on only one of their crossings are folded
+    /// into it once every meet is placed
+    /// ([`Arrangement::fold_the_meets_by_a_corner_off_their_crossing_into_it`]).
     fn the_corner_that_is_this_place(
         &self,
         on_both: &[usize],
@@ -4756,6 +4760,125 @@ impl<'f> Arrangement<'f> {
             let run = self.crossings[crossing].run.clone();
             self.crossings[crossing].order =
                 how_a_crossing_runs(&self.surface, &partner, &run, at, log)?;
+        }
+        Ok(())
+    }
+
+    /// Fold into a corner of the face the meets of a crossing that passes by
+    /// the corner without being on it, where every node of that crossing
+    /// that reaches the corner's room lies inside it, each is a meet of the
+    /// crossing with crossings the corner is on, and no two are proved apart.
+    ///
+    /// **The corner stands for them as it stands for the places of a meet on
+    /// both its crossings** ([`Arrangement::the_corner_that_is_this_place`]):
+    /// every point of their boxes lies inside the room writing the corner
+    /// down cost, which is the same wobble one place inside it is (§17.2).
+    /// That fold looks only at corners on both crossings of a meet, since it
+    /// is asked as each meet is placed, and a corner is on a crossing only
+    /// where [`Arrangement::place_the_corners`] proved it so. A curve can pass
+    /// through the corner's room with the corner not proved on it, and then
+    /// meet each of the corner's crossings there.
+    ///
+    /// The flange's flat `x = -1.23` of
+    /// `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step` cuts the body's pipe in
+    /// an ellipse about `9e16` long, whose end lies about `7e-17` in front of
+    /// the front corner `(-1.23, -1.27, 15)` and turns on a radius of about
+    /// `1e-16`. The front is written as two planes, the flange's and the body
+    /// disc's, each a crossing through the corner, and each meets the ellipse
+    /// twice at its end: four nodes within `1e-14` of the corner, the pipe not
+    /// proved through it. No box told the four apart, and asked their order
+    /// round the ellipse every fuse of the file refused `Undecidable` (Q3110).
+    /// The front face folds two of them, the flat, the flange's front and the
+    /// pipe, into this corner already, where it is on the flat's line and on
+    /// the pipe's circle, so folding them here makes the two faces agree.
+    ///
+    /// **Only where the crossing meets two of the corner's crossings in the
+    /// room**, so that it runs through the corner and not only past one of
+    /// its sides. On the face `z = 15.3` of the same LED a straight crossing
+    /// runs by two corners at `y = -1.27`, `x = 2.04` and `x = 2.64`, and
+    /// meets one crossing of each inside its room and no other crossing
+    /// there. Folded, those two meets put both corners on it, and every fuse
+    /// of the file refused `CannotTellTheCellsOfAFaceApart` on that face.
+    ///
+    /// **Only where the corner is all that is near.** A node of the crossing
+    /// that reaches the room and sticks out of it, that is a corner itself or
+    /// the middle of a half, that meets a crossing the corner is not on, or
+    /// whose box misses another's, leaves every node of that crossing a node
+    /// of its own, for [`Arrangement::merge_points_that_are_one_point`] to
+    /// ask the policy about (§17.4).
+    ///
+    /// # Errors
+    ///
+    /// [`Invalid::EdgeHasNoLength`] where a meet lies in the room of two
+    /// corners and joins them ([`Arrangement::fold_the_nodes`]).
+    fn fold_the_meets_by_a_corner_off_their_crossing_into_it(&mut self) -> Result<()> {
+        let mut same = Sameness::of(self.nodes.len());
+        let mut corners: Vec<usize> = self.node_of_corner.iter().flatten().copied().collect();
+        corners.sort_unstable();
+        corners.dedup();
+        for corner in corners {
+            let through = &self.nodes[corner].crossings;
+            let at = self.nodes[corner].point;
+            let room = super::bake::grown_by(
+                at,
+                super::bake::what_writing_the_corner_down_cost(at.enclosure()),
+            );
+            for crossing in 0..self.crossings.len() {
+                if !self.crossings[crossing].reaches_the_face
+                    || through.contains(&crossing)
+                    || !nothing_rules_the_point_out(self.crossings[crossing].picked_by(), at)
+                {
+                    continue;
+                }
+                let reaching: SmallVec<[usize; 4]> = (0..self.nodes.len())
+                    .filter(|&node| {
+                        self.nodes[node].crossings.contains(&crossing)
+                            && boxes_overlap(room, self.nodes[node].point)
+                    })
+                    .collect();
+                let a_meet_of_the_corners_crossings_inside_its_room = |node: usize| {
+                    let node = &self.nodes[node];
+                    let mut others = node.crossings.iter().filter(|&&other| other != crossing);
+                    node.vertex.is_none()
+                        && node.made_of.is_some()
+                        && !node.half_way_round
+                        && others.clone().next().is_some()
+                        && others.all(|other| through.contains(other))
+                        && lies_inside(node.point, room)
+                };
+                let no_two_apart = || {
+                    reaching.iter().all(|&one| {
+                        reaching.iter().all(|&other| {
+                            boxes_overlap(self.nodes[one].point, self.nodes[other].point)
+                        })
+                    })
+                };
+                if reaching.is_empty()
+                    || !reaching
+                        .iter()
+                        .all(|&node| a_meet_of_the_corners_crossings_inside_its_room(node))
+                    || !no_two_apart()
+                {
+                    continue;
+                }
+                let mut met: SmallVec<[usize; 4]> = reaching
+                    .iter()
+                    .flat_map(|&node| &self.nodes[node].crossings)
+                    .copied()
+                    .filter(|&other| other != crossing)
+                    .collect();
+                met.sort_unstable();
+                met.dedup();
+                if met.len() < 2 {
+                    continue;
+                }
+                for node in reaching {
+                    same.join(corner, node);
+                }
+            }
+        }
+        if same.joined_anything() {
+            self.fold_the_nodes(&mut same)?;
         }
         Ok(())
     }
@@ -17352,6 +17475,12 @@ fn square_to_the_run_at_the_start(
 fn boxes_overlap(one: PredicatePoint, other: PredicatePoint) -> bool {
     let (mine, theirs) = (one.enclosure(), other.enclosure());
     (0..3).all(|axis| mine[axis].lo() <= theirs[axis].hi() && theirs[axis].lo() <= mine[axis].hi())
+}
+
+/// Whether every point of `inner`'s box is in `outer`'s, sides included.
+fn lies_inside(inner: PredicatePoint, outer: PredicatePoint) -> bool {
+    let (inner, outer) = (inner.enclosure(), outer.enclosure());
+    (0..3).all(|axis| outer[axis].lo() <= inner[axis].lo() && inner[axis].hi() <= outer[axis].hi())
 }
 
 /// Which of two points comes first going round a closed crossing from `from`,
