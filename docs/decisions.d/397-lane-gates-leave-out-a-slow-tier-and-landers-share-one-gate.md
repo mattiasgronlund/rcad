@@ -796,3 +796,68 @@ that starts late ends last.
 order the ends differently, so the table is re-taken from a quiet machine if a
 late starter is ever seen to end last. The sentence in §397.10 that there is no
 `.config/nextest.toml` stays true.
+
+### 397.12 The pin header grew in two steps, both cut since, and CPU seconds grow under load (Q3090)
+
+*Lane Q3090, 2026-11-03, read-only. Written in by the dispatcher from its
+report. Each reading is `/usr/bin/time -v` round `mise exec -- just t
+pin_header_1x39` with `PinHeader_1x39_P2.54mm_Vertical.step` alone in
+`RCAD_STEP_CORPUS`, build cached. The raw lines, with the one-minute load
+before and after each, are in `~/rcad-probes/q3090/results.txt`, outside git.*
+
+**Where the time came from.** Q3083 read the file's user CPU growing from
+145.8 s at `f126887ba` to 280.4 s at `92663a41f` (2026-10-26).
+On a quiet machine, two readings each, the growth is two steps:
+
+- **`2be072575`, the merge of Q1949's follow-up, 2026-10-15:** 115–122 s at
+  `67091b9aa` before it, 182–189 s after. Its commit `b2cac7ed1` alone reads
+  160–164 s. That commit made `a_face_may_run_between_it_and_the_plane` in
+  `fuse/select.rs` ask a flat face at the four corners of the piece's plane in
+  the box, and gdb put that function first among rcad-topo frames in 4 of 14
+  samples after it and 0 of 9 before. **Q3088 took that cost out** at
+  `99ce048a2`, which asks the whole box first.
+- **`955f07d66`, the merge of Q2575, 2026-10-24:** 154 s at `e3bd2e862` before
+  it, 227.5 s after, one reading each. `the_baked_corner_of` in
+  `fuse/arrange.rs` searched the face's edges for each corner that
+  `as_read_round_a_corner` asked about. A sample's leaf was `eq` in `key.rs`
+  under it in 6 of 14 samples after the merge and 0 of 12 before. **Q3087 took that cost out** at `8955050e1`,
+  which looks the corner up by vertex.
+
+So the two rows the lane proposed were both done before it reported, and
+neither was filed. Not bisected: a drop of about 30 s between `aec567c33`
+(183–187 s) and `eb521fdc1` (149 s), and about 20 s that `2be072575` holds
+above `b2cac7ed1` alone.
+
+**The same commit read up to half again as much on a busy machine.** The lane
+timed its first two bisections once per commit while Q3088's and Q3098's
+gates ran, and timed again from 11:22Z, when the load had fallen:
+
+| commit | busy (load at start) | quiet (load at start) |
+|---|---|---|
+| `eb521fdc1` | 223.95 s (28.40) | 149.39 s (0.96) |
+| `2be072575` | 244.65 s (38.55) | 182.47 s (15.53), 188.63 s (1.73) |
+| `f337994aa` | 250.95 s (30.73) | 225.03 s (9.67) |
+| `aec567c33` | 205.01 s (17.33) | 183.02 s (12.64), 186.90 s (1.65) |
+| `723c4a065` | 126.95 s (19.71) | 114.41 s (13.31), 113.77 s (4.87) |
+| `b2cac7ed1` | 161.53 s (26.59) | 160.16 s (12.80), 164.34 s (2.13) |
+| `f126887ba` | 119.40 s (41.79) | 122.35 s (13.22), 124.54 s (2.88) |
+
+The busy reading ran from no higher to 50% higher, and the load at the start
+did not say which: `f126887ba` at 41.79 read no higher, `eb521fdc1` at 28.40
+read half again. Nor does a low load at the start make a reading safe. Q3083's
+280.4 s at `92663a41f` began at a load of 3.2, and `0d82af996`, whose crate
+sources are the same (the two differ only in a test file of another test
+binary), reads 233.94–236.69 s quiet. One minute's average, read once, says
+nothing of what shared the cores over a run of two to four minutes. Why user
+time grows when the cores are busy was not measured. Two threads sharing each
+core and a lower clock with every core busy are both candidates.
+
+It cost the lane about an hour and a half: one reading per commit on the busy
+machine sent its bisection of 2026-10-19..26 to `386176e37` and `0d82af996`,
+a step that the quiet readings do not show.
+
+**So a CPU time compared across commits is read on a quiet machine, both
+commits back to back and twice each.** A reading taken beside other lanes'
+builds is compared with nothing, whatever load is written beside it. A row
+whose answer is such a comparison can keep the machine to itself with `just
+queue cores <id> all` (§308), at the price of every other slot while it runs.
