@@ -7539,6 +7539,16 @@ test slow_log="" slow_status="":
         | awk '/^ *Summary \[/ {seen = 1; listed = ""; next}
                seen && /^ *(TRY [0-9]+ )?[A-Z][A-Z-]* \[/ && NF >= 5 {listed = listed $0 "\n"}
                END {printf "%s", listed}' >"$run.failing"
+    # Every test that ran and did not pass is on that list, so a line in a
+    # shape the pattern does not read shows as one line too few, and the split
+    # is then refused rather than passing a tier whose test failed unread.
+    summary=$(sed 's/\x1b\[[0-9;]*m//g' "$run" | grep -E '^ *Summary \[' | tail -n 1 || true)
+    counted='\] +([0-9]+)(/[0-9]+)? tests? run: ([0-9]+) passed'
+    not_passed=-1
+    if [[ "$summary" =~ $counted ]]; then
+        not_passed=$((BASH_REMATCH[1] - BASH_REMATCH[3]))
+    fi
+    listed_count=$(wc -l <"$run.failing")
     slow_pairs=$(while read -r token; do echo "${token%/*} ${token##*/}"; done <<<"$names")
     fast_failed=""
     slow_failed=""
@@ -7552,10 +7562,12 @@ test slow_log="" slow_status="":
     done <"$run.failing"
     fast_rc=0
     slow_rc=0
-    if [ "$rc" -eq 100 ] && [ -s "$run.failing" ]; then
+    if [ "$rc" -eq 100 ] && [ "$listed_count" -gt 0 ] && [ "$listed_count" -eq "$not_passed" ]; then
         [ -z "$fast_failed" ] || fast_rc=100
         [ -z "$slow_failed" ] || slow_rc=100
     elif [ "$rc" -ne 0 ]; then
+        [ "$not_passed" -lt 0 ] \
+            || echo "nextest's Summary line counts $not_passed tests that did not pass, and $listed_count are listed after it in a shape this reads"
         echo "nextest exited $rc and its failures cannot be split between the tiers, so test and test-slow both fail"
         fast_rc=$rc
         slow_rc=$rc
