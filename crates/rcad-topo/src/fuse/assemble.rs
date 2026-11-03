@@ -10316,10 +10316,9 @@ impl Corners {
         policy: &Policy,
     ) -> Vec<Vec<(CornerName, Point)>> {
         type OneLineAndOneConic = ([[u64; 4]; 2], u8, [[u64; 9]; 2]);
-        let mut on_one_conic: BTreeMap<
-            OneLineAndOneConic,
-            BTreeMap<CornerName, (&'a [Surface; 3], Vec<Point>)>,
-        > = BTreeMap::new();
+        type WhereEachNameArrived<'b> = BTreeMap<CornerName, (&'b [Surface; 3], Vec<Point>)>;
+        let mut on_one_conic: BTreeMap<OneLineAndOneConic, WhereEachNameArrived<'a>> =
+            BTreeMap::new();
         for end in ends {
             let MeetPoint::OfThreeSurfaces {
                 surfaces,
