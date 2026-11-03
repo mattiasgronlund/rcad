@@ -9176,7 +9176,16 @@ fuzz-overnight window="28800" pause_start="" pause_end="":
         [ "$pause_until" -ge "$deadline" ] || second=1
     fi
 
-    left=$(( first_stop - $(date +%s) ))
+    # Whole seconds a target may run, counted from the clock in milliseconds
+    # when a pause is what ends the stretch. A clock rounded down reads a
+    # whole second left in the last second before the pause, and a target
+    # given it runs into the pause (Q3062). The deadline is left on the
+    # coarse clock: a window of one second must still fuzz for it.
+    if [ "$first_stop" -eq "$deadline" ]; then
+        left=$(( first_stop - $(date +%s) ))
+    else
+        left=$(( (first_stop * 1000 - $(date +%s%3N)) / 1000 ))
+    fi
     if [ -n "$second" ] && [ "$left" -lt 1 ]; then
         echo "started inside the pause, so nothing runs before it"
     else
@@ -11468,10 +11477,13 @@ check-fuzz-overnight-selftest:
 
     # Thirty-five: a pause that ends at or after the deadline ends the night
     # where it starts. Nothing waits for its end, and nothing runs after it.
+    # Seven seconds before the pause, the most a window of eight allows: the
+    # build and two checks come out of it, and took three seconds under load
+    # (Q3062).
     thirty_five() {
     : >"$dir/log"
     t0=$(date +%s)
-    pause_from=$(( t0 + 5 ))
+    pause_from=$(( t0 + 7 ))
     pause_until=$(( t0 + 60 ))
     run 8 "@$pause_from" "@$pause_until" \
         || fail "a night whose pause outlasts it failed: $(cat "$dir/out")"
