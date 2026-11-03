@@ -7441,10 +7441,21 @@ check-recipe-selftest:
 # exactly, so a name selects one test at most, and the count fails on a name
 # that selects none and on a name written twice. Either would leave the list
 # saying something about the tier that is not so.
-[doc("Every test but the slow tier, which `test-slow` runs, and the doc tests. Fails first unless each name in `slow_tests` selects exactly one test.")]
-test:
+#
+# **Given where test-slow's log and exit code go, it runs the slow tier too, in
+# the same nextest run** (§397.10). That is how `gate` runs the two when both
+# are to run, so the slow tests share the cores with the rest instead of
+# running after them. A failing test is test-slow's when `slow_tests` names it
+# and test's when not, read from the list nextest prints after its Summary
+# line. The run goes on past a failure, so a fast one leaves test-slow an
+# answer of its own. A run that fails and names no test fails both. A failed
+# count writes no exit code, and `gate` then runs test-slow alone.
+[doc("Every test but the slow tier, which `test-slow` runs, and the doc tests. Fails first unless each name in `slow_tests` selects exactly one test. Given two files, runs the slow tier in the same nextest run and writes test-slow's log and exit code to them.")]
+test slow_log="" slow_status="":
     #!/usr/bin/env bash
     set -euo pipefail
+    slow_log=$1
+    slow_status=$2
     filter=$({{ just_executable() }} _slow-tests-filter '{{ slow_tests }}')
     names=$(printf '%s\n' {{ slow_tests }})
     listed=$(cargo nextest list --workspace -E "$filter" --message-format oneline)
@@ -7459,7 +7470,62 @@ test:
         echo "a renamed or split slow test is renamed in slow_tests in the same commit (docs/decisions.md §397.4)"
         exit 1
     fi
-    cargo nextest run --workspace -E "not ($filter)"
+    if [ -z "$slow_log" ]; then
+        cargo nextest run --workspace -E "not ($filter)"
+        cargo test --workspace --doc
+        exit 0
+    fi
+
+    run=$(mktemp)
+    trap 'rm -f "$run" "$run.failing"' EXIT
+    # `--final-status-level` and `--failure-output` are named because the
+    # environment can set them, and the list after the Summary line is what
+    # this reads: each failing test as its status word, its time, its place in
+    # the run, its binary_id and its name, in colour on a runner.
+    rc=0
+    cargo nextest run --workspace --no-fail-fast --final-status-level fail --failure-output immediate \
+        -E "not ($filter)" -E "$filter" 2>&1 | tee "$run" || rc=$?
+    sed 's/\x1b\[[0-9;]*m//g' "$run" \
+        | awk '/^ *Summary \[/ {seen = 1; listed = ""; next}
+               seen && /^ *[A-Z][A-Z-]* \[/ && NF >= 5 {listed = listed $0 "\n"}
+               END {printf "%s", listed}' >"$run.failing"
+    slow_pairs=$(while read -r token; do echo "${token%/*} ${token##*/}"; done <<<"$names")
+    fast_failed=""
+    slow_failed=""
+    while IFS= read -r line; do
+        read -ra field <<<"$line"
+        if grep -qxF "${field[-2]} ${field[-1]}" <<<"$slow_pairs"; then
+            slow_failed+="$line"$'\n'
+        else
+            fast_failed+="$line"$'\n'
+        fi
+    done <"$run.failing"
+    fast_rc=0
+    slow_rc=0
+    if [ "$rc" -eq 100 ] && [ -s "$run.failing" ]; then
+        [ -z "$fast_failed" ] || fast_rc=100
+        [ -z "$slow_failed" ] || slow_rc=100
+    elif [ "$rc" -ne 0 ]; then
+        echo "nextest exited $rc and its failures cannot be split between the tiers, so test and test-slow both fail"
+        fast_rc=$rc
+        slow_rc=$rc
+    fi
+    # No count line, since the gate's summary reads both steps' logs and the
+    # Summary line above already counts the slow tier.
+    {
+        echo "the slow tier ran in test's nextest run, beside every other test, and its output is in test's log (docs/decisions.md §397.10)"
+        if [ -n "$slow_failed" ]; then
+            echo "these slow tests failed:"
+            printf '%s' "$slow_failed"
+        elif [ "$slow_rc" -ne 0 ]; then
+            echo "nextest exited $rc and its failures cannot be split between the tiers"
+        fi
+    } >"$slow_log"
+    echo "$slow_rc" >"$slow_status"
+    if [ "$fast_rc" -eq 0 ] && [ -n "$slow_failed" ]; then
+        echo "every test that failed is in the slow tier, so test-slow fails and test goes on to the doc tests"
+    fi
+    [ "$fast_rc" -eq 0 ] || exit "$fast_rc"
     cargo test --workspace --doc
 
 # The slow tier `slow_tests` names, and nothing else. The land gate runs it and
