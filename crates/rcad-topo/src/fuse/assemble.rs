@@ -10034,6 +10034,12 @@ struct Corners {
     /// to put them there, by the name the point goes by: the furthest of them
     /// ([`fold_each_corner_one_plane_cuts_a_rounding_from_it`]).
     moved: BTreeMap<CornerName, f64>,
+    /// How far apart the places a point's names arrived at are, by the name
+    /// the point goes by, where some of those names are meets of one line
+    /// with one conic that no arrangement proved one point
+    /// ([`Corners::the_meets_of_one_line_and_one_conic`]): added to the wobble
+    /// of the corner, which is put at one of those places and stands for all.
+    spread: BTreeMap<CornerName, f64>,
     /// For every closed curve the kept sides bring under more than one name,
     /// the one name each of them goes by. See
     /// [`the_name_each_closed_curve_goes_by`].
@@ -10167,14 +10173,19 @@ impl Corners {
                 policy,
             ),
             arcs: the_name_each_arc_of_a_conic_goes_by(
+                model,
                 sides
                     .iter()
                     .filter(|(_, curve)| curve.is_none())
-                    .map(|(meet, _)| &meet.carried_by),
+                    .map(|(meet, _)| (&meet.carried_by, &meet.along[..])),
                 policy,
             ),
             ..Self::default()
         };
+        let on_one_conic = corners.the_meets_of_one_line_and_one_conic(
+            sides.iter().flat_map(|(meet, _)| &meet.ends),
+            policy,
+        );
         let mut closes: BTreeMap<VertexSlot, BTreeSet<Option<CurveName>>> = BTreeMap::new();
         let mut on_curve: BTreeMap<CurveName, OneClosedCurve<'_>> = BTreeMap::new();
         for (meet, curve) in &sides {
@@ -10206,7 +10217,13 @@ impl Corners {
                 }
             }
         }
-        corners.join_the_names_of_each_point(model, names_of_one_point, policy, log)?;
+        corners.join_the_names_of_each_point(
+            model,
+            names_of_one_point,
+            &on_one_conic,
+            policy,
+            log,
+        )?;
         corners.make_one_corner_of_the_ends_of_each_side_with_no_length(
             model,
             sides.iter().map(|&(meet, _)| meet),
@@ -10267,6 +10284,110 @@ impl Corners {
         (*self.arcs.get(&named).unwrap_or(&named), sign)
     }
 
+    /// Every group of two or more names among `ends` that are one point
+    /// because they are where one line meets one conic, with each place a name
+    /// of the group arrived at.
+    ///
+    /// **One line**: two of a meet's three surfaces are planes, and a meet of
+    /// two planes and a ball, a pipe or a cone is one of the places along the
+    /// line those two cross in, numbered by `which` in the order along it
+    /// (`where_a_line_meets_a_quadric` in `rcad-geom`). The two planes are
+    /// compared bit for bit, never at any scale: a plane turned round turns
+    /// the line round, and that swaps which place is which.
+    ///
+    /// **One conic**: the third is a ball, a pipe or a cone whose conic on one
+    /// of the two planes goes by the same name as the other's
+    /// ([`the_name_each_arc_of_a_conic_goes_by`]). One line meets one conic in
+    /// the same places whichever surface the conic is read off, so the places
+    /// with one `which` are one point, where the two surfaces meet the line in
+    /// as many places each ([`meet_of_three_surfaces`]). Where either cannot
+    /// be worked out, or they meet it in a different number of places, the
+    /// names are left apart, and the answer is refused as it was.
+    ///
+    /// This is no coordinate deciding what is one corner, nor a tolerance:
+    /// the conics are one because a side of each runs along one input edge,
+    /// or because the plane and the two share more than a point. The places
+    /// can land a few roundings apart all the same, `2.2e-15` on the rim of a
+    /// KiCad LED's dome (Q3104), so each group's spread is added to the wobble
+    /// ([`Corners::join_the_names_of_each_point`]).
+    fn the_meets_of_one_line_and_one_conic<'a>(
+        &self,
+        ends: impl Iterator<Item = &'a MeetPoint>,
+        policy: &Policy,
+    ) -> Vec<Vec<(CornerName, Point)>> {
+        type OneLineAndOneConic = ([[u64; 4]; 2], u8, [[u64; 9]; 2]);
+        type WhereEachNameArrived<'b> = BTreeMap<CornerName, (&'b [Surface; 3], Vec<Point>)>;
+        let mut on_one_conic: BTreeMap<OneLineAndOneConic, WhereEachNameArrived<'a>> =
+            BTreeMap::new();
+        for end in ends {
+            let MeetPoint::OfThreeSurfaces {
+                surfaces,
+                which,
+                point,
+            } = end
+            else {
+                continue;
+            };
+            let [Surface::Plane(one), Surface::Plane(other), round] = surfaces else {
+                continue;
+            };
+            if round.as_plane().is_some() {
+                continue;
+            }
+            let line = [one, other].map(|flat| flat.coefficients().map(f64::to_bits));
+            let round_named = name_of_the_surface_either_way_round(round);
+            for flat in [one, other] {
+                let arc = [
+                    round_named,
+                    name_of_the_plane_at_any_scale(&Surface::Plane(*flat)),
+                ];
+                let Some(&conic) = self.arcs.get(&arc) else {
+                    continue;
+                };
+                on_one_conic
+                    .entry((line, *which, conic))
+                    .or_default()
+                    .entry(CornerName::Meet(
+                        names_of_the_three_surfaces(surfaces),
+                        *which,
+                    ))
+                    .or_insert_with(|| (surfaces, Vec::new()))
+                    .1
+                    .push(middle_of(*point));
+            }
+        }
+        let how_many_places = |surfaces: &[Surface; 3]| {
+            let Ok(MeetOfThree::At(places)) =
+                meet_of_three_surfaces(surfaces.each_ref(), policy, &mut ProvenanceLog::new())
+            else {
+                return None;
+            };
+            Some(places.len())
+        };
+        let mut groups = Vec::new();
+        for named in on_one_conic.into_values() {
+            if named.len() < 2 {
+                continue;
+            }
+            let mut counts = named
+                .values()
+                .map(|&(surfaces, _)| how_many_places(surfaces));
+            let first = counts.next().flatten();
+            if first.is_none() || !counts.all(|count| count == first) {
+                continue;
+            }
+            groups.push(
+                named
+                    .into_iter()
+                    .flat_map(|(name, (_, points))| {
+                        points.into_iter().map(move |point| (name.clone(), point))
+                    })
+                    .collect(),
+            );
+        }
+        groups
+    }
+
     /// Make every name of one point go by one name, and put the point where
     /// its input corner is, when one of its names is an input corner.
     ///
@@ -10284,6 +10405,13 @@ impl Corners {
     /// them. The input corner wins as it wins the fold, where its point is the
     /// one the faces round it agree on.
     ///
+    /// **The meets of one line with one conic under two names are one point
+    /// too** ([`Corners::the_meets_of_one_line_and_one_conic`]), joined with
+    /// the arrangement's folds. No arrangement proved them one, and they can
+    /// land a few roundings apart, so the furthest apart any two of `on_one_conic`'s
+    /// points of one group are is added to the wobble of the corner they make
+    /// ([`Corners::spread`]).
+    ///
     /// # Errors
     ///
     /// Whatever [`Corners::name_of`] gives.
@@ -10291,6 +10419,7 @@ impl Corners {
         &mut self,
         model: &Model,
         names_of_one_point: &[NamesOfOnePoint],
+        on_one_conic: &[Vec<(CornerName, Point)>],
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<()> {
@@ -10304,7 +10433,29 @@ impl Corners {
                 ]);
             }
         }
+        for group in on_one_conic {
+            let (first, _) = &group[0];
+            folds.extend(
+                group[1..]
+                    .iter()
+                    .map(|(name, _)| [first.clone(), name.clone()]),
+            );
+        }
         self.goes_by.extend(the_least_name_of_each_group(folds));
+        let mut arrived_at: BTreeMap<CornerName, Vec<Point>> = BTreeMap::new();
+        for &(ref name, point) in on_one_conic.iter().flatten() {
+            arrived_at
+                .entry(self.goes_by(name.clone()))
+                .or_default()
+                .push(point);
+        }
+        for (name, points) in arrived_at {
+            let furthest = points
+                .iter()
+                .flat_map(|&one| points.iter().map(move |&other| how_far_apart(one, other)))
+                .fold(0.0, f64::max);
+            self.spread.insert(name, furthest);
+        }
         for one_point in names_of_one_point {
             let MeetPoint::Existing { vertex, .. } = &one_point.kept else {
                 continue;
@@ -10609,6 +10760,7 @@ impl Corners {
     /// no corner of that name or at that point is made yet, without making it.
     fn the_corner_it_would_be(&self, model: &Model, name: &CornerName, end: &MeetPoint) -> Corner {
         let moved = self.moved.get(name).copied();
+        let spread = self.spread.get(name).copied().unwrap_or(0.0);
         let (point, wobble, was) = match self.put_at.get(name) {
             Some(&(input_corner, vertex)) => (
                 input_corner,
@@ -10632,7 +10784,7 @@ impl Corners {
         };
         Corner {
             point: middle_of(point),
-            wobble,
+            wobble: wobble + spread,
             from: was,
             moved_by_the_policy: moved.is_some(),
             where_walls_touch: Vec::new(),
@@ -11229,6 +11381,20 @@ fn the_plane_and_the_ring_of(carried_by: &[Surface; 2]) -> Option<(Plane, Surfac
 /// [`the_name_each_closed_curve_goes_by`] makes: two different conics in one
 /// plane share at most four points.
 ///
+/// **Or where the plane is one at any scale and a side of each runs along one
+/// input edge.** The input says the two faces meet along that edge, so its
+/// curve is on both conics: two conics in one plane that share an arc are one
+/// conic. The ball a KiCad LED's dome is and the pipe of its body are stored
+/// `2e-15` apart across the axis, so their circles on the rim's plane are
+/// centred that far apart and cross in two points, and share no more than a
+/// point as stored. The file draws the rim as one edge between the two faces,
+/// and named apart its pieces were edges with one face along each, so every
+/// difference of the LED with a box was refused `DynamicRangeTooWide`
+/// (`tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs` in `rcad-step`,
+/// Q3104). The two sides of an arc so joined end where one line meets the
+/// one conic, and [`Corners::the_meets_of_one_line_and_one_conic`] makes
+/// those ends one corner.
+///
 /// **The sign an arc is named with holds across the join.** It says whether a
 /// face walks the arc along `∇round × n` or against it, `n` the plane's
 /// normal as its name folds it. Only the part of `∇round` in the plane counts
@@ -11245,11 +11411,13 @@ fn the_plane_and_the_ring_of(carried_by: &[Surface; 2]) -> Option<(Plane, Surfac
 /// nothing for a closed curve, and the answer is refused as not a manifold, as
 /// it was before anything was asked.
 fn the_name_each_arc_of_a_conic_goes_by<'a>(
-    open_sides: impl Iterator<Item = &'a [Surface; 2]>,
+    model: &Model,
+    open_sides: impl Iterator<Item = (&'a [Surface; 2], &'a [EdgeKey])>,
     policy: &Policy,
 ) -> BTreeMap<[[u64; 9]; 2], [[u64; 9]; 2]> {
-    let mut cut_out_of: BTreeMap<[[u64; 9]; 2], (Plane, Surface)> = BTreeMap::new();
-    for carried_by in open_sides {
+    let mut cut_out_of: BTreeMap<[[u64; 9]; 2], (Plane, Surface, BTreeSet<EdgeSlot>)> =
+        BTreeMap::new();
+    for (carried_by, along) in open_sides {
         if which_of_them_a_closed_crossing_runs_round(carried_by).is_none() {
             continue;
         }
@@ -11258,22 +11426,26 @@ fn the_name_each_arc_of_a_conic_goes_by<'a>(
                 name_of_the_surface_either_way_round(&round),
                 name_of_the_plane_at_any_scale(&Surface::Plane(flat)),
             ];
-            cut_out_of.entry(named).or_insert((flat, round));
+            let (_, _, runs_along) = cut_out_of
+                .entry(named)
+                .or_insert_with(|| (flat, round, BTreeSet::new()));
+            runs_along.extend(along.iter().map(|edge| edge.slot_in(model.id())));
         }
     }
     let named: Vec<_> = cut_out_of.iter().collect();
     let mut joined = Vec::new();
-    for (at, &(one, &(flat, mine))) in named.iter().enumerate() {
-        for &(other, &(_, theirs)) in &named[at + 1..] {
+    for (at, &(one, (flat, mine, mine_along))) in named.iter().enumerate() {
+        for &(other, (_, theirs, theirs_along)) in &named[at + 1..] {
             let one_conic = one[1] == other[1]
-                && matches!(
-                    meet_of_three_surfaces(
-                        [&Surface::Plane(flat), &mine, &theirs],
-                        policy,
-                        &mut ProvenanceLog::new(),
-                    ),
-                    Ok(MeetOfThree::MoreThanAPoint)
-                );
+                && (!mine_along.is_disjoint(theirs_along)
+                    || matches!(
+                        meet_of_three_surfaces(
+                            [&Surface::Plane(*flat), mine, theirs],
+                            policy,
+                            &mut ProvenanceLog::new(),
+                        ),
+                        Ok(MeetOfThree::MoreThanAPoint)
+                    ));
             if one_conic {
                 joined.push([*one, *other]);
             }

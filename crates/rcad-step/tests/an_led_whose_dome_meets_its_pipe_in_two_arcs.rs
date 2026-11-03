@@ -91,10 +91,36 @@
 //!   numbers and round to one `f64` triple (Q3056). The straight side between
 //!   them was refused as though it were an arc. A straight side on a pipe
 //!   whose two ends are one corner is now left out, as one between two planes
-//!   is (Q3057), and every difference stops refused `DynamicRangeTooWide`, at
-//!   a ratio of `1.8e16`. Q3056's probe of the same fix found edges of the
-//!   dome's rim `z = 9.1` each claimed by one face, the ball's and the pipe's
-//!   writing their corners `2e-15` apart. Untraced.
+//!   is (Q3057), and every difference stopped refused `DynamicRangeTooWide`,
+//!   at a ratio of `1.8e16`. That was `ResultIsNotManifold` read for its
+//!   range: 26 pieces of the ball and 26 of the pipe each walked an edge of
+//!   the rim `z = 9.1` no other face walked. The ball and the pipe cross in
+//!   the thin loop above, so the ball keeps a band between the rim and the
+//!   loop's top branch, `1e-7` above it, and the pipe a band down to the
+//!   loop's bottom branch, and planes across the rim cut each band in pieces.
+//!   Each piece's side along the rim is a piece of the one input edge, but
+//!   the ball's is carried by the ball and the rim's plane and the pipe's by
+//!   the pipe and that plane. The two circles they cut in the plane are
+//!   centred `2e-15` apart, so they cross in two points and do not share more
+//!   than a point, and the arcs were not joined under one name as they are on
+//!   a bar capped by a ball of its radius (Q3000). Their corners are named by
+//!   the plane, the plane across and the ball or the pipe:
+//!   `(2.74, -2.491987158875427, 9.1)` for the ball and
+//!   `(2.74, -2.4919871588754248, 9.1)` for the pipe, two triples, so even
+//!   where a corner was shared the two edges were two. Two arcs on one plane
+//!   whose sides run along one input edge are now one conic, and where one
+//!   line meets that conic the ball's and the pipe's names are one corner
+//!   (Q3104), so every edge of the rim has two faces on it. Every difference
+//!   still stops refused `DynamicRangeTooWide`, at a ratio of `1.8e16`, now
+//!   on thin strips of the body's pipe. The lead's sides `y = 0.2` and
+//!   `y = -0.2` are each stored twice, a rounding apart, and each copy cuts
+//!   the pipe along its own line, `6.7e-16` from the other's. The rings,
+//!   slopes, loop and rim across the pipe cut each strip in edges that short,
+//!   and pieces of one input face are joined back only where they are flat.
+//!   Under a tolerant policy, which lets that range through, every difference
+//!   stops refused `ACrossingAlongThisEdgeCouldNotBeFollowed`, where the ball
+//!   and the pipe are too nearly tangent to follow the thin loop they cross
+//!   in.
 //! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
 //!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
 //!   rounding apart in direction. Q2938's road answers that triple, and the
@@ -205,7 +231,7 @@ const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 /// The box round the corner `(0.04, 0, 4)` holds the flange below `z = 4`
 /// from the flat `x = 0.04` on, and the body's pipe above it.
 #[test]
-fn a_d5_led_leaves_out_a_straight_side_of_no_length_on_its_flange_rim_and_stops_cutting_a_box_out_on_too_wide_a_range()
+fn a_d5_led_gets_its_dome_rim_on_two_faces_and_stops_cutting_a_box_out_on_strips_two_copies_of_a_lead_side_cut_from_its_pipe()
  {
     let radius = 2.5_f64;
     let flange_in_the_box = HALF * HALF * (2.0 * HALF);
@@ -222,6 +248,26 @@ fn a_d5_led_leaves_out_a_straight_side_of_no_length_on_its_flange_rim_and_stops_
             (FAR_OFF, Rule::Difference),
         ],
         too_wide_a_range,
+        &Policy::certified(),
+    );
+}
+
+/// A tolerant policy lets the strips' range through, and the box round the
+/// corner `(0.04, 0, 4)` and the box that misses the LED are each refused
+/// where the ball and the pipe, too nearly tangent to follow, cross in the
+/// thin loop below the rim. Before the rim's arcs were joined by their input
+/// edge, both were refused `ResultIsNotManifold` here.
+#[test]
+fn a_d5_led_less_a_box_gets_past_its_rim_under_a_tolerant_policy_and_stops_where_its_ball_and_pipe_cross_in_a_thin_loop()
+ {
+    every_fuse_refuses(
+        D5,
+        &[
+            ([0.04, 0.0, 4.0], Rule::Difference),
+            (FAR_OFF, Rule::Difference),
+        ],
+        the_ball_and_the_pipe_are_too_nearly_tangent_to_follow,
+        &Policy::tolerant(10.0),
     );
 }
 
@@ -232,7 +278,23 @@ fn a_d3_led_gets_past_the_cells_of_its_flange_front_and_stops_where_two_curves_t
         D3,
         &both_rules_with_a_box_round_each_of(&[THE_FRONT_CORNER, THE_BACK_CORNER, FAR_OFF]),
         two_curves_touch_on_the_side_of_a_lead,
+        &Policy::certified(),
     );
+}
+
+/// Refused `ACrossingAlongThisEdgeCouldNotBeFollowed` on the `D5.0` LED,
+/// because the body's pipe and its dome's ball are too nearly tangent where
+/// they cross. The edge it names is not looked up: it is a key of the model
+/// the fuse builds its answer in, not of `model`.
+fn the_ball_and_the_pipe_are_too_nearly_tangent_to_follow(_: &Model, error: &Error) -> bool {
+    let Error::ACrossingAlongThisEdgeCouldNotBeFollowed { why, .. } = error else {
+        return false;
+    };
+    let rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent { surfaces, .. } = &**why
+    else {
+        return false;
+    };
+    matches!(**surfaces, [Surface::Cylinder(_), Surface::Sphere(_)])
 }
 
 /// Refused `TwoCurvesTouchWithoutCrossing` on the `D3.0` LED's lead's side,
@@ -281,24 +343,20 @@ fn the_led_and_a_box_share(file: &str, centre: [f64; 3], shared: f64) {
 }
 
 /// Each box of side `2 * HALF` centred on a corner of `fuses`, fused with the
-/// LED in `file` under its rule, is refused as `the_refusal` takes, handed the
-/// model it was refused in, which holds every face of the LED.
+/// LED in `file` under its rule and `policy`, is refused as `the_refusal`
+/// takes, handed the model it was refused in, which holds every face of the
+/// LED.
 fn every_fuse_refuses(
     file: &str,
     fuses: &[([f64; 3], Rule)],
     the_refusal: impl Fn(&Model, &Error) -> bool,
+    policy: &Policy,
 ) {
     let (led, solid) = the_led(file);
     for &(centre, rule) in fuses {
         let mut model = led.clone();
         let knife = a_box_round(&mut model, centre);
-        match model.fuse(
-            &[solid],
-            &[knife],
-            rule,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        ) {
+        match model.fuse(&[solid], &[knife], rule, policy, &mut ProvenanceLog::new()) {
             Err(error) if the_refusal(&model, &error) => {}
             Err(error) => panic!(
                 "{file}: {rule:?} with a box round {centre:?} refused {error:?}, which is not the \
