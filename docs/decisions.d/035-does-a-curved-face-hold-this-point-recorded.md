@@ -77,6 +77,36 @@ is written against lane 2's *absence*. A row 10 built on `meet_of_three_surfaces
 would have made the two lanes sequential and turned the milestone's only
 concurrency into a queue.
 
+**Corrected for Q2938.** The plane `x + 16z = 8`, the pipe of radius one along
+`x` and the ball of radius three about `(0, 0.5, 0)` are answered now, at the
+four points near `z = 0.316`, `0.337`, `0.665` and `0.682`. Take off the plane
+the coordinate its normal leans along most, and the pipe and the ball are each
+a conic in the other two; the road for a plane that cuts both in conics works
+out exactly the quartic at whose roots the two conics meet, and each real root
+names one point. The pin that showed the refusal is now
+`point_in_a_curved_solid::a_ray_along_a_balls_skin_leaning_to_a_pipe_off_its_centre_meets_both_in_four_points`,
+and the three are pinned answered as
+`where_a_plane_and_two_round_surfaces_meet::a_plane_leaning_across_a_pipe_and_a_ball_off_its_axis_meets_them_at_four_corners`.
+The names above, `..._is_refused_with_four_points_there` and `..._is_a_gap`,
+are gone; the refusal's gap is shown on a ring now
+(`a_plane_holding_a_rings_axis_and_a_ball_off_it_is_a_gap`). A ray plane
+leaning any other way across a pipe and a ball is no longer in the leftover as
+a class either: the same road takes it, and refuses only the cases it hands
+on, which the doc on `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` lists — two
+conics whose numbers it cannot multiply out within `f64`'s range, two both
+linear in the unknown it takes out, two that share a whole curve, a place
+where the quartic may touch nothing and it cannot tell, and a root at which it
+cannot tell what names the other unknown from nothing.
+
+So the first reason route 1 was set aside no longer holds for one plane and
+two quadrics: their meets are not refused as a class, and the one fix named
+above, an algebraic solver for a plane and two quadrics that §31.2 deferred,
+is that road. It still holds for a ring, which is no quadric, with fewer than
+two planes and outside the eighth family the same doc names, and for three
+curved surfaces no two of which differ by a stored plane: both are still in
+that leftover. The second reason still holds as written: it is about
+lane 3 being written against lane 2's absence, and no road changes that.
+
 **Route 3, cutting the face into pieces the flat argument does reach.** The cuts
 have to be *placed*, and placing one on a curved face is where that cut's surface
 meets the two the face's boundary already runs along — the same meet, arrived at
