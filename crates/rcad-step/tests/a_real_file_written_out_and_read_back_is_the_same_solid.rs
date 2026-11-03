@@ -56,23 +56,44 @@ mod every_kicad_file_that_imports_round_trips_to_the_same_solid {
     /// alone on that base, `PinHeader_1x39_P2.54mm_Vertical.step` took about
     /// 156 s, `PinHeader_1x32_P2.54mm_Vertical.step` about 88 s and
     /// `PinHeader_1x25_P2.54mm_Vertical.step` about 64 s, against roughly
-    /// 94 s for the other 162 files combined.
+    /// 94 s for the other 162 files combined. Those were the numbers then;
+    /// the fuse work has moved a lot since, see the timings below.
     ///
     /// The fuse work everywhere else grew since then (Q1239 is why it grew,
     /// not this enum), and by Q3040 `every_other_file` alone cost 756.6 s of
     /// a 761.9 s test step — almost the whole wall of the gate. Timed alone
     /// again, two more files stood out the same way the first three did:
-    /// `PinHeader_2x36_P2.54mm_Vertical.step` (about 220 s) and
-    /// `PinHeader_2x29_P2.54mm_Vertical.step` (about 101 s), so each gets its
-    /// own test too. Next heaviest, at about 108 s together, are the
-    /// eleven-position and twelve-position DIP switches —
-    /// `SW_DIP_SPSTx11_...` and `SW_DIP_SPSTx12_...`, in both their
-    /// spellings — which share `dip_switches_with_eleven_or_twelve_positions`;
-    /// the ten-position DIP switch down to the one-position one share
-    /// `dip_switches_with_ten_or_fewer_positions`, at about 109 s. Everything
-    /// left — every other pin header, every LED, relay, fuse and the
-    /// fuseholder — is still cheap even together, at about 131 s, and still
-    /// shares `every_other_file`.
+    /// `PinHeader_2x36_P2.54mm_Vertical.step` and
+    /// `PinHeader_2x29_P2.54mm_Vertical.step`, so each gets its own test too.
+    /// Next heaviest are the eleven-position and twelve-position DIP
+    /// switches — `SW_DIP_SPSTx11_...` and `SW_DIP_SPSTx12_...`, in both
+    /// their spellings — which share
+    /// `dip_switches_with_eleven_or_twelve_positions`; the ten-position DIP
+    /// switch down to the one-position one share
+    /// `dip_switches_with_ten_or_fewer_positions`. Everything left — every
+    /// other pin header, every LED, relay, fuse and the fuseholder — shares
+    /// `every_other_file`.
+    ///
+    /// Timed again by Q3089, each test alone with
+    /// `/usr/bin/time mise exec -- just t <name>` on
+    /// 3114ae13ba2cdf96042b367cff132fcaee2dbf93 (2026-11-03), user CPU
+    /// seconds, with the 1-minute load average from `/proc/loadavg` before
+    /// the run (other lanes shared the 24-thread machine, so the figures are
+    /// noisy):
+    ///
+    /// | test | user CPU s | load before |
+    /// |---|---|---|
+    /// | `pin_header_1x25` | 66.6 | 6.88 |
+    /// | `pin_header_1x32` | 177.3 | 5.31 |
+    /// | `pin_header_1x39` | 178.4 | 3.16 |
+    /// | `pin_header_2x29` | 67.3 | 1.94 |
+    /// | `pin_header_2x36` | 140.6 | 1.60 |
+    /// | `dip_switches_with_eleven_or_twelve_positions` | 104.1 | 10.13 |
+    /// | `dip_switches_with_ten_or_fewer_positions` | 110.6 | 4.96 |
+    /// | `every_other_file` | 152.5 | 4.31 |
+    ///
+    /// The three Q1238 pin headers cost 66.6 to 178.4 s now, not 64 to 156 s,
+    /// and `every_other_file` cost 152.5 s now, not Q3040's 756.6 s.
     #[derive(Clone, Copy, PartialEq, Eq)]
     enum Group {
         PinHeader1x39,
