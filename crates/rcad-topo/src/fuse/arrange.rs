@@ -9040,7 +9040,10 @@ impl<'f> Arrangement<'f> {
                 }
             }
         }
-        for cut in 0..self.crossings.len() {
+        // Every fold before a cut takes a cut drawn before it off its nodes
+        // and puts a crossing drawn before that one on, so neither changes
+        // which nodes the cut runs through: its list is still right.
+        for (cut, on_the_cut) in nodes_on.iter().enumerate() {
             if !self.crossings[cut].reaches_the_face
                 || !self.crossings[cut].order.runs_straight()
                 || self
@@ -9051,10 +9054,6 @@ impl<'f> Arrangement<'f> {
             {
                 continue;
             }
-            // Every fold so far took a cut drawn before this one off its nodes
-            // and put a crossing drawn before that one on, so neither changed
-            // which nodes this cut runs through.
-            let on_the_cut = &nodes_on[cut];
             let mut met_before_it: Vec<usize> = on_the_cut
                 .iter()
                 .flat_map(|&node| self.nodes[node].crossings.iter().copied())
