@@ -6191,7 +6191,7 @@ check-kache-off-on-ci:
 # `check-plugins` first and print its tail.
 #
 # **The arm after it holds `gate`'s `cargo_steps` line to the steps whose recipes
-# run cargo.** Those run one after another, and one left off the line would wait
+# run cargo.** Those build one after another, and one left off the line would wait
 # on cargo's lock beside `test`: slower, never wrong, so nothing else would
 # notice (§372.10). A recipe runs cargo if a line of it, not a comment, starts a
 # command with `cargo` and a subcommand that builds, or calls the `t` recipe. The
