@@ -21,9 +21,10 @@
 # builds into `target/` and a link would only move the build's copies away from
 # it.
 #
-# A directory that is already a real directory is reported and kept; replacing
-# one is Q3070's, under clean-targets' rules for idle trees. A link whose
-# destination is missing, as after every boot, gets its destination made again.
+# A directory that is already a real directory is reported and kept;
+# `just clean-targets` replaces it once the tree is idle, under its rules for
+# idle trees (476.6). A link whose destination is missing, as after every boot,
+# gets its destination made again.
 #
 # Called by the post-checkout hook beside this file on `git worktree add`, and
 # by `just link-targets-to-zram`. The roots come from the environment so the

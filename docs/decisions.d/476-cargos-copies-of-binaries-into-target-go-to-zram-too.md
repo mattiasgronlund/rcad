@@ -247,3 +247,119 @@ run by hand as `mattias` with the unit's arguments printed `made 2
 destinations, 1 already there, 0 links refused, 0 could not be made` in 2.7 s,
 warm cache. The scratch tree and its destinations were removed after. The first
 run at boot, with a cold cache, is still unmeasured.
+
+### 476.6 What Q3070 does: idle trees get their links, and the copies go with their build directory
+
+*Q3070's three lanes, 2026-11-03, in trees `wf_af1988e5-529-2`, `-3` and `-4`.
+Each measurement says which tree it was made in.*
+
+**Why it is needed.** In `529-2`, a survey of every rcad worktree found real
+directories where the links belong, the largest being the dispatcher's own
+tree, `clean-up-dead-sessions`, with a real `target/debug` of 20G and
+`target/release` of 361M, both holding a whole build from before build-dir was
+set (474.9). A tree made before the hook of 476.5 has them, and so does a tree
+after a plain `cargo clean`.
+
+**`clean-targets` replaces an idle tree's real `target/debug` and
+`target/release` with their links,** in a pass before it clears the build
+directories. It asks `git worktree list` for the trees, and `cargo metadata
+--format-version 1 --no-deps --offline` in each tree for its build directory,
+whose last two parts are the key of its links (476.3), as
+`tooling/zram/link-targets.sh` reads it. The key is `{workspace-path-hash}`,
+cargo's own hash of the workspace path, and the recipe asks cargo for it rather
+than computing it, since a copy of cargo's hash here would go wrong without a
+word the day cargo changes it. Reading it the other way round, from a build
+directory's `.d` files, which name the tree, fails exactly where it is needed:
+a cleared build directory has none left. So the recipe now needs git and
+cargo. The unit's `PATH` has no cargo: in `529-2`, the unit's
+environment under `mise exec` printed `cargo: command not found`. So when
+`PATH` has no cargo, the recipe adds `${CARGO_HOME:-~/.cargo}/bin` to it. It
+runs `cargo metadata` with a 20 s timeout and `RUSTUP_AUTO_INSTALL=0`, so a
+missing toolchain is a refusal, not a download.
+
+**A real directory is kept** for every reason a build directory is kept (474.11),
+read over two directories: the real directory, with its `.cargo-lock`, and the
+tree's build directory, with its `.cargo-build-lock`. In `529-2`, cargo 1.96
+held `target/debug/.cargo-lock` while it built: a scratch crate whose `build.rs`
+sleeps 6 s, probed at 3 s, printed `artifact .cargo-lock: HELD during build`.
+The build directory is asked too because a test runs from there, and through
+`CARGO_BIN_EXE_<name>` it may run the binary that sits in `target/debug`. A
+build directory that does not exist is skipped, since a tree that has never
+built has none. Three more reasons keep it:
+
+- **A gate is running in the tree.** Between two of its steps no lock is held
+  and no program runs, so nothing above shows it. The gate keeps
+  `target/last-gate.log.run/pid`, and while it runs that pid is a bash whose
+  command line has `<run>/script` as one argument. The recipe asks for both,
+  because a pid alone may be another process once the pids wrap.
+- **`cargo metadata` failed in the tree**, so its key is not known.
+- **The build directory is not `<root>/<xx>/<hash>`, or the target directory
+  is not `<tree>/target`**, so a link would point at no key or sit in the wrong
+  place.
+
+**How it replaces one.** It holds both directories' locks, makes the
+destination, moves the real directory aside to `.<name>-replaced-by-a-link`,
+makes the link, lets go of the locks, and only then deletes the old
+directory, since 20G takes a while. If the link cannot be made and nothing has
+taken the path, the directory is moved back. A run killed between the move and
+the delete leaves the `.<name>-replaced-by-a-link` directory, and the next run
+removes it. A cargo that opened the old `.cargo-lock` before the move gets it
+once the locks are let go, and writes through the link. A cargo that starts
+after the move opens the destination's `.cargo-lock`, a different file. The two
+are kept apart by the build directory's `.cargo-build-lock`, which stays where
+it is and which cargo 1.96 holds from a build's start to its exit (474.11).
+This answers 476.3's question about `cargo
+clean`: the link is made again once the tree is idle.
+
+**The build loop clears a build directory's copies with it.** The build
+directory `<root>/<xx>/<hash>` and its link destinations
+`<artifacts>/<xx>/<hash>` are kept or cleared together. The destinations are
+read as the second directory, with their `.cargo-lock`, which cargo holds
+through the link while it builds. A fresh file in either one, a held lock in
+either one, or a program running from either one keeps both. Under
+`artifacts`, only the directories beside a `.cargo-lock`, two or more levels
+down, are cleared, with what is under them. inari links its whole `target/`
+under the same root, and in `529-2` one of its destinations held
+`/var/cache/zram/artifacts/5a/fc54fb831019f4/.rustc_info.json`, with `doc/`,
+`tmp/` and `package/` beside its profiles. Those are not cargo's copies, and
+nothing says whether they are in use. A cleared destination keeps its lock
+files and its own directory, since a link to a missing directory fails the next
+build with `File exists (os error 17)` (476.5).
+
+A key the tree pass has just converted is kept by the build loop until 30
+minutes have passed, because making the destination is a change in it. A later
+run clears it as usual.
+
+**`prune-worktrees` removes a removed tree's `<artifacts>/<xx>/<hash>` whole,**
+along with the build directory it pairs with (474.10). It does so even when that
+build directory is gone already. Nothing else removes a destination: the boot
+step makes one for each link, and `clean-targets` only clears one.
+
+**The selftests.** `check-clean-targets-selftest` has a miniature `artifacts/`
+beside its `targets/` and `kache/`, a git repo of its own with one worktree for
+each reason a real directory is kept, and a stub `cargo` that answers only for
+those worktrees, so no real tree is ever asked. Its idle tree has both
+directories replaced, with the tooling's `last-gate.log` left in `target/`. It
+pins the tallies: in the ordinary run, `2 real target directories replaced with
+links; 7 kept` and 9 build directories kept, and in the run after it, `0 real
+target directories replaced with links; 7 kept` and `0 cleared; 13 build
+directories kept`. `check-prune-worktrees-selftest` gives each tree's stub key a
+`<xx>/<hash>` shape and checks that a removed tree's destinations go, that a
+kept tree's stay, and that a tree whose build directory was already gone loses
+its destinations too. Both selftests fail on the base's recipes, which take
+none of the new arguments.
+
+**What this leaves.**
+
+- **Destinations whose build directory is gone** are never cleared by
+  `clean-targets`, because its build loop walks the build directories. In
+  `529-4`, 13 keys under `/var/cache/zram/artifacts` had no build directory and
+  held 344M between them, inari's `5a/fc54fb831019f4` among them. Most are from
+  trees removed before this section. They cannot be removed whole, since a tree
+  with its links that has not built since the boot has no build directory
+  either, and removing its destinations breaks its next build. Clearing their
+  files under the idle rules, keeping their directories and lock files, would be
+  safe. That is a row.
+- **`tooling/systemd/rcad-clean-targets.service`** says the recipe needs neither
+  git nor anything from `~/.cargo`. Both are false now. That is a row too, since
+  the unit is outside Q3070's write set.
