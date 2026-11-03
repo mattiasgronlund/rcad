@@ -111,7 +111,7 @@ back leaves its own tree locked, holding a slot, until someone finds it by hand
    Before step 2's checkout, run `git checkout <base> -- docs/queue.md` if
    unsure the tree still holds the base's copy of the queue. Run `mise exec --
    just queue show <id>` once per id in the row, or each id of a bundle, and
-   build the union of each row's write-set column the way `writeSetOf` in `lanes.js` builds the write set above, and compare the two.
+   build the union of each row's write set the way `writeSetOf` in `lanes.js` builds the write set above, and compare the two. A row's write set is its column, **unless** the same `show` prints a line under the row naming a newer set: `narrowed to <set>, taken with <...>`, or `` write set set to <set> by `writes`, <column> in docs/queue.md ``. Then read that printed set instead, as `prep.md` does, since a `writes` ran after the column was written (§230.3, Q3069). Judge `files_outside_write_set` against that same set, so a file the newer set holds is not reported outside.
    The write set above is the one the brief gave you.
    List every file where they disagree in `write_set_mismatch`; it is empty when the two match exactly (§396).
 2. `git checkout --detach <branch>`.
