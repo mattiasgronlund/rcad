@@ -15294,6 +15294,59 @@ check-clean-targets-selftest:
     grep -qE "^[0-9.]+K cleared; 6 build directories kept$" <<<"$got" \
         || fail "the tally is wrong, so a run that found nothing would read like a tidy machine"
 
+# Links the directories cargo copies its finished binaries into to the zram
+# disk, or installs the post-checkout hook that does it on `git worktree add`
+# (docs/decisions.d/476).
+#
+# `links` runs `tooling/zram/link-targets.sh` on `tree`: target/debug,
+# target/release and fuzz/target/x86_64-unknown-linux-gnu/release become links
+# to `<artifacts>/<xx>/<hash>/...`, keyed by the tree's build directory under
+# `targets`, and a link whose destination is gone gets it made again. A
+# `cargo clean` deletes the links (476.5), and the build after it puts a real
+# target/debug back on the SSD, so run this in between.
+#
+# `install-hook` copies `tooling/zram/post-checkout` into the common
+# `.git/hooks` of `tree`'s repository. Mattias runs it, not a session (476.3),
+# and no gate step needs the hook installed. It refuses a post-checkout hook
+# that is not rcad's, which it would otherwise destroy, and a repository with
+# `core.hooksPath` set, where git would never run the copy.
+[doc("Link target/debug, target/release and the fuzz release directory to the zram disk, or install the post-checkout hook that does it on git worktree add.")]
+link-targets-to-zram action="links" tree="." targets="/var/cache/zram/targets" artifacts="/var/cache/zram/artifacts":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tree=$(realpath -e -- "{{ tree }}")
+    case "{{ action }}" in
+    links)
+        RCAD_ZRAM_TARGETS="{{ targets }}" RCAD_ZRAM_ARTIFACTS="{{ artifacts }}" \
+            exec '{{ justfile_directory() }}/tooling/zram/link-targets.sh' "$tree"
+        ;;
+    install-hook) ;;
+    *)
+        echo "link-targets-to-zram has no action {{ action }}: it takes links or install-hook"
+        exit 1
+        ;;
+    esac
+    source='{{ justfile_directory() }}/tooling/zram/post-checkout'
+    common=$(git -C "$tree" rev-parse --path-format=absolute --git-common-dir)
+    if hooks_path=$(git -C "$tree" config --get core.hooksPath); then
+        echo "refused: core.hooksPath is $hooks_path, so git never runs a hook in $common/hooks"
+        exit 1
+    fi
+    hook="$common/hooks/post-checkout"
+    if [ -e "$hook" ] || [ -L "$hook" ]; then
+        if cmp -s "$source" "$hook" && [ -x "$hook" ]; then
+            echo "installed already: $hook"
+            exit 0
+        fi
+        if ! grep -q "^# rcad's post-checkout hook" "$hook"; then
+            echo "refused: $hook is not rcad's post-checkout hook, and is left as it is. To see how it differs: diff -u $hook $source"
+            exit 1
+        fi
+    fi
+    mkdir -p "$common/hooks"
+    install -m 0755 "$source" "$hook"
+    echo "installed: $hook"
+
 # Pins `link-targets-to-zram`, the post-checkout hook it installs and the boot
 # script beside them (docs/decisions.d/476), in a scratch directory: a stub
 # cargo answers `metadata` the way cargo 1.96 does with build-dir set, and a
@@ -15362,17 +15415,21 @@ check-link-targets-to-zram-selftest:
     other="$dir/other"
     git init -q "$other"
     printf '#!/bin/sh\necho somebody else\n' >"$other/.git/hooks/post-checkout"
-    if got=$(just_here link-targets-to-zram install-hook "$other"); then
+    if got=$(just_here link-targets-to-zram install-hook "$other" 2>&1); then
         fail "install-hook wrote over a post-checkout hook that is not rcad's: $got"
     fi
     grep -qF 'somebody else' "$other/.git/hooks/post-checkout" || fail "a hook that is not rcad's was changed"
+    grep -qF "refused: $other/.git/hooks/post-checkout is not rcad's post-checkout hook" <<<"$got" \
+        || fail "a hook that is not rcad's was refused without saying why: $got"
     printf "#!/bin/sh\n# rcad's post-checkout hook, an older one\n" >"$other/.git/hooks/post-checkout"
     got=$(just_here link-targets-to-zram install-hook "$other") || fail "an older copy of rcad's own hook was not replaced: $got"
     cmp -s "$hook_source" "$other/.git/hooks/post-checkout" || fail "an older copy of rcad's own hook was left as it was"
     git -C "$other" config core.hooksPath "$dir/elsewhere"
-    if got=$(just_here link-targets-to-zram install-hook "$other"); then
+    if got=$(just_here link-targets-to-zram install-hook "$other" 2>&1); then
         fail "install-hook installed into .git/hooks, which git does not read when core.hooksPath is set: $got"
     fi
+    grep -qF "refused: core.hooksPath is $dir/elsewhere" <<<"$got" \
+        || fail "a repository with core.hooksPath set was refused without saying why: $got"
 
     git -C "$repo" worktree add -q -b one "$dir/one" || fail "git worktree add failed with the hook installed"
     linked_all "$dir/one" "git worktree add -b"
@@ -15420,7 +15477,9 @@ check-link-targets-to-zram-selftest:
         || fail "a real directory kept was not reported: $got"
     grep -qxF "kept (a link to $dir/elsewhere, not to $art/ab/0123456789abcd/release): $dir/two/target/release" <<<"$got" \
         || fail "a link somewhere else kept was not reported: $got"
-    if got=$(just_here link-targets-to-zram nonsense); then fail "an action that does not exist was taken: $got"; fi
+    if got=$(just_here link-targets-to-zram nonsense 2>&1); then fail "an action that does not exist was taken: $got"; fi
+    grep -qF "link-targets-to-zram has no action nonsense" <<<"$got" \
+        || fail "an action that does not exist was refused without saying so: $got"
 
     search="$dir/search"
     boot="$dir/boot/artifacts"
