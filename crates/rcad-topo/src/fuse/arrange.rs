@@ -71,6 +71,7 @@
 //! instead ([`Arrangement::the_bands_round_the_tube`]).
 
 use core::cmp::Ordering;
+use std::collections::HashMap;
 
 use rcad_geom::{
     Axis, Cone, Cylinder, EdgeRun, HalfSpace, HalfSpaceThroughAPoint, MeetOfThree, NamedRun,
@@ -823,6 +824,12 @@ struct Arrangement<'f> {
     /// [`Arrangement::side_of_a_round_curve_a_cut_misses`] and
     /// [`Arrangement::turns_anticlockwise`] read it.
     meeting_nowhere: Vec<[usize; 2]>,
+    /// The corner `bake` placed at each vertex an edge of the face starts at,
+    /// for [`Arrangement::the_baked_corner_of`]. Built once, because that is
+    /// asked inside loops over the nodes, and searching the face's edges each
+    /// time cost the edge count per question: on a KiCad pin header's face
+    /// that search was as many samples as the loop it was called from (Q3083).
+    baked_corner_at: HashMap<VertexKey, &'f BakedCorner>,
 }
 
 /// One curve on the face: one of the curves where the face's surface crosses
@@ -1304,7 +1311,19 @@ impl<'f> Arrangement<'f> {
         policy: &Policy,
         log: &mut ProvenanceLog,
     ) -> Result<Self> {
-        let mut arrangement = Self {
+        let mut arrangement = Self::nothing_drawn_on(face);
+        arrangement.draw_the_crossings(cuts, policy, log)?;
+        arrangement.place_the_corners(policy, log)?;
+        arrangement.leave_out_the_cuts_clear_of_the_face();
+        arrangement.place_the_meets(policy, log)?;
+        arrangement.place_the_touches();
+        arrangement.leave_out_the_cuts_that_reach_only_the_boundary();
+        Ok(arrangement)
+    }
+
+    /// The face with no crossing, node or arc drawn on it yet.
+    fn nothing_drawn_on(face: &'f BakedFace) -> Self {
+        Self {
             face,
             surface: face.surface,
             crossings: Vec::new(),
@@ -1327,14 +1346,8 @@ impl<'f> Arrangement<'f> {
             cuts_reached_by_no_face: Vec::new(),
             kept_where_a_crossing_left_out_meets_it: Vec::new(),
             meeting_nowhere: Vec::new(),
-        };
-        arrangement.draw_the_crossings(cuts, policy, log)?;
-        arrangement.place_the_corners(policy, log)?;
-        arrangement.leave_out_the_cuts_clear_of_the_face();
-        arrangement.place_the_meets(policy, log)?;
-        arrangement.place_the_touches();
-        arrangement.leave_out_the_cuts_that_reach_only_the_boundary();
-        Ok(arrangement)
+            baked_corner_at: Self::the_baked_corners_by_vertex(face),
+        }
     }
 
     /// The pieces: the cells the face's boundary winds once round.
@@ -4188,14 +4201,20 @@ impl<'f> Arrangement<'f> {
         let vertex = corner
             .vertex
             .expect("only a corner of the face is asked whether it is a meet");
-        &self
-            .face
-            .wires
-            .iter()
-            .flatten()
-            .find(|edge| edge.start.vertex == vertex)
+        self.baked_corner_at
+            .get(&vertex)
             .expect("every corner node is where an edge of this face starts")
-            .start
+    }
+
+    /// The corner `bake` placed at each vertex an edge of `face` starts at.
+    /// Where two edges start at one vertex, the first in wire order gives it,
+    /// as a search of the edges in that order would find it.
+    fn the_baked_corners_by_vertex(face: &BakedFace) -> HashMap<VertexKey, &BakedCorner> {
+        let mut by_vertex = HashMap::new();
+        for edge in face.wires.iter().flatten() {
+            by_vertex.entry(edge.start.vertex).or_insert(&edge.start);
+        }
+        by_vertex
     }
 
     /// Whether `place`, where the face's surface and the partners of the
@@ -26485,6 +26504,37 @@ mod tests {
         assert_eq!(middles, every_corner, "one half in each corner");
     }
 
+    /// A node at a vertex is read as the corner of the first edge, in wire
+    /// order, that starts there, in whichever wire that edge is.
+    #[test]
+    fn a_node_at_a_vertex_is_read_as_the_corner_of_the_first_edge_that_starts_there() {
+        let (cube, _) = the_unit_cube_baked_and_the_plane_x_equals_y();
+        let mut bottom = the_face_facing(&cube, [0.0, 0.0, -1.0]);
+        let top = the_face_facing(&cube, [0.0, 0.0, 1.0]);
+        let second_wire = vec![bottom.wires[0][1].clone(), top.wires[0][0].clone()];
+        bottom.wires.push(second_wire);
+        let arrangement = Arrangement::nothing_drawn_on(&bottom);
+        let read_at = |wire: usize, position: usize| {
+            let start = &bottom.wires[wire][position].start;
+            arrangement.the_baked_corner_of(&Node {
+                point: start.point,
+                vertex: Some(start.vertex),
+                made_of: None,
+                also: Vec::new(),
+                half_way_round: false,
+                crossings: Vec::new(),
+            })
+        };
+        assert!(
+            core::ptr::eq(read_at(1, 0), &bottom.wires[0][1].start),
+            "a vertex two edges start at is read off the first of them"
+        );
+        assert!(
+            core::ptr::eq(read_at(1, 1), &bottom.wires[1][1].start),
+            "a vertex only an edge of the second wire starts at is read off that edge"
+        );
+    }
+
     /// Whether `point`'s box holds `place` and is no wider than a rounding.
     fn holds(point: PredicatePoint, place: [f64; 3]) -> bool {
         point
@@ -26568,30 +26618,7 @@ mod tests {
     /// after `place_the_meets` fold nodes together, and it is the corners as
     /// `a_corner_is_this_place` is asked about them that these tests read.
     fn drawn_up_to_its_corners(face: &BakedFace) -> Arrangement<'_> {
-        let mut arrangement = Arrangement {
-            face,
-            surface: face.surface,
-            crossings: Vec::new(),
-            nodes: Vec::new(),
-            arcs: Vec::new(),
-            drawn_in_full: Vec::new(),
-            whole_ellipses: Vec::new(),
-            cut_crossings: Vec::new(),
-            touches: Vec::new(),
-            crossing_of_edge: Vec::new(),
-            node_of_corner: Vec::new(),
-            node_of_the_end: Vec::new(),
-            leaving: Vec::new(),
-            cycle_of: Vec::new(),
-            cycles: Vec::new(),
-            winding_of_cycle: Vec::new(),
-            cell_of: Vec::new(),
-            cells: Vec::new(),
-            winding: Vec::new(),
-            cuts_reached_by_no_face: Vec::new(),
-            kept_where_a_crossing_left_out_meets_it: Vec::new(),
-            meeting_nowhere: Vec::new(),
-        };
+        let mut arrangement = Arrangement::nothing_drawn_on(face);
         let mut log = ProvenanceLog::new();
         arrangement
             .draw_the_crossings(
