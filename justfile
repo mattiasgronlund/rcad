@@ -9808,11 +9808,12 @@ check-fuzz-overnight-selftest:
     set -euo pipefail
     dir=$(mktemp -d)
 
-    # The stub writes its artifacts into the real `fuzz/artifacts/`, because that
-    # is the one path the recipe under test is not free to choose — `cargo-fuzz`
-    # fixes `-artifact_prefix` and nothing in the environment moves it. So the tag
-    # is unique per run, two lanes can gate at once, and the trap takes away
-    # exactly what this run put there and nothing a real night left.
+    # The stub writes its artifacts into `fuzz/artifacts/`, because that is the
+    # one path the recipe under test is not free to choose — `cargo-fuzz` fixes
+    # `-artifact_prefix` and nothing in the environment moves it. Since Q3050 that
+    # is the `fuzz/artifacts/` of this run's own tree of links (see `night_tree`
+    # below), not the real one. The tag is still unique per run, and the trap
+    # takes away exactly what this run put there.
     #
     # It goes by the tag alone and never by kind. It used to name `crash-` and
     # `slow-unit-`, so every `timeout-` an arm wrote stayed behind whenever that
@@ -9837,7 +9838,33 @@ check-fuzz-overnight-selftest:
         rm -f fuzz/artifacts/*/*-"$tag"
         rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*"$tag"
     }
-    trap clean_up EXIT
+    trap 'clean_up; rm -rf "${night_tree:-}"' EXIT
+
+    # Q3050: every arm runs in a tree of its own, so two gates running this
+    # recipe at once never see each other's artifacts. `fuzz-overnight` reads
+    # the relative path `fuzz/artifacts`, and the only way to move that
+    # without editing it is to move the working directory. The tree is a
+    # copy of the repository's top level made of links, except `fuzz/`, which
+    # is a real directory of links to everything in the real `fuzz/` but
+    # `artifacts`. So `fuzz/target` stays the one shared build directory
+    # (the sweep and the rlib checks below already handle that sharing by
+    # pid), and `fuzz/artifacts` is this run's alone. Without it a sibling
+    # gate's own libFuzzer writes for the same target counted as new tonight
+    # here too, and arm Fourteen failed with "tonight's one new timeout was
+    # miscounted against last night's pile".
+    real_tree="$PWD"
+    night_tree=$(mktemp -d)
+    for entry in "$real_tree"/* "$real_tree"/.[!.]*; do
+        [ "${entry##*/}" != fuzz ] || continue
+        ln -s "$entry" "$night_tree/${entry##*/}"
+    done
+    mkdir "$night_tree/fuzz"
+    for entry in "$real_tree"/fuzz/* "$real_tree"/fuzz/.[!.]*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        [ "${entry##*/}" != artifacts ] || continue
+        ln -s "$entry" "$night_tree/fuzz/${entry##*/}"
+    done
+    cd "$night_tree"
 
     # A gate killed mid-run (`SIGKILL`, so this recipe's own `trap` above
     # never fires) leaves its `selftest-*` directories behind under the real
@@ -11558,6 +11585,20 @@ check-fuzz-overnight-selftest:
         || fail "a night with half a second before its pause ran into it; launches and stops, against it: $(tr '\n' ',' <<<"$got")"
     }
 
+    # Forty-three (Q3050): a night's artifacts land in this run's own tree
+    # and never in the real `fuzz/artifacts/`, where a sibling gate running
+    # this same recipe would count them as new tonight. Alone, because it
+    # looks at the real tree's whole contents.
+    forty_three() {
+    : >"$dir/log"
+    run 8 || fail "a night run for the isolation check failed: $(cat "$dir/out")"
+    [ -n "$(find fuzz/artifacts -name "*-$tag")" ] \
+        || fail "the night wrote no artifact into this run's own fuzz/artifacts"
+    leaked=$(find "$real_tree/fuzz/artifacts" -name "*-$tag" 2>/dev/null || true)
+    [ -z "$leaked" ] \
+        || { rm -f $leaked; fail "the night wrote into the real fuzz/artifacts, where a sibling gate sees it as new tonight: $leaked"; }
+    }
+
     # Forty: this build's rlib is clean and a sancov one is left under
     # `fuzz/target`, which a guard that read `fuzz/target` would fail the
     # night on. Alone, because that rlib sits where every night with
@@ -11615,9 +11656,10 @@ check-fuzz-overnight-selftest:
     # tag of its own, `<arm>-$tag`, as `$tag`. So its log, out, logs, corpus,
     # rendezvous file and fixture repositories are its own, and so are the
     # artifact names its stub writes and the timing rlib its build writes. One
-    # thing is shared, and no arm can be given its own: the real
-    # `fuzz/artifacts/`, which every night that gets as far as its summary
-    # scans whole. A night beside others sees their slow units as new tonight.
+    # thing is shared among the arms of one run: `fuzz/artifacts/`, which every
+    # night that gets as far as its summary scans whole (it is this run's own
+    # since Q3050, so other gates no longer meet it). A night beside others
+    # sees their slow units as new tonight.
     # That decides which arms may share the tree:
     #
     #   - Beside each other: arms whose stubs write slow units only, or
@@ -11632,7 +11674,8 @@ check-fuzz-overnight-selftest:
     #     units only, or nothing. Thirty-eight's sancov rlib is under its own
     #     `$dir`, and the clean one it leaves under `fuzz/target` passes any
     #     night that meets it; Thirty-nine writes none.
-    #   - Alone, after them: Three and Twenty-three count slow units exactly,
+    #   - Alone, after them: Forty-three reads the whole tree for a leak, Three
+    #     and Twenty-three count slow units exactly,
     #     Twelve, Thirty-three and Thirteen write crashes, and Sixteen,
     #     Twenty-nine and Forty write a sancov rlib under `fuzz/target`, which
     #     any other night's guard could meet.
@@ -11719,6 +11762,7 @@ check-fuzz-overnight-selftest:
     alone twenty_nine
     alone forty
     alone forty_one
+    alone forty_three
     alone twenty_three
     arm="after the last"
     head_did_not_move
