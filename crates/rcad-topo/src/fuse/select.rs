@@ -4138,6 +4138,19 @@ fn settle_against_each(
 /// tolerant `orient3d` its log did not expect (`turning_a_fuse.rs`'s
 /// `a_tall_block_through_a_flat_one_turned_answers_every_rule_under_a_tolerant_policy`).
 ///
+/// **A plane that leaves the whole box on the point's side is not asked at
+/// the corners**, since the corners lie in the box and it leaves them there
+/// too. Asking it over the box is one interval sum, where the corners are four
+/// predicates on four by four determinants: in the fuse of
+/// `PinHeader_1x39_P2.54mm_Vertical.step`, the corners took 28.24 s of the
+/// 31.04 s this spent over its first 40000 calls, and the box cleared every
+/// face they did (Q3088). The box is asked only where every number the
+/// corners' predicate would multiply is [`far_from_both_ends_of_the_range`],
+/// so that the predicate would have reached the same answer. Past those ends a
+/// corner the intervals cannot place comes back undecided, the face is asked
+/// whether it holds the box instead, and clearing it by the box could change
+/// what this says.
+///
 /// **What a face that holds no part of the box was decided with goes into
 /// `ray`**, which says why `point` was placed where it was, so a tolerance
 /// spent on it is logged where the ray's own is, and dropped with it.
@@ -4164,16 +4177,32 @@ fn a_face_may_run_between_it_and_the_plane(
     let reach = stretched_to_the_plane(flat, point)
         .expect("the_piece_holds stretched this point to the plane before it held it");
     let corners = the_corners_of_the_plane_in(flat, reach);
+    let the_corners_are_far_from_both_ends = corners
+        .iter()
+        .flatten()
+        .flatten()
+        .all(|&number| far_from_both_ends_of_the_range(number));
     for face in solid.faces() {
         let surface = face.surface();
         let clear = match surface.as_plane() {
             Some(plane) => {
                 let where_the_point_is = side_of_a_flat_face(plane, point);
-                matches!(where_the_point_is, Decision::Pos | Decision::Neg)
-                    && corners.iter().all(|&three| {
+                let the_whole_box_is_there = || {
+                    the_corners_are_far_from_both_ends
+                        && plane
+                            .coefficients()
+                            .into_iter()
+                            .all(far_from_both_ends_of_the_range)
+                        && side_of_a_flat_face(plane, reach) == where_the_point_is
+                };
+                let every_corner_is_there = || {
+                    corners.iter().all(|&three| {
                         side_of_a_plane_where_three_planes_meet(three, plane.coefficients())
                             == Ok(where_the_point_is)
                     })
+                };
+                matches!(where_the_point_is, Decision::Pos | Decision::Neg)
+                    && (the_whole_box_is_there() || every_corner_is_there())
             }
             None => {
                 let where_the_point_is = side_of_surface(&surface, point);
@@ -4223,6 +4252,26 @@ fn the_corners_of_the_plane_in(flat: &Plane, reach: PredicatePoint) -> [[[f64; 4
     let [first, second] = ends(and_across);
     [(one, first), (one, second), (other, first), (other, second)]
         .map(|(this, that)| [flat.coefficients(), at(across, this), at(and_across, that)])
+}
+
+/// Whether `number` is zero or between `1e-45` and `1e45` in size, so that
+/// [`side_of_a_plane_where_three_planes_meet`] on sixteen such numbers always
+/// reaches its exact level, and so never comes back undecided.
+///
+/// **The exact level runs wherever every product it takes is exact and nothing
+/// overflows**, and both hold here with room to spare. `1e-45` and `1e45` lie
+/// inside `2⁻¹⁵⁰` and `2¹⁵⁰`, so each number that is not zero is a whole
+/// multiple of `2⁻²⁰²`, its own last bit. A two by two determinant's products
+/// are then `2⁻³⁰⁰` or more, and its entries whole multiples of `2⁻⁴⁰⁴`. Times
+/// a number of the third column, each product is `2⁻⁵⁵⁴` or more, and a three
+/// by three determinant's entries are whole multiples of `2⁻⁶⁰⁶`. Times an
+/// offset, each product is `2⁻⁷⁵⁶` or more. Every one is past `2⁻⁹⁶⁹`, the
+/// smallest product `product_is_exact` passes, and none is past about `2⁶¹⁰`.
+/// `the_corners_predicate_decides_every_plane_made_of_numbers_far_from_both_ends`
+/// asks the predicate at these ends, and a number past them that it cannot
+/// decide.
+fn far_from_both_ends_of_the_range(number: f64) -> bool {
+    number == 0.0 || (1e-45..=1e45).contains(&number.abs())
 }
 
 /// Whether a flat piece is inside `solid`, read off the one face of `solid`
@@ -6050,13 +6099,62 @@ mod tests {
     use super::{
         ACornerReadAsOnePoint, ANodeReadRoundACorner, InPlane, Piece, Rule,
         a_face_of_the_input_holds, by_the_one_face_its_box_meets, candidate_points, choose,
-        corners_of, every_picker_keeps, midway_between, the_meridian_circle_each_side_runs_round,
-        the_middles_of_a_round_wire, the_pickers_of_the_meridian_circle_through, the_piece_holds,
+        corners_of, every_picker_keeps, far_from_both_ends_of_the_range, midway_between,
+        the_meridian_circle_each_side_runs_round, the_middles_of_a_round_wire,
+        the_pickers_of_the_meridian_circle_through, the_piece_holds,
         what_else_each_round_wire_asks,
     };
     use crate::fuse::bake::{BakedEdge, BakedFace, BakedSolid, bake};
     use crate::fuse::{FaceMeet, MeetPoint, Scratch};
     use crate::{Model, ProfileBuilder, SolidKey};
+
+    /// The corners' predicate decides every plane made of zero, two ordinary
+    /// numbers and the two ends of what [`far_from_both_ends_of_the_range`] lets
+    /// through, asked where three such planes meet. Each plane is the first of
+    /// the three with its offset swapped, so it runs through the corner or
+    /// exactly one offset's difference from it, and the intervals alone cannot
+    /// always settle that. A number past the lower end leaves it undecided.
+    #[test]
+    fn the_corners_predicate_decides_every_plane_made_of_numbers_far_from_both_ends() {
+        let ends = [0.0, 1e-45, -1e45, 0.3, -0.7];
+        let pick = |index: usize, slot: u32| ends[index / ends.len().pow(slot) % ends.len()];
+        for index in 0..ends.len().pow(7) {
+            let [a, b, c, d, x, y, offset] = [0, 1, 2, 3, 4, 5, 6].map(|slot| pick(index, slot));
+            if c == 0.0 {
+                continue;
+            }
+            let three = [[a, b, c, d], [1.0, 0.0, 0.0, -x], [0.0, 1.0, 0.0, -y]];
+            let plane = [a, b, c, offset];
+            assert!(
+                three
+                    .iter()
+                    .flatten()
+                    .chain(&plane)
+                    .all(|&number| far_from_both_ends_of_the_range(number))
+            );
+            let truth = if offset > d {
+                Decision::Pos
+            } else if offset < d {
+                Decision::Neg
+            } else {
+                Decision::Zero
+            };
+            assert_eq!(
+                side_of_a_plane_where_three_planes_meet(three, plane),
+                Ok(truth),
+                "{plane:?} where {three:?} meet"
+            );
+        }
+
+        let past_the_lower_end = f64::powi(2.0, -1000);
+        assert!(!far_from_both_ends_of_the_range(past_the_lower_end));
+        let flat = [0.3, 0.3, 0.7, past_the_lower_end];
+        let three = [flat, [1.0, 0.0, 0.0, -0.3], [0.0, 1.0, 0.0, -0.3]];
+        assert!(matches!(
+            side_of_a_plane_where_three_planes_meet(three, flat),
+            Ok(Decision::Undecidable { .. })
+        ));
+    }
 
     /// Adding first overflows here: `1e308 + 1.5e308` is past the largest
     /// double, and the middle, `1.25e308`, is not.
