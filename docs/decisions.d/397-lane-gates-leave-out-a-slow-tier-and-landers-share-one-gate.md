@@ -736,3 +736,60 @@ was not measured on an idle machine. Two other lanes' gates ran beside it. One
 of them, from 03:45:49Z to 04:06:43Z, ran `test` alone, `4696 tests run`, as
 a step of 1093.0 s. That is one pair of gates on a loaded machine, not a
 measure of the saving.
+
+### 397.11 Starting the longest tests first would not shorten the step (Q3079)
+
+Q3079 asked whether a nextest `priority` override, which makes higher values
+start sooner, would shorten the test step by starting its longest tests
+earlier. It would not, and no `.config/nextest.toml` was added.
+
+**The measure.** One run of every test in the workspace, `just t --workspace
+--no-fail-fast --profile measure` with a junit file, at `d9e3eb1ae` with Q3040's
+split in. It ran from 08:55:28 CET with `/proc/loadavg` `13.14 20.42 18.37`
+before and `54.18 38.72 28.11` after, on 24 cores, beside two other lanes and
+the fuzz night. The step took 616.4 s, `4772 tests run: 4772 passed (24 slow),
+3 skipped`. The slow tier's tests are in it. The load is why every figure is
+longer than the quiet-machine ones in §397.2: the order tests start in does not
+depend on the load, but their lengths do.
+
+**The 20 longest, by seconds from the start of the step.** Tier `slow` is a
+test `slow_tests` names; the rest are `fast`.
+
+```text
+ length  start    end  binary / test (tier)
+  605.4   11.0  616.4  rcad-step::merged  pin_header_2x36 (fast)
+  521.3   10.6  531.9  rcad-step::merged  pin_header_1x39 (fast)
+  377.3    9.4  386.7  rcad-step::merged  pin_header_1x32 (fast)
+  331.4    8.2  339.6  rcad-step::merged  every_other_file (fast)
+  248.8   10.8  259.7  rcad-step::merged  pin_header_2x29 (fast)
+  229.3    8.1  237.4  rcad-step::merged  dip_switches_with_eleven_or_twelve_positions (fast)
+  224.6    8.1  232.7  rcad-step::merged  dip_switches_with_ten_or_fewer_positions (fast)
+  205.4  108.3  313.7  rcad-topo::merged  a_block_below_a_frustum_is_cut_where_the_frustum_has_no_face_and_every_answer_is_right (fast)
+  144.1    8.8  152.9  rcad-step::merged  pin_header_1x25 (fast)
+  132.6  137.4  270.0  rcad-topo::merged  a_pointed_cone_..._at_a_lean_of_a_quarter_answers_right_or_refuses (slow)
+  128.6  173.7  302.4  rcad-topo::merged  a_steeper_plane_at_a_lean_of_a_quarter_across_a_frustum_... (slow)
+  119.4  138.5  257.9  rcad-topo::merged  a_pointed_cone_..._at_a_lean_of_three_eighths_... (slow)
+  118.2  137.4  255.6  rcad-topo::merged  a_frustum_whose_apex_is_inside_the_block_answers_right_or_refuses (slow)
+  114.3  298.7  413.0  rcad-topo::merged  a_tolerant_union_of_a_round_bar_and_a_block_cornered_on_its_wall_... (fast)
+  108.1   50.6  158.7  rcad-topo::merged  a_thousand_turns_of_a_cube_and_a_bar (fast)
+   93.8  178.2  272.0  rcad-topo::merged  a_steeper_plane_at_a_lean_of_three_eighths_... (slow)
+   85.9  132.4  218.3  rcad-topo::merged  a_corner_up_cube_of_side_six_round_a_frustums_apex_... (slow)
+   85.2  132.6  217.8  rcad-topo::merged  a_corner_up_cube_of_side_six_turned_about_the_axis_... (slow)
+   82.8  129.6  212.3  rcad-topo::merged  a_corner_up_cube_of_side_four_round_a_frustums_apex_... (slow)
+   82.3  131.7  214.0  rcad-topo::merged  a_corner_up_cube_of_side_four_turned_about_the_axis_... (slow)
+```
+
+**Why it stops there.** The test that ends last, `pin_header_2x36`, started
+11.0 s into the step, and the seven longest all started within 11 s. The ones
+that start late, from 100 s on, are all topo tests that end between 213 s and
+413 s, well before the step's 616.4 s. A priority would move tests that are
+already early to the same place, and the late ones, which do not set the end,
+earlier. The step's length here is the length of one test on a loaded machine,
+and that is Q3040's and Q1239's to shorten, not the order's. A priority is not
+worth a config file, a second filter and a second count check until a test
+that starts late ends last.
+
+**What this leaves.** The one measure is on a loaded machine; a quiet run might
+order the ends differently, so the table is re-taken from a quiet machine if a
+late starter is ever seen to end last. The sentence in §397.10 that there is no
+`.config/nextest.toml` stays true.
