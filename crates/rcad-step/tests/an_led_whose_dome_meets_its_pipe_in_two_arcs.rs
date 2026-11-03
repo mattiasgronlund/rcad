@@ -92,9 +92,22 @@
 //!   them was refused as though it were an arc. A straight side on a pipe
 //!   whose two ends are one corner is now left out, as one between two planes
 //!   is (Q3057), and every difference stops refused `DynamicRangeTooWide`, at
-//!   a ratio of `1.8e16`. Q3056's probe of the same fix found edges of the
-//!   dome's rim `z = 9.1` each claimed by one face, the ball's and the pipe's
-//!   writing their corners `2e-15` apart. Untraced.
+//!   a ratio of `1.8e16`. That is `ResultIsNotManifold` read for its range:
+//!   26 pieces of the ball and 26 of the pipe each walk an edge of the rim
+//!   `z = 9.1` no other face walks. The ball and the pipe cross in the thin
+//!   loop above, so the ball keeps a band between the rim and the loop's top
+//!   branch, `1e-7` above it, and the pipe a band down to the loop's bottom
+//!   branch, and planes across the rim cut each band in pieces. Each piece's
+//!   side along the rim is a piece of the one input edge, but the ball's is
+//!   carried by the ball and the rim's plane and the pipe's by the pipe and
+//!   that plane. The two circles they cut in the plane are centred `2e-15`
+//!   apart, so they cross in two points and do not share more than a point,
+//!   and the arcs are not joined under one name as they are on a bar capped
+//!   by a ball of its radius (Q3000). Their corners are named by the plane,
+//!   the plane across and the ball or the pipe: `(2.74, -2.491987158875427,
+//!   9.1)` for the ball and `(2.74, -2.4919871588754248, 9.1)` for the pipe,
+//!   which are two triples, so even where a corner is shared the two edges
+//!   are two (Q3104).
 //! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
 //!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
 //!   rounding apart in direction. Q2938's road answers that triple, and the
