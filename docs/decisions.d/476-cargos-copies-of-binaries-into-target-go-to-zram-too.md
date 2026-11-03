@@ -154,21 +154,25 @@ Each holds only a `.cargo-lock`, so neither is linked. `target/release` got no
 binary either, since a release test binary stays in the build directory. It is
 linked anyway, because any `cargo build --release` copies into it.
 
-**The fuzz workspace's directory is not linked yet.** The first gate in `bdd-3`
-ran with `fuzz/target/x86_64-unknown-linux-gnu/release` linked too, and
+**The fuzz workspace's directory is linked too (Q3107).** The first gate in
+`bdd-3` ran with `fuzz/target/x86_64-unknown-linux-gnu/release` linked, and
 `check-fuzz-overnight-selftest` failed in arm `twenty_nine`: "none of 26 stale
 rlib names sorted before the real one under find, on 8 different real names in
-a row". That arm plants its fixtures under
+a row". That arm planted its fixtures under
 `fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing` and needs
 a directory made later to come first under `find`. ext4 lists a directory in
 hash order, which gives that. xfs, the zram disk's filesystem, lists a small
 directory in the order its entries were made, which never does. Run with the
 arm's own pattern of names (`target/order.sh` in `bdd-3`), a later directory
-came first in 0 of 8 attempts on xfs and in 7 of 8 on ext4. With that link, the
-arm fails in every tree. The arm is outside Q3069's write set, so
-`link-targets.sh` leaves the fuzz directory alone, and
-`check-link-targets-to-zram-selftest` fails if anything is made under
-`fuzz/target`. A row moves the arm's fixtures, and a row after it adds the link.
+came first in 0 of 8 attempts on xfs and in 7 of 8 on ext4. So Q3069 left the
+link out, and Q3106 made the arm put a `find` of its own in front of the
+night's `PATH` that lists in reverse name order, which does not depend on the
+filesystem. With that done, `link-targets.sh` links the directory: it asks
+`cargo +nightly metadata` in `fuzz/`, since the fuzz workspace builds on the
+nightly toolchain, and keys the link by that workspace's own build directory,
+so its destination is not the root's. `check-link-targets-to-zram-selftest`
+checks the link is made, its stub cargo answering a key of its own for
+`+nightly`, and that nothing is made where cargo fails or build-dir is unset.
 The gate's own steps put no binary there: after the first gate the destination
 held only the arm's fixtures. The five fuzz binaries come from `cargo fuzz
 build`, in a night or a fuzz recipe.
@@ -179,7 +183,7 @@ build`, in a night or a fuzz recipe.
 copies, such as the ones `cargo run --profile test -p rcad-fuzz-explain` makes in
 `target/debug`, and those copies are what the link is for. Under the fuzz
 triple's directory, the justfile writes only the fuzz-overnight selftest's
-fixtures, above. `bdd-2` found kache's `.kache-build-script-shims` in
+fixtures, above, which now sit on the zram disk too. `bdd-2` found kache's `.kache-build-script-shims` in
 `target/debug` in trees made before build-dir was set. It was not there after
 `bdd-3`'s gate.
 
