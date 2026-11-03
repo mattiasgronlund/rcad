@@ -694,7 +694,13 @@ pub enum Error {
     /// was solved in, and two places of two names whose middles land on one
     /// `f64` triple are one corner. A straight side between two such places is
     /// left out of every face along it, as a side of no length
-    /// (`docs/decisions.md` §365.7). A side on a curved surface cannot be: an
+    /// (`docs/decisions.md` §365.7). So is a straight side on a curved surface,
+    /// since Q3057: wherever the two surfaces are proved to cross in straight
+    /// lines (`runs_along_a_line` in `fuse/assemble.rs`, for one a plane that
+    /// holds a pipe's axis's direction), the side is a segment and is left out.
+    /// `LED_D5.0mm-3.step`'s flange rim is the case: a lead's side `x = 2.74`
+    /// cut the rim between two meets `3e-16` apart. Only a side that bends
+    /// cannot be: an
     /// edge from one corner back to itself is a whole closed curve, so the arc
     /// between the two places would be written as the whole circle through
     /// them, and both arcs of that circle as one edge. Until Q2193 the fuse went
