@@ -7549,11 +7549,13 @@ test slow_log="" slow_status="":
                END {printf "%s", listed}' >"$run.failing"
     # Every test that ran and did not pass is on that list, so a line in a
     # shape the pattern does not read shows as one line too few, and the split
-    # is then refused rather than passing a tier whose test failed unread.
+    # is then refused rather than passing a tier whose test failed unread. A
+    # run cut short, `3/7 tests run`, left tests of either tier without an
+    # answer, and is refused the same way.
     summary=$(sed 's/\x1b\[[0-9;]*m//g' "$run" | grep -E '^ *Summary \[' | tail -n 1 || true)
     counted='\] +([0-9]+)(/[0-9]+)? tests? run: ([0-9]+) passed'
     not_passed=-1
-    if [[ "$summary" =~ $counted ]]; then
+    if [[ "$summary" =~ $counted ]] && [ -z "${BASH_REMATCH[2]}" ]; then
         not_passed=$((BASH_REMATCH[1] - BASH_REMATCH[3]))
     fi
     listed_count=$(wc -l <"$run.failing")
