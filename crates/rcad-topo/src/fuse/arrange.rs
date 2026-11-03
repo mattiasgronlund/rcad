@@ -4800,6 +4800,19 @@ impl<'f> Arrangement<'f> {
     /// there. Folded, those two meets put both corners on it, and every fuse
     /// of the file refused `CannotTellTheCellsOfAFaceApart` on that face.
     ///
+    /// **Only where the crossing meets each of them an even number of times
+    /// in the room**, so that it comes into the room and goes out of it on
+    /// the same side of each, and folded it touches the corner and turns
+    /// back, as the ellipse's end does. A crossing that meets one of them an
+    /// odd number of times goes from one side of it to the other by the
+    /// corner, and the sliver it cuts off there is a piece of the face, which
+    /// holds its own points (Q2297). In
+    /// `a_block_cornered_on_a_round_tabs_rim.rs` the tab's circle passes
+    /// through all four corners of a block's floor or roof and in `f64` cuts
+    /// each off, meeting each of its two sides once a rounding from it.
+    /// Folded, the fuses of the block cornered twice, certified and tolerant,
+    /// refused `a point inside a piece of a face` at the corner `(7.6, 8.2)`.
+    ///
     /// **Only where the corner is all that is near.** A node of the crossing
     /// that reaches the room and sticks out of it, that is a corner itself or
     /// the middle of a half, that meets a crossing the corner is not on, or
@@ -4877,7 +4890,15 @@ impl<'f> Arrangement<'f> {
                     .collect();
                 met.sort_unstable();
                 met.dedup();
-                if met.len() < 2 {
+                let comes_back_on_the_side_it_came_from = |other: &usize| {
+                    reaching
+                        .iter()
+                        .filter(|&&node| self.nodes[node].crossings.contains(other))
+                        .count()
+                        % 2
+                        == 0
+                };
+                if met.len() < 2 || !met.iter().all(comes_back_on_the_side_it_came_from) {
                     continue;
                 }
                 for node in reaching {
