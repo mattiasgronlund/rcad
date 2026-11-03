@@ -83,8 +83,18 @@
 //!   the crossing, so a node that cannot tell is now passed over and the walk
 //!   read off its next node, `(1.07, 1.28, 2.2e15)`, which can (Q3009). Every
 //!   intersection now answers, and shares with the LED what it should; every
-//!   difference stops refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`
+//!   difference stopped refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`
 //!   on the flange's rim, the pipe of radius 2.9, at `(2.74, −2.893, 3.5)`.
+//!   There a lead's side `x = 2.74` and two slopes that by design meet it on
+//!   one line cut the rim, which no face of the three reaches, in three
+//!   places: the two on `x = 2.74` are `3.0e-16` apart over the stored
+//!   numbers and round to one `f64` triple (Q3056). The straight side between
+//!   them was refused as though it were an arc. A straight side on a pipe
+//!   whose two ends are one corner is now left out, as one between two planes
+//!   is (Q3057), and every difference stops refused `DynamicRangeTooWide`, at
+//!   a ratio of `1.8e16`. Q3056's probe of the same fix found edges of the
+//!   dome's rim `z = 9.1` each claimed by one face, the ball's and the pipe's
+//!   writing their corners `2e-15` apart. Untraced.
 //! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
 //!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
 //!   rounding apart in direction. Q2938's road answers that triple, and the
@@ -173,7 +183,7 @@ use std::{env, fs, path::PathBuf};
 use rcad_geom::{Deflection, Isometry, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
 const D5: &str = "LED_D5.0mm-3.step";
 const D3: &str = "LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step";
@@ -195,7 +205,7 @@ const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 /// The box round the corner `(0.04, 0, 4)` holds the flange below `z = 4`
 /// from the flat `x = 0.04` on, and the body's pipe above it.
 #[test]
-fn a_d5_led_reads_a_walk_far_up_its_pipe_off_a_node_that_can_tell_and_stops_cutting_a_box_out_on_its_flange_rim()
+fn a_d5_led_leaves_out_a_straight_side_of_no_length_on_its_flange_rim_and_stops_cutting_a_box_out_on_too_wide_a_range()
  {
     let radius = 2.5_f64;
     let flange_in_the_box = HALF * HALF * (2.0 * HALF);
@@ -211,7 +221,7 @@ fn a_d5_led_reads_a_walk_far_up_its_pipe_off_a_node_that_can_tell_and_stops_cutt
             ([0.04, 0.0, 4.0], Rule::Difference),
             (FAR_OFF, Rule::Difference),
         ],
-        two_ends_of_an_edge_on_the_flange_rim_round_to_one_point,
+        too_wide_a_range,
     );
 }
 
@@ -311,27 +321,13 @@ fn both_rules_with_a_box_round_each_of(centres: &[[f64; 3]]) -> Vec<([f64; 3], R
         .collect()
 }
 
-/// Refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` on the `D5.0`
-/// LED's flange rim, the pipe of radius 2.9 about its body's axis, where the
-/// lead's side `x = 2.74` crosses it at `z = 3.5` on its `-y` side.
-fn two_ends_of_an_edge_on_the_flange_rim_round_to_one_point(model: &Model, error: &Error) -> bool {
-    let Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face, at } = error else {
-        return false;
-    };
-    let surface = model
-        .face(*face)
-        .expect("the refusal names a face of the LED")
-        .surface();
-    let Surface::Cylinder(rim) = surface else {
-        return false;
-    };
-    let on_the_minus_y_side = -(2.9_f64.powi(2) - 0.2_f64.powi(2)).sqrt();
-    (rim.radius() - 2.9).abs() < 1e-9
-        && at
-            .coordinates()
-            .iter()
-            .zip([2.74, on_the_minus_y_side, 3.5])
-            .all(|(at, expected)| (at - expected).abs() < 1e-9)
+/// Refused `DynamicRangeTooWide` on the `D5.0` LED, the ratio of its largest
+/// coordinate to its shortest edge about `1.8e16`.
+fn too_wide_a_range(_: &Model, error: &Error) -> bool {
+    matches!(
+        error,
+        Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (1.8e16..1.9e16).contains(ratio)
+    )
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
