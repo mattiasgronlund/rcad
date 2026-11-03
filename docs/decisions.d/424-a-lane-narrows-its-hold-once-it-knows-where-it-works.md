@@ -368,3 +368,32 @@ always the set it still held.
   `relay_*` family's style, pinning both halves: the new `lane.md` prose, and
   `RELAY()`'s brief telling a relay to read its current hold with `just queue
   show` rather than handing it `lane.writeSet` as the set it owns.
+
+### 424.12 What Q2884 built
+
+*Q3033, 2026-11-03: §424.10 says a bundle taken within one `apply` needed no
+exception and that only the destination branch is left out. Q2884 (`568610a86`,
+`6852e8778`) shows both halves were short, and this records what it built.*
+
+A bundle's rows share one branch. Taken again onto a new branch, each row's
+own current hold, still on the old branch, tripped every partner's meets check,
+because §424.10's exception left out only holds on the branch being taken onto.
+
+- **Holds on the row's current branch are left out too.** `take_step` in
+  `tooling/queue/queue.py` now leaves out the holds on the branch the row is
+  held on now, the way `narrow` leaves out holds on the hold's own branch
+  (§424.3), beside the holds on the destination branch that §424.10 already
+  left out. §424.10's exception for a dispatcher bundling a later row onto a
+  running lane's branch in a separate `apply` is unchanged.
+- **A batch now sees its own earlier takes.** `apply` appends its claims events
+  only after every step has run, so a later `take` could not see an earlier
+  one's, which is why §424.10 thought a bundle needed no exception. `Batch`
+  now carries this apply's own `take` events, in the shape `claims.holds()`
+  returns, and `take_step` reads them beside the claims file. So two rows of a
+  bundle that share a file and are taken in one `apply` onto one branch are
+  compared with each other, and pass only because the destination branch's
+  holds are left out.
+- **The tests.** `check-queue-api-selftest` gained two fixtures: one row of a
+  bundle taken alone onto a new branch while its partner stays held on the
+  branch they share, and a two-row bundle taken again onto a new branch in one
+  `apply`. Both failed before, each row meeting its partner's hold.

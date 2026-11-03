@@ -315,13 +315,16 @@ gate_metered_steps := "check check-fuzz-builds check-timing-hooked-calls check-w
 # (§337.9).
 #
 # `check-queue-api-selftest` reads nothing outside the tree, so it does not
-# belong beside those five, but it answers from `justfile`, `tooling/`,
-# `.gitattributes` and `mise.toml` alone (plus what `_code-fingerprint` reads
-# from the environment): a strace of it found nothing it opens outside those
-# paths and its own scratch repository under `docs/`. Keying it on that
-# narrower tree instead of the whole-tree fingerprint serves it on 310 of the
-# 370 commits that touch anything outside `docs/` (docs/decisions.d/337
-# §337.10), rather than only on prose commits.
+# belong beside those five, but it answers from `tooling/`, `.gitattributes`,
+# `mise.toml` and `mise.lock`, and from only the part of the justfile it runs:
+# the ten recipes it calls and the assignments they read, plus any assignment
+# that is exported or runs a function or backtick, which `just` evaluates
+# before any recipe (plus what `_code-fingerprint` reads from the environment).
+# A strace of it found nothing it opens outside those paths and its own
+# scratch repository under `docs/`. So `_queue-api-selftest-fingerprint` keys
+# it on that part alone, and a commit that changes another recipe is served
+# the step (docs/decisions.d/337 §337.12, which narrowed §337.10's whole-justfile
+# key).
 #
 # `check`, `check-ignored`, `test`, `test-slow` and `check-release-build`, the
 # five that build and test the kernel, read less of the tree than the
