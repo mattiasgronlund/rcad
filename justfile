@@ -1295,7 +1295,14 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     # it comes after `test` here. `check-gate-runs-every-check` holds this line
     # to the steps whose recipes run cargo, so a new one cannot be left off it
     # unnoticed, and holds `test` first.
-    cargo_steps="test test-slow check check-fuzz-builds check-timing-hooked-calls check-wildcards check-ignored lint check-release-build check-t-selftest"
+    #
+    # **Four steps that run cargo are not on it, since their builds take none
+    # of its locks** (§372.15): `check-fuzz-builds` and
+    # `check-timing-hooked-calls` build in `fuzz/`, a workspace of its own,
+    # `check-wildcards` in a build directory of its own, and
+    # `check-release-build` in the release profile. So they start as any other
+    # step does, and run beside the chain from its first second.
+    cargo_steps="test test-slow check check-ignored lint check-t-selftest"
     names=()
     chained=()
     unchained=()
