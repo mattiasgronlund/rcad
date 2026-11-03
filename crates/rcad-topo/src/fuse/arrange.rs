@@ -71,6 +71,7 @@
 //! instead ([`Arrangement::the_bands_round_the_tube`]).
 
 use core::cmp::Ordering;
+use std::collections::HashMap;
 
 use rcad_geom::{
     Axis, Cone, Cylinder, EdgeRun, HalfSpace, HalfSpaceThroughAPoint, MeetOfThree, NamedRun,
@@ -823,6 +824,12 @@ struct Arrangement<'f> {
     /// [`Arrangement::side_of_a_round_curve_a_cut_misses`] and
     /// [`Arrangement::turns_anticlockwise`] read it.
     meeting_nowhere: Vec<[usize; 2]>,
+    /// The corner `bake` placed at each vertex an edge of the face starts at,
+    /// for [`Arrangement::the_baked_corner_of`]. Built once, because that is
+    /// asked inside loops over the nodes, and searching the face's edges each
+    /// time cost the edge count per question: on a KiCad pin header's face
+    /// that search was as many samples as the loop it was called from (Q3083).
+    baked_corner_at: HashMap<VertexKey, &'f BakedCorner>,
 }
 
 /// One curve on the face: one of the curves where the face's surface crosses
@@ -1339,6 +1346,7 @@ impl<'f> Arrangement<'f> {
             cuts_reached_by_no_face: Vec::new(),
             kept_where_a_crossing_left_out_meets_it: Vec::new(),
             meeting_nowhere: Vec::new(),
+            baked_corner_at: Self::the_baked_corners_by_vertex(face),
         }
     }
 
@@ -4193,14 +4201,20 @@ impl<'f> Arrangement<'f> {
         let vertex = corner
             .vertex
             .expect("only a corner of the face is asked whether it is a meet");
-        &self
-            .face
-            .wires
-            .iter()
-            .flatten()
-            .find(|edge| edge.start.vertex == vertex)
+        self.baked_corner_at
+            .get(&vertex)
             .expect("every corner node is where an edge of this face starts")
-            .start
+    }
+
+    /// The corner `bake` placed at each vertex an edge of `face` starts at.
+    /// Where two edges start at one vertex, the first in wire order gives it,
+    /// as a search of the edges in that order would find it.
+    fn the_baked_corners_by_vertex(face: &BakedFace) -> HashMap<VertexKey, &BakedCorner> {
+        let mut by_vertex = HashMap::new();
+        for edge in face.wires.iter().flatten() {
+            by_vertex.entry(edge.start.vertex).or_insert(&edge.start);
+        }
+        by_vertex
     }
 
     /// Whether `place`, where the face's surface and the partners of the
