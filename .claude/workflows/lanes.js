@@ -819,6 +819,7 @@ function handedBack(lane, prior) {
     row.lines.push(`verifier said ${prior.check.verdict}${prior.check.notes ? `: ${prior.check.notes}` : ''}`)
     for (const c of prior.check.unbacked_claims || []) row.lines.push(`unbacked: ${c}`)
     for (const c of prior.check.number_mismatches || []) row.lines.push(`number: ${c}`)
+    for (const c of prior.check.commands_that_cannot_run || []) row.lines.push(`number command cannot run: ${c}`)
     for (const c of prior.check.moved_text_problems || []) row.lines.push(`moved text: ${c}`)
   }
   for (const n of (prior.prep && prior.prep.needs) || []) row.lines.push(`needs ${n.file}: ${n.why}`)
@@ -1456,6 +1457,7 @@ function verdictSchema(kind) {
     write_set_mismatch: { type: 'array', items: { type: 'string' }, description: 'each file where the write set above and the write-set columns just queue show prints at the base disagree; empty when they match exactly (§396)' },
     gate_summary: { type: 'string', description: 'the summary block, verbatim, or why you could not run it' },
     number_mismatches: { type: 'array', items: { type: 'string' } },
+    commands_that_cannot_run: { type: 'array', items: { type: 'string' }, description: 'each entry of the commands_that_cannot_run list verify-lane printed, after you checked that number by hand; leave it out when verify-lane listed none' },
     unbacked_claims: { type: 'array', items: { type: 'string' } },
     fixes: { type: 'array', items: { type: 'string' }, description: 'each fix fix_first asks for: the file, the change, and why' },
     lines_that_run_command: { type: 'string', description: 'the lines-that-run command from your brief, exactly as you ran it' },

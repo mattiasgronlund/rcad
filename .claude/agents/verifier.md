@@ -65,6 +65,11 @@ The reading is yours whatever it printed:
 - the section's claims, under §16.10 (step 5);
 - each number in `number_mismatches`, and each it did not run: read the print
   and the lane's claim, then keep it as a mismatch or drop it;
+- each number in `commands_that_cannot_run`: the lane's own command is the
+  fault (`bash -n` refuses its text, its first word is no command, or it holds
+  a literal `...` path), and `verify-lane` did not run it. Go straight to
+  checking that number by hand, and say in the report that the command was
+  wrong;
 - a revert by hand, when it says a source path holds test code the branch
   changed (step 7);
 - for a lane marked `sameBehaviour`, the mutation and the lane's argument
