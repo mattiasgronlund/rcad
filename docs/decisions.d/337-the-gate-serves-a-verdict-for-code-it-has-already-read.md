@@ -849,3 +849,127 @@ at 290.6 s and 284.1 s, since §337.10's key holds the whole justfile.
 recipes it runs rather than the whole justfile, as `_code-fingerprint rust`
 does for the five, so that a commit that changes only the justfile is served
 it too.
+
+### 337.12 `check-queue-api-selftest`, keyed on the part of the justfile it runs
+
+*Q3086, 2026-11-03: §337.10 keyed `check-queue-api-selftest` on the whole
+justfile, beside `tooling/`, `.gitattributes`, `mise.toml` and `mise.lock`. So
+once §337.11 served the cargo steps to a commit that changes only the
+justfile, this step was the longest of such a gate: 290.6 s and 284.1 s in the
+two lane gates of 2026-11-02 that §337.11's real run names.*
+
+**What it runs.** The first lane on the row traced one real run on the base
+`219aed7c5`, with `strace -f --seccomp-bpf -qq -s 512 -e trace=execve -e
+signal=none -o <file> mise exec -- just check-queue-api-selftest`. It took
+about ten minutes under the trace and exited clean. Its 2216 `just` processes
+ran ten recipes and nothing else: `queue` 551 times, `_queue-rows` 465,
+`queue-page` 261, `check-queue` 220, `_queue-check` 220, `decisions-all` 220,
+`_triage-refusal` 8, `_status-triage` 8, `queue-merge-driver` once, and
+`check-queue-api-selftest` itself once. The other 261 were `just --evaluate
+queue_bundle`, which `tooling/queue-page/render.py` runs. A word scan of the
+justfile for the recipes each one calls was tried first and is not the list:
+it took `check`, `status`, `fuzz` and `t` from shell names such as `check()`
+and `status=$?`.
+
+**What it reads of the justfile.** `just --show` prints a recipe's comments,
+attributes and body, and a body prints `{{ queue_file }}`, not what
+`queue_file` holds. The ten bodies read eleven assignments, found in the
+expression trees `just --dump --dump-format json` gives of them:
+`decisions_dir` in `decisions-all`, and `fuzz_log_root`, `queue_file`,
+`queue_slots`, `queue_bundle`, `queue_shared_files`, `queue_running`,
+`queue_now`, `queue_threads`, `queue_page_dir` and `queue_merge_driver` in
+`queue`, `queue-page`, `check-queue`, `_queue-check` and `queue-merge-driver`.
+None is built from another assignment. The justfile reaches the step two other
+ways:
+
+- Every recipe gets the settings, and the exported assignments in its
+  environment, and the Python the step runs reads its environment.
+- `just` 1.42.4 evaluates every assignment before it runs any recipe. A probe
+  justfile holding `` x := `false` `` and a recipe that never reads `x` fails
+  with "Backtick failed with exit code 1". The step's own `just` calls run
+  with `--working-directory` set to its scratch hub, so an assignment no
+  recipe reads can stop the step there and not in the tree: a backtick, a
+  `shell()`, or a function that looks for a file where `just` runs. A probe
+  justfile holding only `x := read("here.txt")` ran its recipe from the
+  directory holding `here.txt`, and from another failed with "Call to function
+  `read` failed: I/O error reading `here.txt`".
+
+**The key**, `_queue-api-selftest-fingerprint`. It hashes:
+
+- `git ls-tree -r --full-tree HEAD` of `tooling`, `.gitattributes`,
+  `mise.toml` and `mise.lock`: §337.10's paths without the justfile;
+- of the justfile, `just --show` of the ten recipes, then from `just --dump
+  --dump-format json` the settings, the unexports, the definitions of the
+  eleven, and every assignment that is exported or that calls a function or
+  runs a backtick anywhere in its expression, and every assignment at all
+  under `set export`;
+- the same environment block as before.
+
+A definition, not a value: `queue_page_dir` and `fuzz_log_root` name
+`RCAD_QUEUE_PAGE_DIR` and `RCAD_FUZZ_LOGS`, which the step sets to its scratch
+directory, so the value the gate's own `just` gives them is not the one the
+step reads, and renaming the variable leaves that value the same. The JSON
+dump and not the text one, because the text dump prints a string as it is
+written, so a definition written over two lines takes two lines of it, and the
+line that names it holds only the first.
+Today the rule takes twelve assignments, two of them among the eleven:
+`hub_aligned`'s `shell()`, `questions_root`'s `` `id -u` ``,
+`RCAD_STEP_CORPUS`'s backtick, and nine that call `env_var`,
+`env_var_or_default`, `home_directory` or `path_exists`.
+
+The `--show`s and the dump run before the hash, as in §337.11, so a recipe
+that cannot be shown, or one of the eleven that is no longer defined, stops the
+recipe with no hash printed. This narrows §337.10's key, which held the
+justfile whole. A commit that changes another recipe, a comment outside the
+ten, or a plain assignment none of the ten reads leaves the key where it was,
+and the step is served.
+
+**The limit.** Nothing checks the two lists. A recipe one of the ten comes to
+call, or an assignment one comes to read, has to be added by hand, as with
+`_code-fingerprint rust`'s list, and a trace like the one above is how to find
+it.
+
+**The demonstration.** `check-gate-verdicts-selftest`'s block for this step,
+on §337.10's fixture, now asserts:
+
+- a second `decisions-toc` after the stub leaves the key where it was and is
+  served the step;
+- a second `queue-merge-driver` moves the key and runs the step;
+- a change to `queue_bundle`, a rename of the variable `queue_page_dir` reads
+  with its value the same, and a change to only the second line of a
+  `queue_shared_files` written over two, each move the key;
+- an unread assignment of a plain string leaves it; one with a backtick, one
+  that calls `read()`, an exported one, and a new setting each move it.
+
+Each fingerprint a case takes must be a hash, so one that errors cannot pass a
+`!=` as an empty string.
+
+The selftest failed before each part it checks was there. At `2e0e493bd`, with
+the first cases and §337.10's key, it failed on "a commit that changed only
+decisions-toc, which check-queue-api-selftest never runs, moved its
+fingerprint". The key at `7a9e7c8d2` took each definition as a line of the text
+dump and an unread assignment only for a backtick or `shell()`; at
+`e64e18b12`, with the rest of the cases, it failed on "a commit that changed
+only the second line of queue_shared_files, which queue reads, left
+check-queue-api-selftest's fingerprint where it was". Five mutations, each
+reverted, failed it on the case they break: on `7a9e7c8d2`, dropping
+`queue-merge-driver` from the ten, and dropping the eleven definitions; on
+`07b195173`, counting only `shell()` among the calls, leaving exported
+assignments out, and leaving the settings out.
+
+**The real run.** `just pre-gate gate-lane` on `11a76a317`, the row's commit
+of this section, passed. Its branch changed only the justfile and this file
+since `219aed7c`, so it was served `check`, `check-ignored`, `test` and
+`check-release-build` from `219aed7c`'s gate on §337.11's key, with `test`'s
+4772 tests. `check-queue-api-selftest` ran, at 276.1 s, since nothing was yet
+recorded under the new key, and its green was recorded as `c264e8773686`. It
+was still the longest step of the gate; the next was
+`check-gate-verdicts-selftest`, at 66.0 s. On a scratch commit over
+`11a76a317` that added one line to `decisions-toc`'s body, the whole-tree key
+moved from the gate's `37a08eb0e766` to `a0778dc4dc83`, and this one stayed
+`c264e8773686`, so a gate there would be served the step.
+
+**What this leaves.** The comment above `gate_reusable_steps` still says this
+step answers from `justfile`, `tooling/`, `.gitattributes` and `mise.toml` and
+is keyed on that tree. It is in an item Q3080 held while this row ran, so a row
+says to bring it to this section.

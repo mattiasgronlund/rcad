@@ -3018,9 +3018,10 @@ check-gate-verdicts-selftest:
     g reset -q --hard "$base"
 
     # check-queue-api-selftest's own narrow-key cache (docs/decisions.d/337
-    # §337.10): a fingerprint and record store kept apart from the whole-tree
-    # one above, keyed on justfile, tooling/, .gitattributes, mise.toml and
-    # mise.lock. The real recipe copies tooling/queue/*.py into a scratch hub
+    # §337.10, §337.12): a fingerprint and record store kept apart from the
+    # whole-tree one above, keyed on tooling/, .gitattributes, mise.toml,
+    # mise.lock and the part of the justfile the step runs. The real recipe
+    # copies tooling/queue/*.py into a scratch hub
     # and drives `just queue` end to end, which takes minutes, so this drives
     # the step through a copy of this justfile, committed into `$repo` itself
     # as `$repo/justfile`, with the real recipe's body replaced by a fast one:
@@ -3102,6 +3103,103 @@ check-gate-verdicts-selftest:
         || fail "a tooling/queue/rows.py change was served instead of run again"
     grep -q '^· served: check-queue-api-selftest' <<<"$got" \
         && fail "a tooling/queue/rows.py change was reported as served"
+
+    # Of the justfile, the key holds only what check-queue-api-selftest runs
+    # (docs/decisions.d/337 §337.12). So a commit that changes another recipe
+    # is served the step, and one that changes a recipe it runs runs it again.
+    # Each recipe is changed by a second definition after the stub, which
+    # `set allow-duplicate-recipes` makes the one `just` reads, so the case
+    # does not hang on how either recipe is written today.
+    g reset -q --hard "$qas_commit1"
+    printf '\ndecisions-toc:\n    exit 0\n' >>"$repo/justfile"
+    g add -A
+    commit_served -m 'a recipe check-queue-api-selftest never runs'
+    [ "$(qas_fingerprint)" = "$qas_fp1" ] \
+        || fail "a commit that changed only decisions-toc, which check-queue-api-selftest never runs, moved its fingerprint"
+    got=$(qas_gate) || fail "a narrow gate of a change to decisions-toc failed"
+    grep -q "^· served: check-queue-api-selftest from ${qas_commit1:0:8}'s gate at " <<<"$got" \
+        || fail "a commit that changed only decisions-toc was not served check-queue-api-selftest's green"
+    grep -q '^· check-queue-api-selftest (' <<<"$got" \
+        && fail "a served narrow step ran anyway after a change to decisions-toc"
+
+    g reset -q --hard "$qas_commit1"
+    printf '\nqueue-merge-driver:\n    exit 0\n' >>"$repo/justfile"
+    g add -A
+    g commit -q -m 'a recipe check-queue-api-selftest runs'
+    [ "$(qas_fingerprint)" != "$qas_fp1" ] \
+        || fail "a commit that changed queue-merge-driver, which check-queue-api-selftest runs, left its fingerprint where it was"
+    got=$(qas_gate) || fail "a narrow gate after a change to queue-merge-driver failed"
+    grep -q '^· check-queue-api-selftest (' <<<"$got" \
+        || fail "a change to queue-merge-driver was served instead of run again"
+
+    # The recipes read assignments, whose values `just --show` does not print.
+    # So the key holds each one's definition: its value, and for
+    # queue_page_dir the variable that can point it elsewhere, which renaming
+    # moves the key though the value with neither set stays the same.
+    # Sets qas_fp rather than printing it, so a fingerprint that is not a hash
+    # fails here, in this shell, and not as an empty string some `!=` passes.
+    qas_fp_of_commit() {
+        g add -A
+        g commit -q -m "$1"
+        qas_fp=$(qas_fingerprint)
+        g reset -q --hard "$qas_commit1"
+        [[ "$qas_fp" =~ ^[0-9a-f]{64}$ ]] || fail "the commit '$1' gave no fingerprint: $qas_fp"
+    }
+    g reset -q --hard "$qas_commit1"
+    sed -i 's/^queue_bundle := "\([0-9]*\)"$/queue_bundle := "\19"/' "$repo/justfile"
+    g diff --quiet && fail "the edit meant to change queue_bundle matched nothing"
+    qas_fp_of_commit 'queue_bundle changed'
+    [ "$qas_fp" != "$qas_fp1" ] \
+        || fail "a commit that changed queue_bundle, which queue reads, left check-queue-api-selftest's fingerprint where it was"
+    qas_page_dir() { (cd "$repo" && env -u RCAD_QUEUE_PAGE_DIR -u RCAD_QUEUE_PAGES "$j" --evaluate queue_page_dir); }
+    qas_page_dir_before=$(qas_page_dir)
+    sed -i 's/^queue_page_dir := env_var_or_default("RCAD_QUEUE_PAGE_DIR", /queue_page_dir := env_var_or_default("RCAD_QUEUE_PAGES", /' "$repo/justfile"
+    g diff --quiet && fail "the edit meant to rename queue_page_dir's variable matched nothing"
+    [ "$(qas_page_dir)" = "$qas_page_dir_before" ] \
+        || fail "renaming queue_page_dir's variable changed its value, so the case below would prove nothing"
+    qas_fp_of_commit 'queue_page_dir reads another variable'
+    [ "$qas_fp" != "$qas_fp1" ] \
+        || fail "a commit that renamed the variable queue_page_dir reads left check-queue-api-selftest's fingerprint where it was"
+
+    # A definition can run over several lines, and a change to the second
+    # moves the key as one to the first does.
+    sed -i 's/^queue_shared_files := "\(.*\)"$/queue_shared_files := "\1,\\\n    one.rs"/' "$repo/justfile"
+    g diff --quiet && fail "the edit meant to put queue_shared_files over two lines matched nothing"
+    qas_fp_of_commit 'queue_shared_files over two lines'
+    qas_fp_two_lines=$qas_fp
+    sed -i 's/^queue_shared_files := "\(.*\)"$/queue_shared_files := "\1,\\\n    two.rs"/' "$repo/justfile"
+    qas_fp_of_commit 'the second line of queue_shared_files changed'
+    [ "$qas_fp" != "$qas_fp_two_lines" ] \
+        || fail "a commit that changed only the second line of queue_shared_files, which queue reads, left check-queue-api-selftest's fingerprint where it was"
+
+    # `just` evaluates every assignment before it runs any recipe, so one that
+    # runs a command can stop the step though no recipe reads it, and so can
+    # one that calls a function: `read` looks for its file where `just` runs,
+    # and the step's own `just` calls run in its scratch hub. Such an
+    # assignment moves the key, and a plain one no recipe reads does not.
+    printf '\nunread_by_the_queue := "true"\n' >>"$repo/justfile"
+    qas_fp_of_commit 'an assignment no queue recipe reads'
+    [ "$qas_fp" = "$qas_fp1" ] \
+        || fail "a commit that added a plain assignment no queue recipe reads moved check-queue-api-selftest's fingerprint"
+    printf '\nunread_by_the_queue := `true`\n' >>"$repo/justfile"
+    qas_fp_of_commit 'an assignment that runs a command'
+    [ "$qas_fp" != "$qas_fp1" ] \
+        || fail "a commit that added an assignment that runs a command left check-queue-api-selftest's fingerprint where it was"
+    printf '\nunread_by_the_queue := read("mise.toml")\n' >>"$repo/justfile"
+    qas_fp_of_commit 'an assignment that reads a file'
+    [ "$qas_fp" != "$qas_fp1" ] \
+        || fail "a commit that added an assignment that reads a file where just runs left check-queue-api-selftest's fingerprint where it was"
+
+    # Every recipe gets the settings and the exported assignments, and the
+    # Python the step runs can read an exported one no recipe names.
+    printf '\nexport UNREAD_BY_THE_QUEUE := "true"\n' >>"$repo/justfile"
+    qas_fp_of_commit 'an exported assignment'
+    [ "$qas_fp" != "$qas_fp1" ] \
+        || fail "a commit that added an exported assignment no queue recipe names left check-queue-api-selftest's fingerprint where it was"
+    printf '\nset ignore-comments\n' >>"$repo/justfile"
+    qas_fp_of_commit 'a setting'
+    [ "$qas_fp" != "$qas_fp1" ] \
+        || fail "a commit that added a setting left check-queue-api-selftest's fingerprint where it was"
     g reset -q --hard "$base"
 
     # The five steps that build with cargo, served off a key of what they read
@@ -20562,9 +20660,25 @@ check-queue-api-selftest:
 # version before it ever reaches `tooling/queue/queue.py`. `just` itself does
 # not: `just_executable()` already names the real binary, not a shim.
 #
-# `justfile` is one of the paths, so a change to this recipe's own text, or to
-# check-queue-api-selftest's, already moves the key on its own. There is no
-# `--show` of either to keep in step, unlike the narrower four paths above.
+# **Of the justfile, only what the step runs** (§337.12), as `_code-fingerprint
+# rust` takes it for the cargo steps. An `execve` trace of a real run found its
+# `just` processes running the ten recipes below and nothing else, beside one
+# `--evaluate queue_bundle`. So the key holds their `--show`, the settings and
+# the exported assignments every recipe gets, and the definitions of the eleven
+# assignments the ten read, since `--show` prints `{{ queue_file }}` and not
+# what it holds. The definitions come from `just --dump --dump-format json`,
+# which gives each whole however many lines it is written over, where a line
+# of the text dump gives only its first. A definition, not a value:
+# `queue_page_dir` and `fuzz_log_root` name the variables the step sets to
+# point them into its scratch directory, and a rename of either leaves their
+# value here the same. None of the eleven is built from another assignment;
+# one that comes to be brings that one in too. Every assignment that runs a
+# command or calls a function is in as well, because `just` evaluates every
+# assignment before it runs a recipe, and the step's own `just` calls run in
+# its scratch hub: a backtick, or a `read` of a file that is not there, stops
+# the step though no recipe reads it. A recipe one of the ten comes to call, or
+# an assignment one comes to read, has to be added here by hand, as with
+# `_code-fingerprint rust`'s list.
 [private]
 _queue-api-selftest-fingerprint:
     #!/usr/bin/env bash
@@ -20574,8 +20688,37 @@ _queue-api-selftest-fingerprint:
         echo "the tree has uncommitted or untracked files"
         exit 0
     fi
+    # Before the hash rather than inside it, so a recipe that cannot be shown
+    # stops this with no hash printed rather than one that left it out.
+    shown=""
+    for recipe in check-queue-api-selftest queue queue-page _queue-rows _triage-refusal _status-triage \
+            check-queue decisions-all _queue-check queue-merge-driver; do
+        shown+=$('{{ just_executable() }}' --justfile '{{ justfile() }}' --show "$recipe")$'\n'
+    done
+    dumped=$('{{ just_executable() }}' --justfile '{{ justfile() }}' --dump --dump-format json)
+    definitions=$(python3 -c '
+    import json, sys
+    dump = json.load(sys.stdin)
+    assignments = dump["assignments"]
+    read_by_the_ten = ["decisions_dir", "fuzz_log_root", "queue_file", "queue_slots", "queue_bundle",
+        "queue_shared_files", "queue_running", "queue_now", "queue_threads", "queue_page_dir",
+        "queue_merge_driver"]
+    def calls_something(value):
+        return isinstance(value, list) and (value[0] in ("call", "evaluate") or any(map(calls_something, value[1:])))
+    print("-- settings")
+    print(json.dumps(dump["settings"], sort_keys=True))
+    print(json.dumps(sorted(dump["unexports"])))
+    print("-- assignments")
+    for name in read_by_the_ten:
+        print(json.dumps(assignments[name], sort_keys=True))
+    for name, assignment in sorted(assignments.items()):
+        if assignment["export"] or dump["settings"]["export"] or calls_something(assignment["value"]):
+            print(json.dumps(assignment, sort_keys=True))' <<<"$dumped")
     {
-        git ls-tree -r --full-tree HEAD -- justfile tooling .gitattributes mise.toml mise.lock
+        git ls-tree -r --full-tree HEAD -- tooling .gitattributes mise.toml mise.lock
+        echo "-- recipes"
+        printf '%s' "$shown"
+        printf '%s\n' "$definitions"
         echo "-- environment"
         for name in $(compgen -e | LC_ALL=C sort); do
             case "$name" in
