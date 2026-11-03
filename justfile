@@ -119,6 +119,7 @@ gate_steps := "check-plugins \
     check-hub-selftest \
     check-hub-align-selftest \
     check-clean-targets-selftest \
+    check-link-targets-to-zram-selftest \
     check-prune-worktrees-selftest \
     check-decisions \
     check-decisions-selftest \
@@ -357,6 +358,7 @@ gate_reusable_steps := "check \
     check-hub-selftest \
     check-hub-align-selftest \
     check-clean-targets-selftest \
+    check-link-targets-to-zram-selftest \
     check-prune-worktrees-selftest \
     check-decisions-selftest \
     check-claim-section-selftest \
@@ -6337,8 +6339,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "64" ]; then \
-        echo "found $n check-* recipes, expected 64"; \
+    if [ "$n" != "65" ]; then \
+        echo "found $n check-* recipes, expected 65"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -15380,6 +15382,221 @@ check-clean-targets-selftest:
         || fail "a build directory with only its lock files left was not reported as kept"
     grep -qE "^0 cleared; 9 build directories kept$" <<<"$got" \
         || fail "a run over already-cleared directories did not clear nothing and keep nine"
+
+# Links the directories cargo copies its finished binaries into to the zram
+# disk, or installs the post-checkout hook that does it on `git worktree add`
+# (docs/decisions.d/476).
+#
+# `links` runs `tooling/zram/link-targets.sh` on `tree`: target/debug and
+# target/release become links to `<artifacts>/<xx>/<hash>/...`, keyed by the
+# tree's build directory under `targets`, and a link whose destination is gone
+# gets it made again. The fuzz workspace's directory is not linked yet (476.5). A
+# `cargo clean` deletes the links (476.5), and the build after it puts a real
+# target/debug back on the SSD, so run this in between.
+#
+# `install-hook` copies `tooling/zram/post-checkout` into the common
+# `.git/hooks` of `tree`'s repository. Mattias runs it, not a session (476.3),
+# and no gate step needs the hook installed. It refuses a post-checkout hook
+# that is not rcad's, which it would otherwise destroy, and a repository with
+# `core.hooksPath` set, where git would never run the copy.
+[doc("Link target/debug and target/release to the zram disk, or install the post-checkout hook that does it on git worktree add.")]
+link-targets-to-zram action="links" tree="." targets="/var/cache/zram/targets" artifacts="/var/cache/zram/artifacts":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tree=$(realpath -e -- "{{ tree }}")
+    case "{{ action }}" in
+    links)
+        RCAD_ZRAM_TARGETS="{{ targets }}" RCAD_ZRAM_ARTIFACTS="{{ artifacts }}" \
+            exec '{{ justfile_directory() }}/tooling/zram/link-targets.sh' "$tree"
+        ;;
+    install-hook) ;;
+    *)
+        echo "link-targets-to-zram has no action {{ action }}: it takes links or install-hook"
+        exit 1
+        ;;
+    esac
+    source='{{ justfile_directory() }}/tooling/zram/post-checkout'
+    common=$(git -C "$tree" rev-parse --path-format=absolute --git-common-dir)
+    if hooks_path=$(git -C "$tree" config --get core.hooksPath); then
+        echo "refused: core.hooksPath is $hooks_path, so git never runs a hook in $common/hooks"
+        exit 1
+    fi
+    hook="$common/hooks/post-checkout"
+    if [ -e "$hook" ] || [ -L "$hook" ]; then
+        if cmp -s "$source" "$hook" && [ -x "$hook" ]; then
+            echo "installed already: $hook"
+            exit 0
+        fi
+        if ! grep -q "^# rcad's post-checkout hook" "$hook"; then
+            echo "refused: $hook is not rcad's post-checkout hook, and is left as it is. To see how it differs: diff -u $hook $source"
+            exit 1
+        fi
+    fi
+    mkdir -p "$common/hooks"
+    install -m 0755 "$source" "$hook"
+    echo "installed: $hook"
+
+# Pins `link-targets-to-zram`, the post-checkout hook it installs and the boot
+# script beside them (docs/decisions.d/476), in a scratch directory: a stub
+# cargo answers `metadata` the way cargo 1.96 does with build-dir set, and a
+# miniature zram disk stands in for /var/cache/zram. The hook goes into scratch
+# repositories only, never this one's `.git/hooks`: installing it here is
+# Mattias's (476.3), and no gate step needs it installed.
+#
+# git's global and system config are shut out, so a `core.hooksPath` or a hook
+# setting on the machine running this cannot change what it sees.
+[doc("The zram links are made on git worktree add and by hand, a missing destination is made again, and the boot step makes every destination and nothing else.")]
+check-link-targets-to-zram-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir=$(realpath -e "$(mktemp -d)")
+    trap 'rm -rf "$dir"' EXIT
+    fail() { echo "check-link-targets-to-zram-selftest: $*"; exit 1; }
+    just_here() { {{ just_executable() }} --justfile '{{ justfile() }}' "$@"; }
+    export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+    export RCAD_ZRAM_TARGETS="$dir/zram/targets" RCAD_ZRAM_ARTIFACTS="$dir/zram/artifacts"
+    art=$RCAD_ZRAM_ARTIFACTS
+    mkdir -p "$dir/bin" "$dir/zram"
+    printf '%s\n' '#!/usr/bin/env bash' \
+        '[ -z "${STUB_CARGO_FAILS:-}" ] || exit 101' \
+        'key=ab/0123456789abcd' \
+        '[ "$1" = metadata ] || exit 101' \
+        'build="$RCAD_ZRAM_TARGETS/$key"' \
+        '[ -z "${STUB_BUILD_DIR_UNSET:-}" ] || build="$PWD/target"' \
+        'printf "{\"build_directory\":\"%s\",\"target_directory\":\"%s\"}\n" "$build" "$PWD/target"' \
+        >"$dir/bin/cargo"
+    chmod +x "$dir/bin/cargo"
+    export PATH="$dir/bin:$PATH"
+    repo="$dir/repo"
+    mkdir -p "$repo/tooling/zram" "$repo/fuzz"
+    cp '{{ justfile_directory() }}/tooling/zram/link-targets.sh' "$repo/tooling/zram/"
+    : >"$repo/Cargo.toml"
+    : >"$repo/fuzz/Cargo.toml"
+    git -C "$repo" init -q -b main
+    git -C "$repo" add .
+    git -C "$repo" -c user.name=selftest -c user.email=selftest@invalid commit -q -m 'a tree with the link script'
+    hook_source='{{ justfile_directory() }}/tooling/zram/post-checkout'
+    linked() {
+        [ "$(readlink "$1/$2" || true)" = "$art/$3" ] || fail "$4: $1/$2 is not a link to $art/$3"
+        [ -d "$art/$3" ] || fail "$4: the destination $art/$3 of $1/$2 was not made"
+    }
+    # The fuzz workspace's directory stays on the SSD until
+    # check-fuzz-overnight-selftest keeps its fixtures somewhere else: they
+    # need ext4's directory order, and the zram disk is xfs (476.5).
+    linked_all() {
+        linked "$1" target/debug ab/0123456789abcd/debug "$2"
+        linked "$1" target/release ab/0123456789abcd/release "$2"
+        [ -d "$1/target" ] && [ ! -L "$1/target" ] \
+            || fail "$2: $1/target is not a real directory, and the tooling keeps what it writes there"
+        [ ! -e "$1/fuzz/target" ] && [ ! -L "$1/fuzz/target" ] \
+            || fail "$2: something was made under $1/fuzz/target, where check-fuzz-overnight-selftest needs the SSD's directory order (476.5)"
+    }
+    unlinked() {
+        for at in target/debug target/release fuzz/target; do
+            [ ! -e "$1/$at" ] && [ ! -L "$1/$at" ] || fail "$2: $1/$at was made"
+        done
+    }
+
+    got=$(just_here link-targets-to-zram install-hook "$repo") || fail "installing the hook into a repo with none failed: $got"
+    cmp -s "$hook_source" "$repo/.git/hooks/post-checkout" && [ -x "$repo/.git/hooks/post-checkout" ] \
+        || fail "install-hook did not put an executable copy of tooling/zram/post-checkout in the repo's hooks"
+    got=$(just_here link-targets-to-zram install-hook "$repo") || fail "installing the hook a second time failed: $got"
+    grep -qxF "installed already: $repo/.git/hooks/post-checkout" <<<"$got" \
+        || fail "a second install did not say the hook was there already: $got"
+
+    other="$dir/other"
+    git init -q "$other"
+    printf '#!/bin/sh\necho somebody else\n' >"$other/.git/hooks/post-checkout"
+    if got=$(just_here link-targets-to-zram install-hook "$other" 2>&1); then
+        fail "install-hook wrote over a post-checkout hook that is not rcad's: $got"
+    fi
+    grep -qF 'somebody else' "$other/.git/hooks/post-checkout" || fail "a hook that is not rcad's was changed"
+    grep -qF "refused: $other/.git/hooks/post-checkout is not rcad's post-checkout hook" <<<"$got" \
+        || fail "a hook that is not rcad's was refused without saying why: $got"
+    printf "#!/bin/sh\n# rcad's post-checkout hook, an older one\n" >"$other/.git/hooks/post-checkout"
+    got=$(just_here link-targets-to-zram install-hook "$other") || fail "an older copy of rcad's own hook was not replaced: $got"
+    cmp -s "$hook_source" "$other/.git/hooks/post-checkout" || fail "an older copy of rcad's own hook was left as it was"
+    git -C "$other" config core.hooksPath "$dir/elsewhere"
+    if got=$(just_here link-targets-to-zram install-hook "$other" 2>&1); then
+        fail "install-hook installed into .git/hooks, which git does not read when core.hooksPath is set: $got"
+    fi
+    grep -qF "refused: core.hooksPath is $dir/elsewhere" <<<"$got" \
+        || fail "a repository with core.hooksPath set was refused without saying why: $got"
+
+    git -C "$repo" worktree add -q -b one "$dir/one" || fail "git worktree add failed with the hook installed"
+    linked_all "$dir/one" "git worktree add -b"
+    git -C "$repo" worktree add -q --detach "$dir/two" || fail "git worktree add --detach failed with the hook installed"
+    linked_all "$dir/two" "git worktree add --detach"
+    got=$(just_here link-targets-to-zram install-hook "$dir/one") || fail "installing from a worktree failed: $got"
+    grep -qxF "installed already: $repo/.git/hooks/post-checkout" <<<"$got" \
+        || fail "install-hook run from a worktree did not find the hook in the common .git/hooks: $got"
+
+    rm "$dir/two/target/debug"
+    sha=$(git -C "$dir/two" rev-parse HEAD)
+    (cd "$dir/two" && "$repo/.git/hooks/post-checkout" "$sha" "$sha" 1) \
+        || fail "the hook exited non-zero on an ordinary checkout"
+    [ ! -L "$dir/two/target/debug" ] || fail "the hook made links on a checkout that made no new tree"
+
+    STUB_CARGO_FAILS=1 git -C "$repo" worktree add -q --detach "$dir/three" \
+        || fail "a cargo that fails made git worktree add fail"
+    unlinked "$dir/three" "with cargo failing"
+    STUB_BUILD_DIR_UNSET=1 git -C "$repo" worktree add -q --detach "$dir/four" \
+        || fail "a cargo with build-dir unset made git worktree add fail"
+    unlinked "$dir/four" "with build-dir unset, so cargo builds into target/"
+    got=$(STUB_BUILD_DIR_UNSET=1 just_here link-targets-to-zram links "$dir/four" "$RCAD_ZRAM_TARGETS" "$art") \
+        || fail "a tree whose build directory is target/ read as a failure: $got"
+    grep -qxF "skipped $dir/four: its build directory $dir/four/target is not one under $RCAD_ZRAM_TARGETS" <<<"$got" \
+        || fail "a tree whose build directory is target/ was not reported as skipped: $got"
+    : >"$dir/a-file"
+    RCAD_ZRAM_ARTIFACTS="$dir/a-file/artifacts" git -C "$repo" worktree add -q --detach "$dir/five" 2>/dev/null \
+        || fail "a destination that cannot be made made git worktree add fail"
+    unlinked "$dir/five" "with no destination that can be made"
+
+    rm -rf "$art"
+    got=$(just_here link-targets-to-zram links "$dir/one" "$RCAD_ZRAM_TARGETS" "$art") \
+        || fail "making the links again after the destinations went failed: $got"
+    linked_all "$dir/one" "after a boot emptied the disk"
+    grep -qxF "made its missing destination again: $dir/one/target/debug -> $art/ab/0123456789abcd/debug" <<<"$got" \
+        || fail "a missing destination made again was not reported: $got"
+
+    mkdir "$dir/two/target/debug"
+    ln -sfn "$dir/elsewhere" "$dir/two/target/release"
+    got=$(just_here link-targets-to-zram links "$dir/two" "$RCAD_ZRAM_TARGETS" "$art") \
+        || fail "a tree with a real directory and a foreign link read as a failure: $got"
+    [ -d "$dir/two/target/debug" ] && [ ! -L "$dir/two/target/debug" ] || fail "a real target/debug was replaced"
+    [ "$(readlink "$dir/two/target/release")" = "$dir/elsewhere" ] || fail "a link somewhere else was changed"
+    grep -qxF "kept (a real directory, which Q3070 replaces in an idle tree): $dir/two/target/debug" <<<"$got" \
+        || fail "a real directory kept was not reported: $got"
+    grep -qxF "kept (a link to $dir/elsewhere, not to $art/ab/0123456789abcd/release): $dir/two/target/release" <<<"$got" \
+        || fail "a link somewhere else kept was not reported: $got"
+    if got=$(just_here link-targets-to-zram nonsense 2>&1); then fail "an action that does not exist was taken: $got"; fi
+    grep -qF "link-targets-to-zram has no action nonsense" <<<"$got" \
+        || fail "an action that does not exist was refused without saying so: $got"
+
+    search="$dir/search"
+    boot="$dir/boot/artifacts"
+    mkdir -p "$search/rcad/target" "$search/inari" "$search/rcad/.git/x"
+    ln -s "$boot/ab/0123456789abcd/debug" "$search/rcad/target/debug"
+    ln -s "$boot/12/3456789abcdef0" "$search/inari/target"
+    ln -s "$boot/ab/../../../escaped" "$search/rcad/target/release"
+    ln -s "$dir/elsewhere" "$search/rcad/target/other"
+    ln -s "$boot/de/adbeef/in-git" "$search/rcad/.git/x/link"
+    boot_dirs() { '{{ justfile_directory() }}/tooling/zram/make-artifact-dirs.sh' "$boot" "$search" "$dir/no-such-root"; }
+    got=$(boot_dirs) || fail "the boot step exited non-zero: $got"
+    for made in ab ab/0123456789abcd ab/0123456789abcd/debug 12/3456789abcdef0; do
+        [ -d "$boot/$made" ] || fail "the boot step did not make $boot/$made: $got"
+        [ "$(stat -c %a "$boot/$made")" = 755 ] || fail "the boot step made $boot/$made with mode $(stat -c %a "$boot/$made"), not 755"
+    done
+    [ ! -e "$dir/escaped" ] || fail "the boot step followed a link that climbs out of the artifacts directory"
+    [ ! -e "$dir/elsewhere" ] || fail "the boot step made the destination of a link that points somewhere else"
+    [ ! -e "$boot/de" ] || fail "the boot step looked inside .git"
+    grep -qxF "refused (not a plain path under $boot): $search/rcad/target/release -> $boot/ab/../../../escaped" <<<"$got" \
+        || fail "the link that climbs out was not reported as refused: $got"
+    grep -qxF "made 2 destinations, 0 already there, 1 links refused, 0 could not be made" <<<"$got" \
+        || fail "the boot step's tally is wrong: $got"
+    got=$(boot_dirs) || fail "the boot step exited non-zero the second time: $got"
+    grep -qxF "made 0 destinations, 2 already there, 1 links refused, 0 could not be made" <<<"$got" \
+        || fail "the boot step's tally is wrong when everything is there: $got"
 
 # Mark worktrees whose run is over, so `prune-worktrees` removes them without
 # waiting out its hour (§315.2).
