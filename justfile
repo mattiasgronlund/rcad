@@ -15045,9 +15045,30 @@ fmt:
 # cargo's `build-dir` to `/var/cache/zram/targets/{workspace-path-hash}`
 # (§474.9), so each build directory sits two levels under `root`. What is left
 # in `target/` is the tooling's evidence (§371.2), which is small, and it goes
-# when `prune-worktrees` removes the tree. So this never asks which tree a build
-# directory belongs to, and needs no queue: a waiting row's tree, an idle
-# session, a dead one and a finished lane are all just idle directories.
+# when `prune-worktrees` removes the tree. So the build directories need no
+# queue: a waiting row's tree, an idle session, a dead one and a finished lane
+# are all just idle directories.
+#
+# **With the copies its tree's links hold.** `target/debug` and `target/release`
+# are links to `artifacts/<xx>/<hash>/debug` and `release`, the same key as the
+# build directory, so cargo's copies of its binaries are hard links on the zram
+# disk (476). They are cleared with the build directory and kept with it, and
+# only the directories cargo keeps a `.cargo-lock` in are cleared: inari links
+# its whole `target/` under the same root, with files of its own beside them.
+#
+# **First, an idle tree's real `target/debug` and `target/release` become their
+# links** (476.6). A tree made before the hook of 476.5, or one a `cargo clean`
+# took the links from, has real directories there, the old ones holding a whole
+# build from before build-dir was set. Only here does this ask which tree a
+# directory belongs to: `cargo metadata` in the tree names its build directory,
+# and so the key, the way `tooling/zram/link-targets.sh` reads it. That is why
+# this needs git and cargo, and it finds cargo in `~/.cargo/bin` when the
+# unit's PATH has none. A real directory is kept for every reason below, with
+# the tree's build directory asked too, since a test runs from there and may
+# run a binary from `target/debug`; and while `just gate` runs in the tree,
+# since between two of its steps nothing else shows it. It is moved aside, the
+# link made, and only then deleted, with its locks held until the link is in
+# place.
 #
 # **Kept, each for its own reason:**
 #
@@ -15067,14 +15088,21 @@ fmt:
 #   program runs from the directory and no lock is held, and nothing in the
 #   nextest process names the directory (§474.12), so every directory is kept.
 # - **Only its lock files are left**, which is what a cleared directory is.
-# - **No `.cargo-build-lock` in it**, since then nothing says whether a cargo is
-#   building there; **or `find` could not read all of it**, since then nobody
-#   knows how long it has been idle.
+# - **No `.cargo-build-lock` in it**, or for a tree's `target/debug` no
+#   `.cargo-lock`, since then nothing says whether a cargo is building there;
+#   **or `find` could not read all of it**, since then nobody knows how long it
+#   has been idle.
+#
+# A link destination's `.cargo-lock` is the one cargo holds in `target/debug`
+# through the link while it builds (476.6), so it is taken like the build
+# directory's.
 #
 # **Never kache's store**, which sits beside `targets/` on the same disk. A
-# `root` that holds the store or sits inside it is refused, and nothing is
-# touched but the directories two levels under `root` and this recipe's own
-# `.clearing-*` leftovers.
+# `root` or `artifacts` that holds the store or sits inside it is refused, and
+# nothing is touched but the directories two levels under `root`, the
+# directories beside a `.cargo-lock` under `artifacts`, a tree's real
+# `target/debug` and `target/release`, and this recipe's own `.clearing-*` and
+# `.*-replaced-by-a-link` leftovers.
 #
 # **Deleted in place, but for the lock files.** A cargo waiting on a lock has
 # the file open, and a rename would hand it a lock on a file at another path
@@ -15090,8 +15118,8 @@ fmt:
 #
 # The sizes are `du`'s, which counts a file kache restored by reflink in full,
 # so they overstate what the disk gets back (§474.10).
-[doc("Clear build directories under /var/cache/zram/targets that are idle 30 minutes and unused. Never kache's store.")]
-clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache" nextest_name="cargo-nextest":
+[doc("Replace an idle tree's real target/debug and target/release with their links, then clear build directories under /var/cache/zram/targets, with their link destinations, that are idle 30 minutes and unused. Never kache's store.")]
+clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache" nextest_name="cargo-nextest" artifacts="/var/cache/zram/artifacts" repo=justfile_directory():
     #!/usr/bin/env bash
     set -euo pipefail
     shopt -s nullglob
@@ -15100,29 +15128,35 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
         exit 1
     }
     store=$(realpath -m -- "{{kache_store}}")
-    case "$store/" in "$root/"*)
-        echo "kache's store $store is inside $root, and clean-targets never touches it (§474.7)"
-        exit 1 ;;
-    esac
-    case "$root/" in "$store/"*)
-        echo "$root is inside kache's store $store, and clean-targets never touches it (§474.7)"
-        exit 1 ;;
-    esac
+    artifacts=$(realpath -m -- "{{artifacts}}")
+    refuse_inside() {
+        case "$1/" in "$2/"*)
+            echo "$3, and clean-targets never touches it (§474.7)"
+            exit 1 ;;
+        esac
+    }
+    refuse_inside "$store" "$root" "kache's store $store is inside $root"
+    refuse_inside "$root" "$store" "$root is inside kache's store $store"
+    refuse_inside "$store" "$artifacts" "kache's store $store is inside $artifacts"
+    refuse_inside "$artifacts" "$store" "$artifacts is inside kache's store $store"
+    command -v cargo >/dev/null || PATH="$PATH:${CARGO_HOME:-$HOME/.cargo}/bin"
     exec {whole}<"$root"
     if ! flock -n "$whole"; then
         echo "another clean-targets is clearing $root, so this one leaves it be"
         exit 0
     fi
+    trees=$(git -C "{{repo}}" worktree list --porcelain | sed -n 's|^worktree ||p') || {
+        echo "git could not list the worktrees of {{repo}}, so no real target directory can be replaced with its link"
+        exit 1
+    }
     for left in "$root"/.clearing-*; do
         rm -rf -- "$left"
         echo "removed what an earlier run left half-cleared: $left"
     done
     nextest=$(pgrep -x -- "{{nextest_name}}" | head -n 1 || true)
-    cleared=0
-    kept=0
     held=()
     keep() {
-        echo "kept ($1): $build"
+        echo "kept ($1): $2"
         kept=$((kept + 1))
     }
     release() {
@@ -15131,23 +15165,42 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
         done
         held=()
     }
-    for build in "$root"/*/*/; do
-        build=${build%/}
-        if ! recent=$(find "$build" -mmin -30 -print -quit 2>/dev/null) \
-            || ! locks=$(find "$build" -name .cargo-build-lock 2>/dev/null); then
-            keep "find could not read all of it, so how long it has been idle is unknown"
-            continue
-        fi
-        if [ -n "$recent" ]; then
-            keep "something in it changed in the last 30 minutes"
-            continue
-        fi
-        if [ -z "$locks" ]; then
-            keep "no .cargo-build-lock in it, so whether a cargo is building in it cannot be read"
-            continue
-        fi
+    # `in_use <dir> <lock name> [<dir> <lock name>]...` asks of the first
+    # directory and each other one that exists whether a cargo, a test or a
+    # nextest may be using it. It says why in `busy`, holding no lock, or
+    # leaves `busy` empty with every lock in them held in `held`, so a cargo
+    # that starts meanwhile waits. The first directory must hold a lock.
+    in_use() {
         busy=""
+        local name=$2 dirs=() locks="" found unlocked="" recent lock fd running match=() d
+        while [ "$#" -gt 0 ]; do
+            if [ "${#dirs[@]}" -eq 0 ] || [ -e "$1" ]; then
+                dirs+=("$1")
+                found=$(find "$1" -name "$2" 2>/dev/null) || {
+                    busy="find could not read all of it, so how long it has been idle is unknown"
+                    return
+                }
+                if [ "${#dirs[@]}" -eq 1 ] && [ -z "$found" ]; then
+                    unlocked=1
+                fi
+                locks+=${found:+$found$'\n'}
+            fi
+            shift 2
+        done
+        recent=$(find "${dirs[@]}" -mmin -30 -print -quit 2>/dev/null) || {
+            busy="find could not read all of it, so how long it has been idle is unknown"
+            return
+        }
+        if [ -n "$recent" ]; then
+            busy="something in it changed in the last 30 minutes"
+            return
+        fi
+        if [ -n "$unlocked" ]; then
+            busy="no $name in it, so whether a cargo is building in it cannot be read"
+            return
+        fi
         while read -r lock; do
+            [ -n "$lock" ] || continue
             if ! { exec {fd}<"$lock"; } 2>/dev/null; then
                 busy="its $lock went away while this run read it"
                 break
@@ -15158,35 +15211,153 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
                 break
             fi
         done <<<"$locks"
+        if [ -z "$busy" ] && [ -n "$nextest" ]; then
+            busy="a cargo-nextest is running, and between two of its tests nothing shows which build directory it uses"
+        fi
+        if [ -z "$busy" ]; then
+            for d in "${dirs[@]}"; do
+                match+=(-o -lname "$d/*")
+            done
+            # find's own exit is no answer here: it cannot read other users'
+            # processes, nor one that exits while it walks, and neither can be
+            # running a program from a directory of ours.
+            running=$(find /proc -mindepth 2 -maxdepth 2 -name exe \( "${match[@]:1}" \) -printf '%h\n' -quit 2>/dev/null || true)
+            if [ -n "$running" ]; then
+                busy="process ${running#/proc/} is running a program from it"
+            fi
+        fi
         if [ -n "$busy" ]; then
             release
-            keep "$busy"
-            continue
         fi
-        # find's own exit is no answer here: it cannot read other users'
-        # processes, nor one that exits while it walks, and neither can be
-        # running a program from a build directory of ours.
-        if [ -n "$nextest" ]; then
+    }
+    # The run directory `just gate` keeps in the tree names the pid, and while
+    # the gate runs that pid is a bash running the run's own copy of the
+    # script. Between two steps no lock is held and no program runs.
+    gate_running() {
+        local run="$1/target/last-gate.log.run" pid cmdline
+        pid=$(cat "$run/pid" 2>/dev/null) || return 1
+        [[ $pid =~ ^[0-9]+$ ]] || return 1
+        cmdline=$(tr '\0' '\n' 2>/dev/null <"/proc/$pid/cmdline") || return 1
+        grep -qxF "$run/script" <<<"$cmdline"
+    }
+    # Sets `key` to the tree's build directory under `root`, the key its links
+    # take (476.3), or `why` to the reason there is none.
+    tree_key() {
+        local metadata dirs build target
+        why=""
+        key=""
+        metadata=$(cd "$1" && RUSTUP_AUTO_INSTALL=0 timeout 20 cargo metadata \
+            --format-version 1 --no-deps --offline 2>/dev/null </dev/null) || {
+            why="cargo metadata failed in it, so its build directory is not known"
+            return
+        }
+        dirs=$(python3 -I -c 'import json, sys; m = json.load(sys.stdin); print(m["build_directory"]); print(m["target_directory"])' <<<"$metadata" 2>/dev/null) || {
+            why="cargo metadata named no build_directory and target_directory"
+            return
+        }
+        build=$(sed -n 1p <<<"$dirs")
+        target=$(sed -n 2p <<<"$dirs")
+        key=${build#"$root"/}
+        if [ "$key" = "$build" ] || ! grep -qxE '[^/.][^/]*/[^/.][^/]*' <<<"$key"; then
+            why="its build directory $build is not one under $root"
+        elif [ "$target" != "$1/target" ]; then
+            why="its target directory is $target, not $1/target"
+        fi
+    }
+    # Its locks are held. A cargo that opened one before this waits, and once
+    # it has it, it writes through the path, which is the link by then; one
+    # that starts later finds the link. Deleted only after the link is in
+    # place, and after the locks are let go, since a 20 GB tree takes a while.
+    replace() {
+        local path=$1 dest=$2 aside size
+        aside="$(dirname "$path")/.$(basename "$path")-replaced-by-a-link"
+        size=$(du -sb -- "$path" | cut -f1)
+        if ! mkdir -p -- "$dest" || ! mv -T -- "$path" "$aside"; then
             release
-            keep "a cargo-nextest is running, and between two of its tests nothing shows which build directory it uses"
-            continue
-        fi
-        running=$(find /proc -mindepth 2 -maxdepth 2 -name exe -lname "$build/*" -printf '%h\n' -quit 2>/dev/null || true)
-        if [ -n "$running" ]; then
+            keep "it could not be moved aside for its link to $dest" "$path"
+        elif ln -sT -- "$dest" "$path" 2>/dev/null; then
             release
-            keep "process ${running#/proc/} is running a program from it"
-            continue
-        fi
-        if [ -z "$(find "$build" ! -type d ! -name .cargo-build-lock -print -quit)" ]; then
+            rm -rf -- "$aside"
+            echo "replaced with a link, freeing $(numfmt --to=iec "$size"): $path -> $dest"
+            replaced=$((replaced + 1))
+        elif [ -e "$path" ] || [ -L "$path" ]; then
             release
-            keep "only its lock files are left, so there is nothing to clear"
+            rm -rf -- "$aside"
+            keep "something made it again while this run replaced it" "$path"
+        else
+            mv -T -- "$aside" "$path"
+            release
+            keep "its link to $dest could not be made, so it was put back" "$path"
+        fi
+    }
+
+    replaced=0
+    kept=0
+    while IFS= read -r tree; do
+        for left in "$tree"/target/.*-replaced-by-a-link; do
+            rm -rf -- "$left"
+            echo "removed what an earlier run left half-replaced: $left"
+        done
+        real=()
+        for name in debug release; do
+            if [ -d "$tree/target/$name" ] && [ ! -L "$tree/target/$name" ]; then
+                real+=("$name")
+            fi
+        done
+        [ "${#real[@]}" -gt 0 ] || continue
+        tree_key "$tree"
+        for name in "${real[@]}"; do
+            path=$tree/target/$name
+            if [ -n "$why" ]; then
+                keep "$why" "$path"
+                continue
+            fi
+            if gate_running "$tree"; then
+                keep "a gate is running in the tree" "$path"
+                continue
+            fi
+            in_use "$path" .cargo-lock "$root/$key" .cargo-build-lock
+            if [ -n "$busy" ]; then
+                keep "$busy" "$path"
+                continue
+            fi
+            replace "$path" "$artifacts/$key/$name"
+        done
+    done <<<"$trees"
+    echo "$replaced real target directories replaced with links; $kept kept"
+
+    cleared=0
+    kept=0
+    for build in "$root"/*/*/; do
+        build=${build%/}
+        copies=$artifacts/${build#"$root"/}
+        in_use "$build" .cargo-build-lock "$copies" .cargo-lock
+        if [ -n "$busy" ]; then
+            keep "$busy" "$build"
             continue
         fi
-        size=$(du -sb -- "$build" | cut -f1)
-        find "$build" ! -type d ! -name .cargo-build-lock -delete
-        find "$build" -mindepth 1 -type d -empty -delete
+        # Each directory cargo keeps a lock in, and nothing beside them: a tree
+        # that links its whole `target/` here, as inari's do, keeps its own
+        # files there too.
+        dirs=("$build")
+        if [ -d "$copies" ]; then
+            mapfile -t -O 1 dirs < <(find "$copies" -mindepth 2 -name .cargo-lock -printf '%h\n')
+        fi
+        if [ -z "$(find "${dirs[@]}" ! -type d ! -name '.cargo-*lock' -print -quit)" ]; then
+            release
+            keep "only its lock files are left, so there is nothing to clear" "$build"
+            continue
+        fi
+        # du counts a file once however many of these hold a link to it.
+        size=$(du -scb -- "${dirs[@]}" | tail -n 1 | cut -f1)
+        find "${dirs[@]}" ! -type d ! -name '.cargo-*lock' -delete
+        find "${dirs[@]}" -mindepth 1 -type d -empty -delete
         release
-        echo "cleared $(numfmt --to=iec "$size"): $build"
+        if [ "${#dirs[@]}" -gt 1 ]; then
+            echo "cleared $(numfmt --to=iec "$size"): $build, with its link destinations under $copies"
+        else
+            echo "cleared $(numfmt --to=iec "$size"): $build"
+        fi
         cleared=$((cleared + size))
     done
     echo "$(numfmt --to=iec "$cleared") cleared; $kept build directories kept"
@@ -15889,8 +16060,8 @@ mark-finished +trees:
 # checks again, at the delete, that each branch is merged into `main` and
 # checked out nowhere. That is why a branch only `origin/main` holds waits for
 # `ff-main`, and why the recipe fails when no tree holds `main`.
-[doc("Remove lane worktrees that are clean, landed on main, unlocked, and idle for an hour or marked finished, clearing each removed tree's build directories too; then delete the branches main holds that no tree or queue row uses.")]
-prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-fuzz.service"):
+[doc("Remove lane worktrees that are clean, landed on main, unlocked, and idle for an hour or marked finished, clearing each removed tree's build directories and link destinations too; then delete the branches main holds that no tree or queue row uses.")]
+prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-fuzz.service") targets="/var/cache/zram/targets" artifacts="/var/cache/zram/artifacts":
     #!/usr/bin/env bash
     set -euo pipefail
     [ -r /proc/self/cwd ] || { echo "no /proc, so nothing can say whether a process is running in a worktree"; exit 2; }
@@ -15940,6 +16111,11 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
     # `/var/cache/zram/kache`, which is kache's own store, not cargo's. A
     # tree whose cargo cannot answer still goes; this prints which build
     # directory it could not find (docs/decisions.d/474-build-output-goes-to-zram.md 474.10).
+    # A build directory `<targets>/<xx>/<hash>` takes its link destinations
+    # `<artifacts>/<xx>/<hash>` with it, the copies the tree's `target/debug`
+    # and `target/release` linked to (476), and they go even when the build
+    # directory is gone already, since `clean-targets` never removes one and
+    # nothing else would (476.6).
     clear_build_dir() {
         local label="$1" in_dir="$2"
         shift 2
@@ -15964,6 +16140,10 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
         esac
         if [ -d "$build" ]; then
             rm -rf "$build"
+        fi
+        local key=${build#"{{targets}}"/}
+        if [ "$key" != "$build" ] && grep -qxE '[^/.][^/]*/[^/.][^/]*' <<<"$key"; then
+            rm -rf -- "{{artifacts}}/$key"
         fi
     }
     # The first entry is the hub, which `git worktree remove` refuses. `branch`
