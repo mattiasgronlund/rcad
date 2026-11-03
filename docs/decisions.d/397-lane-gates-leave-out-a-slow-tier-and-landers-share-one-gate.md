@@ -609,3 +609,130 @@ What this leaves:
   out too thin for that, the re-scoring is the consumer.
 - **A cap on `just t`.** It is the other source of spikes (§397.6), and nothing
   here touches it.
+
+### 397.10 A gate that runs both tiers runs them as one nextest run (amends §397.4 and §337.11)
+
+*Q3078, 2026-11-03: `test` and `test-slow` both build with cargo, so the gate
+chained them, one after the other (§372.10, §397.4). Every land gate then
+waited for the slow tier after the rest had finished: 76 tests, a median of
+109 s and at most 133 s across the 8 gates of 2026-11-02 that ran it, as the
+row counted them. That wait is inside the land lock, and the last minutes of
+`test` ran on a few of 24 cores.*
+
+**What changed.** When `gate` starts `test` and `test-slow` is still waiting in
+the chain, it takes `test-slow` out of the chain and hands `test` two paths:
+where test-slow's log goes and where its exit code goes. `test` then runs one
+nextest run over both filters, `-E "not (F)" -E "F"`, and the doc tests after
+it. When `test` ends, the gate reads the exit code from its file and reports
+`test-slow` as a step of its own, with its own `·` line, log and exit code. The
+verdict record names each step it passed, as before.
+
+Nothing else changed:
+
+- `test` given no paths runs the two command lines it ran before.
+- `gate-lane` leaves `test-slow` out, so `test` is never given the paths there.
+- A served step never reaches the gate's list of steps to run. So a gate served
+  `test` runs `test-slow` alone, and one served `test-slow` runs `test` alone.
+- `test` and `test-slow` keep their own recipes, each with its `cargo nextest`
+  line, so `check-gate-runs-every-check` still finds both in the chain
+  (§372.10).
+
+**How each tier gets its answer.** After its Summary line, nextest lists every
+test that failed: its status word, its time, its place in the run, its
+binary_id and its name. `test` reads that list with the colour codes taken out,
+and matches each line's last two words against the pairs of `slow_tests`.
+
+- A slow test failing fails `test-slow`, with nextest's code, 100.
+- Any other test failing fails `test`, and `test` then skips the doc tests, as
+  it did before.
+- When only slow tests failed, `test` passes and runs the doc tests.
+- A run that fails and lists no test, one that lists fewer tests than its
+  Summary line counts as not passed, one cut short, and a build that fails
+  (101), fail both with nextest's code, since neither tier has an answer of
+  its own.
+
+A line names a slow test only when its binary and name are exactly a pair of
+`slow_tests`, so a fast test is never read as slow. The list is read only when
+nextest failed, so a run that passed passes both.
+
+**Why `--no-fail-fast`.** There is no `.config/nextest.toml`, so nextest stops
+at the first failure. In one run, a fast test failing first would cancel the
+slow tests not yet run, and `test-slow` would have no answer of its own.
+Passing it would be false. Failing it would be false too, and over a record
+that names `test-slow` a false failure is a false violation (§337.6). So the
+one run goes on past a failure. `test` alone keeps its old command line.
+
+**Why the list and not nextest's machine output.** `--message-format
+libtest-json` refuses to run without `NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1`
+(exit 95 on 0.9.143). With it set, it names a test of the scratch crate below
+`nx::nx$t::slow_bad`, a third spelling beside `slow_tests`'s `nx/t::slow_bad`
+and the list's `nx t::slow_bad`.
+The command names `--final-status-level fail` and `--failure-output immediate`
+because the environment can set them, and the list is what they print.
+
+The status word was measured as `FAIL` and `SIGABRT`, plain and in colour, and
+as `TRY 2 FAIL` when `NEXTEST_RETRIES` retried the test. The first version read
+only a word of capitals and dashes, so a retried slow test that failed every
+try fell through to "lists no test" and failed `test` as well. A shape nobody
+has seen yet would be worse beside a line the pattern does read: the slow test
+behind it would leave `test-slow` passing. So `test` counts too. Its Summary
+line says how many tests ran and how many passed, and every test that ran and
+did not pass is on the list after it. `test` splits the failures only when it
+read exactly that many lines. Otherwise both tiers fail, and a line names the
+two counts. A run cut short at a failure writes `2/7 tests run` in its Summary
+line instead, as a run without `--no-fail-fast` did on 0.9.143. The tests it
+never ran may be of either tier, so that run is refused the same way. A shape
+found later goes into the pattern and into the selftest's cases in the same
+commit.
+
+**When `test` writes no exit code.** `test` counts `slow_tests` against `nextest
+list` before it runs anything (§397.4 item 5). A failed count exits before the
+run, and so does a filter `test` cannot build. The exit code file is then
+missing. The gate puts `test-slow` back at the front of the chain, where it runs
+alone and gives its own answer, as it does for a `test` killed before it wrote
+the file.
+
+**What a record holds** (amends §337.11's "a record holds the counts its steps
+printed"). `test-slow`'s log from the one run holds no count, so the summary
+does not count the slow tier twice. A record that names both steps from one run
+holds that run's Summary line, which counts both tiers. A record written by a
+gate that ran them apart holds a line from each, as before.
+
+**The demonstration.**
+
+- `check-gate-docs-selftest`, with its stub `cargo`: `test` alone runs its two
+  old lines. Given the paths, it runs both filters in one run, then the doc
+  tests. A slow test failing, plain, in colour or retried, fails `test-slow`
+  alone. A fast test killed by a signal fails `test` alone and skips the doc
+  tests. A run that fails and lists nothing, one that lists one line of the
+  two its Summary line counts, one cut short at `2/4 tests run`, and a build
+  that fails, fail both. A failed count writes no exit code.
+- `check-gate-verdicts-selftest`, whose fixture `test` logs each run it makes:
+  the first gate of the cargo steps runs one `test` for both. A slow test
+  failing inside the run, over a record without `test-slow`, is a failure and
+  not a violation. A gate served `test` runs `test-slow` alone. A `test` that
+  writes no exit code leaves `test-slow` to run alone after it.
+- Both selftests failed on `8ba1a8091`, the cases without the change. The
+  retry case failed on `ca0605ddf`, before the pattern took `TRY`, the
+  short list on `6ee692485`, before `test` counted, and the run cut short on
+  `b667f0954`, before `test` read its `/4`.
+- The real `test`, through a copy of the justfile, over a real nextest run of a
+  scratch crate named `nx`, with two slow tests and five others (a probe, not
+  committed). Eight cases gave the answers above, as `test`'s exit code and
+  `test-slow`'s: nothing failing, 0 and 0; a slow test, 0 and 100, with the doc
+  tests run; a fast test and a crash, 100 and 0; a slow test and a test in
+  another binary, 100 and 100; in colour, a slow test, 0 and 100, and a fast
+  test, 100 and 0; with `NEXTEST_RETRIES=1`, a slow test, 0 and 100, and a slow
+  and a fast test, 100 and 100.
+- The whole gate on the workspace, `just gate quiet` at `1eb5fd9b2`, from
+  03:54:42Z to 04:15:25Z: `test` and `test-slow` both ended at 1054.5 s, on one
+  Summary line, `4772 tests run: 4772 passed (56 slow), 3 skipped`, the slow
+  tier's 76 among them. Its one failure was `check-fuzz-overnight-selftest`'s
+  arm thirty_five under load, Q3062's, which passed when run alone after it.
+
+**What the time shows, and what it does not.** On that gate `test-slow` added
+nothing after `test`. Whether the one run takes longer than `test` alone did
+was not measured on an idle machine. Two other lanes' gates ran beside it. One
+of them, from 03:45:49Z to 04:06:43Z, ran `test` alone, `4696 tests run`, as
+a step of 1093.0 s. That is one pair of gates on a loaded machine, not a
+measure of the saving.
