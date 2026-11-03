@@ -11174,71 +11174,34 @@ check-fuzz-overnight-selftest:
     # one the stub writes when `STUB_TIMING_SANCOV=1`. The night must still
     # fail on the one it actually built, not on whichever `find` meets first.
     #
-    # `find`'s own order between the two is not alphabetical and not the
-    # order they were created in — checked directly: three directories
-    # created in one order came back in a different one, and the same two
-    # names that sorted one way at one tag sorted the other way at another.
-    # ext4 hashes each full name with a seed fixed for this filesystem, so
-    # the order is stable for a given name but not predictable from the name
-    # alone, and `$tag` carries this run's own PID and `$RANDOM`. So rather
-    # than assume any one stale name sorts first, this tries a few until one
-    # does, against a placeholder standing in for the real slot.
-    #
-    # Q1519: every one of those 26 tries is checked against the *same*
-    # planted name, so they are not 26 independent coin flips — a run where
-    # that one name's own hash happens to be the lowest of the 27 loses all
-    # 26 at once, which for a uniform hash is about 1 run in 27, not the old
-    # comment's 2^-26. Measured directly on this filesystem: 300 runs of
-    # this same plant-26-against-one-fixed-name loop, in a fresh directory
-    # each time, lost 5 — the same order of magnitude as 1-in-27, nowhere
-    # near 2^-26. So this no longer trusts one planted name's luck: a loss
-    # replants the real slot under a fresh name too, for a fresh 1-in-27
-    # draw against the same 26 tries, up to eight times. Eight independent
-    # ~1-in-27 draws losing in a row is under 2e-12 even by the old (wrong)
-    # coin-flip arithmetic, let alone the measured rate — low enough that a
-    # real loss here is a filesystem whose order is not acting as roughly
-    # uniform, not a flake.
+    # `find`'s own order between the two depends on the filesystem: ext4
+    # hashes the names, xfs lists them in the order they were made. The arm
+    # used to try 26 stale names until one came first, which ext4 gave and
+    # xfs never did (Q3106, with `fuzz/target` linked to the zram disk). So
+    # this puts a `find` in front of the night's `PATH` that lists the rlibs
+    # in reverse name order, which puts the stale one (`selftest-stale-…`)
+    # before the real one (`selftest-r-…`) on any filesystem, and checks
+    # before the night runs that it does.
     #
     # Q2509: `find "$base"` walks the whole shared build directory, and up
     # to three gates can be running this same arm at once in this one tree
-    # (§372) — each plants its own `-$tag` pair under that same `$base`
-    # while this one is probing. `head -n1` can then meet another arm's or
-    # another gate's own rlib before it ever meets one of this attempt's
-    # own 26 tries, and no probe letter this attempt plants will ever match
-    # it — failing all 8 real-name retries for a reason that has nothing to
-    # do with this run's own luck, the same "none of 26 ... on 8 different
-    # real names" message a genuine run of bad luck gives. So `find`'s
-    # output is filtered, after the walk and without re-sorting it, down to
-    # just the two paths this attempt itself just made: whichever of those
-    # two `find` met first is what this attempt's own luck says, with
-    # everyone else's rlibs left out of the count.
+    # (§372), each planting its own `-$tag` pair under that same `$base`.
+    # So the check of the order is filtered down to just the two paths this
+    # arm made, with everyone else's rlibs left out.
     #
     # The filter is pulled out into `filter_pattern` so a made-up, fixed
-    # listing can run through the exact same grep this loop uses, instead
-    # of waiting on a real directory's walk order to put a foreign name
-    # first the way a real sibling gate would. Below, `check_tag` plants no
+    # listing can run through the exact same grep. `check_tag` plants no
     # real files; it feeds `filter_pattern`'s own pattern two made-up lines
     # at a time — a decoy standing in for another gate's rlib, listed
     # first, beside one of this check's own two names — and asks which one
     # `grep | head -n1` kept. Run once against the real name and once
     # against the stale one, so each half of the filter's `|` is the one
-    # that has to reject the decoy, not just whichever half happens to
-    # match first. That decides every single time this check runs, not
-    # only on average the way the real probe below still does: a real
-    # decoy's own luck at sorting first is still the probe's problem; a
-    # decoy's name failing to match the filter never is.
+    # that has to reject the decoy.
     #
-    # Named so every directory this makes ends in `-$tag`: the retry's own
-    # discriminator goes in front of it, never after, so `clean_up`'s
-    # `selftest-*"$tag"` glob still sweeps every attempt, tried or kept, with
-    # everything else this run planted. `tag` is shadowed with `local` for
-    # the retry's own directory names and reverts to the run-wide value the
-    # moment this function returns, so `clean_up` and every other arm still
-    # see the one tag they always did — which means the next arm's own build
-    # no longer writes into this arm's `real_out`, the way it did when every
-    # arm shared the one plain name and each one's fresh, clean rebuild
-    # overwrote the last one's rlib in passing. So this arm removes its own
-    # `real_out` and `stale_out` once it is done with them, rather than
+    # Named so every directory this makes ends in `-$tag`, so `clean_up`'s
+    # `selftest-*"$tag"` glob still sweeps them. `tag` is shadowed with
+    # `local` and reverts when this function returns. This arm removes its
+    # own `real_out` and `stale_out` once it is done with them, rather than
     # leaving the dirty one for whichever arm runs next to find.
     twenty_nine() {
     : >"$dir/log"
@@ -11263,40 +11226,35 @@ check-fuzz-overnight-selftest:
     [ "$check_first" = "$stale_line" ] \
         || fail "Q2509 regression: filter_pattern picked '$check_first' instead of this check's own stale line, with a decoy standing in for a sibling gate's own rlib (§372) ahead of it"
 
-    stale=""
-    attempt=0
-    while [ -z "$stale" ] && [ "$attempt" -lt 8 ]; do
-        attempt=$((attempt + 1))
-        local tag="r$attempt-$outer_tag"
-        real_out="$base/selftest-$tag/out"
-        mkdir -p "$real_out"
-        touch "$real_out/librcad_fuzz_timing-selftest-$tag.rlib"
-
-        for probe in a b c d e f g h i j k l m n o p q r s t u v w x y z; do
-            stale_out="$base/selftest-stale-$probe-$tag/out"
-            mkdir -p "$stale_out"
-            touch "$stale_out/librcad_fuzz_timing-selftest-stale-$probe-$tag.rlib"
-            first=$(find "$base" -name 'librcad_fuzz_timing-*.rlib' \
-                | grep -E "$(filter_pattern "$tag" "$probe")" \
-                | head -n1 || true)
-            case "$first" in
-                *"/selftest-stale-$probe-$tag/"*) stale="$probe"; break ;;
-            esac
-            rm -rf "$base/selftest-stale-$probe-$tag"
-        done
-        [ -n "$stale" ] || rm -rf "$real_out"
-    done
-    [ -n "$stale" ] \
-        || fail "none of 26 stale rlib names sorted before the real one under find, on $attempt different real names in a row — this filesystem's hash order is not acting as roughly uniform"
-
+    local tag="real-$outer_tag"
+    stale="a"
+    real_out="$base/selftest-$tag/out"
     stale_out="$base/selftest-stale-$stale-$tag/out"
+    mkdir -p "$real_out" "$stale_out"
+    touch "$real_out/librcad_fuzz_timing-selftest-$tag.rlib"
+    touch "$stale_out/librcad_fuzz_timing-selftest-stale-$stale-$tag.rlib"
+
+    real_find=$(command -v find)
+    mkdir -p "$dir/bin-twenty-nine"
+    printf '#!/usr/bin/env bash\ncase " $* " in\n    *librcad_fuzz_timing-*) %s "$@" | sort -r ;;\n    *) exec %s "$@" ;;\nesac\n' \
+        "$real_find" "$real_find" >"$dir/bin-twenty-nine/find"
+    chmod +x "$dir/bin-twenty-nine/find"
+
+    first=$(PATH="$dir/bin-twenty-nine:$PATH" find "$base" -name 'librcad_fuzz_timing-*.rlib' \
+        | grep -E "$(filter_pattern "$tag" "$stale")" \
+        | head -n1 || true)
+    case "$first" in
+        *"/selftest-stale-$stale-$tag/"*) ;;
+        *) fail "the find stand-in did not list the stale rlib before the real one: '$first'" ;;
+    esac
+
     rm -f "$real_out"/librcad_fuzz_timing-*.rlib "$stale_out"/librcad_fuzz_timing-*.rlib
     printf '.globl clean_stale_symbol\nclean_stale_symbol:\n' >"$stale_out/sym.s"
     as "$stale_out/sym.s" -o "$stale_out/sym.o"
     ar rcs "$stale_out/librcad_fuzz_timing-selftest-stale-$stale-$tag.rlib" "$stale_out/sym.o"
 
     status=0
-    STUB_TIMING_SANCOV=1 run 8 || status=$?
+    PATH="$dir/bin-twenty-nine:$PATH" STUB_TIMING_SANCOV=1 run 8 || status=$?
     [ "$status" -ne 0 ] \
         || fail "a clean rlib beside the one this build wrote let the night report success"
     grep -q 'sancov reference' "$dir/out" \
