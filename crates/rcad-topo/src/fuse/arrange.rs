@@ -4823,18 +4823,27 @@ impl<'f> Arrangement<'f> {
                 at,
                 super::bake::what_writing_the_corner_down_cost(at.enclosure()),
             );
-            for crossing in 0..self.crossings.len() {
+            let near: SmallVec<[usize; 8]> = (0..self.nodes.len())
+                .filter(|&node| boxes_overlap(room, self.nodes[node].point))
+                .collect();
+            let mut passing_by: SmallVec<[usize; 8]> = near
+                .iter()
+                .flat_map(|&node| &self.nodes[node].crossings)
+                .copied()
+                .filter(|crossing| !through.contains(crossing))
+                .collect();
+            passing_by.sort_unstable();
+            passing_by.dedup();
+            for crossing in passing_by {
                 if !self.crossings[crossing].reaches_the_face
-                    || through.contains(&crossing)
                     || !nothing_rules_the_point_out(self.crossings[crossing].picked_by(), at)
                 {
                     continue;
                 }
-                let reaching: SmallVec<[usize; 4]> = (0..self.nodes.len())
-                    .filter(|&node| {
-                        self.nodes[node].crossings.contains(&crossing)
-                            && boxes_overlap(room, self.nodes[node].point)
-                    })
+                let reaching: SmallVec<[usize; 4]> = near
+                    .iter()
+                    .copied()
+                    .filter(|&node| self.nodes[node].crossings.contains(&crossing))
                     .collect();
                 let a_meet_of_the_corners_crossings_inside_its_room = |node: usize| {
                     let node = &self.nodes[node];
@@ -4853,10 +4862,9 @@ impl<'f> Arrangement<'f> {
                         })
                     })
                 };
-                if reaching.is_empty()
-                    || !reaching
-                        .iter()
-                        .all(|&node| a_meet_of_the_corners_crossings_inside_its_room(node))
+                if !reaching
+                    .iter()
+                    .all(|&node| a_meet_of_the_corners_crossings_inside_its_room(node))
                     || !no_two_apart()
                 {
                     continue;
