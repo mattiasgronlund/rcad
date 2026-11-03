@@ -88,9 +88,8 @@ CLOSED_ROWS_SHOWN = 12
 # a sum, not a path.
 MEETS_LINE = re.compile(r"^skip (\S+) \(tier (\S+)\): its (\S+) meets (\S+)'s (\S+), held (by|elsewhere by) (\S+)$")
 PINNED_LINE = re.compile(r"^skip (\S+) \(tier (\S+)\): its (\S+) meets (\S+)'s (\S+), pinned and skipped above$")
-SHARED_LINE = re.compile(
-    r"^skip (\S+) \(tier (\S+)\): its (\S+) is shared, and "
-    r"(\S+) \(held (by|elsewhere by) (\S+)\) and (\S+) \(held (by|elsewhere by) (\S+)\) already hold it$")
+SHARED_LINE = re.compile(r"^skip (\S+) \(tier (\S+)\): its (\S+) is shared, and (\S.*\)) and (\S.*\)) already hold it$")
+SHARED_HOLDER = re.compile(r"^(\S+) \((?:held (by|elsewhere by) (\S+)|pinned and skipped above)\)$")
 # `names` (justfile's `cores_fit_skip`) is a comma-joined mix of three kinds of
 # item: the literal "the night fuzz", "<id> (held by <state>)" or "<id> (held
 # elsewhere by <state>)" for a running row, and "<id> (taken above)" for one
@@ -540,9 +539,9 @@ def parse_blocked_line(line):
                 "holders": [(other, theirs, "pinned and skipped above", None)]}
     shared = SHARED_LINE.match(line)
     if shared:
-        row_id, _, mine, first, first_how, first_holder, second, second_how, second_holder = shared.groups()
+        row_id, _, mine, first, second = shared.groups()
         return {"id": row_id, "mine": mine, "shared": True,
-                "holders": [(first, None, first_how, first_holder), (second, None, second_how, second_holder)]}
+                "holders": [shared_holder(first, line), shared_holder(second, line)]}
     cores = CORES_LINE.match(line)
     assert cores, f"`just queue blocked` printed a line this cannot read: {line!r}"
     row_id, _, need, threads, names = cores.groups()
@@ -938,19 +937,34 @@ def reasons_not_taken(groups, links):
     return [("Waits on rows not yet done", waiting), ("Parked", parked), ("Meets a running lane's write set", meeting)]
 
 
+def shared_holder(text, line):
+    held = SHARED_HOLDER.match(text)
+    assert held, f"`just queue blocked` printed a shared-skip line this cannot read: {line!r}"
+    other, how, holder = held.groups()
+    if how is None:
+        return (other, None, "pinned and skipped above", None)
+    return (other, None, how, holder)
+
+
 def meeting_reason(line, links):
     if line["shared"] == "cores":
         holders = join_and(cores_holder_text(other, how, holder, links) for other, _, how, holder in line["holders"])
         return (f"waits for threads: <code>{html.escape(line['mine'])}</code> does not fit the "
                 f"{html.escape(line['threads'])} threads of the machine, held by {holders}")
     if line["shared"]:
-        holders = " and ".join(f"{links.ref(other)} (held {how} <code>{html.escape(holder)}</code>)"
+        holders = " and ".join(shared_holder_text(other, how, holder, links)
                                for other, _, how, holder in line["holders"])
         return f"<code>{html.escape(line['mine'])}</code> is shared, and {holders} already hold it"
     ((other, theirs, how, holder),) = line["holders"]
     if how == "pinned and skipped above":
         return f"meets {links.ref(other)}'s <code>{html.escape(theirs)}</code>, pinned and skipped above"
     return f"meets {links.ref(other)}'s <code>{html.escape(theirs)}</code>, held {how} <code>{html.escape(holder)}</code>"
+
+
+def shared_holder_text(other, how, holder, links):
+    if how == "pinned and skipped above":
+        return f"{links.ref(other)} (pinned and skipped above)"
+    return f"{links.ref(other)} (held {how} <code>{html.escape(holder)}</code>)"
 
 
 def cores_holder_text(other, how, holder, links):
