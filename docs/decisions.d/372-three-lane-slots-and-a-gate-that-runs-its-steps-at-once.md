@@ -370,8 +370,8 @@ copy of the justfile, on two fixture steps: a `test` that prints the `Starting`
 line and then waits up to 20 s for `check`, and a `check` that writes whether
 `test` was still running. It expects `beside`. With a `test` that prints a
 `Compiling` line instead, it expects `alone`. It took 5.7 s. It failed on three
-broken copies of the gate: with no hand-off, `test` waited 20.3 s and `check`
-wrote `alone`; with the base's order, `alone`; with a reader that hands on at
+broken copies of the gate: with no hand-off, `test` ran out its 20 s wait and
+`check` wrote `alone`; with the base's order, `alone`; with a reader that hands on at
 any line, `beside` where `alone` was expected. On a justfile whose line has the
 base's order, it prints `gate's cargo_steps line starts with 'check', expected
 'test'`.
