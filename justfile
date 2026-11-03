@@ -2400,32 +2400,83 @@ check-gate-docs-selftest:
         || fail "a comment, an attribute or a selftest naming gate-lane was refused"
 
     # `test` and `test-slow`, with a stub `cargo` whose `nextest list` prints a
-    # fixture as what the filter selected, and which logs every other call. A
-    # bench binary's id holds a `/`, so the split must be at the last one.
+    # fixture as what the filter selected, and which logs every other call.
+    # Its `nextest run` prints what `$dir/run` holds and exits with STUB_EXIT.
+    # A bench binary's id holds a `/`, so the split must be at the last one.
     held='test and test-slow'
     mkdir -p "$dir/bin"
     printf '%s\n' '#!/usr/bin/env bash' \
-        'if [ "$1 $2" = "nextest list" ]; then cat "$STUB_LISTED"; else echo "cargo $*" >>"$STUB_LOG"; fi' \
+        'if [ "$1 $2" = "nextest list" ]; then cat "$STUB_LISTED"; exit 0; fi' \
+        'echo "cargo $*" >>"$STUB_LOG"' \
+        'if [ "$1 $2" = "nextest run" ]; then cat "$STUB_RUN"; exit "$STUB_EXIT"; fi' \
         >"$dir/bin/cargo"
     chmod +x "$dir/bin/cargo"
     stub() {
         : >"$dir/cargo.log"
-        PATH="$dir/bin:$PATH" STUB_LISTED="$dir/listed" STUB_LOG="$dir/cargo.log" "$j" --set slow_tests "$@" 2>&1
+        rm -f "$dir/slow.log" "$dir/slow.status"
+        PATH="$dir/bin:$PATH" STUB_LISTED="$dir/listed" STUB_LOG="$dir/cargo.log" STUB_RUN="$dir/run" \
+            STUB_EXIT="${STUB_EXIT:-0}" "$j" --set slow_tests "$@" 2>&1
     }
+    tier='rcad-x::a/t1 rcad-x::bench/b/t2'
     printf '%s\n' 'rcad-x::a t1' 'rcad-x::bench/b t2' >"$dir/listed"
+    printf '%s\n' '     Summary [   0.300s] 4 tests run: 4 passed, 0 skipped' >"$dir/run"
     filter='(binary_id(=rcad-x::a) & test(=t1)) | (binary_id(=rcad-x::bench/b) & test(=t2))'
-    got=$(stub 'rcad-x::a/t1 rcad-x::bench/b/t2' test) || fail "a slow tier whose names each select one test failed"
+    got=$(stub "$tier" test) || fail "a slow tier whose names each select one test failed"
     [ "$(cat "$dir/cargo.log")" = "cargo nextest run --workspace -E not ($filter)"$'\n'"cargo test --workspace --doc" ] \
         || fail "test did not run every test but the slow tier, then the doc tests: $(cat "$dir/cargo.log")"
-    got=$(stub 'rcad-x::a/t1 rcad-x::bench/b/t2' test-slow) || fail "test-slow failed"
+    got=$(stub "$tier" test-slow) || fail "test-slow failed"
     [ "$(cat "$dir/cargo.log")" = "cargo nextest run --workspace --no-tests fail -E $filter" ] \
         || fail "test-slow did not run only the slow tier: $(cat "$dir/cargo.log")"
+
+    # Both tiers in one nextest run, as `gate` runs them when both are to run:
+    # `test` is given where test-slow's log and exit code go, and reads which
+    # tier each failing test is in from the list after the Summary line
+    # (docs/decisions.d/397 §397.10).
+    pair=("$dir/slow.log" "$dir/slow.status")
+    one_run="cargo nextest run --workspace --no-fail-fast --final-status-level fail --failure-output immediate -E not ($filter) -E $filter"
+    got=$(stub "$tier" test "${pair[@]}") || fail "a run of both tiers that passed failed"
+    [ "$(cat "$dir/cargo.log")" = "$one_run"$'\n'"cargo test --workspace --doc" ] \
+        || fail "test given test-slow's files did not run both tiers in one nextest run, then the doc tests: $(cat "$dir/cargo.log")"
+    [ "$(cat "$dir/slow.status")" = 0 ] || fail "a run of both tiers that passed did not pass test-slow"
+    grep -qE '^ *Summary |^test result: ' "$dir/slow.log" \
+        && fail "test-slow's log holds a count, which the gate's summary would count a second time"
+    # A slow test failing, its line in colour as on a runner, fails test-slow
+    # alone, and test still runs its doc tests.
+    printf '%s\n' '        FAIL [   0.013s] (2/4) rcad-x::bench/b t2' 'a slow test said why' \
+        '     Summary [   0.300s] 4 tests run: 3 passed, 1 failed, 0 skipped' \
+        $'\e[31;1m        FAIL\e[0m [   0.013s] (2/4) \e[35;1mrcad-x::bench/b\e[0m \e[34;1mt2\e[0m' \
+        'error: test run failed' >"$dir/run"
+    got=$(STUB_EXIT=100 stub "$tier" test "${pair[@]}") || fail "test failed when only a slow test did"
+    [ "$(cat "$dir/slow.status")" = 100 ] || fail "a slow test failed and test-slow did not fail with nextest's code"
+    grep -q 'rcad-x::bench/b t2$' "$dir/slow.log" || fail "test-slow's log does not name the slow test that failed"
+    grep -qx 'cargo test --workspace --doc' "$dir/cargo.log" \
+        || fail "a failure in the slow tier alone stopped test's doc tests"
+    # A test outside the tier, here killed by a signal, fails test alone.
+    printf '%s\n' '     Summary [   0.300s] 4 tests run: 3 passed, 1 failed, 0 skipped' \
+        '     SIGABRT [   2.021s] (4/4) rcad-x::a t3' 'error: test run failed' >"$dir/run"
+    got=$(STUB_EXIT=100 stub "$tier" test "${pair[@]}") && fail "test passed when a test outside the slow tier failed"
+    [ "$(cat "$dir/slow.status")" = 0 ] || fail "a test outside the slow tier failed test-slow"
+    grep -qx 'cargo test --workspace --doc' "$dir/cargo.log" && fail "test ran its doc tests after a test of its own failed"
+    # A run that failed and named no test, and a build that failed, leave
+    # neither tier an answer, so both fail.
+    printf '%s\n' '     Summary [   0.300s] 4 tests run: 4 passed, 0 skipped' 'error: test run failed' >"$dir/run"
+    got=$(STUB_EXIT=100 stub "$tier" test "${pair[@]}") && fail "test passed when nextest failed and named no test"
+    [ "$(cat "$dir/slow.status")" = 100 ] || fail "nextest failed and named no test, and test-slow passed"
+    printf '%s\n' 'error: could not compile `rcad-x`' >"$dir/run"
+    got=$(STUB_EXIT=101 stub "$tier" test "${pair[@]}") && fail "test passed when the build failed"
+    [ "$(cat "$dir/slow.status")" = 101 ] || fail "the build failed, and test-slow did not fail with its code"
+
     printf '%s\n' 'rcad-x::a t1' >"$dir/listed"
     got=$(stub 'rcad-x::a/t1 rcad-x::a/gone rcad-x::a/t1' test) && fail "a name that selects nothing and a name written twice passed"
     grep -qx 'slow_tests names 3 tests and selects 1:' <<<"$got" || fail "the count did not say what it counted"
     grep -qx '  rcad-x::a/gone selects no test' <<<"$got" || fail "a name that selects nothing was not named"
     grep -qx '  named twice: rcad-x::a/t1' <<<"$got" || fail "a name written twice was not named"
     [ ! -s "$dir/cargo.log" ] || fail "test ran tests after its count failed: $(cat "$dir/cargo.log")"
+    # Given test-slow's files, a failed count leaves test-slow no answer, so
+    # the gate runs it alone and it fails on its own.
+    got=$(stub 'rcad-x::a/t1 rcad-x::a/gone' test "${pair[@]}") && fail "a name that selects nothing passed in a run of both tiers"
+    [ ! -e "$dir/slow.status" ] || fail "a failed count wrote test-slow's answer: $(cat "$dir/slow.status")"
+    [ ! -s "$dir/cargo.log" ] || fail "test ran tests after its count failed in a run of both tiers: $(cat "$dir/cargo.log")"
     got=$(stub 'rcad-x::a' test-slow) && fail "a name with no binary passed"
     grep -q "names 'rcad-x::a', which is not binary_id/test_name" <<<"$got" || fail "a name with no binary was refused without its name"
     [ ! -s "$dir/cargo.log" ] || fail "test-slow ran with a name it could not split: $(cat "$dir/cargo.log")"
@@ -2951,6 +3002,12 @@ check-gate-verdicts-selftest:
     # be followed into the record and out of it. `check-release-build` fails
     # while RUST_SELFTEST_FAIL is set, which nothing in the key reads: the same
     # inputs giving a different answer is what a violation is.
+    #
+    # `test` given test-slow's two files plays the one nextest run of both
+    # tiers (docs/decisions.d/397 §397.10): it prints a count of both, writes
+    # RUST_SELFTEST_SLOW_FAIL or 0 as test-slow's exit code, and exits 1
+    # without it while RUST_SELFTEST_NO_SLOW_STATUS is set, as a failed count
+    # does. Each of the two writes a line to RUST_SELFTEST_RUNS as it starts.
     rust_steps="check check-ignored test test-slow check-release-build"
     for step in $rust_steps; do
         grep -qx "$step" <<<"$reusable" \
@@ -2962,13 +3019,22 @@ check-gate-verdicts-selftest:
         (cd "$repo" && "$j" --set gate_steps "$1" --set gate_reusable_steps "$rust_steps" \
             --set gate_log "$dir/gate.log" gate quiet "${@:2}" 2>&1)
     }
+    export RUST_SELFTEST_RUNS="$dir/runs"
     test_count='tests: Summary [   0.300s] 5 tests run: 5 passed, 0 skipped'
     slow_count='tests: Summary [   0.200s] 2 tests run: 2 passed, 0 skipped'
+    both_count='tests: Summary [   0.500s] 7 tests run: 7 passed, 0 skipped'
     cp '{{ justfile() }}' "$repo/justfile"
     printf '%s\n' '' 'set allow-duplicate-recipes' '' \
         'check:' '    @true' '' 'check-ignored:' '    @true' '' \
-        'test:' '    @echo "     Summary [   0.300s] 5 tests run: 5 passed, 0 skipped"' '' \
-        'test-slow:' '    @echo "     Summary [   0.200s] 2 tests run: 2 passed, 0 skipped"' '' \
+        'test slow_log="" slow_status="":' '    #!/usr/bin/env bash' \
+        '    echo "test${1:+ and test-slow}" >>"$RUST_SELFTEST_RUNS"' \
+        '    [ -n "$1" ] || { echo "     Summary [   0.300s] 5 tests run: 5 passed, 0 skipped"; exit 0; }' \
+        '    [ -z "${RUST_SELFTEST_NO_SLOW_STATUS:-}" ] || exit 1' \
+        '    echo "     Summary [   0.500s] 7 tests run: 7 passed, 0 skipped"' \
+        '    echo "the slow tier ran in this run" >"$1"' \
+        '    echo "${RUST_SELFTEST_SLOW_FAIL:-0}" >"$2"' '' \
+        'test-slow:' '    @echo test-slow >>"$RUST_SELFTEST_RUNS"' \
+        '    @echo "     Summary [   0.200s] 2 tests run: 2 passed, 0 skipped"' '' \
         'check-release-build:' '    @[ -z "${RUST_SELFTEST_FAIL:-}" ]' >>"$repo/justfile"
     printf '[workspace]\n' >"$repo/Cargo.toml"
     g add -A
@@ -2983,15 +3049,19 @@ check-gate-verdicts-selftest:
     got=""
     tree_fp1=$(fingerprint)
 
+    : >"$RUST_SELFTEST_RUNS"
     got=$(rust_gate "$rust_steps") || fail "the first gate of the cargo steps failed"
     grep -q '^· test (' <<<"$got" || fail "the first gate of the cargo steps did not run test"
+    grep -q '^· test-slow (' <<<"$got" || fail "the first gate of the cargo steps did not report test-slow"
+    [ "$(cat "$RUST_SELFTEST_RUNS")" = 'test and test-slow' ] \
+        || fail "a gate that ran both test and test-slow did not run them as one run of test: $(cat "$RUST_SELFTEST_RUNS")"
     [ -f "$rust_store/$rust_fp1" ] || fail "a passing gate of the cargo steps recorded nothing under their own store"
     [ -f "$store/$tree_fp1" ] && fail "a gate of the cargo steps recorded them under the whole-tree store"
     grep -qx "commit $rust_commit1" "$rust_store/$rust_fp1" \
         || fail "the cargo steps' record does not name the commit that was gated"
     grep -qx "steps $rust_steps" "$rust_store/$rust_fp1" \
         || fail "the cargo steps' record does not name the five steps it passed"
-    grep -qxF "$test_count" "$rust_store/$rust_fp1" || fail "the cargo steps' record does not hold test's counts"
+    grep -qxF "$both_count" "$rust_store/$rust_fp1" || fail "the cargo steps' record does not hold the one run's counts"
 
     # A commit that changes only the justfile, outside the recipes the five
     # run, is the case the key is for: Q3053's ran test fresh for 842 s.
@@ -3006,7 +3076,7 @@ check-gate-verdicts-selftest:
     grep -q "^· served: $rust_steps from ${rust_commit1:0:8}'s gate at " <<<"$got" \
         || fail "a justfile-only commit was not served the cargo steps' green from the commit under it"
     grep -q '^· test (' <<<"$got" && fail "a served test ran anyway"
-    grep -qxF "$test_count (served from ${rust_commit1:0:8})" <<<"$got" \
+    grep -qxF "$both_count (served from ${rust_commit1:0:8})" <<<"$got" \
         || fail "a gate served test did not show the counts of the gate that served it"
     grep -qx 'tests: not reached' <<<"$got" && fail "a gate served test said no tests were reached"
 
@@ -3063,10 +3133,21 @@ check-gate-verdicts-selftest:
     got=$(rust_gate 'check check-ignored test check-release-build') || fail "a gate that left out test-slow failed"
     grep -qx 'steps check check-ignored test check-release-build' "$rust_store/$rust_fp1" \
         || fail "a run that left out test-slow did not record the cargo steps it ran"
+    # A slow test failing inside test's run, over that record, fails test-slow
+    # and not test: a failure, and not a violation of test's green (§397.4).
+    got=$(RUST_SELFTEST_SLOW_FAIL=100 rust_gate "$rust_steps" fresh) && fail "a gate whose slow tier failed inside test's run exited 0"
+    grep -q '^· test-slow (.*) FAILED, exit 100$' <<<"$got" || fail "a slow tier that failed inside test's run was not reported as test-slow's failure"
+    grep -q '^· test (.*) FAILED' <<<"$got" && fail "a slow tier that failed inside test's run failed test"
+    grep -q 'verdict violated' <<<"$got" && fail "test-slow, which the record never passed, failing inside test's run was taken as a violation"
+    grep -qx 'steps check check-ignored test check-release-build' "$rust_store/$rust_fp1" \
+        || fail "a slow tier failing inside test's run changed or deleted the record"
+    : >"$RUST_SELFTEST_RUNS"
     got=$(rust_gate "$rust_steps") || fail "a partly served gate of the cargo steps failed"
     grep -q "^· served: check check-ignored test check-release-build from ${rust_commit1:0:8}'s gate at " <<<"$got" \
         || fail "a gate was not served the cargo steps its record names"
     grep -q '^· test-slow (' <<<"$got" || fail "test-slow, which the record does not name, was not run"
+    [ "$(cat "$RUST_SELFTEST_RUNS")" = test-slow ] \
+        || fail "a gate served test did not run test-slow alone: $(cat "$RUST_SELFTEST_RUNS")"
     grep -qxF "$test_count (served from ${rust_commit1:0:8})" <<<"$got" && grep -qxF "$slow_count" <<<"$got" \
         || fail "a partly served gate did not show test's counts as served and test-slow's as its own"
     grep -qx 'steps check check-ignored test check-release-build test-slow' "$rust_store/$rust_fp1" \
@@ -3096,6 +3177,15 @@ check-gate-verdicts-selftest:
     [ -f "$rust_store/$rust_fp1" ] && fail "a violated record of the cargo steps was kept, so the next gate would serve it"
     grep -q " $rust_fp1 check-release-build " "$repo/.git/rcad-verdict-violations" \
         || fail "the cargo steps' violation was not written down"
+
+    # A `test` that stops before its run, as at a failed count, leaves
+    # test-slow no answer, so the gate runs test-slow alone after it.
+    : >"$RUST_SELFTEST_RUNS"
+    got=$(RUST_SELFTEST_NO_SLOW_STATUS=1 rust_gate "$rust_steps") && fail "a gate whose test failed before its run exited 0"
+    [ "$(cat "$RUST_SELFTEST_RUNS")" = 'test and test-slow'$'\n''test-slow' ] \
+        || fail "test stopped before writing test-slow's answer, and test-slow was not run alone after it: $(cat "$RUST_SELFTEST_RUNS")"
+    grep -q '^· test (.*) FAILED, exit 1$' <<<"$got" && grep -q '^· test-slow ([0-9.]* s)$' <<<"$got" \
+        || fail "test failing before its run did not leave test-slow to pass on its own"
 
     # One run that writes both records puts in each the counts of its own
     # steps and no other's. The summary shows one record's counts, the cargo
