@@ -1273,27 +1273,37 @@ gate mode="loud" verdicts="reuse" jobs="cores":
         fi
     done
 
-    # The steps that build with cargo run one after another, in the order
-    # `gate_steps` gives them, beside everything else. Cargo locks the build
-    # directory, so two of them started together only wait on each other: all 56
-    # steps started at once took 110 s, not 91, and `test` waited on the lock
-    # seven times (§372.3). `check-t-selftest` also needs the binaries `test`
-    # built, which is why it comes after `test` in the list. `test-slow` leaves
-    # the chain when `test` starts while it is still in it, and runs inside
-    # `test`'s nextest run (§397.10).
-    # `check-gate-runs-every-check` holds this line to the steps whose recipes
-    # run cargo, so a new one cannot be left off it unnoticed.
-    cargo_steps="check check-fuzz-builds check-timing-hooked-calls check-wildcards check-ignored lint test test-slow check-release-build check-t-selftest"
+    # The steps that build with cargo run one after another, in the order of
+    # this line, beside everything else. Cargo locks the build directory, so two
+    # of them started together only wait on each other: all 56 steps started at
+    # once took 110 s, not 91, and `test` waited on the lock seven times
+    # (§372.3). `test-slow` leaves the chain when `test` starts while it is
+    # still in it, and runs inside `test`'s nextest run (§397.10).
+    #
+    # **The next one starts when the one before has stopped building, not when
+    # it has ended** (§372.14). nextest holds cargo's locks only while it
+    # builds, and prints `Starting N tests across M binaries` once it has let
+    # them go, so a step whose log shows that line hands the chain on. `test`
+    # comes first: it builds the test binaries, then runs its tests for many
+    # minutes beside the rest of the chain instead of ahead of it. A step that
+    # never prints the line holds the chain until it ends, as every step did
+    # before. `check-t-selftest` needs the binaries `test` built, which is why
+    # it comes after `test` here. `check-gate-runs-every-check` holds this line
+    # to the steps whose recipes run cargo, so a new one cannot be left off it
+    # unnoticed, and holds `test` first.
+    cargo_steps="test test-slow check check-fuzz-builds check-timing-hooked-calls check-wildcards check-ignored lint check-release-build check-t-selftest"
     names=()
     chained=()
     unchained=()
     for step in {{ gate_steps }}; do
         case " $served " in *" $step "*) continue ;; esac
-        case " $cargo_steps " in
-            *" $step "*) chained+=("${#names[@]}") ;;
-            *) unchained+=("${#names[@]}") ;;
-        esac
+        case " $cargo_steps " in *" $step "*) ;; *) unchained+=("${#names[@]}") ;; esac
         names+=("$step")
+    done
+    for step in $cargo_steps; do
+        for i in "${!names[@]}"; do
+            [ "${names[$i]}" != "$step" ] || chained+=("$i")
+        done
     done
     # Keyed by index rather than by name: a fixture list can name a step twice.
     declare -A running=()
@@ -1305,10 +1315,35 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     # tests share the cores with the rest instead of waiting for them, and
     # leaves test-slow's log and exit code where it is told to (§397.10).
     carried=""
+    # The chained step whose log is being read for nextest's `Starting` line,
+    # keyed by the pid of the subshell reading it, which exits on that line.
+    declare -A watching=()
     start() {
         began[$1]=${EPOCHREALTIME//[!0-9]/}
         "$j" "${names[$1]}" "${@:2}" >"$steps_dir/$1-${names[$1]}.log" 2>&1 &
         running[$!]=$1
+    }
+    # The step is the last one started, and the subshell ends only on the
+    # line: the step ending first is seen where it is reaped, below, which
+    # stops the subshell there.
+    watch_building() {
+        (
+            while :; do
+                sed 's/\x1b\[[0-9;]*m//g' "$steps_dir/$1-${names[$1]}.log" 2>/dev/null \
+                    | grep -qE '^ *Starting [0-9]+ tests? across [0-9]+ binar' && exit 0
+                sleep 0.5
+            done
+        ) &
+        watching[$!]=$1
+    }
+    stop_watching() {
+        local w
+        for w in "${!watching[@]}"; do
+            [ "${watching[$w]}" = "$1" ] || continue
+            kill "$w" 2>/dev/null
+            wait "$w" 2>/dev/null
+            unset "watching[$w]"
+        done
     }
     take_test_slow() {
         local at
@@ -1348,6 +1383,7 @@ gate mode="loud" verdicts="reuse" jobs="cores":
                 else
                     start "$chain_busy"
                 fi
+                watch_building "$chain_busy"
             elif [ "${#unchained[@]}" -gt 0 ]; then
                 start "${unchained[0]}"
                 unchained=("${unchained[@]:1}")
@@ -1358,8 +1394,14 @@ gate mode="loud" verdicts="reuse" jobs="cores":
         [ "${#running[@]}" -gt 0 ] || break
         wait -n -p pid
         step_status=$?
+        if [[ -v watching[$pid] ]]; then
+            [ "${watching[$pid]}" != "$chain_busy" ] || chain_busy=""
+            unset "watching[$pid]"
+            continue
+        fi
         i=${running[$pid]}
         unset "running[$pid]"
+        stop_watching "$i"
         [ "$i" != "$chain_busy" ] || chain_busy=""
         ended_with[$i]=$step_status
         report "$i"
