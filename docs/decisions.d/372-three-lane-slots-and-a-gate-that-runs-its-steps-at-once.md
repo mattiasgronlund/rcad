@@ -226,6 +226,13 @@ the gate slower, never wrong.
 it has stopped building, and `check-gate-runs-every-check` holds `test` first
 on the line.
 
+**Amended by §372.15 on 2026-11-03: four cargo steps whose builds take none of
+the chain's locks are off the line, held to it by the arm.** They are
+`check-fuzz-builds`, `check-timing-hooked-calls`, `check-wildcards` and
+`check-release-build`. The arm now compares the steps that build with cargo
+with the line and that list together, and fails when a step on the list loses
+the text in its recipe that keeps its build apart.
+
 ### 372.11 What loud and quiet print
 
 `quiet` prints one line per step as the step ends, `· <step> (<seconds> s)`,
@@ -412,4 +419,118 @@ included.
   the chain and run beside it from the first second. That matters where the
   chain runs past `test`: above it ended about 40 s before `test` did, with
   `check-timing-hooked-calls` 449.8 s of it. Not run, so not claimed. A row.
+  Answered in §372.15: they share none, and they left the chain.
 - How long the doc tests can wait on a later step's build, above. Not measured.
+  Answered in §372.15: they waited on nothing, and when they can wait.
+
+### 372.15 Four cargo steps leave the chain, since their builds take none of its locks (Q3098)
+
+*Lane Q3098, 2026-11-03, in two relays. On 24 cores shared with other lanes,
+Q3088 and Q3090 among them, so `/proc/loadavg` is given beside the wall times.
+Each figure is in the lane's report with the command that printed it. The lock
+samples were kept outside git, in the lane's `target/q3098-locks.txt`.*
+
+**How the locks were read.** Not with `flock -n`, as §372.14 read them on a
+scratch crate: `flock -n` takes a lock it finds free, so a cargo of the gate
+could then wait on the reader. A sampler read `/proc/locks` every quarter
+second through one fresh gate at `1ee550b4c`, named the gate step of each
+holder and waiter by its parent processes and working directory, and named
+each file with `lslocks`. Times below are seconds after the gate was started;
+its first steps started 4.2 s in.
+
+**Which locks each cargo step took.** `<build>` is this tree's build directory
+under `/var/cache/zram/targets` (§474.9), and `<fuzz build>` is `fuzz/`'s,
+another one, which stable and nightly cargo both gave it.
+
+| step | build directory | `target/` |
+|---|---|---|
+| `test`, `check`, `check-ignored`, `lint`, `check-t-selftest` | `<build>/debug/` | `target/debug/` |
+| `check-fuzz-builds` | `<fuzz build>/debug/` | `fuzz/target/debug/` |
+| `check-timing-hooked-calls` | `<fuzz build>/release/` and `<fuzz build>/x86_64-unknown-linux-gnu/release/` | the same two under `fuzz/target/` |
+| `check-wildcards` | `<build>/wildcards/debug/` | `target/wildcards/debug/` |
+| `check-release-build` | `<build>/release/` | `target/release/` |
+
+In each build directory a step held `.cargo-build-lock` for writing, and in its
+`target/` directory `.cargo-lock` for reading and `.cargo-artifact-lock` for
+writing; the steps that only check, `check`, `lint`, `check-fuzz-builds` and
+`check-wildcards`, took no artifact lock. So none of the four took a lock that
+a chained step took. The one lock all cargo steps share is
+`~/.cargo/.package-cache`, which every cargo on the machine takes, in every
+tree, for 0.3 to 1.7 s while it resolves; `.package-cache-mutate` is taken for
+reading for the whole build, so nobody waits on it. kache's job permits under
+`/var/cache/zram/kache/scheduler/permits/` are shared by every build too, and
+no step was seen waiting on one. `test` waited 0.40 s on `.package-cache` at
+7.3 s, held by `check-wildcards`. That was the only wait between the four and
+the chain.
+
+**What changed.** `cargo_steps` is now `test test-slow check check-ignored
+lint check-t-selftest`. The four start as every step off the line does, in
+`gate_steps`' order as slots come free, so `gate_steps` needed no edit. Here
+`check-fuzz-builds` and `check-wildcards` started at 4.2 s,
+`check-timing-hooked-calls` at 17.2 s and `check-release-build` at 28.2 s.
+
+**The check.** `check-gate-runs-every-check` keeps a list of the four, each with
+the text in its recipe that keeps its build apart: `cd fuzz` for the two fuzz
+steps, `CARGO_BUILD_BUILD_DIR=` for `check-wildcards` and `--cargo-profile
+release` for `check-release-build`. It fails when one of them is on the line,
+when its recipe has lost that text, since its build may then share the chain's
+locks again, and when the steps whose recipes build with cargo are not the line
+and the list together. On `b10a0d06e`, which has the arm and the base's line,
+it prints `gate's cargo_steps line holds steps that share no cargo lock with
+the chain:` and names the four. It failed on four broken copies of the
+justfile, each with its own message: `CARGO_BUILD_BUILD_DIR=` taken out of
+`check-wildcards`, `check-release-build` taken off the list,
+`check-fuzz-builds` put back on the line, and `check-release-build`'s cargo
+call turned into an `echo`.
+
+**The doc tests waited on nothing.** `cargo test --workspace --doc` ran from
+670.7 to 673.5 s. It held `.package-cache` for 0.3 s, no hold of the build lock
+was seen since nothing needed building, and no wait was seen. The chain had
+ended at 315.6 s, when `check-t-selftest` did. What follows `test` on the line
+is now `check`, `check-ignored`, `lint` and `check-t-selftest`, 132.7 s of steps
+here, against 487.9 s of `test`'s nextest run. The doc tests can wait on one of
+them only when `test`'s tests take less time than those steps, and then for at
+most what is left of them. Cargo prints `Blocking waiting for file lock` when it
+waits, so a gate's log keeps the waits its steps printed. Of the gate logs on
+this machine written since 08:50Z, two were whole gates that ran `test`: this
+one, and one in another lane's tree that ended at 10:05:22Z with the four still
+on the line and `test` 469.8 s. Neither shows such a line in `test`'s section
+after its nextest `Summary`. Two gates is not "ever"; the condition above is
+the answer.
+
+**One fresh gate,** set beside §372.14's at `912dad157`, which had the four on
+the line. `1ee550b4c` differs from the base only in `gate` and its check.
+
+| gate | started | load at start | load at end | wall | `test` took | its build | its nextest run | chain ended |
+|---|---|---|---|---|---|---|---|---|
+| §372.14, `912dad157` | 08:37:37Z | 31.61 25.77 24.69 | | 746 s | 743.5 s | about 118 s | 616.0 s | about 703 s |
+| this, `1ee550b4c` | 09:57:25Z | 24.16 15.33 15.30 | 19.18 33.58 29.90 | 725.2 s | 668.3 s | about 173 s | 487.9 s | 315.6 s |
+
+The one-minute load peaked at 75.29, 69 s in, while `test` and the four built
+at once. `test`'s build held its lock from 8.2 to 181.2 s, longer than §372.14's
+because four other builds shared the cores with it, and its run had no 450 s
+fuzz build beside it. Of the four, `check-fuzz-builds` took 61.5 s,
+`check-wildcards` 99.9 s, `check-release-build` 15.1 s and
+`check-timing-hooked-calls` 589.3 s, whose build held its locks from 21.8 to
+435.0 s. The chain ended about 357 s before `test` did, where in §372.14's gate
+it ended about 40 s before. The gate's wall was set by
+`check-queue-api-selftest`, 717.6 s, a step that runs no cargo and that
+§337.10 and §337.12 let a gate serve, and not by `test`, which ended at about
+672.5 s. One gate
+each, at different loads, is not a measure of the saving. The gate failed only
+on `check-fuzz-overnight-selftest`, arms `two_with_no_step_corpus`,
+`thirty_four`, `thirty_five` and `thirty_six`, which is Q3062's, as §372.14's
+gate did with the four still on the line; `4773 tests run: 4773 passed (37
+slow), 3 skipped`.
+
+**`check-fuzz-triage-selftest` builds in `debug/` and is on neither list.** It
+reaches cargo through `just fuzz-triage`, whose `cargo run --profile test -p
+rcad-fuzz-explain` the arm's test cannot see, which is the kind §372.10 already
+lets past. It waited 157.1 s on `test`'s build lock, 51.4 s on `check`'s and
+73.7 s on `lint`'s. The sampler saw no chained step wait on it, though `lint`'s
+log shows cargo waiting once for the build directory and twice for the package
+cache, each shorter than a sample, so who held them is not known. It ended at
+about 333 s, about 390 s before the gate did, and on the line it would start
+after `check-t-selftest` and end at about the same time. So it stays where it
+is, and no row is filed: while the chain ends this far ahead of `test`, moving
+it moves nothing.
