@@ -1646,9 +1646,18 @@ def show(here, args):
             print(f"handed out by `just queue add` in {event[3]} at {event[2]}:\n    {event[4]}")
     hold = claims.holds().get(row_id)
     print(f"held by {hold['branch']} from {hold['tree']} since {hold['time']}" if hold else "no hold")
-    if hold and hold["write_set"] != hold["taken"]:
-        print(f"narrowed to {hold['write_set']}, taken with {hold['taken']}")
-    elif not hold and row is not None:
+    if hold:
+        # `writes` on a held row moves `taken` along with `write_set` (Q2670),
+        # so the two agree right after one and this `!=` would miss it; the
+        # column -- `row.write_set`, read from here.relative -- is what a
+        # plain `writes` leaves behind, so that is what a widened hold is
+        # read against, the same comparison `narrowed` makes (§230.3).
+        column = row.write_set if row is not None else hold["taken"]
+        if hold["write_set"] != hold["taken"]:
+            print(f"narrowed to {hold['write_set']}, taken with {hold['taken']}")
+        elif hold["write_set"] != column:
+            print(f"write set set to {hold['write_set']} by `writes`, {column} in {here.relative}")
+    elif row is not None:
         written = latest_writes(here.claims).get(row_id)
         if written is not None and written != row.write_set:
             print(f"write set set to {written} by `writes`, {row.write_set} in {here.relative}")
