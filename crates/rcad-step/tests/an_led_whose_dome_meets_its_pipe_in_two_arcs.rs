@@ -92,9 +92,22 @@
 //!   them was refused as though it were an arc. A straight side on a pipe
 //!   whose two ends are one corner is now left out, as one between two planes
 //!   is (Q3057), and every difference stops refused `DynamicRangeTooWide`, at
-//!   a ratio of `1.8e16`. Q3056's probe of the same fix found edges of the
-//!   dome's rim `z = 9.1` each claimed by one face, the ball's and the pipe's
-//!   writing their corners `2e-15` apart. Untraced.
+//!   a ratio of `1.8e16`. That is `ResultIsNotManifold` read for its range:
+//!   26 pieces of the ball and 26 of the pipe each walk an edge of the rim
+//!   `z = 9.1` no other face walks. The ball and the pipe cross in the thin
+//!   loop above, so the ball keeps a band between the rim and the loop's top
+//!   branch, `1e-7` above it, and the pipe a band down to the loop's bottom
+//!   branch, and planes across the rim cut each band in pieces. Each piece's
+//!   side along the rim is a piece of the one input edge, but the ball's is
+//!   carried by the ball and the rim's plane and the pipe's by the pipe and
+//!   that plane. The two circles they cut in the plane are centred `2e-15`
+//!   apart, so they cross in two points and do not share more than a point,
+//!   and the arcs are not joined under one name as they are on a bar capped
+//!   by a ball of its radius (Q3000). Their corners are named by the plane,
+//!   the plane across and the ball or the pipe: `(2.74, -2.491987158875427,
+//!   9.1)` for the ball and `(2.74, -2.4919871588754248, 9.1)` for the pipe,
+//!   which are two triples, so even where a corner is shared the two edges
+//!   are two (Q3104).
 //! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
 //!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
 //!   rounding apart in direction. Q2938's road answers that triple, and the
@@ -225,6 +238,13 @@ fn a_d5_led_leaves_out_a_straight_side_of_no_length_on_its_flange_rim_and_stops_
     );
 }
 
+/// A box that misses the LED cuts nothing out of it, so what is left is the
+/// whole LED, its dome's rim `z = 9.1` an edge of the ball and the pipe.
+#[test]
+fn a_d5_led_less_a_box_that_misses_it_is_the_whole_led() {
+    the_led_less_a_box_that_misses_it_is_the_whole_led(D5, FAR_OFF);
+}
+
 #[test]
 fn a_d3_led_gets_past_the_cells_of_its_flange_front_and_stops_where_two_curves_touch_on_the_side_of_a_lead()
  {
@@ -277,6 +297,35 @@ fn the_led_and_a_box_share(file: &str, centre: [f64; 3], shared: f64) {
         (common - shared).abs() <= error + 1e-12,
         "{file}: the LED and the box round {centre:?} share {common} ± {error}, and {shared} is \
          right"
+    );
+}
+
+/// The LED in `file` less a box of side `2 * HALF` centred on `centre`, which
+/// misses it, answers with a model `validate` accepts, holding as much as the
+/// LED does to within what measuring both costs.
+fn the_led_less_a_box_that_misses_it_is_the_whole_led(file: &str, centre: [f64; 3]) {
+    let (mut model, solid) = the_led(file);
+    let (whole, whole_error) = volume_of(&model, &[solid]);
+    let knife = a_box_round(&mut model, centre);
+    let fused = model
+        .fuse(
+            &[solid],
+            &[knife],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{file}: less the box round {centre:?} refused: {why:?}"));
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| {
+            panic!("{file}: less the box round {centre:?} left a model that is not valid: {why:?}")
+        });
+    let (left, error) = volume_of(&model, fused.solids());
+    assert!(
+        (left - whole).abs() <= error + whole_error + 1e-12,
+        "{file}: less the box round {centre:?} holds {left} ± {error}, and the LED holds {whole} \
+         ± {whole_error}"
     );
 }
 
