@@ -17199,6 +17199,23 @@ check-queue-page-selftest:
         "meets <Q2>'s <code>crates/t/tests/</code>, pinned and skipped above"
     ), render.meeting_reason(pinned, Links())
 
+    shared = render.parse_blocked_line(
+        "skip Q3082 (tier 1): its crates/rcad-topo/src/fuse/arrange.rs is shared, and "
+        "Q3081 (held elsewhere by lane:lane-q3081-carry-on-the-sides-of-planes) and "
+        "Q3071 (pinned and skipped above) already hold it")
+    assert shared == {
+        "id": "Q3082", "mine": "crates/rcad-topo/src/fuse/arrange.rs", "shared": True,
+        "holders": [
+            ("Q3081", None, "elsewhere by", "lane:lane-q3081-carry-on-the-sides-of-planes"),
+            ("Q3071", None, "pinned and skipped above", None),
+        ],
+    }, shared
+    assert render.meeting_reason(shared, Links()) == (
+        "<code>crates/rcad-topo/src/fuse/arrange.rs</code> is shared, and "
+        "<Q3081> (held elsewhere by <code>lane:lane-q3081-carry-on-the-sides-of-planes</code>) and "
+        "<Q3071> (pinned and skipped above) already hold it"
+    ), render.meeting_reason(shared, Links())
+
     print("ok")
     PY
     ) || fail "parse_blocked_line or meeting_reason could not read the pinned-and-skipped-above line §430.7"
