@@ -957,6 +957,18 @@ reverted, failed it on the case they break: on `7a9e7c8d2`, dropping
 `07b195173`, counting only `shell()` among the calls, leaving exported
 assignments out, and leaving the settings out.
 
+**The real run.** `just pre-gate gate-lane` on `11a76a317`, the row's commit
+of this section, passed. Its branch changed only the justfile and this file
+since `219aed7c`, so it was served `check`, `check-ignored`, `test` and
+`check-release-build` from `219aed7c`'s gate on §337.11's key, with `test`'s
+4772 tests. `check-queue-api-selftest` ran, at 276.1 s, since nothing was yet
+recorded under the new key, and its green was recorded as `c264e8773686`. It
+was still the longest step of the gate; the next was
+`check-gate-verdicts-selftest`, at 66.0 s. On a scratch commit over
+`11a76a317` that added one line to `decisions-toc`'s body, the whole-tree key
+moved from the gate's `37a08eb0e766` to `a0778dc4dc83`, and this one stayed
+`c264e8773686`, so a gate there would be served the step.
+
 **What this leaves.** The comment above `gate_reusable_steps` still says this
 step answers from `justfile`, `tooling/`, `.gitattributes` and `mise.toml` and
 is keyed on that tree. It is in an item Q3080 held while this row ran, so a row
