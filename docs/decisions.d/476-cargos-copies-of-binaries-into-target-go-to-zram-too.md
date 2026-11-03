@@ -122,3 +122,114 @@ nothing that linking cargo's own directories does not already save.
   idle rule clears them with the build directory too. While the build directory
   is there the two share their bytes through the hard links, but once it is
   cleared a destination alone holds tens of megabytes of RAM.
+
+### 476.5 What Q3069 found
+
+*Q3069's two lanes, 2026-11-03. The first worked in tree `wf_84a56c29-bdd-2`
+and the second in `wf_84a56c29-bdd-3`; each finding says which.*
+
+**Linking `target/debug` one level down works as linking `target/` did.** In
+`bdd-2`, with `target/debug` a link to
+`/var/cache/zram/artifacts/71/3fd20140d51477/debug`, `cargo build -p
+rcad-fuzz-explain --bins --lib` passed in 13.07 s, and
+`target/debug/rcad-fuzz-explain` (36,170,904 bytes) was inode 140240753 with
+link count 2, the same file as the build directory's `deps/` copy. In `bdd-3`,
+after `just pre-gate gate-lane`, all 8 files over 1 MB in the linked
+`target/debug` had link count 2: `rcad-fuzz-explain`,
+`librcad_fuzz_explain.rlib` and six examples, 92,521,353 bytes. With
+`target/debug` on the SSD, each would have been a full copy (476.1).
+
+**A missing destination fails differently one level down.** In `bdd-2`, a build
+of a scratch crate whose `target/debug` linked to a missing directory failed
+with `File exists (os error 17)`, not 476.1's `Not a directory (os error 20)`
+for `target` linked whole. Either way the boot step must make it first.
+
+**Which directories cargo copies into, read off a gate.** In `bdd-3`, with
+`target/debug` and `target/release` linked, `just pre-gate gate-lane` and then
+`just check-release-build` left no file over 1 MB with link count 1 under
+`target/` or `fuzz/target/` (`find target fuzz/target -xdev -type f -size +1M
+-links 1` printed nothing). Cargo made two more real directories:
+`target/wildcards/debug`, for `check-wildcards`' clippy, and `fuzz/target/debug`.
+Each holds only a `.cargo-lock`, so neither is linked. `target/release` got no
+binary either, since a release test binary stays in the build directory. It is
+linked anyway, because any `cargo build --release` copies into it.
+
+**The fuzz workspace's directory is not linked yet.** The first gate in `bdd-3`
+ran with `fuzz/target/x86_64-unknown-linux-gnu/release` linked too, and
+`check-fuzz-overnight-selftest` failed in arm `twenty_nine`: "none of 26 stale
+rlib names sorted before the real one under find, on 8 different real names in
+a row". That arm plants its fixtures under
+`fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing` and needs
+a directory made later to come first under `find`. ext4 lists a directory in
+hash order, which gives that. xfs, the zram disk's filesystem, lists a small
+directory in the order its entries were made, which never does. Run with the
+arm's own pattern of names (`target/order.sh` in `bdd-3`), a later directory
+came first in 0 of 8 attempts on xfs and in 7 of 8 on ext4. With that link, the
+arm fails in every tree. The arm is outside Q3069's write set, so
+`link-targets.sh` leaves the fuzz directory alone, and
+`check-link-targets-to-zram-selftest` fails if anything is made under
+`fuzz/target`. A row moves the arm's fixtures, and a row after it adds the link.
+The gate's own steps put no binary there: after the first gate the destination
+held only the arm's fixtures. The five fuzz binaries come from `cargo fuzz
+build`, in a night or a fuzz recipe.
+
+**Nothing else the tooling writes goes under a linked directory.** A grep of
+`.claude/` and `tooling/` found no writes under `target/debug` or
+`target/release`. In the justfile, the only writes under them are cargo's own
+copies, such as the ones `cargo run --profile test -p rcad-fuzz-explain` makes in
+`target/debug`, and those copies are what the link is for. Under the fuzz
+triple's directory, the justfile writes only the fuzz-overnight selftest's
+fixtures, above. `bdd-2` found kache's `.kache-build-script-shims` in
+`target/debug` in trees made before build-dir was set. It was not there after
+`bdd-3`'s gate.
+
+**What `cargo clean` does to a link** (476.3), in `bdd-2` on a scratch crate
+whose `target/debug` was a link:
+
+- Plain `cargo clean` removes `target/`, which takes the link itself but not its
+  destination, and it removes the build directory too. The destination keeps
+  the binary, now with link count 1, still taking RAM. The next build makes a
+  real `target/debug` on the SSD (inode 52299735, link count 1).
+- `cargo clean --profile dev` also deletes the link and leaves the
+  destination's files.
+- `cargo clean -p <package>` keeps the link and deletes that package's files in
+  it.
+
+Nothing in the justfile, `.claude/` or `tooling/` runs `cargo clean`. So
+nothing yet makes a link again where a real directory has come back. Q3070 will:
+it replaces a real `target/debug` in an idle tree. Until then,
+`just link-targets-to-zram`, run after a `cargo clean` and before the next
+build, makes the link again.
+
+**The hook and the boot step.** `tooling/zram/post-checkout` acts only when its
+`$1` is the all-zero sha, runs the new tree's own `tooling/zram/link-targets.sh`,
+and always exits 0. On a tree already linked, that script ran in 0.097 s in
+`bdd-3`. `tooling/zram/make-artifact-dirs.sh` is the boot step. Its search of
+`~/git` and `/tmp/claude-1000` for links into `/var/cache/zram/artifacts` took
+2.4 s with the disk cache warm. It leaves out `.git` and anything more than two
+levels inside a `target`. Pruned that way, it walked 999,735 entries in `bdd-2`'s
+count, against 1,479,358 unpruned. The time with a cold cache, as at boot, was
+not measured. `zram-kache start` hands the new disk's root to its owner, so the
+step runs as `mattias`, and every directory it makes is his.
+
+**What Mattias runs** to install both. No session can: auto mode refused the
+inari session its own hook (476.3), and the boot step needs `sudo`.
+
+1. From main's tree: `just link-targets-to-zram install-hook`.
+2. `sudo install -m 0755 -o root -g root tooling/zram/make-artifact-dirs.sh
+   /usr/local/sbin/rcad-zram-artifact-dirs`. It is a copy owned by root, because
+   a unit started as root must not run a file that any session can edit. A
+   change to the tracked script reaches the copy only when this is run again.
+3. Add two lines to `/etc/systemd/system/zram-kache.service.d/subdirs.conf`,
+   after the two that are there:
+
+   ```
+   ExecStartPost=/usr/bin/install -d -m 0755 -o mattias -g mattias /var/cache/zram/artifacts
+   ExecStartPost=-/usr/sbin/runuser -u mattias -- /usr/local/sbin/rcad-zram-artifact-dirs /var/cache/zram/artifacts /home/mattias/git /tmp/claude-1000
+   ```
+
+4. `sudo systemctl daemon-reload`, and never a restart of `zram-kache`: a
+   restart empties the disk. The lines take effect at the next boot.
+
+A tree made before the hook is installed has no links, and a gate there passes
+just the same. Converting those trees is Q3070's.
