@@ -2511,6 +2511,14 @@ check-gate-docs-selftest:
         'error: test run failed' >"$dir/run"
     got=$(STUB_EXIT=100 stub "$tier" test "${pair[@]}") && fail "test passed when a test outside the slow tier failed beside an unread line"
     [ "$(cat "$dir/slow.status")" = 100 ] || fail "nextest counted a failure the list did not show, and test-slow passed"
+    # A run cut short at a fast failure, as nextest 0.9.143 prints it, never
+    # ran some tests, and the slow test may be one of them.
+    printf '%s\n' '     Summary [   0.032s] 2/4 tests run: 1 passed, 1 failed, 0 skipped' \
+        '        FAIL [   0.012s] (2/4) rcad-x::a t3' \
+        'warning: 2/4 tests were not run due to test failure (run with --no-fail-fast to run all tests, or run with --max-fail)' \
+        'error: test run failed' >"$dir/run"
+    got=$(STUB_EXIT=100 stub "$tier" test "${pair[@]}") && fail "test passed when a test outside the slow tier failed in a run cut short"
+    [ "$(cat "$dir/slow.status")" = 100 ] || fail "a run cut short before the slow tier had run passed test-slow"
     printf '%s\n' 'error: could not compile `rcad-x`' >"$dir/run"
     got=$(STUB_EXIT=101 stub "$tier" test "${pair[@]}") && fail "test passed when the build failed"
     [ "$(cat "$dir/slow.status")" = 101 ] || fail "the build failed, and test-slow did not fail with its code"
