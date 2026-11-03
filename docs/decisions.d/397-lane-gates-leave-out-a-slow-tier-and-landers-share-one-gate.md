@@ -724,3 +724,15 @@ gate that ran them apart holds a line from each, as before.
   another binary, 100 and 100; in colour, a slow test, 0 and 100, and a fast
   test, 100 and 0; with `NEXTEST_RETRIES=1`, a slow test, 0 and 100, and a slow
   and a fast test, 100 and 100.
+- The whole gate on the workspace, `just gate quiet` at `1eb5fd9b2`, from
+  03:54:42Z to 04:15:25Z: `test` and `test-slow` both ended at 1054.5 s, on one
+  Summary line, `4772 tests run: 4772 passed (56 slow), 3 skipped`, the slow
+  tier's 76 among them. Its one failure was `check-fuzz-overnight-selftest`'s
+  arm thirty_five under load, Q3062's, which passed when run alone after it.
+
+**What the time shows, and what it does not.** On that gate `test-slow` added
+nothing after `test`. Whether the one run takes longer than `test` alone did
+was not measured on an idle machine. Two other lanes' gates ran beside it. One
+of them, from 03:45:49Z to 04:06:43Z, ran `test` alone, `4696 tests run`, as
+a step of 1093.0 s. That is one pair of gates on a loaded machine, not a
+measure of the saving.
