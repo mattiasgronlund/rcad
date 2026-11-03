@@ -36,10 +36,13 @@ Read each row with `mise exec -- just queue show <id>`, one id a call. A bundle,
 `rows`: its id, its model column, its write-set column and its whole line, each
 exactly as the command prints it — **unless** the same `show` also prints a
 line under the row naming a newer set: `narrowed to <set>, taken with <...>`
-on a row already held, or `` write set set to <set> by `writes`, <column> in
-docs/queue.md `` on one not yet held. Either line means a `writes` ran after
-the column was written (§230.3); report that printed set as the row's write
-set instead of the column, and check `needs` against it too, not the column.
+when a hold has narrowed below what it was taken with, or `` write set set to
+<set> by `writes`, <column> in docs/queue.md `` otherwise — on a row not yet
+held, or one a plain `writes` has already moved onto the entry it is held
+with too (Q2670, so `write_set` and `taken` agree and the first line does not
+fire). Either line means a `writes` ran after the column was written
+(§230.3); report that printed set as the row's write set instead of the
+column, and check `needs` against it too, not the column.
 `lanes.js` cannot read the queue file, so what you copy is what the lane is
 given, and what your answer is checked against.
 
