@@ -2504,6 +2504,13 @@ check-gate-docs-selftest:
     printf '%s\n' '     Summary [   0.300s] 4 tests run: 4 passed, 0 skipped' 'error: test run failed' >"$dir/run"
     got=$(STUB_EXIT=100 stub "$tier" test "${pair[@]}") && fail "test passed when nextest failed and named no test"
     [ "$(cat "$dir/slow.status")" = 100 ] || fail "nextest failed and named no test, and test-slow passed"
+    # Two tests did not pass and one line is read: the other, here the slow
+    # test in a shape no nextest has printed yet, may be either tier's.
+    printf '%s\n' '     Summary [   0.300s] 4 tests run: 2 passed, 2 failed, 0 skipped' \
+        '     SIGABRT [   2.021s] (3/4) rcad-x::a t3' '     Unread [   0.013s] (4/4) rcad-x::bench/b t2' \
+        'error: test run failed' >"$dir/run"
+    got=$(STUB_EXIT=100 stub "$tier" test "${pair[@]}") && fail "test passed when a test outside the slow tier failed beside an unread line"
+    [ "$(cat "$dir/slow.status")" = 100 ] || fail "nextest counted a failure the list did not show, and test-slow passed"
     printf '%s\n' 'error: could not compile `rcad-x`' >"$dir/run"
     got=$(STUB_EXIT=101 stub "$tier" test "${pair[@]}") && fail "test passed when the build failed"
     [ "$(cat "$dir/slow.status")" = 101 ] || fail "the build failed, and test-slow did not fail with its code"
