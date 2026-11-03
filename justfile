@@ -15707,9 +15707,10 @@ check-clean-targets-selftest:
 # `links` runs `tooling/zram/link-targets.sh` on `tree`: target/debug and
 # target/release become links to `<artifacts>/<xx>/<hash>/...`, keyed by the
 # tree's build directory under `targets`, and a link whose destination is gone
-# gets it made again. The fuzz workspace's directory is not linked yet (476.5). A
-# `cargo clean` deletes the links (476.5), and the build after it puts a real
-# target/debug back on the SSD, so run this in between.
+# gets it made again. So does fuzz/target/x86_64-unknown-linux-gnu/release, keyed
+# by the fuzz workspace's own build directory (476.5). A `cargo clean` deletes
+# the links (476.5), and the build after it puts a real target/debug back on
+# the SSD, so run this in between.
 #
 # `install-hook` copies `tooling/zram/post-checkout` into the common
 # `.git/hooks` of `tree`'s repository. Mattias runs it, not a session (476.3),
@@ -15777,6 +15778,7 @@ check-link-targets-to-zram-selftest:
     printf '%s\n' '#!/usr/bin/env bash' \
         '[ -z "${STUB_CARGO_FAILS:-}" ] || exit 101' \
         'key=ab/0123456789abcd' \
+        '[ "$1" != +nightly ] || { key=cd/fedcba98765432; shift; }' \
         '[ "$1" = metadata ] || exit 101' \
         'build="$RCAD_ZRAM_TARGETS/$key"' \
         '[ -z "${STUB_BUILD_DIR_UNSET:-}" ] || build="$PWD/target"' \
@@ -15797,16 +15799,14 @@ check-link-targets-to-zram-selftest:
         [ "$(readlink "$1/$2" || true)" = "$art/$3" ] || fail "$4: $1/$2 is not a link to $art/$3"
         [ -d "$art/$3" ] || fail "$4: the destination $art/$3 of $1/$2 was not made"
     }
-    # The fuzz workspace's directory stays on the SSD until
-    # check-fuzz-overnight-selftest keeps its fixtures somewhere else: they
-    # need ext4's directory order, and the zram disk is xfs (476.5).
     linked_all() {
         linked "$1" target/debug ab/0123456789abcd/debug "$2"
         linked "$1" target/release ab/0123456789abcd/release "$2"
         [ -d "$1/target" ] && [ ! -L "$1/target" ] \
             || fail "$2: $1/target is not a real directory, and the tooling keeps what it writes there"
-        [ ! -e "$1/fuzz/target" ] && [ ! -L "$1/fuzz/target" ] \
-            || fail "$2: something was made under $1/fuzz/target, where check-fuzz-overnight-selftest needs the SSD's directory order (476.5)"
+        linked "$1" fuzz/target/x86_64-unknown-linux-gnu/release cd/fedcba98765432/x86_64-unknown-linux-gnu/release "$2"
+        [ -d "$1/fuzz/target" ] && [ ! -L "$1/fuzz/target" ] \
+            || fail "$2: $1/fuzz/target is not a real directory"
     }
     unlinked() {
         for at in target/debug target/release fuzz/target; do
