@@ -330,12 +330,13 @@ longer free.
 **nextest holds cargo's locks only while it builds.** §474.11 found that cargo
 holds `.cargo-build-lock` in the build directory and two locks in
 `target/debug/` while it builds, and none while `cargo test` runs the tests it
-built. A scratch crate showed the same for `cargo nextest run`: all three locks
-held during the build, and at 8.76 s, when nextest printed `Starting 2 tests
-across 2 binaries`, none held and no cargo process left. `cargo test --doc`
-held none while rustdoc compiled and ran the doc test. So a nextest run gives
-the build directory back before it runs a test, and says so on a line of its
-own.
+built. A scratch crate with an 8 s build script, read every quarter second
+with `flock -n`, showed the same for `cargo nextest run`: all three locks held
+while it built, and from the moment nextest printed `Starting 2 tests across 2
+binaries`, none held and no cargo process left. `cargo test --doc` held all
+three while it built the library and none while rustdoc compiled and ran the
+doc test. So a nextest run gives the build directory back before it runs a
+test, and says so on a line of its own.
 
 **What changed.**
 
@@ -359,22 +360,22 @@ follows it. On a log of one `Starting` line and 200000 `PASS` lines, `grep -q`
 gave 141 and `grep -c` gave 0.
 
 **What it can cost.** `test`'s doc tests come last in its recipe, and `cargo
-test --doc` takes the debug build lock again to see that the library is built.
-If a later chained step is building then, the doc tests wait for it. That can
-move `test`'s end later, never its answer. In the gate below the chain had
-ended before the doc tests began, so it did not arise.
+test --doc` is cargo again, before rustdoc. If a later chained step holds the
+debug build lock then, the doc tests can wait for it. That can move `test`'s
+end later, never its answer. In the gate below the chain had ended before the
+doc tests began, so it did not arise.
 
 **The check.** `check-gate-runs-every-check` fails unless `test` is first on
 the line. Its second line runs `gate` itself, in a scratch repository with a
 copy of the justfile, on two fixture steps: a `test` that prints the `Starting`
 line and then waits up to 20 s for `check`, and a `check` that writes whether
 `test` was still running. It expects `beside`. With a `test` that prints a
-`Compiling` line instead, it expects `alone`. It took 5.7 s. It failed on three
-broken copies of the gate: with no hand-off, `test` ran out its 20 s wait and
-`check` wrote `alone`; with the base's order, `alone`; with a reader that hands on at
-any line, `beside` where `alone` was expected. On a justfile whose line has the
-base's order, it prints `gate's cargo_steps line starts with 'check', expected
-'test'`.
+`Compiling` line instead, it expects `alone`. It takes about 10 s. It failed
+on three broken copies of the gate: with no hand-off, `test` ran out its 20 s
+wait and `check` wrote `alone`; with the base's order, `alone`; with a reader
+that hands on at any line, `beside` where `alone` was expected. On a justfile
+whose line has the base's order, it prints `gate's cargo_steps line starts with
+'check', expected 'test'`.
 
 **Both orders, one fresh gate each,** each on a tree that had never built. The
 base's order ran at `655e412ca` and the new one at `912dad157`, which differ
@@ -392,13 +393,15 @@ about 123 s in, when `check` began. The rest of the chain then ran beside its
 tests: `check` 50.3 s, `check-fuzz-builds` 25.4, `check-timing-hooked-calls`
 449.8 (not served), `check-wildcards` 27.8, `check-ignored` 0.5, `lint` 21.4,
 `check-release-build` 2.4 and `check-t-selftest` 1.9, 579.5 s in all, and
-had ended by about 703 s, before `test` did. No chained step's log shows cargo waiting
-for the build directory. `test`'s run took longer than the base's, 616.0 s
-against 469.4 s, at a load 12 higher and with the chain beside it, and the gate
-still ended 191 s sooner. One gate each on a loaded machine is not a measure of
-the saving on an idle one. The new gate failed on `check-fuzz-overnight-selftest`'s
-arm `thirty_five` under load, which is Q3062's; every other step passed, `4772
-tests run: 4772 passed`.
+had ended by about 703 s, before `test` did. No chained step's log shows cargo
+waiting for the build directory. `test`'s run took longer than the base's,
+616.0 s against 469.4 s, at a load 12 higher and with the chain beside it, and
+the gate still ended 191 s sooner. One gate each on a loaded machine is not a
+measure of the saving on an idle one. The new gate failed on
+`check-fuzz-overnight-selftest`'s arm `thirty_five` under load, which is
+Q3062's; every other step passed, `4772 tests run: 4772 passed`. A lane gate
+right after, of code that differs only in a comment, passed, that selftest
+included.
 
 **What this leaves.**
 
