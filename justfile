@@ -15202,6 +15202,13 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
 # building is stood in for by holding its `.cargo-build-lock` from this shell,
 # the way cargo 1.96 holds it (`flock`, §474.11), and a test that is running by
 # a copy of `sleep` started from inside the build directory.
+#
+# `artifacts/` beside them holds the link destinations of 476: a build
+# directory's copies are cleared with it, and only the directories cargo keeps a
+# `.cargo-lock` in, since inari links its whole `target/` there. Then a git repo
+# of its own, with one worktree for each reason a real `target/debug` is kept
+# rather than replaced with its link, and a stub `cargo` that answers only for
+# those trees, so no real tree is ever asked (476.6).
 [private]
 check-clean-targets-selftest:
     #!/usr/bin/env bash
@@ -15209,12 +15216,38 @@ check-clean-targets-selftest:
     # Resolved, because the kernel names a running program by its real path and
     # the recipe prints the paths it resolved.
     dir=$(realpath -e "$(mktemp -d)")
-    running=""
-    nextest=""
-    trap '[ -z "$running" ] || kill "$running" 2>/dev/null || true; [ -z "$nextest" ] || kill "$nextest" 2>/dev/null || true; rm -rf "$dir"' EXIT
+    pids=()
+    trap 'for pid in "${pids[@]}"; do kill "$pid" 2>/dev/null || true; done; rm -rf "$dir"' EXIT
     root="$dir/zram/targets"
     store="$dir/zram/kache"
+    art="$dir/zram/artifacts"
     old() { find "$1" -exec touch -d '4 hours ago' {} +; }
+    # A link destination as cargo 1.96 leaves one: a `.cargo-lock` and a
+    # `.cargo-artifact-lock` in the profile directory, beside its copies.
+    copies() {
+        local at="$art/$1"
+        shift
+        for profile in "$@"; do
+            mkdir -p "$at/$profile/examples"
+            : >"$at/$profile/.cargo-lock"
+            : >"$at/$profile/.cargo-artifact-lock"
+            head -c 4096 /dev/zero >"$at/$profile/tool"
+            head -c 4096 /dev/zero >"$at/$profile/examples/probe"
+        done
+        old "$at"
+    }
+    # Runs a copy of sleep from `$1`, and waits until the kernel names it so.
+    run_from() {
+        cp /bin/sleep "$1"
+        ( exec -a sleep "$1" 300 ) &
+        pids+=("$!")
+        for _ in $(seq 100); do
+            [ "$(readlink "/proc/$!/exe" 2>/dev/null || true)" = "$1" ] && return
+            sleep 0.05
+        done
+        echo "clean-targets-selftest: the copy of sleep never ran from $1, so a running-program case cannot be built"
+        exit 1
+    }
     # A build directory as cargo 1.96 leaves one: a lock file beside each
     # profile it built, and the output under deps/.
     build() {
@@ -15249,18 +15282,9 @@ check-clean-targets-selftest:
     flock -n "$nested"
     build 0f/testing debug
     prog="$root/0f/testing/debug/deps/testing-0123456789abcdef"
-    cp /bin/sleep "$prog"
+    run_from "$prog"
+    running=${pids[-1]}
     old "$root/0f/testing"
-    ( exec -a sleep "$prog" 300 ) &
-    running=$!
-    for _ in $(seq 100); do
-        [ "$(readlink "/proc/$running/exe" 2>/dev/null || true)" = "$prog" ] && break
-        sleep 0.05
-    done
-    [ "$(readlink "/proc/$running/exe" 2>/dev/null || true)" = "$prog" ] || {
-        echo "clean-targets-selftest: the copy of sleep never ran from $prog, so the running-test case cannot be built"
-        exit 1
-    }
     mkdir -p "$root/10/lockless/debug/deps"
     old "$root/10/lockless"
     # Stands in for a file a build deletes while find is walking past it: either
@@ -15281,6 +15305,97 @@ check-clean-targets-selftest:
     # Cleared in place, the file at that path is still the one it opened.
     idle_lock="$root/0a/idle/debug/.cargo-build-lock"
     idle_inode=$(stat -c %i "$idle_lock")
+
+    # A tree whose `target/debug` and `target/release` link here: its copies go
+    # with the build directory, and an empty `release/` stays. The two files
+    # beside them stand in for what inari keeps in a `target/` it links whole.
+    build 13/linked debug
+    copies 13/linked debug
+    mkdir -p "$art/13/linked/release" "$art/13/linked/doc"
+    printf '{}\n' >"$art/13/linked/.rustc_info.json"
+    printf 'docs\n' >"$art/13/linked/doc/index.html"
+    old "$art/13/linked"
+    linked_lock="$art/13/linked/debug/.cargo-lock"
+    linked_inode=$(stat -c %i "$linked_lock")
+    build 14/copying debug
+    copies 14/copying debug
+    printf 'copied a moment ago\n' >"$art/14/copying/debug/fresh"
+    build 15/copylock debug
+    copies 15/copylock debug
+    exec {copylock}<"$art/15/copylock/debug/.cargo-lock"
+    flock -n "$copylock"
+    build 16/running debug
+    copies 16/running debug
+    run_from "$art/16/running/debug/examples/probe-run"
+    copy_running=${pids[-1]}
+    old "$art/16/running"
+
+    # The trees, each made before the hook and so with real directories where
+    # its links belong. `swap` is idle and goes; every other tree with a real
+    # directory keeps it for one reason; `linked` has its links and what a run
+    # killed between its rename and its delete left beside them.
+    repo="$dir/repo"
+    trees="$dir/trees"
+    git init -q -b main "$repo"
+    git -C "$repo" config user.email t@t
+    git -C "$repo" config user.name t
+    git -C "$repo" commit -q --allow-empty -m root
+    for name in swap fresh-tree cargo-at-work gating testing-tree elsewhere unrooted no-cargo linked; do
+        git -C "$repo" worktree add -q --detach "$trees/$name"
+    done
+    real() {
+        local at="$trees/$1/target/$2"
+        mkdir -p "$at/deps"
+        : >"$at/.cargo-lock"
+        head -c 4096 /dev/zero >"$at/deps/old-build"
+        old "$at"
+    }
+    real swap debug
+    real swap release
+    printf 'the tooling keeps this\n' >"$trees/swap/target/last-gate.log"
+    real fresh-tree debug
+    printf 'built a moment ago\n' >"$trees/fresh-tree/target/debug/deps/fresh"
+    real cargo-at-work debug
+    exec {at_work}<"$trees/cargo-at-work/target/debug/.cargo-lock"
+    flock -n "$at_work"
+    real gating debug
+    gate_run="$trees/gating/target/last-gate.log.run"
+    mkdir -p "$gate_run"
+    printf '%s\n' "trap 'exit 0' TERM; for _ in \$(seq 3000); do sleep 0.1; done" >"$gate_run/script"
+    bash "$gate_run/script" &
+    pids+=("$!")
+    echo "$!" >"$gate_run/pid"
+    real testing-tree debug
+    real elsewhere debug
+    real unrooted debug
+    real no-cargo debug
+    mkdir -p "$art/1d/linked/debug" "$trees/linked/target"
+    ln -s "$art/1d/linked/debug" "$trees/linked/target/debug"
+    mkdir -p "$dir/bin"
+    {
+        printf '%s\t%s\t%s\n' "$trees/swap" "$root/17/swap" "$trees/swap/target"
+        printf '%s\t%s\t%s\n' "$trees/fresh-tree" "$root/18/fresh-tree" "$trees/fresh-tree/target"
+        printf '%s\t%s\t%s\n' "$trees/cargo-at-work" "$root/19/cargo-at-work" "$trees/cargo-at-work/target"
+        printf '%s\t%s\t%s\n' "$trees/gating" "$root/1a/gating" "$trees/gating/target"
+        printf '%s\t%s\t%s\n' "$trees/testing-tree" "$root/0f/testing" "$trees/testing-tree/target"
+        printf '%s\t%s\t%s\n' "$trees/elsewhere" "$root/1b/elsewhere" "$dir/elsewhere-target"
+        printf '%s\t%s\t%s\n' "$trees/unrooted" "$dir/builds/1c/unrooted" "$trees/unrooted/target"
+    } >"$dir/stub-keys"
+    # Answers `cargo metadata` for the trees in its table and fails everywhere
+    # else, so a real tree is never answered for.
+    cat >"$dir/bin/cargo" <<'SH'
+    #!/usr/bin/env bash
+    [ "$1" = metadata ] || exit 1
+    while IFS=$'\t' read -r tree build target; do
+        if [ "$tree" = "$PWD" ]; then
+            printf '{"build_directory": "%s", "target_directory": "%s"}\n' "$build" "$target"
+            exit 0
+        fi
+    done <"$STUB_KEYS"
+    exit 1
+    SH
+    chmod +x "$dir/bin/cargo"
+    export PATH="$dir/bin:$PATH" STUB_KEYS="$dir/stub-keys"
 
     got=""
     fail() {
@@ -15308,21 +15423,27 @@ check-clean-targets-selftest:
     fi
     grep -qF "$store/store is inside kache's store $store" <<<"$got" \
         || fail "a run over a directory inside kache's store did not say why it refused"
+    if got=$(just clean-targets "$root" "$store" fx-absent "$store/store" "$repo" 2>&1); then
+        fail "a run whose link destinations are inside kache's store did not refuse"
+    fi
+    grep -qF "$store/store is inside kache's store $store" <<<"$got" \
+        || fail "a run whose link destinations are inside kache's store did not say why it refused"
+    [ -f "$store/store/ab/entry" ] || fail "a refused run took a file from kache's store"
     if got=$(just clean-targets "$dir/unmounted" "$store" 2>&1); then
         fail "a run over a disk that is not there exited 0, which reads like a tidy machine"
     fi
     grep -qF "$dir/unmounted does not exist" <<<"$got" \
         || fail "a run over a disk that is not there did not say so"
 
-    mkdir -p "$dir/bin"
     cp /bin/sleep "$dir/bin/fx-nextest"
     "$dir/bin/fx-nextest" 300 &
     nextest=$!
+    pids+=("$nextest")
     for _ in $(seq 100); do
         [ "$(cat "/proc/$nextest/comm" 2>/dev/null || true)" = fx-nextest ] && break
         sleep 0.05
     done
-    got=$(just clean-targets "$root" "$store" fx-nextest 2>&1) || fail "a run with a nextest running exited non-zero"
+    got=$(just clean-targets "$root" "$store" fx-nextest "$art" "$repo" 2>&1) || fail "a run with a nextest running exited non-zero"
     kill "$nextest"
     wait "$nextest" 2>/dev/null || true
     [ -f "$root/12/between/debug/deps/artifact" ] \
@@ -15331,11 +15452,18 @@ check-clean-targets-selftest:
         || fail "an idle build directory was cleared while a nextest was running"
     grep -qxF "kept (a cargo-nextest is running, and between two of its tests nothing shows which build directory it uses): $root/12/between" <<<"$got" \
         || fail "the build directory kept for a running nextest was not reported as kept"
+    [ -f "$art/13/linked/debug/tool" ] \
+        || fail "a link destination was cleared while a nextest was running"
+    [ -d "$trees/swap/target/debug" ] && [ ! -L "$trees/swap/target/debug" ] \
+        || fail "an idle tree's target/debug was replaced while a nextest was running, which may be about to run a binary from it"
+    grep -qxF "kept (a cargo-nextest is running, and between two of its tests nothing shows which build directory it uses): $trees/swap/target/debug" <<<"$got" \
+        || fail "the idle tree's target/debug kept for a running nextest was not reported as kept"
 
-    # What a run killed between its rename and its rm leaves behind.
-    mkdir -p "$root/.clearing-1a-half/debug/deps"
+    # What a run killed between its rename and its rm leaves behind, for a build
+    # directory and for a tree's real target/debug.
+    mkdir -p "$root/.clearing-1a-half/debug/deps" "$trees/linked/target/.debug-replaced-by-a-link/deps"
     old "$root/.clearing-1a-half"
-    got=$(just clean-targets "$root" "$store" fx-absent 2>&1) || fail "the ordinary run exited non-zero"
+    got=$(just clean-targets "$root" "$store" fx-absent "$art" "$repo" 2>&1) || fail "the ordinary run exited non-zero"
     [ -f "$store/store/ab/entry" ] || fail "kache's store lost a file (§474.7)"
     [ ! -e "$root/0a/idle/debug/deps" ] || fail "an idle build directory, no lock held and no program running from it, was kept"
     [ "$(stat -c %i "$idle_lock")" = "$idle_inode" ] \
@@ -15370,18 +15498,78 @@ check-clean-targets-selftest:
     [ ! -e "$root/.clearing-1a-half" ] || fail "what an earlier run left half-cleared is still there"
     grep -qxF "removed what an earlier run left half-cleared: $root/.clearing-1a-half" <<<"$got" \
         || fail "the half-cleared leftover was not reported"
-    grep -qE "^[0-9.]+K cleared; 6 build directories kept$" <<<"$got" \
+
+    [ ! -e "$root/13/linked/debug/deps" ] || fail "an idle build directory with link destinations was kept"
+    [ ! -e "$art/13/linked/debug/tool" ] && [ ! -e "$art/13/linked/debug/examples" ] \
+        || fail "an idle build directory was cleared and the copies its tree's links hold were kept"
+    [ -d "$art/13/linked/debug" ] && [ -d "$art/13/linked/release" ] \
+        || fail "a link destination was removed, so the next build through the link fails with os error 17 (476.5)"
+    [ "$(stat -c %i "$linked_lock")" = "$linked_inode" ] && [ -f "$art/13/linked/debug/.cargo-artifact-lock" ] \
+        || fail "a cleared link destination's lock files are not the ones a waiting cargo opened"
+    [ -f "$art/13/linked/.rustc_info.json" ] && [ -f "$art/13/linked/doc/index.html" ] \
+        || fail "a file beside the link destinations, in no directory cargo locks, was deleted"
+    grep -qE "^cleared [0-9.]+K: $root/13/linked, with its link destinations under $art/13/linked$" <<<"$got" \
+        || fail "the build directory cleared with its link destinations was not reported as cleared"
+    [ -f "$art/14/copying/debug/tool" ] && [ -f "$root/14/copying/debug/deps/artifact" ] \
+        || fail "a build directory was cleared with a file in its link destination written a moment ago"
+    grep -qxF "kept (something in it changed in the last 30 minutes): $root/14/copying" <<<"$got" \
+        || fail "the build directory with a fresh file in its link destination was not reported as kept"
+    [ -f "$art/15/copylock/debug/tool" ] \
+        || fail "a link destination was cleared while a cargo held its .cargo-lock"
+    grep -qxF "kept (a cargo is building in it, holding $art/15/copylock/debug/.cargo-lock): $root/15/copylock" <<<"$got" \
+        || fail "the build directory whose link destination a cargo holds was not reported as kept"
+    [ -f "$art/16/running/debug/examples/probe-run" ] \
+        || fail "a link destination was cleared while a program was running from it"
+    grep -qxF "kept (process $copy_running is running a program from it): $root/16/running" <<<"$got" \
+        || fail "the build directory whose link destination a program runs from was not reported as kept"
+    grep -qE "^[0-9.]+K cleared; 9 build directories kept$" <<<"$got" \
         || fail "the tally is wrong, so a run that found nothing would read like a tidy machine"
+
+    for name in debug release; do
+        [ "$(readlink "$trees/swap/target/$name")" = "$art/17/swap/$name" ] && [ -d "$art/17/swap/$name" ] \
+            || fail "an idle tree's real target/$name was not replaced with its link"
+        grep -qE "^replaced with a link, freeing [0-9.]+K: $trees/swap/target/$name -> $art/17/swap/$name$" <<<"$got" \
+            || fail "an idle tree's target/$name was not reported as replaced"
+    done
+    [ -f "$trees/swap/target/last-gate.log" ] || fail "a file the tooling keeps in target/ went with the replaced directories"
+    [ -z "$(find "$trees/swap/target" -maxdepth 1 -name '.*-replaced-by-a-link')" ] \
+        || fail "a replaced directory was left beside its link"
+    expect_real() {
+        [ -d "$trees/$1/target/debug" ] && [ ! -L "$trees/$1/target/debug" ] \
+            || fail "the $1 tree's target/debug was replaced, though $2"
+        grep -qxF "kept ($2): $trees/$1/target/debug" <<<"$got" \
+            || fail "the $1 tree's target/debug was not reported as kept for '$2'"
+    }
+    expect_real fresh-tree "something in it changed in the last 30 minutes"
+    expect_real cargo-at-work "a cargo is building in it, holding $trees/cargo-at-work/target/debug/.cargo-lock"
+    expect_real gating "a gate is running in the tree"
+    expect_real testing-tree "process $running is running a program from it"
+    expect_real elsewhere "its target directory is $dir/elsewhere-target, not $trees/elsewhere/target"
+    expect_real unrooted "its build directory $dir/builds/1c/unrooted is not one under $root"
+    expect_real no-cargo "cargo metadata failed in it, so its build directory is not known"
+    [ ! -e "$trees/linked/target/.debug-replaced-by-a-link" ] || fail "what an earlier run left half-replaced is still there"
+    grep -qxF "removed what an earlier run left half-replaced: $trees/linked/target/.debug-replaced-by-a-link" <<<"$got" \
+        || fail "the half-replaced leftover was not reported"
+    [ "$(readlink "$trees/linked/target/debug")" = "$art/1d/linked/debug" ] || fail "a tree's link was changed"
+    ! grep -qF "$trees/linked/target/debug" <<<"$got" || fail "a tree that has its links already was reported on"
+    grep -qxF "2 real target directories replaced with links; 7 kept" <<<"$got" \
+        || fail "the tally of real target directories is wrong"
 
     # Clearing in place touched the directories, so they wait out 30 minutes.
     old "$root/0a/idle"
     old "$root/0b/fuzz"
     old "$root/12/between"
-    got=$(just clean-targets "$root" "$store" fx-absent 2>&1) || fail "the run over already-cleared directories exited non-zero"
+    old "$root/13/linked"
+    old "$art/13/linked"
+    got=$(just clean-targets "$root" "$store" fx-absent "$art" "$repo" 2>&1) || fail "the run over already-cleared directories exited non-zero"
     grep -qxF "kept (only its lock files are left, so there is nothing to clear): $root/0a/idle" <<<"$got" \
         || fail "a build directory with only its lock files left was not reported as kept"
-    grep -qE "^0 cleared; 9 build directories kept$" <<<"$got" \
-        || fail "a run over already-cleared directories did not clear nothing and keep nine"
+    grep -qxF "kept (only its lock files are left, so there is nothing to clear): $root/13/linked" <<<"$got" \
+        || fail "a build directory with only its lock files left, in it and in its link destinations, was not reported as kept"
+    grep -qE "^0 cleared; 13 build directories kept$" <<<"$got" \
+        || fail "a run over already-cleared directories did not clear nothing and keep thirteen"
+    grep -qxF "0 real target directories replaced with links; 7 kept" <<<"$got" \
+        || fail "a run over trees already linked did not replace nothing and keep seven"
 
 # Links the directories cargo copies its finished binaries into to the zram
 # disk, or installs the post-checkout hook that does it on `git worktree add`
@@ -15868,7 +16056,9 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
 # the tree is kept; `finished`'s is never touched; and none of the fixtures
 # has a `fuzz/` workspace, so every removed tree's fuzz build directory comes
 # back as not found (docs/decisions.d/474-build-output-goes-to-zram.md
-# 474.10).
+# 474.10). The link destinations under `artifacts/` go the same way as the build
+# directory they pair with, and `marked`'s go though its build directory is gone
+# already (476.6).
 [private]
 check-prune-worktrees-selftest:
     #!/usr/bin/env bash
@@ -15958,17 +16148,27 @@ check-prune-worktrees-selftest:
         printf '{"build_directory": "/var/cache/zram/kache/pretend"}\n'
     else
         safe=$(printf '%s' "$PWD" | tr '/' '_')
-        printf '{"build_directory": "%s"}\n' "$STUB_BUILD_ROOT/$safe"
+        printf '{"build_directory": "%s"}\n' "$STUB_BUILD_ROOT/st/$safe"
     fi
     SH
     chmod +x "$dir/bin/cargo"
-    merged_build=$(printf '%s' "$dir/merged" | tr '/' '_')
-    merged_build="$dir/builds/$merged_build"
-    runner_build=$(printf '%s' "$dir/runner" | tr '/' '_')
-    runner_build="$dir/builds/$runner_build"
-    mkdir -p "$merged_build" "$runner_build"
+    # Each key is `st/<tree's path>`, so its link destinations are
+    # `artifacts/st/<tree's path>`, the way link-targets.sh pairs them (476).
+    # `marked`'s build directory has been cleared away already and its link
+    # destinations have not, which is what every tree removed before 476.6
+    # left behind.
+    key() { printf 'st/%s' "$(printf '%s' "$1" | tr '/' '_')"; }
+    merged_build="$dir/builds/$(key "$dir/merged")"
+    runner_build="$dir/builds/$(key "$dir/runner")"
+    merged_copies="$dir/artifacts/$(key "$dir/merged")"
+    runner_copies="$dir/artifacts/$(key "$dir/runner")"
+    marked_copies="$dir/artifacts/$(key "$dir/marked")"
+    mkdir -p "$merged_build" "$runner_build" "$merged_copies/debug" "$runner_copies/debug" "$marked_copies/debug"
     echo marker >"$merged_build/marker"
     echo marker >"$runner_build/marker"
+    echo copy >"$merged_copies/debug/tool"
+    echo copy >"$runner_copies/debug/tool"
+    echo copy >"$marked_copies/debug/tool"
     [ -d "$merged_build" ] && [ -d "$runner_build" ] \
         || fail "the stub build directories were not set up before the sweep"
     export PATH="$dir/bin:$PATH" STUB_BUILD_ROOT="$dir/builds" STUB_KACHE_TREE="$dir/finished"
@@ -15976,9 +16176,9 @@ check-prune-worktrees-selftest:
     # one push sending their pruners at once (§315). The lock serializes
     # them: whichever reaches it first does the real removal and deletion,
     # and the other waits, then finds its own work already done.
-    just prune-worktrees "$dir/runner" "$dir/rcad-fuzz.service" >"$dir/sweep-a" 2>&1 &
+    just prune-worktrees "$dir/runner" "$dir/rcad-fuzz.service" "$dir/builds" "$dir/artifacts" >"$dir/sweep-a" 2>&1 &
     sweep_a=$!
-    just prune-worktrees "$dir/runner" "$dir/rcad-fuzz.service" >"$dir/sweep-b" 2>&1 &
+    just prune-worktrees "$dir/runner" "$dir/rcad-fuzz.service" "$dir/builds" "$dir/artifacts" >"$dir/sweep-b" 2>&1 &
     sweep_b=$!
     rc_a=0; wait "$sweep_a" || rc_a=$?
     rc_b=0; wait "$sweep_b" || rc_b=$?
@@ -16020,6 +16220,13 @@ check-prune-worktrees-selftest:
         || fail "merged's build directory, outside the tree, was not cleared when the tree was removed"
     [ -d "$runner_build" ] \
         || fail "runner's build directory was cleared even though the tree was kept"
+    [ ! -e "$merged_copies" ] \
+        || fail "merged's link destinations were not removed with its build directory (476.6)"
+    [ -f "$runner_copies/debug/tool" ] \
+        || fail "runner's link destinations were removed even though the tree was kept"
+    [ ! -e "$marked_copies" ] \
+        || fail "marked's link destinations were kept because its build directory was gone already (476.6)"
+    [ -d "$dir/artifacts/st" ] || fail "prune-worktrees removed more of the artifacts root than a removed tree's key"
     grep -qF "cargo metadata in $dir/finished named kache's own store, /var/cache/zram/kache/pretend, which prune-worktrees never clears" <<<"$got" \
         || fail "a build directory under kache's own store was not reported as never cleared"
     grep -qF "cargo metadata failed in $dir/merged/fuzz, so $dir/merged's fuzz build directory could not be found" <<<"$got" \
