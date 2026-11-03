@@ -406,8 +406,9 @@ pub(crate) struct InputSide {
 /// either arc would be built as the whole circle. Here the split builds
 /// nothing, and refusing here would refuse a fuse over a piece no rule keeps.
 ///
-/// **A straight side whose two ends come out one corner is left out**, as
-/// [`sides_of`] leaves it out of a kept piece (§365.7). Two corners of two
+/// **A straight side whose two ends come out one corner is left out**
+/// ([`runs_along_a_line`]), as [`sides_of`] leaves it out of a kept piece
+/// (§365.7). Two corners of two
 /// names that land on one `f64` triple are one corner unless their planes
 /// prove them two points ([`the_planes_keep_them_apart`]) and no kept side
 /// runs between them ([`Corners::of`]), and a piece can have a straight
@@ -512,7 +513,7 @@ pub(crate) fn the_edge_each_side_of_every_piece_is(
         let mut of_this_piece = Vec::new();
         for (meet, &[from, to]) in wires.iter().flat_map(|wire| wire.iter()).zip(ends) {
             if from == to {
-                if is_carried_by_two_planes(meet) {
+                if runs_along_a_line(meet) {
                     continue;
                 }
                 let ends = [
@@ -10333,8 +10334,8 @@ impl Corners {
     /// **Two names a side runs between are one corner wherever both land on
     /// one triple, whatever their planes prove.** Such a side has no length
     /// as the answer's corners are written, and its two ends must be one
-    /// corner for [`sides_of`] to leave it out on a plane (§365.7), and for
-    /// [`Corners::of_both_ends`] to refuse it on a curved surface. The
+    /// corner for [`sides_of`] to leave it out where it is straight (§365.7),
+    /// and for [`Corners::of_both_ends`] to refuse it where it bends. The
     /// arrangement keeps two meets apart wherever it can order them along a
     /// crossing, so its folds alone do not make them one, and
     /// [`the_planes_keep_them_apart`] could keep two such ends two corners.
@@ -10408,16 +10409,18 @@ impl Corners {
     /// The corners `meet`'s two ends are, made the first time each is asked
     /// for, for a side of a piece cut from `face`.
     ///
-    /// **Two ends of two names that come out one corner bound no side on a
-    /// curved surface.** The two ends of a side whose boxes' middles land on
-    /// one `f64` triple are one corner, whatever their planes prove
+    /// **Two ends of two names that come out one corner bound no side that
+    /// bends.** The two ends of a side whose boxes' middles land on one `f64`
+    /// triple are one corner, whatever their planes prove
     /// ([`Corners::make_one_corner_of_the_ends_of_each_side_with_no_length`]).
     /// A straight side between two such has no length as the answer is
-    /// written, and [`sides_of`] leaves it out (§365.7). A side on a curved
-    /// surface cannot be left out that way: [`Edges::of`] builds a side from
-    /// one corner back to itself as a whole closed curve, so the arc between
-    /// the two places would be written as the whole circle through them. A
-    /// block's edge grazing a ball at
+    /// written, and [`sides_of`] leaves it out (§365.7), whether two planes
+    /// carry it or a plane and a pipe that cross in straight lines do
+    /// ([`runs_along_a_line`], Q3057). A side that bends cannot be left out
+    /// that way: [`Edges::of`] builds a side from one corner back to itself as
+    /// a whole closed curve, so the arc between the two places would be
+    /// written as the whole circle through them. A block's edge grazing a ball
+    /// at
     /// `16 ∓ 2⁻⁵¹` built both arcs of the ball's circle there as one closed
     /// edge, and every fuse of the two was refused later, as a face whose loop
     /// passed one corner twice or two faces facing apart
@@ -10449,9 +10452,9 @@ impl Corners {
     /// # Errors
     ///
     /// [`Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`] where two
-    /// ends of two names on a side that some curved surface carries come out
-    /// one corner, unless the side is a stretch of an open input edge on a
-    /// circle off one of its own ends, and whatever [`Corners::of`] gives.
+    /// ends of two names on a side that bends come out one corner, unless the
+    /// side is a stretch of an open input edge on a circle off one of its own
+    /// ends, and whatever [`Corners::of`] gives.
     fn of_both_ends(
         &mut self,
         model: &Model,
@@ -10465,10 +10468,7 @@ impl Corners {
             self.of(model, &meet.ends[1], policy, log)?,
         ];
         if from == to
-            && meet
-                .carried_by
-                .iter()
-                .any(|surface| surface.as_plane().is_none())
+            && !runs_along_a_line(meet)
             && self.goes_by(self.name_of(model, &meet.ends[0], policy, log)?)
                 != self.goes_by(self.name_of(model, &meet.ends[1], policy, log)?)
             && !is_a_stretch_of_an_open_input_edge_off_its_own_end(meet, model)
@@ -13313,8 +13313,9 @@ fn which_of_them_a_closed_crossing_runs_round(carried_by: &[Surface; 2]) -> Opti
 /// corner ([`Edges::of`]), so a side read before the last side naming its
 /// corner had arrived could be read where the edge is not written (Q2571).
 ///
-/// **A curved side whose two ends are two names and one corner is refused**,
-/// by [`Corners::of_both_ends`]. It has a length, so it cannot be left out,
+/// **A side that bends whose two ends are two names and one corner is
+/// refused**, by [`Corners::of_both_ends`]. It has a length, so it cannot be
+/// left out the way a straight one is ([`runs_along_a_line`]),
 /// and an edge from that corner back to itself would be the whole closed
 /// curve and not the arc between the two places (Q2193). Except a stretch of
 /// an open input edge on a circle off one of its own ends, which has none as
@@ -13378,7 +13379,11 @@ fn the_corners_each_side_runs_between(
 /// ([`Corners::make_one_corner_of_the_ends_of_each_side_with_no_length`]), and
 /// it is left out here (`docs/decisions.md` §365.7). Every face that
 /// has the side names its two ends through the same [`Corners`], so every one
-/// of them leaves it out, and no edge is left with one face along it.
+/// of them leaves it out, and no edge is left with one face along it. A
+/// straight side on a pipe is one too, where a plane holding the pipe's axis's
+/// direction cuts it ([`runs_along_a_line`]): an LED's lead side plane and two
+/// slopes that by design meet it on one line cut its flange rim `3e-16` apart
+/// (Q3057).
 ///
 /// # Panics
 ///
@@ -13432,22 +13437,31 @@ fn sides_of(
 }
 
 /// Whether `meet` is a side whose two ends came out one corner and that has no
-/// length as the answer is written, which [`sides_of`] leaves out: one two
-/// planes carry, or a stretch of an open input edge off one of its own ends
-/// ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]).
+/// length as the answer is written, which [`sides_of`] leaves out: a straight
+/// one ([`runs_along_a_line`]), or a stretch of an open input edge off one of
+/// its own ends ([`is_a_stretch_of_an_open_input_edge_off_its_own_end`]).
 /// [`the_edge_each_side_of_every_piece_is`] leaves out the first, and the
 /// second only where its two ends are one name (Q2604).
 fn is_a_side_with_no_length(meet: &FaceMeet, [from, to]: [usize; 2], model: &Model) -> bool {
     from == to
-        && (is_carried_by_two_planes(meet)
+        && (runs_along_a_line(meet)
             || is_a_stretch_of_an_open_input_edge_off_its_own_end(meet, model))
 }
 
-/// Whether both surfaces that carry `meet` are planes: a straight side.
-fn is_carried_by_two_planes(meet: &FaceMeet) -> bool {
-    meet.carried_by
-        .iter()
-        .all(|surface| surface.as_plane().is_some())
+/// Whether the two surfaces that carry `meet` are proved to cross in straight
+/// lines ([`the_crossing_of_these_runs_straight`]), so that the side is as
+/// long as the distance between its two ends: two planes, or a plane that
+/// holds a pipe's axis's direction exactly, and the other pairs that cross in
+/// rulings. [`Edge::runs_straight`] writes such a side as a segment for the
+/// same reason.
+///
+/// Before Q3057 only two planes counted, and an LED's flange rim was refused:
+/// a lead's side plane, square to the rim's axis, and the two slopes that by
+/// design meet it on one line cut the rim `3e-16` apart, and the straight side
+/// between the two meets was refused as though it were an arc
+/// (`LED_D5.0mm-3.step`, `an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`).
+fn runs_along_a_line(meet: &FaceMeet) -> bool {
+    the_crossing_of_these_runs_straight(&meet.carried_by) == Some(true)
 }
 
 /// Whether `meet` runs along one input edge on a circle that does not close
@@ -14022,6 +14036,92 @@ mod tests {
                 given,
                 Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face: refused, at })
                     if refused == face && at == Point::new(4.0, 3.0, 0.0)
+            ),
+            "{given:?}"
+        );
+    }
+
+    /// **A straight side on a pipe between two places that `f64` writes as one
+    /// point has no length, and is left out; one on an ellipse is refused**
+    /// (Q3057). The plane `x = 4` holds the pipe's axis's direction and cuts
+    /// the pipe in two straight lines, and the side runs along the one through
+    /// `(4, 3, ·)` between two places a hair either side of `z = 2`, where two
+    /// slopes cut it. Their boxes' middles are both `(4, 3, 2)`, so they come
+    /// out one corner, and a straight side between them is as short as the
+    /// distance between them, as one between two planes is. An LED's flange
+    /// rim had such a side, where a lead's side plane and two slopes that by
+    /// design meet on one line cut it (`LED_D5.0mm-3.step`).
+    ///
+    /// The plane through the same line leaning a rounding off the axis cuts
+    /// the pipe in a long ellipse that closes, and a side between the same two
+    /// places could be all of it but a hair, so that one is refused.
+    #[test]
+    fn a_straight_side_on_a_pipe_between_two_places_that_round_to_one_point_has_no_length() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_ball(5.0, &Isometry::identity())
+            .expect("a positive radius");
+        let face = model.faces().next().expect("a ball has a face").key();
+        let flat = |normal: Vector| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::new(4.0, 3.0, 2.0), normal)
+                    .expect("a normal with length"),
+            )
+        };
+        let two = 2.0_f64;
+        let a_hair_from_two =
+            |along: Surface, slope: Vector, lo: f64, hi: f64| MeetPoint::OfThreeSurfaces {
+                surfaces: [along, pipe(), flat(slope)],
+                which: 0,
+                point: PredicatePoint::Constructed([
+                    Interval::exactly(4.0),
+                    Interval::exactly(3.0),
+                    Interval::new(lo, hi).expect("lo is below hi"),
+                ]),
+            };
+        let between_two_slopes = |along: Surface| {
+            side(
+                [along, pipe()],
+                [
+                    a_hair_from_two(along, Vector::new(1.0, 0.0, 1.0), two.next_down(), two),
+                    a_hair_from_two(along, Vector::new(1.0, 0.0, -1.0), two, two.next_up()),
+                ],
+                &[],
+            )
+        };
+        let corners_of = |meet: &FaceMeet| {
+            Corners::with_each_closed_curve_started_once(
+                &model,
+                BTreeMap::new(),
+                &[],
+                std::iter::once(meet),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("no closed curve to name")
+            .of_both_ends(
+                &model,
+                meet,
+                face,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+        };
+
+        let straight = between_two_slopes(flat(Vector::new(1.0, 0.0, 0.0)));
+        let given = corners_of(&straight);
+        assert!(
+            matches!(given, Ok(ends) if ends[0] == ends[1] && is_a_side_with_no_length(&straight, ends, &model)),
+            "{given:?}"
+        );
+
+        let round = between_two_slopes(flat(Vector::new(1.0, 0.0, 1e-17)));
+        let given = corners_of(&round);
+        assert!(
+            matches!(
+                given,
+                Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face: refused, at })
+                    if refused == face && at == Point::new(4.0, 3.0, 2.0)
             ),
             "{given:?}"
         );
