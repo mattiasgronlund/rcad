@@ -1295,10 +1295,40 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     began=()
     ended_with=()
     chain_busy=""
+    # `test-slow`'s index while its tests run inside `test`'s nextest run. When
+    # both are to run, `test` takes the slow tier into its own run, so the slow
+    # tests share the cores with the rest instead of waiting for them, and
+    # leaves test-slow's log and exit code where it is told to (§397.10).
+    carried=""
     start() {
         began[$1]=${EPOCHREALTIME//[!0-9]/}
-        "$j" "${names[$1]}" >"$steps_dir/$1-${names[$1]}.log" 2>&1 &
+        "$j" "${names[$1]}" "${@:2}" >"$steps_dir/$1-${names[$1]}.log" 2>&1 &
         running[$!]=$1
+    }
+    take_test_slow() {
+        local at
+        for at in "${!chained[@]}"; do
+            [ "${names[${chained[$at]}]}" = test-slow ] || continue
+            carried=${chained[$at]}
+            chained=("${chained[@]:0:at}" "${chained[@]:at+1}")
+            return 0
+        done
+        return 1
+    }
+    report() {
+        local i=$1 tenths line
+        tenths=$(( (${EPOCHREALTIME//[!0-9]/} - began[i]) / 100000 ))
+        line="${names[$i]} ($((tenths / 10)).$((tenths % 10)) s)"
+        [ "${ended_with[$i]}" -eq 0 ] || line="$line FAILED, exit ${ended_with[$i]}"
+        if [ "$mode" = quiet ]; then
+            # As each step ends rather than as it starts: with every step
+            # started at once, a result cut short would otherwise list them all
+            # and say nothing about how far the run got.
+            echo "· $line"
+            { echo "=== $line ==="; cat "$steps_dir/$i-${names[$i]}.log"; } >>"$log"
+        else
+            { echo "=== $line ==="; cat "$steps_dir/$i-${names[$i]}.log"; } | tee -a "$log"
+        fi
     }
     while :; do
         # The next cargo step takes a free slot first, because the chain is
@@ -1307,7 +1337,12 @@ gate mode="loud" verdicts="reuse" jobs="cores":
             if [ -z "$chain_busy" ] && [ "${#chained[@]}" -gt 0 ]; then
                 chain_busy=${chained[0]}
                 chained=("${chained[@]:1}")
-                start "$chain_busy"
+                if [ "${names[$chain_busy]}" = test ] && take_test_slow; then
+                    start "$chain_busy" "$steps_dir/$carried-test-slow.log" "$steps_dir/$carried-test-slow.status"
+                    began[$carried]=${began[$chain_busy]}
+                else
+                    start "$chain_busy"
+                fi
             elif [ "${#unchained[@]}" -gt 0 ]; then
                 start "${unchained[0]}"
                 unchained=("${unchained[@]:1}")
@@ -1322,17 +1357,18 @@ gate mode="loud" verdicts="reuse" jobs="cores":
         unset "running[$pid]"
         [ "$i" != "$chain_busy" ] || chain_busy=""
         ended_with[$i]=$step_status
-        tenths=$(( (${EPOCHREALTIME//[!0-9]/} - began[i]) / 100000 ))
-        line="${names[$i]} ($((tenths / 10)).$((tenths % 10)) s)"
-        [ "$step_status" -eq 0 ] || line="$line FAILED, exit $step_status"
-        if [ "$mode" = quiet ]; then
-            # As each step ends rather than as it starts: with every step
-            # started at once, a result cut short would otherwise list them all
-            # and say nothing about how far the run got.
-            echo "· $line"
-            { echo "=== $line ==="; cat "$steps_dir/$i-${names[$i]}.log"; } >>"$log"
-        else
-            { echo "=== $line ==="; cat "$steps_dir/$i-${names[$i]}.log"; } | tee -a "$log"
+        report "$i"
+        if [ -n "$carried" ] && [ "${names[$i]}" = test ]; then
+            slow_status=$(cat "$steps_dir/$carried-test-slow.status" 2>/dev/null || true)
+            if [[ "$slow_status" =~ ^[0-9]+$ ]]; then
+                ended_with[$carried]=$slow_status
+                report "$carried"
+            else
+                # `test` stopped before its run, at its count or its filter,
+                # so test-slow runs alone next and gives its own answer.
+                chained=("$carried" "${chained[@]}")
+            fi
+            carried=""
         fi
     done
 
