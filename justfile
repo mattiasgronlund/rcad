@@ -15055,7 +15055,7 @@ fmt:
 # The sizes are `du`'s, which counts a file kache restored by reflink in full,
 # so they overstate what the disk gets back (§474.10).
 [doc("Clear build directories under /var/cache/zram/targets that are idle 30 minutes and unused. Never kache's store.")]
-clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache":
+clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache" nextest_name="cargo-nextest":
     #!/usr/bin/env bash
     set -euo pipefail
     shopt -s nullglob
@@ -15081,7 +15081,7 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
         rm -rf -- "$left"
         echo "removed what an earlier run left half-cleared: $left"
     done
-    nextest=$(pgrep -x cargo-nextest | head -n 1 || true)
+    nextest=$(pgrep -x -- "{{nextest_name}}" | head -n 1 || true)
     cleared=0
     kept=0
     held=()
@@ -15279,14 +15279,14 @@ check-clean-targets-selftest:
         || fail "a run over a disk that is not there did not say so"
 
     mkdir -p "$dir/bin"
-    cp /bin/sleep "$dir/bin/cargo-nextest"
-    "$dir/bin/cargo-nextest" 300 &
+    cp /bin/sleep "$dir/bin/fx-nextest"
+    "$dir/bin/fx-nextest" 300 &
     nextest=$!
     for _ in $(seq 100); do
-        [ "$(cat "/proc/$nextest/comm" 2>/dev/null || true)" = cargo-nextest ] && break
+        [ "$(cat "/proc/$nextest/comm" 2>/dev/null || true)" = fx-nextest ] && break
         sleep 0.05
     done
-    got=$(just clean-targets "$root" "$store" 2>&1) || fail "a run with a nextest running exited non-zero"
+    got=$(just clean-targets "$root" "$store" fx-nextest 2>&1) || fail "a run with a nextest running exited non-zero"
     kill "$nextest"
     wait "$nextest" 2>/dev/null || true
     [ -f "$root/12/between/debug/deps/artifact" ] \
@@ -15299,7 +15299,7 @@ check-clean-targets-selftest:
     # What a run killed between its rename and its rm leaves behind.
     mkdir -p "$root/.clearing-1a-half/debug/deps"
     old "$root/.clearing-1a-half"
-    got=$(just clean-targets "$root" "$store" 2>&1) || fail "the ordinary run exited non-zero"
+    got=$(just clean-targets "$root" "$store" fx-absent 2>&1) || fail "the ordinary run exited non-zero"
     [ -f "$store/store/ab/entry" ] || fail "kache's store lost a file (§474.7)"
     [ ! -e "$root/0a/idle/debug/deps" ] || fail "an idle build directory, no lock held and no program running from it, was kept"
     [ "$(stat -c %i "$idle_lock")" = "$idle_inode" ] \
@@ -15341,7 +15341,7 @@ check-clean-targets-selftest:
     old "$root/0a/idle"
     old "$root/0b/fuzz"
     old "$root/12/between"
-    got=$(just clean-targets "$root" "$store" 2>&1) || fail "the run over already-cleared directories exited non-zero"
+    got=$(just clean-targets "$root" "$store" fx-absent 2>&1) || fail "the run over already-cleared directories exited non-zero"
     grep -qxF "kept (only its lock files are left, so there is nothing to clear): $root/0a/idle" <<<"$got" \
         || fail "a build directory with only its lock files left was not reported as kept"
     grep -qE "^0 cleared; 9 build directories kept$" <<<"$got" \

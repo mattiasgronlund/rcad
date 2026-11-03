@@ -676,8 +676,10 @@ left of a cleared directory is its lock files, which the run reports as kept
 (only its lock files are left), after the 30 minutes that deleting in place
 itself restarts.
 
-`check-clean-targets-selftest` pins both: a copy of `sleep` named
-`cargo-nextest` running, and the inode of a cleared directory's lock file
+`check-clean-targets-selftest` pins both: a copy of `sleep` named `fx-nextest`
+running (the recipe's third argument names the process to look for, so a real
+nextest on the machine, such as the gate's own, cannot keep the selftest's
+fixtures; the first run of the selftest failed that way), and the inode of a cleared directory's lock file
 unchanged by the run. Both fail on the recipe before this change.
 
 **Not tried.** Whether cargo reopens `.cargo-build-lock` if its file is deleted
