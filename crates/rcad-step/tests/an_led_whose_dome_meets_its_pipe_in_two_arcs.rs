@@ -133,9 +133,9 @@
 //!   body's front disc then both run through the corner `(-0.23, -6.35, 2)`
 //!   and cross `0.486` lower, so the slivers between the two lines were walked
 //!   twice. Two lines meet once, so the corner is now read as a place they
-//!   touch (Q3058). Both boxes stop refused `CannotTellTheCellsOfAFaceApart`
+//!   touch (Q3058). Both boxes stopped refused `CannotTellTheCellsOfAFaceApart`
 //!   on the flange's front, face slot 8, which the body's front disc, a
-//!   rounding off the flange front's own plane, also cuts. Untraced. The box
+//!   rounding off the flange front's own plane, also cuts. The box
 //!   round the back corner stopped refused `CannotTellTheCellsOfAFaceApart`
 //!   on the body's pipe, face slot 2. On that face the flat's ellipse has a
 //!   cap about `0.2` long behind the back plane, and the box's side
@@ -150,8 +150,19 @@
 //!   edges it lies in, and a pipe's face the side of a plane its edges go
 //!   round it on in a ring, so the flat is read in front of the back plane and
 //!   the pipe behind it, and the ellipse is left out (Q3048). The box round the
-//!   back corner stops then on the flange's front, face slot 8, as the other
-//!   two do.
+//!   back corner stopped then on the flange's front, face slot 8, as the other
+//!   two did. The front's own plane and the disc's cross in a line about
+//!   `z = 1.5` on the face, and the arrangement took that line through the
+//!   corners of the hole at `(1.27, -6.35, 3.5)`, `(-0.23, -6.35, 2)` and
+//!   `(2.77, -6.35, 2)` without asking, because the disc is one of the
+//!   surfaces round each. The line zigzagged across the face, and the
+//!   windings of its cells could not be counted. The face's own plane written
+//!   a second time is now always asked whether it passes through a corner
+//!   (Q3071), and every fuse of all three boxes stops refused
+//!   `TwoCurvesTouchWithoutCrossing` on face slot 18, the side `x = 0.3` of a
+//!   lead. The body's pipe and the flange's rim run about an axis a rounding
+//!   off that plane's, and cross it in ellipses whose meets reach `4e16` out
+//!   along `y`. Untraced.
 //!
 //! What answers is checked as commit `f179ca02a` checks it: what the box and
 //! the LED share is the box's part inside the LED. When a box's difference
@@ -205,29 +216,19 @@ fn a_d5_led_reads_a_walk_far_up_its_pipe_off_a_node_that_can_tell_and_stops_cutt
 }
 
 #[test]
-fn a_d3_led_leaves_its_flats_crossing_with_its_body_pipe_out_at_its_back_corner_and_stops_on_the_cells_of_its_flange_front()
+fn a_d3_led_gets_past_the_cells_of_its_flange_front_and_stops_where_two_curves_touch_on_the_side_of_a_lead()
  {
     every_fuse_refuses(
         D3,
-        &both_rules_with_a_box_round_each_of(&[THE_BACK_CORNER]),
-        refused_on_the_cells_of_the_flange_front,
+        &both_rules_with_a_box_round_each_of(&[THE_FRONT_CORNER, THE_BACK_CORNER, FAR_OFF]),
+        two_curves_touch_on_the_side_of_a_lead,
     );
 }
 
-#[test]
-fn a_d3_led_gets_past_two_lines_on_its_flat_that_meet_below_its_front_corner_and_stops_on_the_cells_of_its_flange_front()
- {
-    every_fuse_refuses(
-        D3,
-        &both_rules_with_a_box_round_each_of(&[THE_FRONT_CORNER, FAR_OFF]),
-        refused_on_the_cells_of_the_flange_front,
-    );
-}
-
-/// Refused `CannotTellTheCellsOfAFaceApart` on the `D3.0` LED's flange's
-/// front, the plane `y = -6.35` with the body's pipe a hole in it.
-fn refused_on_the_cells_of_the_flange_front(model: &Model, error: &Error) -> bool {
-    let Error::CannotTellTheCellsOfAFaceApart { face } = error else {
+/// Refused `TwoCurvesTouchWithoutCrossing` on the `D3.0` LED's lead's side,
+/// the plane `x = 0.3` with one wire.
+fn two_curves_touch_on_the_side_of_a_lead(model: &Model, error: &Error) -> bool {
+    let Error::TwoCurvesTouchWithoutCrossing { face } = error else {
         return false;
     };
     let face = model.face(*face).expect("the face is the LED's own");
@@ -235,8 +236,8 @@ fn refused_on_the_cells_of_the_flange_front(model: &Model, error: &Error) -> boo
         return false;
     };
     let [x, y, z, d] = plane.coefficients();
-    face.wire_count() == 2
-        && [x, y - 1.0, z, d - 6.35]
+    face.wire_count() == 1
+        && [x - 1.0, y, z, d + 0.3]
             .iter()
             .all(|part| part.abs() < 1e-9)
 }

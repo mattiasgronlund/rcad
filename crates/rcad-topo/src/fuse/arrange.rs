@@ -1842,7 +1842,33 @@ impl<'f> Arrangement<'f> {
     /// and a surface crossing the curve of a corner with two surfaces round
     /// it, within what writing the corner down cost
     /// ([`Arrangement::a_corner_of_two_surfaces_is_where_the_partner_crosses_their_curve`]).
+    ///
+    /// **The face's own plane written a second time is always asked.** Across
+    /// an edge between two flat faces that runs along a curved surface
+    /// ([`BakedEdge::along_a_curved_surface`]) is, in a solid the sweep lets
+    /// through, this face's own plane a rounding off
+    /// ([`Arrangement::is_this_faces_own_plane_a_rounding_off`]), and the two
+    /// cross in a line that can run anywhere on the face. A corner on both
+    /// planes to within a rounding is then not near that line at all. A KiCad
+    /// D3.0 LED's flange front has the corners of its body pipe's hole at
+    /// `(1.27, -6.35, 3.5)`, `(-0.23, -6.35, 2)` and `(2.77, -6.35, 2)` on its
+    /// body's front disc too, and the line where the two planes cross runs at
+    /// about `z = 1.5`. Taken through all three unasked, that line zigzagged
+    /// across the face, and the windings of its cells could not be counted
+    /// (Q3071). Asked, the stored corner is told off the plane exactly, and the
+    /// line meets the hole only where it really does.
+    ///
+    /// [`BakedEdge::along_a_curved_surface`]: super::bake::BakedEdge::along_a_curved_surface
     fn place_the_corners(&mut self, policy: &Policy, log: &mut ProvenanceLog) -> Result<()> {
+        let own_plane_written_again: SmallVec<[Surface; 1]> = self
+            .face
+            .wires
+            .iter()
+            .flatten()
+            .filter(|edge| edge.along_a_curved_surface.is_some())
+            .map(|edge| edge.across)
+            .filter(|across| self.is_this_faces_own_plane_a_rounding_off(across))
+            .collect();
         for wire in 0..self.face.wires.len() {
             let mut corners = Vec::new();
             let count = self.face.wires[wire].len();
@@ -1861,15 +1887,20 @@ impl<'f> Arrangement<'f> {
                     // cone at a node, and the turn between them is undecided
                     // (§224.2's joined cone, taken back in).
                     let crossing = &self.crossings[index];
-                    let on_it = if corner.is_on_by_construction(&crossing.partner)
-                        || self.a_corner_on_a_cap_circle_is_where_two_pipes_touch(
-                            &corner,
-                            &crossing.partner,
-                        )
-                        || self.a_corner_of_two_surfaces_is_where_the_partner_crosses_their_curve(
-                            &corner,
-                            &crossing.partner,
-                        ) {
+                    let asked_anyway = own_plane_written_again
+                        .iter()
+                        .any(|again| one_surface(again, &crossing.partner));
+                    let on_it = if !asked_anyway
+                        && (corner.is_on_by_construction(&crossing.partner)
+                            || self.a_corner_on_a_cap_circle_is_where_two_pipes_touch(
+                                &corner,
+                                &crossing.partner,
+                            )
+                            || self
+                                .a_corner_of_two_surfaces_is_where_the_partner_crosses_their_curve(
+                                    &corner,
+                                    &crossing.partner,
+                                )) {
                         nothing_rules_the_point_out(crossing.picked_by(), at)
                     } else {
                         self.passes_through(index, &corner, policy, log)?
@@ -1908,6 +1939,48 @@ impl<'f> Arrangement<'f> {
             })
             .collect();
         Ok(())
+    }
+
+    /// Whether `across` is this face's own plane written down a second time:
+    /// the two lean apart by so little that, from a corner they share, they are
+    /// no further apart anywhere in the face's box than writing a corner that
+    /// size down costs ([`what_writing_the_corner_down_cost`]). The lean is
+    /// the length of the cross product of the two normals, and the reach the
+    /// box's diagonal.
+    ///
+    /// **An edge along a curved surface does not make the plane across it the
+    /// face's own.** It does in a solid the sweep lets through, which asks the
+    /// same question of the edge's curve: the lean between the two planes times
+    /// the curve's width, against the room writing a plane down costs
+    /// (`Model::check_flat_faces_put_an_edge_in_one_place`). A fuse does not
+    /// sweep what it is handed. A bar read back from bytes with the disc in its
+    /// lid leaning a tenth through the circle's one corner `(1, 0, 4)` has the
+    /// circle's run name the pipe from both sides, and the lid and the disc
+    /// cross in a straight line through that corner, at an angle. The corner
+    /// is on that line by construction. Asked instead, the disc's plane as
+    /// written came out a rounding off the corner, the line missed it, and every
+    /// fuse with a cube whose side holds the line refused the lid as a face
+    /// trimmed by a curve this cannot follow, where it had been refused the
+    /// order of two meets on that line
+    /// (`tests/an_edge_between_two_planes_its_curve_leaves.rs`).
+    ///
+    /// [`what_writing_the_corner_down_cost`]: super::bake::what_writing_the_corner_down_cost
+    fn is_this_faces_own_plane_a_rounding_off(&self, across: &Surface) -> bool {
+        let (Some(own), Some(other), Some(face)) = (
+            self.surface.as_plane(),
+            across.as_plane(),
+            self.face.bounds.as_a_point_anywhere_inside(),
+        ) else {
+            return false;
+        };
+        let reach = face
+            .enclosure()
+            .iter()
+            .map(|side| (side.hi() - side.lo()).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        let lean = own.normal().cross(other.normal()).length();
+        lean * reach <= super::bake::what_writing_the_corner_down_cost(face.enclosure())
     }
 
     /// Whether `corner` is on a cap's circle, the cap square to its pipe's axis
