@@ -290,13 +290,20 @@
 //! The ellipse now passes the back corner twice, once either side of the
 //! nodes past the back plane (Q3064).
 //!
-//! The `Z15.0` LED stops now on the same flat, `Undecidable` with the one
+//! The `Z15.0` LED stopped then on the same flat, `Undecidable` with the one
 //! record `order along a crossing`, the far box included, between two meets
 //! of the ellipse at its end, each within `1e-14` of the front corner. The
 //! front is written as two planes, the flange's and the body's front disc's,
 //! and the ellipse turns there on a radius of about `1e-16`, so each plane
-//! meets it in two places that no box tells apart. The tests pin both LEDs'
-//! stops.
+//! meets it in two places that no box tells apart. The front corner was not
+//! on the ellipse, so the fold of Q2959 did not look at it; it now stands for
+//! all four (Q3110).
+//!
+//! The `Z15.0` LED stops now on the same flat: the boxes round its corners
+//! `TwoCurvesTouchWithoutCrossing`, and the far box `Undecidable` with the one
+//! record `two ways out of a node along one line` at the back corner, one way
+//! out along the back plane and one a box round nothing, as Q3043 was on the
+//! body's pipe. Untraced, both. The tests pin both LEDs' stops.
 
 use std::{env, fs, path::PathBuf};
 
@@ -380,16 +387,22 @@ fn a_d5_led_3_up_gets_past_where_its_flat_meets_its_front_written_twice_and_stop
 /// ways out of its back corner on the body's pipe are put in order by the two
 /// places the corner stands for. Since Q3064 the ellipse its flange's flat cuts
 /// in the body's pipe passes that corner twice, once either side of the front
-/// corner. It stops on that flat, on the order round the ellipse of two meets
-/// at its end by the front corner, one with each of the two planes the front is
-/// written as, the far box included.
+/// corner. Since Q3110 the front corner stands for the four meets at the
+/// ellipse's end, two with each of the two planes the front is written as. It
+/// stops on that flat: the boxes round its corners where two curves touch
+/// without crossing, and the far box on two ways out of its back corner along
+/// one line, one of them a box round nothing.
 #[test]
-fn a_z15_led_gets_past_its_corners_round_the_flats_ellipse_and_stops_on_two_meets_at_its_end() {
+fn a_z15_led_gets_past_the_end_of_its_flats_ellipse_and_stops_on_the_flat_where_two_curves_touch_or_at_its_back_corner()
+ {
     every_fuse_refuses(
         Z15,
-        &a_box_round_each_of(&[Z15_FRONT_CORNER, Z15_BACK_CORNER, FAR_OFF]),
-        |_, error| two_meets_at_the_end_of_the_flats_ellipse_are_not_ordered(error),
+        &a_box_round_each_of(&[Z15_FRONT_CORNER, Z15_BACK_CORNER]),
+        |model, error| two_curves_touch_on_the_plane_x_at(-1.23, model, error),
     );
+    every_fuse_refuses(Z15, &a_box_round_each_of(&[FAR_OFF]), |_, error| {
+        two_ways_out_of_a_corner_are_not_ordered(Z15_BACK_CORNER, error)
+    });
 }
 
 /// The `D3.0` LED tells the cells of its front apart since Q2974. Since Q2988
@@ -503,6 +516,12 @@ fn two_places_along_a_crossing_are_not_ordered(
 /// Refused `TwoCurvesTouchWithoutCrossing` on a lead's side, the plane
 /// `x = -0.3` with one wire.
 fn two_curves_touch_on_the_side_of_a_lead(model: &Model, error: &Error) -> bool {
+    two_curves_touch_on_the_plane_x_at(-0.3, model, error)
+}
+
+/// Refused `TwoCurvesTouchWithoutCrossing` on the plane `x = at` with one
+/// wire, its normal `(-1, 0, 0)`.
+fn two_curves_touch_on_the_plane_x_at(at: f64, model: &Model, error: &Error) -> bool {
     let Error::TwoCurvesTouchWithoutCrossing { face } = error else {
         return false;
     };
@@ -511,10 +530,7 @@ fn two_curves_touch_on_the_side_of_a_lead(model: &Model, error: &Error) -> bool 
         return false;
     };
     let [x, y, z, d] = plane.coefficients();
-    face.wire_count() == 1
-        && [x + 1.0, y, z, d + 0.3]
-            .iter()
-            .all(|part| part.abs() < 1e-9)
+    face.wire_count() == 1 && [x + 1.0, y, z, d - at].iter().all(|part| part.abs() < 1e-9)
 }
 
 /// Refused `Undecidable` with the one record `two ways out of a node along one
@@ -542,31 +558,6 @@ fn the_points_of_the_one_record<'a>(predicate: &str, error: &'a Error) -> &'a [P
         [record] if record.predicate() == predicate => record.inputs(),
         _ => &[],
     }
-}
-
-/// Refused `Undecidable` with the one record `order along a crossing`, handed
-/// two points within `1e-9` of the `Z15.0` LED's front corner, one whose box
-/// along `y` ends at the corner's `y` from in front and one whose box ends
-/// there from behind, either way round: the meet of the flat, the pipe and the
-/// body's front disc's plane, and the meet of the flat, the pipe and the
-/// flange's front.
-fn two_meets_at_the_end_of_the_flats_ellipse_are_not_ordered(error: &Error) -> bool {
-    let Error::Undecidable { records } = error else {
-        return false;
-    };
-    let [record] = records.records() else {
-        return false;
-    };
-    let [one, other] = record.inputs() else {
-        return false;
-    };
-    let [_, y, _] = Z15_FRONT_CORNER;
-    let in_front = |point: &Point| point.enclosure()[1].lo() == y;
-    let behind = |point: &Point| point.enclosure()[1].hi() == y;
-    record.predicate() == ALONG_A_CROSSING
-        && is_within_1e_9_of(one, Z15_FRONT_CORNER)
-        && is_within_1e_9_of(other, Z15_FRONT_CORNER)
-        && ((in_front(one) && behind(other)) || (behind(one) && in_front(other)))
 }
 
 fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
