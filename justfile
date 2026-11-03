@@ -20525,9 +20525,22 @@ check-queue-api-selftest:
 # version before it ever reaches `tooling/queue/queue.py`. `just` itself does
 # not: `just_executable()` already names the real binary, not a shim.
 #
-# `justfile` is one of the paths, so a change to this recipe's own text, or to
-# check-queue-api-selftest's, already moves the key on its own. There is no
-# `--show` of either to keep in step, unlike the narrower four paths above.
+# **Of the justfile, only what the step runs** (§337.12), as `_code-fingerprint
+# rust` takes it for the cargo steps. An `execve` trace of a real run found its
+# `just` processes running the ten recipes below and nothing else, beside one
+# `--evaluate queue_bundle`. So the key holds their `--show`, the `set` and
+# `export` lines every recipe gets, and the definitions of the eleven
+# assignments the ten read, as `just --dump` prints them, since `--show` prints
+# `{{ queue_file }}` and not what it holds. A definition, not a value:
+# `queue_page_dir` and `fuzz_log_root` name the variables the step sets to
+# point them into its scratch directory, and a rename of either leaves their
+# value here the same. None of the eleven is built from another assignment;
+# one that comes to be brings that one in too. Every assignment that runs a
+# command is in as well, because `just` evaluates every assignment before it
+# runs a recipe, and the step's own `just` calls run in its scratch hub: a
+# command that fails there stops the step though no recipe reads it. A recipe
+# one of the ten comes to call, or an assignment one comes to read, has to be
+# added here by hand, as with `_code-fingerprint rust`'s list.
 [private]
 _queue-api-selftest-fingerprint:
     #!/usr/bin/env bash
@@ -20537,8 +20550,24 @@ _queue-api-selftest-fingerprint:
         echo "the tree has uncommitted or untracked files"
         exit 0
     fi
+    # Before the hash rather than inside it, so a recipe that cannot be shown
+    # stops this with no hash printed rather than one that left it out.
+    shown=""
+    for recipe in check-queue-api-selftest queue queue-page _queue-rows _triage-refusal _status-triage \
+            check-queue decisions-all _queue-check queue-merge-driver; do
+        shown+=$('{{ just_executable() }}' --justfile '{{ justfile() }}' --show "$recipe")$'\n'
+    done
+    dumped=$('{{ just_executable() }}' --justfile '{{ justfile() }}' --dump)
+    read_by_the_ten=$(grep -E '^(decisions_dir|fuzz_log_root|queue_(file|slots|bundle|shared_files|running|now|threads|page_dir|merge_driver)) := ' <<<"$dumped")
     {
-        git ls-tree -r --full-tree HEAD -- justfile tooling .gitattributes mise.toml mise.lock
+        git ls-tree -r --full-tree HEAD -- tooling .gitattributes mise.toml mise.lock
+        echo "-- recipes"
+        printf '%s' "$shown"
+        echo "-- settings"
+        grep -E '^(set|export) ' <<<"$dumped" || true
+        echo "-- assignments"
+        printf '%s\n' "$read_by_the_ten"
+        grep -E '^[A-Za-z_][A-Za-z0-9_]* := .*(`|shell\()' <<<"$dumped" || true
         echo "-- environment"
         for name in $(compgen -e | LC_ALL=C sort); do
             case "$name" in
