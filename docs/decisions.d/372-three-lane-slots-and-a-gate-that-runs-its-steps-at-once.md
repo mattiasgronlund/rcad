@@ -204,7 +204,7 @@ names first, with its install command in the tail, because it comes first in
 
 The list is in `gate`: `cargo_steps`, eight names. Its order comes from
 `gate_steps`, so `check-t-selftest`, which needs the binaries `test` builds,
-still runs after `test`.
+still runs after `test` (amended below).
 
 It is a list, held by a check, and not worked out on each run. The simple
 test, "the recipe mentions cargo", puts `check-fuzz-overnight-selftest` in the
@@ -220,6 +220,11 @@ eight. Taking `check-t-selftest` off the list and putting `deny` on fails the
 arm, and its message names both. A new cargo step that the test cannot see
 (one that calls some other recipe that builds) still gets past it. That makes
 the gate slower, never wrong.
+
+**Amended by §372.14 on 2026-11-03: the chain runs in the line's own order,
+`test` first, and not one step after another.** Each starts once the one before
+it has stopped building, and `check-gate-runs-every-check` holds `test` first
+on the line.
 
 ### 372.11 What loud and quiet print
 
@@ -302,3 +307,109 @@ core count, §372.7 already says what moves, and it is the cap, not this.
 does not throttle itself by load. The slot count is no longer the first lever
 for a busy machine: first what each gate runs (§397.4), then how many gates
 landing needs (§397.5), and then the slot count, by §397.7's bar.
+
+### 372.14 `test` builds first, and the chain goes on once a step runs its tests (Q3080)
+
+*Lane Q3080, 2026-11-03, in three relays. On 24 cores shared with two other
+lanes, so `/proc/loadavg` is given beside every wall time. Each figure is in
+the lane's report with the command that printed it.*
+
+**`test` never moved.** `git log -G'cargo_steps="' -- justfile` names Q713's
+`cce545141` as the first commit of the line, and that line already put `test`
+sixth, behind `check check-fuzz-builds check-wildcards check-ignored lint`.
+That was `gate_steps`' own order (§372.10), not a choice: §372.3's `ordered-1`
+ran `test` first only because its measuring script did. §372.8 then found that
+the order inside the chain moved nothing on a warm tree, where `test` took
+70 s and the other seven steps of the chain about 15 s together. Two commits
+added to the line since: Q849's `b80f5e887` put `test-slow` after `test`, and
+Q1544's `aad328e24` put `check-timing-hooked-calls` third. Since then `test`
+has grown to 470–1050 s with the slow tier inside it (§397.10, §397.11), and
+the steps ahead of it take minutes whenever they compile, so the order is no
+longer free.
+
+**nextest holds cargo's locks only while it builds.** §474.11 found that cargo
+holds `.cargo-build-lock` in the build directory and two locks in
+`target/debug/` while it builds, and none while `cargo test` runs the tests it
+built. A scratch crate with an 8 s build script, read every quarter second
+with `flock -n`, showed the same for `cargo nextest run`: all three locks held
+while it built, and from the moment nextest printed `Starting 2 tests across 2
+binaries`, none held and no cargo process left. `cargo test --doc` held all
+three while it built the library and none while rustdoc compiled and ran the
+doc test. So a nextest run gives the build directory back before it runs a
+test, and says so on a line of its own.
+
+**What changed.**
+
+- `cargo_steps` puts `test` first: `test test-slow check check-fuzz-builds
+  check-timing-hooked-calls check-wildcards check-ignored lint
+  check-release-build check-t-selftest`. The chain now runs in this line's
+  order, not in `gate_steps`', whose comment says so.
+- The gate reads a chained step's log every half second for nextest's
+  `Starting N tests across M binaries` line, and starts the next chained step
+  when it shows. A step that never prints it holds the chain until it ends, as
+  every step did before, which is slower and never wrong.
+- `test` runs `cargo nextest list` first, which builds, and then `cargo nextest
+  run`, which prints the line. So the rest of the chain starts once the test
+  binaries are built, and runs beside `test`'s tests instead of after them.
+- `check-t-selftest`, which needs those binaries, still comes after `test`.
+
+**Why `grep -c`.** The reader is `sed … | grep`, under `pipefail`. `grep -q`
+stops reading at the line, `sed` then dies of SIGPIPE writing the rest, and the
+pipe returns 141, so the line counts as not found once more than a pipe buffer
+follows it. On a log of one `Starting` line and 200000 `PASS` lines, `grep -q`
+gave 141 and `grep -c` gave 0.
+
+**What it can cost.** `test`'s doc tests come last in its recipe, and `cargo
+test --doc` is cargo again, before rustdoc. If a later chained step holds the
+debug build lock then, the doc tests can wait for it. That can move `test`'s
+end later, never its answer. In the gate below the chain had ended before the
+doc tests began, so it did not arise.
+
+**The check.** `check-gate-runs-every-check` fails unless `test` is first on
+the line. Its second line runs `gate` itself, in a scratch repository with a
+copy of the justfile, on two fixture steps: a `test` that prints the `Starting`
+line and then waits up to 20 s for `check`, and a `check` that writes whether
+`test` was still running. It expects `beside`. With a `test` that prints a
+`Compiling` line instead, it expects `alone`. It takes about 10 s. It failed
+on three broken copies of the gate: with no hand-off, `test` ran out its 20 s
+wait and `check` wrote `alone`; with the base's order, `alone`; with a reader
+that hands on at any line, `beside` where `alone` was expected. On a justfile
+whose line has the base's order, it prints `gate's cargo_steps line starts with
+'check', expected 'test'`.
+
+**Both orders, one fresh gate each,** each on a tree that had never built. The
+base's order ran at `655e412ca` and the new one at `912dad157`, which differ
+only in `gate` and its check, so the steps ran the same code. Times are from the
+gate's `started` file, the mtime of its `exit` file and the birth times of the
+step logs.
+
+| order | started | load at start | wall | `test` started | `test` took | its nextest run | `check-release-build` started |
+|---|---|---|---|---|---|---|---|
+| base, `check` first | 08:17:12Z | 19.52 19.43 23.57 | 937 s | 462 s in | 473.5 s | 469.4 s | 934 s in |
+| new, `test` first | 08:37:37Z | 31.61 25.77 24.69 | 746 s | 2 s in | 743.5 s | 616.0 s | 699 s in |
+
+In the new order `test` built for 1 min 58 s and printed its `Starting` line
+about 123 s in, when `check` began. The rest of the chain then ran beside its
+tests: `check` 50.3 s, `check-fuzz-builds` 25.4, `check-timing-hooked-calls`
+449.8 (not served), `check-wildcards` 27.8, `check-ignored` 0.5, `lint` 21.4,
+`check-release-build` 2.4 and `check-t-selftest` 1.9, 579.5 s in all, and
+had ended by about 703 s, before `test` did. No chained step's log shows cargo
+waiting for the build directory. `test`'s run took longer than the base's,
+616.0 s against 469.4 s, at a load 12 higher and with the chain beside it, and
+the gate still ended 191 s sooner. One gate each on a loaded machine is not a
+measure of the saving on an idle one. The new gate failed on
+`check-fuzz-overnight-selftest`'s arm `thirty_five` under load, which is
+Q3062's; every other step passed, `4772 tests run: 4772 passed`. A lane gate
+right after, of code that differs only in a comment, passed, that selftest
+included.
+
+**What this leaves.**
+
+- `check-fuzz-builds`, `check-timing-hooked-calls`, `check-wildcards` and
+  `check-release-build` may share no lock with `test`: `fuzz/` is a workspace
+  of its own, `check-wildcards` builds in a directory of its own (§474.11's
+  table), and `check-release-build` builds `release/`. If so they could leave
+  the chain and run beside it from the first second. That matters where the
+  chain runs past `test`: above it ended about 40 s before `test` did, with
+  `check-timing-hooked-calls` 449.8 s of it. Not run, so not claimed. A row.
+- How long the doc tests can wait on a later step's build, above. Not measured.

@@ -51,9 +51,10 @@ list:
 # was written and then never run.
 #
 # **The steps run at once since §372, so the order no longer says what runs
-# first.** It says three things: which failure the block names first when
-# several fail, the order in which steps take a free slot, and the order of the
-# steps that build with cargo, which still run one after another.
+# first.** It says two things: which failure the block names first when several
+# fail, and the order in which steps take a free slot. The steps that build with
+# cargo take theirs in the order of `gate`'s own `cargo_steps` line, `test`
+# first (§372.14).
 #
 # **One step per line, joined by `\` into a single-line value.** The value is
 # what it always was — every consumer below word-splits it and none can tell —
@@ -787,7 +788,10 @@ pre-gate:
 #
 # **The steps run at once, as many as there are cores.** In turn they took 308 s
 # on 24 idle cores; at once, with the steps that build with cargo run one after
-# another beside the rest, 91 s (§372.3). When `test` and `test-slow` are both
+# another beside the rest, 91 s (§372.3). Each of those starts once the one
+# before it has stopped building, which for a nextest run is when it prints
+# `Starting`, not when it ends; `test` builds first, so its run of many minutes
+# goes on beside the rest of them (§372.14). When `test` and `test-slow` are both
 # to run, the slow tier runs inside `test`'s nextest run rather than after it,
 # and is still reported and recorded as `test-slow` (§397.10). Each step writes
 # its own log, and a step's output reaches the terminal and `gate_log` whole,
@@ -1273,27 +1277,37 @@ gate mode="loud" verdicts="reuse" jobs="cores":
         fi
     done
 
-    # The steps that build with cargo run one after another, in the order
-    # `gate_steps` gives them, beside everything else. Cargo locks the build
-    # directory, so two of them started together only wait on each other: all 56
-    # steps started at once took 110 s, not 91, and `test` waited on the lock
-    # seven times (§372.3). `check-t-selftest` also needs the binaries `test`
-    # built, which is why it comes after `test` in the list. `test-slow` leaves
-    # the chain when `test` starts while it is still in it, and runs inside
-    # `test`'s nextest run (§397.10).
-    # `check-gate-runs-every-check` holds this line to the steps whose recipes
-    # run cargo, so a new one cannot be left off it unnoticed.
-    cargo_steps="check check-fuzz-builds check-timing-hooked-calls check-wildcards check-ignored lint test test-slow check-release-build check-t-selftest"
+    # The steps that build with cargo run one after another, in the order of
+    # this line, beside everything else. Cargo locks the build directory, so two
+    # of them started together only wait on each other: all 56 steps started at
+    # once took 110 s, not 91, and `test` waited on the lock seven times
+    # (§372.3). `test-slow` leaves the chain when `test` starts while it is
+    # still in it, and runs inside `test`'s nextest run (§397.10).
+    #
+    # **The next one starts when the one before has stopped building, not when
+    # it has ended** (§372.14). nextest holds cargo's locks only while it
+    # builds, and prints `Starting N tests across M binaries` once it has let
+    # them go, so a step whose log shows that line hands the chain on. `test`
+    # comes first: it builds the test binaries, then runs its tests for many
+    # minutes beside the rest of the chain instead of ahead of it. A step that
+    # never prints the line holds the chain until it ends, as every step did
+    # before. `check-t-selftest` needs the binaries `test` built, which is why
+    # it comes after `test` here. `check-gate-runs-every-check` holds this line
+    # to the steps whose recipes run cargo, so a new one cannot be left off it
+    # unnoticed, and holds `test` first.
+    cargo_steps="test test-slow check check-fuzz-builds check-timing-hooked-calls check-wildcards check-ignored lint check-release-build check-t-selftest"
     names=()
     chained=()
     unchained=()
     for step in {{ gate_steps }}; do
         case " $served " in *" $step "*) continue ;; esac
-        case " $cargo_steps " in
-            *" $step "*) chained+=("${#names[@]}") ;;
-            *) unchained+=("${#names[@]}") ;;
-        esac
+        case " $cargo_steps " in *" $step "*) ;; *) unchained+=("${#names[@]}") ;; esac
         names+=("$step")
+    done
+    for step in $cargo_steps; do
+        for i in "${!names[@]}"; do
+            [ "${names[$i]}" != "$step" ] || chained+=("$i")
+        done
     done
     # Keyed by index rather than by name: a fixture list can name a step twice.
     declare -A running=()
@@ -1305,10 +1319,35 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     # tests share the cores with the rest instead of waiting for them, and
     # leaves test-slow's log and exit code where it is told to (§397.10).
     carried=""
+    # The chained step whose log is being read for nextest's `Starting` line,
+    # keyed by the pid of the subshell reading it, which exits on that line.
+    declare -A watching=()
     start() {
         began[$1]=${EPOCHREALTIME//[!0-9]/}
         "$j" "${names[$1]}" "${@:2}" >"$steps_dir/$1-${names[$1]}.log" 2>&1 &
         running[$!]=$1
+    }
+    # Ends only on the line. A step that ends without printing it stops its
+    # reader where the step is reaped, below. `grep -c` and not `-q`: `-q`
+    # stops reading at the line, and `sed`, cut off with more to write, would
+    # fail the pipe under `pipefail` and hide the line it found.
+    watch_building() {
+        (
+            until sed 's/\x1b\[[0-9;]*m//g' "$steps_dir/$1-${names[$1]}.log" 2>/dev/null \
+                | grep -cE '^ *Starting [0-9]+ tests? across [0-9]+ binar' >/dev/null; do
+                sleep 0.5
+            done
+        ) &
+        watching[$!]=$1
+    }
+    stop_watching() {
+        local w
+        for w in "${!watching[@]}"; do
+            [ "${watching[$w]}" = "$1" ] || continue
+            kill "$w" 2>/dev/null
+            wait "$w" 2>/dev/null
+            unset "watching[$w]"
+        done
     }
     take_test_slow() {
         local at
@@ -1348,6 +1387,7 @@ gate mode="loud" verdicts="reuse" jobs="cores":
                 else
                     start "$chain_busy"
                 fi
+                watch_building "$chain_busy"
             elif [ "${#unchained[@]}" -gt 0 ]; then
                 start "${unchained[0]}"
                 unchained=("${unchained[@]:1}")
@@ -1358,8 +1398,14 @@ gate mode="loud" verdicts="reuse" jobs="cores":
         [ "${#running[@]}" -gt 0 ] || break
         wait -n -p pid
         step_status=$?
+        if [[ -v watching[$pid] ]]; then
+            [ "${watching[$pid]}" != "$chain_busy" ] || chain_busy=""
+            unset "watching[$pid]"
+            continue
+        fi
         i=${running[$pid]}
         unset "running[$pid]"
+        stop_watching "$i"
         [ "$i" != "$chain_busy" ] || chain_busy=""
         ended_with[$i]=$step_status
         report "$i"
@@ -6145,17 +6191,25 @@ check-kache-off-on-ci:
 # `check-plugins` first and print its tail.
 #
 # **The arm after it holds `gate`'s `cargo_steps` line to the steps whose recipes
-# run cargo.** Those run one after another, and one left off the line would wait
+# run cargo.** Those build one after another, and one left off the line would wait
 # on cargo's lock beside `test`: slower, never wrong, so nothing else would
 # notice (§372.10). A recipe runs cargo if a line of it, not a comment, starts a
 # command with `cargo` and a subcommand that builds, or calls the `t` recipe. The
 # line is read out of `just --show gate`, and an empty read fails, for the
 # reason the count above is pinned.
 #
-# **The last arm holds `test` ahead of `check-t-selftest` in `gate_steps`.** The
-# arm above compares the chain as a set, but the chain runs in `gate_steps`
-# order, and `check-t-selftest` needs the binaries `test` builds (§372.10).
-[doc("Every check-* recipe is in `gate`, check-plugins is first, every step that builds with cargo is in gate's chain, and check-t-selftest comes after test.")]
+# **The arm after that holds `test` first on the line.** The arm above compares
+# the chain as a set, but it runs in the line's order. `test` builds the test
+# binaries, which `check-t-selftest` needs, and the rest of the chain goes on
+# beside its run of many minutes only if it built first (§372.14).
+#
+# **The second line runs `gate` itself on two fixture steps**, `check` and a
+# `test` that prints nextest's `Starting` line and then waits for `check`, in a
+# scratch repository with a copy of this justfile. `check` writes whether `test`
+# was still running. It must be, since `test` printed the line; and it must not
+# be when `test` prints no such line, since then the chain waits for `test` to
+# end. The gate before §372.14 started `check` first and wrote `alone`.
+[doc("Every check-* recipe is in `gate`, check-plugins is first, every step that builds with cargo is in gate's chain with test first, and the chain goes on once a step's nextest run has started.")]
 check-gate-runs-every-check:
     @steps=$(printf '%s\n' {{ gate_steps }}); \
     defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
@@ -6203,7 +6257,8 @@ check-gate-runs-every-check:
         echo "names the command that installs them"; \
         exit 1; \
     fi; \
-    chain=$({{ just_executable() }} --show gate | sed -n 's/^ *cargo_steps="\(.*\)"$/\1/p' | tr ' ' '\n' | grep . | sort); \
+    order=$({{ just_executable() }} --show gate | sed -n 's/^ *cargo_steps="\(.*\)"$/\1/p' | tr ' ' '\n' | grep .); \
+    chain=$(printf '%s\n' "$order" | grep . | sort); \
     if [ -z "$chain" ]; then \
         echo "found no cargo_steps line in just --show gate, so the arm below would compare nothing"; \
         exit 1; \
@@ -6219,12 +6274,52 @@ check-gate-runs-every-check:
         echo "a cargo step off the line waits on cargo's lock beside test (docs/decisions.md §372.10)"; \
         exit 1; \
     fi; \
-    test_at=$(printf '%s\n' "$steps" | grep -n -x 'test' | head -1 | cut -d: -f1); \
-    t_selftest_at=$(printf '%s\n' "$steps" | grep -n -x 'check-t-selftest' | head -1 | cut -d: -f1); \
-    if [ -n "$test_at" ] && [ -n "$t_selftest_at" ] && [ "$t_selftest_at" -lt "$test_at" ]; then \
-        echo "check-t-selftest is at line $t_selftest_at of gate_steps, test is at line $test_at"; \
-        echo "check-t-selftest needs the binaries test built, so it must come after"; \
-        echo "test in gate_steps (docs/decisions.md §372.10)"; \
+    first_cargo=$(printf '%s\n' "$order" | head -1); \
+    if [ "$first_cargo" != "test" ]; then \
+        echo "gate's cargo_steps line starts with '$first_cargo', expected 'test'"; \
+        echo "test builds the test binaries, which check-t-selftest needs, and then runs"; \
+        echo "its tests for many minutes, beside the rest of the chain only if it went"; \
+        echo "first (docs/decisions.md §372.14)"; \
+        exit 1; \
+    fi
+    @dir=$(mktemp -d); trap 'rm -rf "$dir"' EXIT; \
+    repo="$dir/repo"; mkdir "$repo"; \
+    cp '{{ justfile() }}' "$repo/justfile"; \
+    printf '%s\n' '' 'set allow-duplicate-recipes' '' \
+        'check:' \
+        '    @if [ -e "$CHAIN_SELFTEST/test-running" ]; then echo beside; else echo alone; fi >"$CHAIN_SELFTEST/check-ran"' '' \
+        'test:' \
+        '    #!/usr/bin/env bash' \
+        '    touch "$CHAIN_SELFTEST/test-running"' \
+        '    if [ -n "$CHAIN_SELFTEST_SILENT" ]; then' \
+        '        echo "   Compiling the fixture"' \
+        '        sleep 2' \
+        '    else' \
+        '        echo "    Starting 1 test across 1 binary"' \
+        '        for _ in $(seq 200); do [ ! -e "$CHAIN_SELFTEST/check-ran" ] || break; sleep 0.1; done' \
+        '    fi' \
+        '    rm "$CHAIN_SELFTEST/test-running"' >>"$repo/justfile"; \
+    git -C "$repo" init -q -b main; \
+    git -C "$repo" add justfile; \
+    git -C "$repo" -c user.name=selftest -c user.email=selftest@invalid commit -q -m 'the chain fixture'; \
+    chain_gate() { \
+        (cd "$repo" && CHAIN_SELFTEST="$dir" CHAIN_SELFTEST_SILENT="$1" {{ just_executable() }} \
+            --set gate_steps 'check test' --set gate_reusable_steps '' --set gate_log "$dir/gate.log" \
+            gate quiet 2>&1); \
+    }; \
+    if ! got=$(chain_gate '') || [ "$(cat "$dir/check-ran" 2>/dev/null)" != beside ]; then \
+        echo "check wrote '$(cat "$dir/check-ran" 2>/dev/null)' where 'beside' was expected: gate should"; \
+        echo "start test first, and check once test has printed nextest's Starting line,"; \
+        echo "while test still runs (docs/decisions.md §372.14)"; \
+        echo "--- got ---"; echo "$got"; \
+        exit 1; \
+    fi; \
+    rm "$dir/check-ran"; \
+    if ! got=$(chain_gate yes) || [ "$(cat "$dir/check-ran" 2>/dev/null)" != alone ]; then \
+        echo "check wrote '$(cat "$dir/check-ran" 2>/dev/null)' where 'alone' was expected: a step that"; \
+        echo "never prints nextest's Starting line holds the chain until it ends"; \
+        echo "(docs/decisions.md §372.14)"; \
+        echo "--- got ---"; echo "$got"; \
         exit 1; \
     fi
 
