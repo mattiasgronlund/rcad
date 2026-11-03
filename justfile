@@ -15021,12 +15021,16 @@ fmt:
 #   `.cargo-build-lock` beside each profile it builds, a target triple's
 #   included, from start to exit (§474.11). Each one found anywhere under the
 #   directory is taken here without waiting, and one refused is a cargo at work.
-#   They stay taken until the directory has been renamed away, so a cargo that
-#   starts meanwhile waits, then builds in a fresh directory.
+#   They stay taken until the contents are deleted, so a cargo that starts
+#   meanwhile waits, then builds in the same directory.
 # - **A program in it is running.** `cargo test` and nextest run the test
 #   binaries from the build directory after cargo has let go of its lock, and a
 #   long run can pass 30 minutes without writing there. Clearing it then fails
 #   every test not yet started.
+# - **A cargo-nextest is running anywhere.** Between two of its tests no
+#   program runs from the directory and no lock is held, and nothing in the
+#   nextest process names the directory (§474.12), so every directory is kept.
+# - **Only its lock files are left**, which is what a cleared directory is.
 # - **No `.cargo-build-lock` in it**, since then nothing says whether a cargo is
 #   building there; **or `find` could not read all of it**, since then nobody
 #   knows how long it has been idle.
@@ -15036,10 +15040,12 @@ fmt:
 # touched but the directories two levels under `root` and this recipe's own
 # `.clearing-*` leftovers.
 #
-# **Renamed, then deleted.** The rename takes the directory out of cargo's way
-# at once, while its locks are held. The delete takes as long as the directory
-# is big, so it runs after. A run killed between the two leaves a
-# `.clearing-*` directory, and the next run removes it. Two runs at once would
+# **Deleted in place, but for the lock files.** A cargo waiting on a lock has
+# the file open, and a rename would hand it a lock on a file at another path
+# while a second cargo builds beside it in a fresh directory (§474.12). So the
+# locks stay, taken, until everything else is gone. Older runs renamed first
+# and a run killed then left a `.clearing-*` directory, which this run still
+# removes. Two runs at once would
 # each delete the other's leftovers mid-delete, so a run takes a lock on `root`
 # first and leaves it to the run that holds it.
 #
@@ -15075,6 +15081,7 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
         rm -rf -- "$left"
         echo "removed what an earlier run left half-cleared: $left"
     done
+    nextest=$(pgrep -x cargo-nextest | head -n 1 || true)
     cleared=0
     kept=0
     held=()
@@ -15123,17 +15130,26 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
         # find's own exit is no answer here: it cannot read other users'
         # processes, nor one that exits while it walks, and neither can be
         # running a program from a build directory of ours.
+        if [ -n "$nextest" ]; then
+            release
+            keep "a cargo-nextest is running, and between two of its tests nothing shows which build directory it uses"
+            continue
+        fi
         running=$(find /proc -mindepth 2 -maxdepth 2 -name exe -lname "$build/*" -printf '%h\n' -quit 2>/dev/null || true)
         if [ -n "$running" ]; then
             release
             keep "process ${running#/proc/} is running a program from it"
             continue
         fi
+        if [ -z "$(find "$build" ! -type d ! -name .cargo-build-lock -print -quit)" ]; then
+            release
+            keep "only its lock files are left, so there is nothing to clear"
+            continue
+        fi
         size=$(du -sb -- "$build" | cut -f1)
-        trash="$root/.clearing-$(basename "$(dirname "$build")")-$(basename "$build")"
-        mv -T -- "$build" "$trash"
+        find "$build" ! -type d ! -name .cargo-build-lock -delete
+        find "$build" -mindepth 1 -type d -empty -delete
         release
-        rm -rf -- "$trash"
         echo "cleared $(numfmt --to=iec "$size"): $build"
         cleared=$((cleared + size))
     done
@@ -15321,6 +15337,10 @@ check-clean-targets-selftest:
     grep -qE "^[0-9.]+K cleared; 6 build directories kept$" <<<"$got" \
         || fail "the tally is wrong, so a run that found nothing would read like a tidy machine"
 
+    # Clearing in place touched the directories, so they wait out 30 minutes.
+    old "$root/0a/idle"
+    old "$root/0b/fuzz"
+    old "$root/12/between"
     got=$(just clean-targets "$root" "$store" 2>&1) || fail "the run over already-cleared directories exited non-zero"
     grep -qxF "kept (only its lock files are left, so there is nothing to clear): $root/0a/idle" <<<"$got" \
         || fail "a build directory with only its lock files left was not reported as kept"
