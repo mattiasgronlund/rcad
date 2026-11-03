@@ -534,3 +534,18 @@ about 333 s, about 390 s before the gate did, and on the line it would start
 after `check-t-selftest` and end at about the same time. So it stays where it
 is, and no row is filed: while the chain ends this far ahead of `test`, moving
 it moves nothing.
+
+**The lane gate, from the second relay's report.** At `01fe2b9ff`, the one-minute
+load 22.62 when it started: wall about 696 s, set by
+`check-queue-api-selftest`'s 691.2 s; `test` 469.6 s, of it a build of about
+82 s and a nextest run of 378.6 s, about 9 s left for the rest; the chain ended
+about 118 s after `test` started, and the doc tests waited on nothing. It failed
+only on `check-fuzz-overnight-selftest`, arm `thirty_five`. In that gate,
+`test`'s nextest printed `Blocking waiting for file lock on build directory`
+between its list build and its run. Nobody sampled there, so who held the lock
+is not known. In the fresh gate `check-fuzz-triage-selftest` took the `debug/`
+build lock at 181.2 s, as `test`'s list build let it go, so it is one
+candidate: it could push back the start of `test`'s run by its own short build.
+Untried, and the paragraph above does not weigh it. Written in from the run's
+journal by the dispatcher after the merge, since the lane's tree, and the logs
+it kept in `target/`, went with the prune.
