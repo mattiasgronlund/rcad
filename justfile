@@ -787,14 +787,17 @@ pre-gate:
 #
 # **The steps run at once, as many as there are cores.** In turn they took 308 s
 # on 24 idle cores; at once, with the steps that build with cargo run one after
-# another beside the rest, 91 s (§372.3). Each step writes its own log, and a
-# step's output reaches the terminal and `gate_log` whole, when it ends, under a
-# `===` line naming it, so no two steps' lines interleave. **A failure stops
-# nothing**: every step runs, the block names the first step of `gate_steps` that
-# failed, and the others that failed after it. Stopping early would mean killing
-# `test` and the slowest selftest, which start at once, and a lane would then
-# find its second failure one gate later. The third word is how many steps run
-# at once; `1` runs them in turn. `docs/decisions.md` §372.8 to §372.12.
+# another beside the rest, 91 s (§372.3). When `test` and `test-slow` are both
+# to run, the slow tier runs inside `test`'s nextest run rather than after it,
+# and is still reported and recorded as `test-slow` (§397.10). Each step writes
+# its own log, and a step's output reaches the terminal and `gate_log` whole,
+# when it ends, under a `===` line naming it, so no two steps' lines interleave.
+# **A failure stops nothing**: every step runs, the block names the first step
+# of `gate_steps` that failed, and the others that failed after it. Stopping
+# early would mean killing `test` and the slowest selftest, which start at once,
+# and a lane would then find its second failure one gate later. The third word
+# is how many steps run at once; `1` runs them in turn. `docs/decisions.md`
+# §372.8 to §372.12.
 #
 # **A tree with anything uncommitted or untracked is refused before any step
 # starts.** No sha names what such a gate reads, so its green can be neither
@@ -1275,7 +1278,9 @@ gate mode="loud" verdicts="reuse" jobs="cores":
     # directory, so two of them started together only wait on each other: all 56
     # steps started at once took 110 s, not 91, and `test` waited on the lock
     # seven times (§372.3). `check-t-selftest` also needs the binaries `test`
-    # built, which is why it comes after `test` in the list.
+    # built, which is why it comes after `test` in the list. `test-slow` leaves
+    # the chain when `test` starts while it is still in it, and runs inside
+    # `test`'s nextest run (§397.10).
     # `check-gate-runs-every-check` holds this line to the steps whose recipes
     # run cargo, so a new one cannot be left off it unnoticed.
     cargo_steps="check check-fuzz-builds check-timing-hooked-calls check-wildcards check-ignored lint test test-slow check-release-build check-t-selftest"
@@ -2275,7 +2280,9 @@ _gate-selftest-sleep:
 # way: it drops `test-slow` and nothing else, and passes its word on to `gate`.
 # So is `check-gate-lane-callers`, which keeps it to its callers, against a
 # repository built here, and the split of `test` and `test-slow`, against a stub
-# `cargo` (§397.4).
+# `cargo` (§397.4). So is the one nextest run of both tiers that `test` makes
+# when given test-slow's two files, and how it reads each tier's answer out of
+# that run's list of failures, retried, cut short or in colour (§397.10).
 [private]
 check-gate-docs-selftest:
     #!/usr/bin/env bash
@@ -7505,7 +7512,8 @@ check-recipe-selftest:
 # running after them. A failing test is test-slow's when `slow_tests` names it
 # and test's when not, read from the list nextest prints after its Summary
 # line. The run goes on past a failure, so a fast one leaves test-slow an
-# answer of its own. A run that fails and names no test fails both. A failed
+# answer of its own. A run that fails and lists fewer tests than its Summary
+# line counts, none included, fails both, and so does a run cut short. A failed
 # count writes no exit code, and `gate` then runs test-slow alone.
 [doc("Every test but the slow tier, which `test-slow` runs, and the doc tests. Fails first unless each name in `slow_tests` selects exactly one test. Given two files, runs the slow tier in the same nextest run and writes test-slow's log and exit code to them.")]
 test slow_log="" slow_status="":
@@ -7601,7 +7609,10 @@ test slow_log="" slow_status="":
     cargo test --workspace --doc
 
 # The slow tier `slow_tests` names, and nothing else. The land gate runs it and
-# `gate-lane` does not (§397.4).
+# `gate-lane` does not (§397.4). A gate that runs `test` too runs these tests
+# inside `test`'s nextest run instead of this recipe, and still reports and
+# records `test-slow` on its own; this recipe is what runs when `test` was
+# served, or stopped before its run (§397.10).
 [doc("Only the slow tier, the tests `slow_tests` names. The land gate runs it; `gate-lane` leaves it out.")]
 test-slow:
     #!/usr/bin/env bash
