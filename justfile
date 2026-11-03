@@ -3090,11 +3090,20 @@ check-gate-verdicts-selftest:
     # So the key holds each one's definition: its value, and for
     # queue_page_dir the variable that can point it elsewhere, which renaming
     # moves the key though the value with neither set stays the same.
-    qas_fp_of_commit() { g add -A; g commit -q -m "$1"; qas_fingerprint; g reset -q --hard "$qas_commit1"; }
+    # Sets qas_fp rather than printing it, so a fingerprint that is not a hash
+    # fails here, in this shell, and not as an empty string some `!=` passes.
+    qas_fp_of_commit() {
+        g add -A
+        g commit -q -m "$1"
+        qas_fp=$(qas_fingerprint)
+        g reset -q --hard "$qas_commit1"
+        [[ "$qas_fp" =~ ^[0-9a-f]{64}$ ]] || fail "the commit '$1' gave no fingerprint: $qas_fp"
+    }
     g reset -q --hard "$qas_commit1"
     sed -i 's/^queue_bundle := "\([0-9]*\)"$/queue_bundle := "\19"/' "$repo/justfile"
     g diff --quiet && fail "the edit meant to change queue_bundle matched nothing"
-    [ "$(qas_fp_of_commit 'queue_bundle changed')" != "$qas_fp1" ] \
+    qas_fp_of_commit 'queue_bundle changed'
+    [ "$qas_fp" != "$qas_fp1" ] \
         || fail "a commit that changed queue_bundle, which queue reads, left check-queue-api-selftest's fingerprint where it was"
     qas_page_dir() { (cd "$repo" && env -u RCAD_QUEUE_PAGE_DIR -u RCAD_QUEUE_PAGES "$j" --evaluate queue_page_dir); }
     qas_page_dir_before=$(qas_page_dir)
@@ -3102,18 +3111,49 @@ check-gate-verdicts-selftest:
     g diff --quiet && fail "the edit meant to rename queue_page_dir's variable matched nothing"
     [ "$(qas_page_dir)" = "$qas_page_dir_before" ] \
         || fail "renaming queue_page_dir's variable changed its value, so the case below would prove nothing"
-    [ "$(qas_fp_of_commit 'queue_page_dir reads another variable')" != "$qas_fp1" ] \
+    qas_fp_of_commit 'queue_page_dir reads another variable'
+    [ "$qas_fp" != "$qas_fp1" ] \
         || fail "a commit that renamed the variable queue_page_dir reads left check-queue-api-selftest's fingerprint where it was"
 
+    # A definition can run over several lines, and a change to the second
+    # moves the key as one to the first does.
+    sed -i 's/^queue_shared_files := "\(.*\)"$/queue_shared_files := "\1,\\\n    one.rs"/' "$repo/justfile"
+    g diff --quiet && fail "the edit meant to put queue_shared_files over two lines matched nothing"
+    qas_fp_of_commit 'queue_shared_files over two lines'
+    qas_fp_two_lines=$qas_fp
+    sed -i 's/^queue_shared_files := "\(.*\)"$/queue_shared_files := "\1,\\\n    two.rs"/' "$repo/justfile"
+    qas_fp_of_commit 'the second line of queue_shared_files changed'
+    [ "$qas_fp" != "$qas_fp_two_lines" ] \
+        || fail "a commit that changed only the second line of queue_shared_files, which queue reads, left check-queue-api-selftest's fingerprint where it was"
+
     # `just` evaluates every assignment before it runs any recipe, so one that
-    # runs a command can stop the step though no recipe reads it. Such an
+    # runs a command can stop the step though no recipe reads it, and so can
+    # one that calls a function: `read` looks for its file where `just` runs,
+    # and the step's own `just` calls run in its scratch hub. Such an
     # assignment moves the key, and a plain one no recipe reads does not.
     printf '\nunread_by_the_queue := "true"\n' >>"$repo/justfile"
-    [ "$(qas_fp_of_commit 'an assignment no queue recipe reads')" = "$qas_fp1" ] \
+    qas_fp_of_commit 'an assignment no queue recipe reads'
+    [ "$qas_fp" = "$qas_fp1" ] \
         || fail "a commit that added a plain assignment no queue recipe reads moved check-queue-api-selftest's fingerprint"
     printf '\nunread_by_the_queue := `true`\n' >>"$repo/justfile"
-    [ "$(qas_fp_of_commit 'an assignment that runs a command')" != "$qas_fp1" ] \
+    qas_fp_of_commit 'an assignment that runs a command'
+    [ "$qas_fp" != "$qas_fp1" ] \
         || fail "a commit that added an assignment that runs a command left check-queue-api-selftest's fingerprint where it was"
+    printf '\nunread_by_the_queue := read("mise.toml")\n' >>"$repo/justfile"
+    qas_fp_of_commit 'an assignment that reads a file'
+    [ "$qas_fp" != "$qas_fp1" ] \
+        || fail "a commit that added an assignment that reads a file where just runs left check-queue-api-selftest's fingerprint where it was"
+
+    # Every recipe gets the settings and the exported assignments, and the
+    # Python the step runs can read an exported one no recipe names.
+    printf '\nexport UNREAD_BY_THE_QUEUE := "true"\n' >>"$repo/justfile"
+    qas_fp_of_commit 'an exported assignment'
+    [ "$qas_fp" != "$qas_fp1" ] \
+        || fail "a commit that added an exported assignment no queue recipe names left check-queue-api-selftest's fingerprint where it was"
+    printf '\nset ignore-comments\n' >>"$repo/justfile"
+    qas_fp_of_commit 'a setting'
+    [ "$qas_fp" != "$qas_fp1" ] \
+        || fail "a commit that added a setting left check-queue-api-selftest's fingerprint where it was"
     g reset -q --hard "$base"
 
     # The five steps that build with cargo, served off a key of what they read
