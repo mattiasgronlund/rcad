@@ -14027,6 +14027,92 @@ mod tests {
         );
     }
 
+    /// **A straight side on a pipe between two places that `f64` writes as one
+    /// point has no length, and is left out; one on an ellipse is refused**
+    /// (Q3057). The plane `x = 4` holds the pipe's axis's direction and cuts
+    /// the pipe in two straight lines, and the side runs along the one through
+    /// `(4, 3, ·)` between two places a hair either side of `z = 2`, where two
+    /// slopes cut it. Their boxes' middles are both `(4, 3, 2)`, so they come
+    /// out one corner, and a straight side between them is as short as the
+    /// distance between them, as one between two planes is. An LED's flange
+    /// rim had such a side, where a lead's side plane and two slopes that by
+    /// design meet on one line cut it (`LED_D5.0mm-3.step`).
+    ///
+    /// The plane through the same line leaning a rounding off the axis cuts
+    /// the pipe in a long ellipse that closes, and a side between the same two
+    /// places could be all of it but a hair, so that one is refused.
+    #[test]
+    fn a_straight_side_on_a_pipe_between_two_places_that_round_to_one_point_has_no_length() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        model
+            .add_ball(5.0, &Isometry::identity())
+            .expect("a positive radius");
+        let face = model.faces().next().expect("a ball has a face").key();
+        let flat = |normal: Vector| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::new(4.0, 3.0, 2.0), normal)
+                    .expect("a normal with length"),
+            )
+        };
+        let two = 2.0_f64;
+        let a_hair_from_two =
+            |along: Surface, slope: Vector, lo: f64, hi: f64| MeetPoint::OfThreeSurfaces {
+                surfaces: [along, pipe(), flat(slope)],
+                which: 0,
+                point: PredicatePoint::Constructed([
+                    Interval::exactly(4.0),
+                    Interval::exactly(3.0),
+                    Interval::new(lo, hi).expect("lo is below hi"),
+                ]),
+            };
+        let between_two_slopes = |along: Surface| {
+            side(
+                [along, pipe()],
+                [
+                    a_hair_from_two(along, Vector::new(1.0, 0.0, 1.0), two.next_down(), two),
+                    a_hair_from_two(along, Vector::new(1.0, 0.0, -1.0), two, two.next_up()),
+                ],
+                &[],
+            )
+        };
+        let corners_of = |meet: &FaceMeet| {
+            Corners::with_each_closed_curve_started_once(
+                &model,
+                BTreeMap::new(),
+                &[],
+                std::iter::once(meet),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("no closed curve to name")
+            .of_both_ends(
+                &model,
+                meet,
+                face,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+        };
+
+        let straight = between_two_slopes(flat(Vector::new(1.0, 0.0, 0.0)));
+        let given = corners_of(&straight);
+        assert!(
+            matches!(given, Ok(ends) if ends[0] == ends[1] && is_a_side_with_no_length(&straight, ends, &model)),
+            "{given:?}"
+        );
+
+        let round = between_two_slopes(flat(Vector::new(1.0, 0.0, 1e-17)));
+        let given = corners_of(&round);
+        assert!(
+            matches!(
+                given,
+                Err(Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face: refused, at })
+                    if refused == face && at == Point::new(4.0, 3.0, 2.0)
+            ),
+            "{given:?}"
+        );
+    }
+
     /// **A stretch of an open input edge from its own end to a place a
     /// rounding off that end is left out, and one to a place whose box
     /// reaches round the edge is refused** (Q2408). The edge runs round the
