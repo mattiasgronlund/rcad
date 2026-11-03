@@ -1,0 +1,22 @@
+#!/bin/sh
+# rcad's post-checkout hook. `just link-targets-to-zram install-hook` copies it
+# into the common `.git/hooks`, and Mattias runs that, not a session
+# (docs/decisions.d/476).
+#
+# `git worktree add` runs it inside the new tree with $1 the all-zero sha, and
+# only then does it do anything: it runs that tree's own
+# `tooling/zram/link-targets.sh`, which links the directories cargo copies its
+# binaries into to the zram disk. A tree checked out at a commit older than
+# that script has none, and is left as it is.
+#
+# It always exits 0, so it can never fail a checkout. The script asks cargo for
+# two build directories, about a tenth of a second, and prints what it made;
+# that goes nowhere, and only a link it could not make is said, on stderr.
+case "$1" in
+0000000000000000000000000000000000000000 | 0000000000000000000000000000000000000000000000000000000000000000) ;;
+*) exit 0 ;;
+esac
+top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+[ -x "$top/tooling/zram/link-targets.sh" ] || exit 0
+"$top/tooling/zram/link-targets.sh" "$top" >/dev/null || true
+exit 0
