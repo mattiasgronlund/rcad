@@ -15055,12 +15055,16 @@ fmt:
 #   `.cargo-build-lock` beside each profile it builds, a target triple's
 #   included, from start to exit (§474.11). Each one found anywhere under the
 #   directory is taken here without waiting, and one refused is a cargo at work.
-#   They stay taken until the directory has been renamed away, so a cargo that
-#   starts meanwhile waits, then builds in a fresh directory.
+#   They stay taken until the contents are deleted, so a cargo that starts
+#   meanwhile waits, then builds in the same directory.
 # - **A program in it is running.** `cargo test` and nextest run the test
 #   binaries from the build directory after cargo has let go of its lock, and a
 #   long run can pass 30 minutes without writing there. Clearing it then fails
 #   every test not yet started.
+# - **A cargo-nextest is running anywhere.** Between two of its tests no
+#   program runs from the directory and no lock is held, and nothing in the
+#   nextest process names the directory (§474.12), so every directory is kept.
+# - **Only its lock files are left**, which is what a cleared directory is.
 # - **No `.cargo-build-lock` in it**, since then nothing says whether a cargo is
 #   building there; **or `find` could not read all of it**, since then nobody
 #   knows how long it has been idle.
@@ -15070,10 +15074,12 @@ fmt:
 # touched but the directories two levels under `root` and this recipe's own
 # `.clearing-*` leftovers.
 #
-# **Renamed, then deleted.** The rename takes the directory out of cargo's way
-# at once, while its locks are held. The delete takes as long as the directory
-# is big, so it runs after. A run killed between the two leaves a
-# `.clearing-*` directory, and the next run removes it. Two runs at once would
+# **Deleted in place, but for the lock files.** A cargo waiting on a lock has
+# the file open, and a rename would hand it a lock on a file at another path
+# while a second cargo builds beside it in a fresh directory (§474.12). So the
+# locks stay, taken, until everything else is gone. Older runs renamed first
+# and a run killed then left a `.clearing-*` directory, which this run still
+# removes. Two runs at once would
 # each delete the other's leftovers mid-delete, so a run takes a lock on `root`
 # first and leaves it to the run that holds it.
 #
@@ -15083,7 +15089,7 @@ fmt:
 # The sizes are `du`'s, which counts a file kache restored by reflink in full,
 # so they overstate what the disk gets back (§474.10).
 [doc("Clear build directories under /var/cache/zram/targets that are idle 30 minutes and unused. Never kache's store.")]
-clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache":
+clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache" nextest_name="cargo-nextest":
     #!/usr/bin/env bash
     set -euo pipefail
     shopt -s nullglob
@@ -15109,6 +15115,7 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
         rm -rf -- "$left"
         echo "removed what an earlier run left half-cleared: $left"
     done
+    nextest=$(pgrep -x -- "{{nextest_name}}" | head -n 1 || true)
     cleared=0
     kept=0
     held=()
@@ -15157,17 +15164,26 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
         # find's own exit is no answer here: it cannot read other users'
         # processes, nor one that exits while it walks, and neither can be
         # running a program from a build directory of ours.
+        if [ -n "$nextest" ]; then
+            release
+            keep "a cargo-nextest is running, and between two of its tests nothing shows which build directory it uses"
+            continue
+        fi
         running=$(find /proc -mindepth 2 -maxdepth 2 -name exe -lname "$build/*" -printf '%h\n' -quit 2>/dev/null || true)
         if [ -n "$running" ]; then
             release
             keep "process ${running#/proc/} is running a program from it"
             continue
         fi
+        if [ -z "$(find "$build" ! -type d ! -name .cargo-build-lock -print -quit)" ]; then
+            release
+            keep "only its lock files are left, so there is nothing to clear"
+            continue
+        fi
         size=$(du -sb -- "$build" | cut -f1)
-        trash="$root/.clearing-$(basename "$(dirname "$build")")-$(basename "$build")"
-        mv -T -- "$build" "$trash"
+        find "$build" ! -type d ! -name .cargo-build-lock -delete
+        find "$build" -mindepth 1 -type d -empty -delete
         release
-        rm -rf -- "$trash"
         echo "cleared $(numfmt --to=iec "$size"): $build"
         cleared=$((cleared + size))
     done
@@ -15192,7 +15208,8 @@ check-clean-targets-selftest:
     # the recipe prints the paths it resolved.
     dir=$(realpath -e "$(mktemp -d)")
     running=""
-    trap '[ -z "$running" ] || kill "$running" 2>/dev/null || true; rm -rf "$dir"' EXIT
+    nextest=""
+    trap '[ -z "$running" ] || kill "$running" 2>/dev/null || true; [ -z "$nextest" ] || kill "$nextest" 2>/dev/null || true; rm -rf "$dir"' EXIT
     root="$dir/zram/targets"
     store="$dir/zram/kache"
     old() { find "$1" -exec touch -d '4 hours ago' {} +; }
@@ -15255,9 +15272,13 @@ check-clean-targets-selftest:
         echo "clean-targets-selftest: find read a directory with mode 000, so this is running as root and the unreadable case cannot be built"
         exit 1
     fi
-    # What a run killed between its rename and its rm leaves behind.
-    mkdir -p "$root/.clearing-1a-half/debug/deps"
-    old "$root/.clearing-1a-half"
+    # A build a nextest run finished more than 30 minutes ago: no lock held, and
+    # between two tests no program running from it.
+    build 12/between debug
+    # A cargo that opened the lock file before the run and is waiting for it.
+    # Cleared in place, the file at that path is still the one it opened.
+    idle_lock="$root/0a/idle/debug/.cargo-build-lock"
+    idle_inode=$(stat -c %i "$idle_lock")
 
     got=""
     fail() {
@@ -15291,12 +15312,36 @@ check-clean-targets-selftest:
     grep -qF "$dir/unmounted does not exist" <<<"$got" \
         || fail "a run over a disk that is not there did not say so"
 
-    got=$(just clean-targets "$root" "$store" 2>&1) || fail "the ordinary run exited non-zero"
+    mkdir -p "$dir/bin"
+    cp /bin/sleep "$dir/bin/fx-nextest"
+    "$dir/bin/fx-nextest" 300 &
+    nextest=$!
+    for _ in $(seq 100); do
+        [ "$(cat "/proc/$nextest/comm" 2>/dev/null || true)" = fx-nextest ] && break
+        sleep 0.05
+    done
+    got=$(just clean-targets "$root" "$store" fx-nextest 2>&1) || fail "a run with a nextest running exited non-zero"
+    kill "$nextest"
+    wait "$nextest" 2>/dev/null || true
+    [ -f "$root/12/between/debug/deps/artifact" ] \
+        || fail "a build directory was cleared while a nextest was running, though between two tests nothing in it shows it is in use"
+    [ -f "$root/0a/idle/debug/deps/artifact" ] \
+        || fail "an idle build directory was cleared while a nextest was running"
+    grep -qxF "kept (a cargo-nextest is running, and between two of its tests nothing shows which build directory it uses): $root/12/between" <<<"$got" \
+        || fail "the build directory kept for a running nextest was not reported as kept"
+
+    # What a run killed between its rename and its rm leaves behind.
+    mkdir -p "$root/.clearing-1a-half/debug/deps"
+    old "$root/.clearing-1a-half"
+    got=$(just clean-targets "$root" "$store" fx-absent 2>&1) || fail "the ordinary run exited non-zero"
     [ -f "$store/store/ab/entry" ] || fail "kache's store lost a file (§474.7)"
-    [ ! -e "$root/0a/idle" ] || fail "an idle build directory, no lock held and no program running from it, was kept"
+    [ ! -e "$root/0a/idle/debug/deps" ] || fail "an idle build directory, no lock held and no program running from it, was kept"
+    [ "$(stat -c %i "$idle_lock")" = "$idle_inode" ] \
+        || fail "the cleared build directory's lock file is not the one a waiting cargo opened, so a second cargo would not be kept out (§474.11)"
     grep -qE "^cleared [0-9.]+K: $root/0a/idle$" <<<"$got" \
         || fail "the idle build directory was not reported as cleared"
-    [ ! -e "$root/0b/fuzz" ] || fail "an idle build directory whose only lock is under a target triple was kept"
+    [ ! -e "$root/0b/fuzz/x86_64-unknown-linux-gnu/release/deps" ] || fail "an idle build directory whose only lock is under a target triple was kept"
+    [ ! -e "$root/12/between/debug/deps" ] || fail "an idle build directory was kept once the nextest had gone"
     [ -f "$root/0c/fresh/debug/deps/fresh" ] \
         || fail "a build directory was cleared with a file in it written a moment ago (§474.5)"
     grep -qxF "kept (something in it changed in the last 30 minutes): $root/0c/fresh" <<<"$got" \
@@ -15325,6 +15370,16 @@ check-clean-targets-selftest:
         || fail "the half-cleared leftover was not reported"
     grep -qE "^[0-9.]+K cleared; 6 build directories kept$" <<<"$got" \
         || fail "the tally is wrong, so a run that found nothing would read like a tidy machine"
+
+    # Clearing in place touched the directories, so they wait out 30 minutes.
+    old "$root/0a/idle"
+    old "$root/0b/fuzz"
+    old "$root/12/between"
+    got=$(just clean-targets "$root" "$store" fx-absent 2>&1) || fail "the run over already-cleared directories exited non-zero"
+    grep -qxF "kept (only its lock files are left, so there is nothing to clear): $root/0a/idle" <<<"$got" \
+        || fail "a build directory with only its lock files left was not reported as kept"
+    grep -qE "^0 cleared; 9 build directories kept$" <<<"$got" \
+        || fail "a run over already-cleared directories did not clear nothing and keep nine"
 
 # Mark worktrees whose run is over, so `prune-worktrees` removes them without
 # waiting out its hour (§315.2).

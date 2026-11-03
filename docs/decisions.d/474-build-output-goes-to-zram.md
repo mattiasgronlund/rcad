@@ -603,10 +603,10 @@ makes two levels. It is cleared only when all of these hold:
   is building there; and `find` read all of it.
 - No process is running a program from it, read from `/proc/<pid>/exe`.
 
-It keeps the locks while it renames the directory to a `.clearing-*` name
-beside the others, then lets them go and deletes it. The rename is instant, and
-the delete takes as long as the directory is big. A run killed between the two
-leaves a `.clearing-*` directory, and the next run deletes it. A run takes a
+It first renamed the directory to a `.clearing-*` name while holding the locks;
+474.12 shows why that let a second cargo in and what it does now. A run killed
+between the two steps left a `.clearing-*` directory, and a run still deletes
+any it finds. A run takes a
 lock on `/var/cache/zram/targets` first, and a second run that finds it taken
 clears nothing and exits 0. It refuses a directory that holds kache's store or
 sits inside it, and exits 1 when `/var/cache/zram/targets` is missing, which is
@@ -632,18 +632,55 @@ the pair would fail its own gate until the install, and every other tree's
 gate would fail after it. So the pair changes on `main` together with its
 install, as 3e770449f did for `rcad-fuzz.service`.
 
-**Not tried, so not claimed either way.** A row from Q3039 tries both.
-
-- **A test run caught between two tests.** nextest runs each test in a process
-  of its own. If its build finished more than 30 minutes ago, and a run of
-  `clean-targets` lands at a moment when no test process is running, the
-  directory is cleared, and the next test fails to start.
-- **A cargo waiting on the lock while the directory is renamed.** It opened
-  `.cargo-build-lock` before the rename. Once the recipe lets go, it holds the
-  lock on the file now under `.clearing-*`, and builds into a fresh directory
-  at the old path. A second cargo starting then takes the fresh directory's own
-  lock, and the first one's lock does not keep it out.
+**Two gaps were left untried here, and 474.12 tries both.**
 
 474.10 says why `prune-worktrees` needs no lock: it clears a build directory
 only together with its tree. `clean-targets` never asks which tree a build
 directory is for, so the two need no helper in common.
+
+### 474.12 The two gaps in `clean-targets`, tried
+
+Both showed, and both are closed (Q3072, from Q3039). Measured with cargo 1.96.0
+and cargo-nextest 0.9.143 on a scratch crate with a `build.rs` that sleeps
+12 s and two tests that sleep 8 s each, `CARGO_BUILD_BUILD_DIR` set to a
+directory of its own, everything in it set four hours old.
+
+**A nextest run between two tests.** `nextest run -j1`, sampled once a second:
+`lslocks` listed no lock under the build directory at any sample, the
+`cargo-nextest` process had no open file in it (its fds were the output file and
+nothing else), and a program was running from it only while a test ran. Between
+the two tests there was no sample-sized window with anything to see, and no
+sign a run was in progress. So a `clean-targets` landing there clears the
+directory and the next test fails to start. The recipe cannot tell which build
+directory a nextest uses: `{workspace-path-hash}` is cargo's, and nextest's
+process names only its own working directory. So it keeps every directory
+while any process named `cargo-nextest` exists (`pgrep -x`), and says why. That
+costs clearing nothing for as long as one run lasts, which is minutes, and the
+hourly timer comes round again. This is wider than it needs to be and is the
+narrowest thing the measurement allows; a way to read the directory off the
+process would narrow it.
+
+**A cargo waiting on the lock while the directory is renamed.** The recipe held
+the lock, a `cargo build` started and printed `Blocking waiting for file lock on
+build directory`, then the recipe renamed the directory to `.clearing-*` and
+let go. `lslocks` then showed the waiting cargo holding `WRITE` on the file now
+under `.clearing-*/debug/.cargo-build-lock (deleted)`, and a second `cargo
+build` started 3 s later printed `Compiling` at once instead of waiting, so two
+cargos built into the same directory. As a second try, the recipe's steps were
+replaced by deleting everything but the `.cargo-build-lock` files in place while
+holding them, then letting go. The waiting cargo then held `WRITE` on the same
+file at its own path, and the second `cargo build` printed `Blocking waiting for
+file lock on build directory` and was still waiting when `timeout` stopped it
+at 6 s. So the recipe now deletes in place and keeps the lock files. What is
+left of a cleared directory is its lock files, which the run reports as kept
+(only its lock files are left), after the 30 minutes that deleting in place
+itself restarts.
+
+`check-clean-targets-selftest` pins both: a copy of `sleep` named `fx-nextest`
+running (the recipe's third argument names the process to look for, so a real
+nextest on the machine, such as the gate's own, cannot keep the selftest's
+fixtures; the first run of the selftest failed that way), and the inode of a cleared directory's lock file
+unchanged by the run. Both fail on the recipe before this change.
+
+**Not tried.** Whether cargo reopens `.cargo-build-lock` if its file is deleted
+under a held lock, since the recipe never does that now.
