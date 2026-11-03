@@ -238,6 +238,13 @@ fn a_d5_led_leaves_out_a_straight_side_of_no_length_on_its_flange_rim_and_stops_
     );
 }
 
+/// A box that misses the LED cuts nothing out of it, so what is left is the
+/// whole LED, its dome's rim `z = 9.1` an edge of the ball and the pipe.
+#[test]
+fn a_d5_led_less_a_box_that_misses_it_is_the_whole_led() {
+    the_led_less_a_box_that_misses_it_is_the_whole_led(D5, FAR_OFF);
+}
+
 #[test]
 fn a_d3_led_gets_past_the_cells_of_its_flange_front_and_stops_where_two_curves_touch_on_the_side_of_a_lead()
  {
@@ -290,6 +297,35 @@ fn the_led_and_a_box_share(file: &str, centre: [f64; 3], shared: f64) {
         (common - shared).abs() <= error + 1e-12,
         "{file}: the LED and the box round {centre:?} share {common} ± {error}, and {shared} is \
          right"
+    );
+}
+
+/// The LED in `file` less a box of side `2 * HALF` centred on `centre`, which
+/// misses it, answers with a model `validate` accepts, holding as much as the
+/// LED does to within what measuring both costs.
+fn the_led_less_a_box_that_misses_it_is_the_whole_led(file: &str, centre: [f64; 3]) {
+    let (mut model, solid) = the_led(file);
+    let (whole, whole_error) = volume_of(&model, &[solid]);
+    let knife = a_box_round(&mut model, centre);
+    let fused = model
+        .fuse(
+            &[solid],
+            &[knife],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{file}: less the box round {centre:?} refused: {why:?}"));
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| {
+            panic!("{file}: less the box round {centre:?} left a model that is not valid: {why:?}")
+        });
+    let (left, error) = volume_of(&model, fused.solids());
+    assert!(
+        (left - whole).abs() <= error + whole_error + 1e-12,
+        "{file}: less the box round {centre:?} holds {left} ± {error}, and the LED holds {whole} \
+         ± {whole_error}"
     );
 }
 
