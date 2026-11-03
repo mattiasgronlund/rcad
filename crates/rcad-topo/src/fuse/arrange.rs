@@ -9023,8 +9023,27 @@ impl<'f> Arrangement<'f> {
     /// first cut ([`Arrangement::draw_the_crossings`]). The cut's nodes move
     /// onto the crossing it is folded into, and a cut surface that turned into
     /// it now turns into that one.
+    ///
+    /// **Only the crossings through the cut's own nodes are asked**, lowest
+    /// first, and only at those nodes: a crossing that shares no node with
+    /// the cut cannot be one line with it here. Which nodes each crossing runs
+    /// through is listed once, before the first fold. Asking every crossing
+    /// drawn before the cut at every node of the face cost the fuse in
+    /// `PinHeader_1x39_P2.54mm_Vertical.step`'s round trip 25 s on one face
+    /// of 404 crossings and 61 973 nodes (Q3082).
     fn fold_the_straight_cuts_along_one_line(&mut self) {
-        for cut in 0..self.crossings.len() {
+        let mut nodes_on: Vec<Vec<usize>> = vec![Vec::new(); self.crossings.len()];
+        for (node, at) in self.nodes.iter().enumerate() {
+            for &crossing in &at.crossings {
+                if nodes_on[crossing].last() != Some(&node) {
+                    nodes_on[crossing].push(node);
+                }
+            }
+        }
+        // Every fold before a cut takes a cut drawn before it off its nodes
+        // and puts a crossing drawn before that one on, so neither changes
+        // which nodes the cut runs through: its list is still right.
+        for (cut, on_the_cut) in nodes_on.iter().enumerate() {
             if !self.crossings[cut].reaches_the_face
                 || !self.crossings[cut].order.runs_straight()
                 || self
@@ -9035,15 +9054,28 @@ impl<'f> Arrangement<'f> {
             {
                 continue;
             }
-            let Some(kept) = (0..cut).find(|&earlier| self.one_straight_line(earlier, cut)) else {
+            let mut met_before_it: Vec<usize> = on_the_cut
+                .iter()
+                .flat_map(|&node| self.nodes[node].crossings.iter().copied())
+                .filter(|&crossing| crossing < cut)
+                .collect();
+            met_before_it.sort_unstable();
+            met_before_it.dedup();
+            let Some(kept) = met_before_it
+                .into_iter()
+                .find(|&earlier| self.one_straight_line(earlier, cut, on_the_cut))
+            else {
                 continue;
             };
-            for node in &mut self.nodes {
-                if let Some(at) = node.crossings.iter().position(|&through| through == cut) {
-                    node.crossings.remove(at);
-                    if let Err(place) = node.crossings.binary_search(&kept) {
-                        node.crossings.insert(place, kept);
-                    }
+            for &node in on_the_cut {
+                let crossings = &mut self.nodes[node].crossings;
+                let at = crossings
+                    .iter()
+                    .position(|&through| through == cut)
+                    .expect("every node on the cut was listed because the cut runs through it");
+                crossings.remove(at);
+                if let Err(place) = crossings.binary_search(&kept) {
+                    crossings.insert(place, kept);
                 }
             }
             for turned_into in self.cut_crossings.iter_mut().flatten() {
@@ -9058,20 +9090,20 @@ impl<'f> Arrangement<'f> {
 
     /// Whether two crossings are straight and share a node whose two ways out
     /// are proved to lie along one line: their cross product exactly nothing,
-    /// and their dot product not.
+    /// and their dot product not. `on_the_later` is every node `later` runs
+    /// through, in increasing order.
     ///
     /// The dot product is what tells a line from a crossing with no direction
     /// at the node, whose way out is the zero vector and is parallel to
     /// everything.
-    fn one_straight_line(&self, earlier: usize, later: usize) -> bool {
+    fn one_straight_line(&self, earlier: usize, later: usize, on_the_later: &[usize]) -> bool {
         if !self.crossings[earlier].reaches_the_face
             || !self.crossings[earlier].order.runs_straight()
         {
             return false;
         }
-        (0..self.nodes.len()).any(|node| {
-            let through = &self.nodes[node].crossings;
-            if !(through.contains(&earlier) && through.contains(&later)) {
+        on_the_later.iter().any(|&node| {
+            if !self.nodes[node].crossings.contains(&earlier) {
                 return false;
             }
             let [one, other] = [earlier, later].map(|crossing| {
