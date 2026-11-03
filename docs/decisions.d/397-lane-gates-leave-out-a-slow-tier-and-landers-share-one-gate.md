@@ -646,8 +646,10 @@ and matches each line's last two words against the pairs of `slow_tests`.
 - Any other test failing fails `test`, and `test` then skips the doc tests, as
   it did before.
 - When only slow tests failed, `test` passes and runs the doc tests.
-- A run that fails and lists no test, and a build that fails (101), fail both
-  with nextest's code, since neither tier has an answer of its own.
+- A run that fails and lists no test, one that lists fewer tests than its
+  Summary line counts as not passed, one cut short, and a build that fails
+  (101), fail both with nextest's code, since neither tier has an answer of
+  its own.
 
 A line names a slow test only when its binary and name are exactly a pair of
 `slow_tests`, so a fast test is never read as slow. The list is read only when
@@ -672,10 +674,16 @@ The status word was measured as `FAIL` and `SIGABRT`, plain and in colour, and
 as `TRY 2 FAIL` when `NEXTEST_RETRIES` retried the test. The first version read
 only a word of capitals and dashes, so a retried slow test that failed every
 try fell through to "lists no test" and failed `test` as well. A shape nobody
-has seen yet goes the same way when it is the only failure. But beside a
-failure the pattern does read, a slow test in a shape it does not read would
-leave `test-slow` passing. So a shape found later goes into the pattern and
-into the selftest's cases in the same commit.
+has seen yet would be worse beside a line the pattern does read: the slow test
+behind it would leave `test-slow` passing. So `test` counts too. Its Summary
+line says how many tests ran and how many passed, and every test that ran and
+did not pass is on the list after it. `test` splits the failures only when it
+read exactly that many lines. Otherwise both tiers fail, and a line names the
+two counts. A run cut short at a failure writes `2/7 tests run` in its Summary
+line instead, as a run without `--no-fail-fast` did on 0.9.143. The tests it
+never ran may be of either tier, so that run is refused the same way. A shape
+found later goes into the pattern and into the selftest's cases in the same
+commit.
 
 **When `test` writes no exit code.** `test` counts `slow_tests` against `nextest
 list` before it runs anything (§397.4 item 5). A failed count exits before the
@@ -696,15 +704,18 @@ gate that ran them apart holds a line from each, as before.
   old lines. Given the paths, it runs both filters in one run, then the doc
   tests. A slow test failing, plain, in colour or retried, fails `test-slow`
   alone. A fast test killed by a signal fails `test` alone and skips the doc
-  tests. A run that fails and lists nothing, and a build that fails, fail both.
-  A failed count writes no exit code.
+  tests. A run that fails and lists nothing, one that lists one line of the
+  two its Summary line counts, one cut short at `2/4 tests run`, and a build
+  that fails, fail both. A failed count writes no exit code.
 - `check-gate-verdicts-selftest`, whose fixture `test` logs each run it makes:
   the first gate of the cargo steps runs one `test` for both. A slow test
   failing inside the run, over a record without `test-slow`, is a failure and
   not a violation. A gate served `test` runs `test-slow` alone. A `test` that
   writes no exit code leaves `test-slow` to run alone after it.
-- Both selftests failed on `8ba1a8091`, the cases without the change, and the
-  retry case failed on `ca0605ddf`, before the pattern took `TRY`.
+- Both selftests failed on `8ba1a8091`, the cases without the change. The
+  retry case failed on `ca0605ddf`, before the pattern took `TRY`, the
+  short list on `6ee692485`, before `test` counted, and the run cut short on
+  `b667f0954`, before `test` read its `/4`.
 - The real `test`, through a copy of the justfile, over a real nextest run of a
   scratch crate named `nx`, with two slow tests and five others (a probe, not
   committed). Eight cases gave the answers above, as `test`'s exit code and
