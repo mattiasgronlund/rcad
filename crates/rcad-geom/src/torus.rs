@@ -516,9 +516,14 @@ fn cross_product_halves<T: Copy + core::ops::Mul<Output = T>>(
 /// within `17·epsilon + 95·epsilon²` of the permanent with no rounding of its
 /// own, and with nothing cancelling the least constant it proves is
 /// `17·epsilon + 232·epsilon²`. Nobody has tried the claim on `value` itself.
-/// The proof covers no zero difference or direction component, which have not
-/// been run; a point on the axis of a torus whose axis is a coordinate axis is
-/// one.
+/// Where a difference or a direction component is zero, Gappa proves the bound
+/// on that same sum at this constant in each of the 169 cases that cover every
+/// way such zeros reach it, and `coqc` accepts each proof, one of them only at
+/// its second certificate (`docs/decisions.md` §464.32). A point on the axis of
+/// a torus whose axis is a coordinate axis is among them, and so is its centre.
+/// A direction zero in all three components never reaches
+/// [`HowFarFromTheRing::on_floats`], as the doc on [`Torus::basis`] says, and
+/// at the centre a `hollow` below the normals makes it return `None`.
 ///
 /// Every step of that argument is a *relative* one, so as with every bound of
 /// this shape it holds only while nothing overflows or falls into the
