@@ -1,8 +1,8 @@
 [Unit]
-Description=rcad: strip target/ from the worktrees nobody is using, every hour
+Description=rcad: clear the idle cargo build directories on the zram disk, every 10 minutes
 
 [Timer]
-OnCalendar=hourly
+OnCalendar=*:0/10
 
 [Install]
 WantedBy=timers.target

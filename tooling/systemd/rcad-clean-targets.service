@@ -1,16 +1,18 @@
 [Unit]
-Description=rcad: strip target/ from the worktrees nobody is using (docs/decisions.md §371)
+Description=rcad: clear the cargo build directories on the zram disk that are idle and unused (docs/decisions.md §474.11)
 
 [Service]
 Type=oneshot
 
-# The tree `main` is checked out in. `clean-targets` keeps the tree it runs
-# from, so this is also the one tree the hour never sweeps.
+# The tree `main` is checked out in, for its justfile. `clean-targets` clears
+# build directories under /var/cache/zram/targets and never asks which tree
+# they belong to, so the tree it runs from is no more kept than any other.
 WorkingDirectory=%h/git/mattiasgronlund/rcad-worktrees/main
 
 # Set rather than inherited, for rcad-fuzz.service's reason (§108): the user
 # manager's PATH came from a login session until the reboot of 2026-09-15 took
-# it away. The recipe needs git and coreutils, and nothing from `~/.cargo`.
+# it away. The recipe needs findutils, coreutils and util-linux's flock, not
+# git, and nothing from `~/.cargo`.
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # mise by absolute path, because `just` comes from mise and systemd has no
