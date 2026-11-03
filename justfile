@@ -7522,14 +7522,15 @@ test slow_log="" slow_status="":
     trap 'rm -f "$run" "$run.failing"' EXIT
     # `--final-status-level` and `--failure-output` are named because the
     # environment can set them, and the list after the Summary line is what
-    # this reads: each failing test as its status word, its time, its place in
-    # the run, its binary_id and its name, in colour on a runner.
+    # this reads: each failing test as its status word, after `TRY 2` when
+    # NEXTEST_RETRIES retried it, its time, its place in the run, its
+    # binary_id and its name, in colour on a runner.
     rc=0
     cargo nextest run --workspace --no-fail-fast --final-status-level fail --failure-output immediate \
         -E "not ($filter)" -E "$filter" 2>&1 | tee "$run" || rc=$?
     sed 's/\x1b\[[0-9;]*m//g' "$run" \
         | awk '/^ *Summary \[/ {seen = 1; listed = ""; next}
-               seen && /^ *[A-Z][A-Z-]* \[/ && NF >= 5 {listed = listed $0 "\n"}
+               seen && /^ *(TRY [0-9]+ )?[A-Z][A-Z-]* \[/ && NF >= 5 {listed = listed $0 "\n"}
                END {printf "%s", listed}' >"$run.failing"
     slow_pairs=$(while read -r token; do echo "${token%/*} ${token##*/}"; done <<<"$names")
     fast_failed=""
