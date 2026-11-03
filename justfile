@@ -2487,6 +2487,12 @@ check-gate-docs-selftest:
     grep -q 'rcad-x::bench/b t2$' "$dir/slow.log" || fail "test-slow's log does not name the slow test that failed"
     grep -qx 'cargo test --workspace --doc' "$dir/cargo.log" \
         || fail "a failure in the slow tier alone stopped test's doc tests"
+    # With NEXTEST_RETRIES set, nextest 0.9.143 lists a test that failed every
+    # try as `TRY 2 FAIL`, which is still the slow tier's alone.
+    printf '%s\n' '     Summary [   0.300s] 4 tests run: 3 passed, 1 failed, 0 skipped' \
+        '  TRY 2 FAIL [   0.007s] (2/4) rcad-x::bench/b t2' 'error: test run failed' >"$dir/run"
+    got=$(STUB_EXIT=100 stub "$tier" test "${pair[@]}") || fail "test failed when only a slow test failed every retry"
+    [ "$(cat "$dir/slow.status")" = 100 ] || fail "a slow test failed every retry and test-slow did not fail with nextest's code"
     # A test outside the tier, here killed by a signal, fails test alone.
     printf '%s\n' '     Summary [   0.300s] 4 tests run: 3 passed, 1 failed, 0 skipped' \
         '     SIGABRT [   2.021s] (4/4) rcad-x::a t3' 'error: test run failed' >"$dir/run"
