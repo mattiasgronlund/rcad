@@ -615,12 +615,19 @@ def numbers(run, lane_numbers, report):
     print instead of running again (§385.3).
     """
     report["number_mismatches"] = []
+    report["commands_that_cannot_run"] = []
     for i, (what, value, command) in enumerate(lane_numbers, start=1):
         writes = WRITES.search(command)
         if writes:
             say(f"number {i}, {what}: not run, since `{command}` writes ({writes.group(0).strip()})")
             left(report, f"number {i}, {what}: not run, since its command writes; re-run it by hand only if "
                          f"that is safe: {command}")
+            continue
+        broken = cannot_run(run, command)
+        if broken:
+            say(f"number {i}, {what}: not run, since `{command}` cannot run ({broken})")
+            report["commands_that_cannot_run"].append(
+                f"number {i}, {what}: the lane's command cannot run ({broken}), so check this number by hand: {command}")
             continue
         kept = run.recall(command)
         if kept is not None:
@@ -642,6 +649,30 @@ def numbers(run, lane_numbers, report):
         tail(plain, 5)
         report["number_mismatches"].append(
             f"{what}: '{value}' is not in what `{command}` printed (exit {rc}); its last line: {last_line(plain)}")
+
+
+def cannot_run(run, command):
+    """Why a number's command cannot run at all, or None when it can.
+
+    Three ways: `bash -n` refuses its text, its text holds a literal `...`
+    path where the lane meant a real one, or its first word is no program,
+    builtin or function. Such a command is the lane's fault, not a value
+    missing from a real print, so it goes under its own report key.
+    """
+    if re.search(r"(^|[\s'\"=/])\.\.\./|/\.\.\.(/|[\s'\"]|$)", command):
+        return "its text holds a literal `...` path"
+    rc, said = run("bash", "-n", "-c", command, timeout=NUMBER_TIMEOUT)
+    if rc != 0:
+        return f"bash -n refuses it: {last_line(said)}"
+    words = command.split()
+    while words and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=\S*", words[0]):
+        words.pop(0)
+    if not words or not re.fullmatch(r"[A-Za-z0-9_./+-]+", words[0]):
+        return None
+    rc, _ = run("bash", "-c", 'type -t -- "$1" >/dev/null', "_", words[0], timeout=NUMBER_TIMEOUT)
+    if rc != 0:
+        return f"its first word `{words[0]}` is no command"
+    return None
 
 
 def squeezed(text):

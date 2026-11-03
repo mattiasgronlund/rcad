@@ -23257,7 +23257,10 @@ check-verify-lane-selftest:
         + number 'lines that say fixed' 1 'grep -c fixed src/lib.txt' \
         + number 'a count the lane misread' 7 'grep -c fixed src/lib.txt' \
         + number 'a count whose command writes' 0 'git commit -q --allow-empty -m "a number"' \
-        + number 'a count whose command pins a row' 0 'just queue pin Q1'
+        + number 'a count whose command pins a row' 0 'just queue pin Q1' \
+        + number 'a count whose text bash refuses' 1 'grep -c fixed src/lib.txt | | wc' \
+        + number 'a count whose program is not there' 1 'no-such-program-q2996 src/lib.txt' \
+        + number 'a count read from a dots path' 1 'grep -c fixed .../src/lib.txt'
     run
     [ "$(field worktree_path) $(field branch_ok)" = "$at/verify true" ] || fail "worktree_path and branch_ok are $(field worktree_path) $(field branch_ok)"
     [ "$(field files_outside_write_set)" = '["outside.txt"]' ] || fail "files_outside_write_set is $(field files_outside_write_set)"
@@ -23273,6 +23276,11 @@ check-verify-lane-selftest:
     [ "$(python3 -c 'import json, sys; print(len(json.loads(sys.argv[1])))' "$(field number_mismatches)")" = 1 ] \
         || fail "of three numbers, one has a value its command prints and one has a value it does not, but number_mismatches is $(field number_mismatches)"
     says number_mismatches "a count the lane misread: '7' is not in what"
+    [ "$(python3 -c 'import json, sys; print(len(json.loads(sys.argv[1])))' "$(field commands_that_cannot_run)")" = 3 ] \
+        || fail "three numbers have commands that cannot run, but commands_that_cannot_run is $(field commands_that_cannot_run)"
+    says commands_that_cannot_run "a count whose text bash refuses: the lane's command cannot run (bash -n refuses it"
+    says commands_that_cannot_run "its first word \`no-such-program-q2996\` is no command"
+    says commands_that_cannot_run 'its text holds a literal `...` path'
     says left_to_you 'a count whose command writes: not run'
     says left_to_you 'a count whose command pins a row: not run'
     back_at_the_tip
