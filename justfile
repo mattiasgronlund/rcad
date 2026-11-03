@@ -20568,19 +20568,22 @@ check-queue-api-selftest:
 # **Of the justfile, only what the step runs** (§337.12), as `_code-fingerprint
 # rust` takes it for the cargo steps. An `execve` trace of a real run found its
 # `just` processes running the ten recipes below and nothing else, beside one
-# `--evaluate queue_bundle`. So the key holds their `--show`, the `set` and
-# `export` lines every recipe gets, and the definitions of the eleven
-# assignments the ten read, as `just --dump` prints them, since `--show` prints
-# `{{ queue_file }}` and not what it holds. A definition, not a value:
+# `--evaluate queue_bundle`. So the key holds their `--show`, the settings and
+# the exported assignments every recipe gets, and the definitions of the eleven
+# assignments the ten read, since `--show` prints `{{ queue_file }}` and not
+# what it holds. The definitions come from `just --dump --dump-format json`,
+# which gives each whole however many lines it is written over, where a line
+# of the text dump gives only its first. A definition, not a value:
 # `queue_page_dir` and `fuzz_log_root` name the variables the step sets to
 # point them into its scratch directory, and a rename of either leaves their
 # value here the same. None of the eleven is built from another assignment;
 # one that comes to be brings that one in too. Every assignment that runs a
-# command is in as well, because `just` evaluates every assignment before it
-# runs a recipe, and the step's own `just` calls run in its scratch hub: a
-# command that fails there stops the step though no recipe reads it. A recipe
-# one of the ten comes to call, or an assignment one comes to read, has to be
-# added here by hand, as with `_code-fingerprint rust`'s list.
+# command or calls a function is in as well, because `just` evaluates every
+# assignment before it runs a recipe, and the step's own `just` calls run in
+# its scratch hub: a backtick, or a `read` of a file that is not there, stops
+# the step though no recipe reads it. A recipe one of the ten comes to call, or
+# an assignment one comes to read, has to be added here by hand, as with
+# `_code-fingerprint rust`'s list.
 [private]
 _queue-api-selftest-fingerprint:
     #!/usr/bin/env bash
@@ -20597,17 +20600,30 @@ _queue-api-selftest-fingerprint:
             check-queue decisions-all _queue-check queue-merge-driver; do
         shown+=$('{{ just_executable() }}' --justfile '{{ justfile() }}' --show "$recipe")$'\n'
     done
-    dumped=$('{{ just_executable() }}' --justfile '{{ justfile() }}' --dump)
-    read_by_the_ten=$(grep -E '^(decisions_dir|fuzz_log_root|queue_(file|slots|bundle|shared_files|running|now|threads|page_dir|merge_driver)) := ' <<<"$dumped")
+    dumped=$('{{ just_executable() }}' --justfile '{{ justfile() }}' --dump --dump-format json)
+    definitions=$(python3 -c '
+    import json, sys
+    dump = json.load(sys.stdin)
+    assignments = dump["assignments"]
+    read_by_the_ten = ["decisions_dir", "fuzz_log_root", "queue_file", "queue_slots", "queue_bundle",
+        "queue_shared_files", "queue_running", "queue_now", "queue_threads", "queue_page_dir",
+        "queue_merge_driver"]
+    def calls_something(value):
+        return isinstance(value, list) and (value[0] in ("call", "evaluate") or any(map(calls_something, value[1:])))
+    print("-- settings")
+    print(json.dumps(dump["settings"], sort_keys=True))
+    print(json.dumps(sorted(dump["unexports"])))
+    print("-- assignments")
+    for name in read_by_the_ten:
+        print(json.dumps(assignments[name], sort_keys=True))
+    for name, assignment in sorted(assignments.items()):
+        if assignment["export"] or dump["settings"]["export"] or calls_something(assignment["value"]):
+            print(json.dumps(assignment, sort_keys=True))' <<<"$dumped")
     {
         git ls-tree -r --full-tree HEAD -- tooling .gitattributes mise.toml mise.lock
         echo "-- recipes"
         printf '%s' "$shown"
-        echo "-- settings"
-        grep -E '^(set|export) ' <<<"$dumped" || true
-        echo "-- assignments"
-        printf '%s\n' "$read_by_the_ten"
-        grep -E '^[A-Za-z_][A-Za-z0-9_]* := .*(`|shell\()' <<<"$dumped" || true
+        printf '%s\n' "$definitions"
         echo "-- environment"
         for name in $(compgen -e | LC_ALL=C sort); do
             case "$name" in
