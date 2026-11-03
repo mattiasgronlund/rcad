@@ -233,3 +233,17 @@ inari session its own hook (476.3), and the boot step needs `sudo`.
 
 A tree made before the hook is installed has no links, and a gate there passes
 just the same. Converting those trees is Q3070's.
+
+**Installed, 2026-11-03.** Mattias ran all four, from the hub rather than main's
+tree, at 7243e8238 (the recipe copies the hook into the common `.git/hooks`, so
+the tree it runs from does not matter). Checked by the dispatcher afterwards:
+the hook and `/usr/local/sbin/rcad-zram-artifact-dirs` are byte for byte the
+tracked files, the second owned by root with mode 755; `systemctl show
+zram-kache` lists all four `ExecStartPost` lines, with `NeedDaemonReload=no`.
+`git worktree add --detach` of a scratch tree at 121def0d3 got `target/debug`
+and `target/release` as links into `/var/cache/zram/artifacts/4a/e4454a24fdbaf8/`,
+destinations made. With those two destinations removed, the installed boot step
+run by hand as `mattias` with the unit's arguments printed `made 2
+destinations, 1 already there, 0 links refused, 0 could not be made` in 2.7 s,
+warm cache. The scratch tree and its destinations were removed after. The first
+run at boot, with a cold cache, is still unmeasured.
