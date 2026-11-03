@@ -6296,6 +6296,17 @@ check-kache-off-on-ci:
 # line is read out of `just --show gate`, and an empty read fails, for the
 # reason the count above is pinned.
 #
+# **Four steps that run cargo are kept off the line, each for a reason this arm
+# reads in its recipe** (§372.15). Their builds take none of the locks the
+# chain's steps take, so on the line they only waited their turn. Two run in
+# `fuzz/`, a workspace of its own and so a build directory of its own:
+# `check-fuzz-builds` (`cd fuzz`) and `check-timing-hooked-calls` (`cd fuzz`).
+# `check-wildcards` sets a build directory of its own (`CARGO_BUILD_BUILD_DIR=`).
+# `check-release-build` builds the release profile (`--cargo-profile release`),
+# whose locks sit under `release/`, where no chained step builds. Each is held
+# off the line, and to its reason: a recipe that loses the text quoted beside
+# its name here fails, since its build may then share the chain's locks again.
+#
 # **The arm after that holds `test` first on the line.** The arm above compares
 # the chain as a set, but it runs in the line's order. `test` builds the test
 # binaries, which `check-t-selftest` needs, and the rest of the chain goes on
@@ -6307,7 +6318,7 @@ check-kache-off-on-ci:
 # was still running. It must be, since `test` printed the line; and it must not
 # be when `test` prints no such line, since then the chain waits for `test` to
 # end. The gate before §372.14 started `check` first and wrote `alone`.
-[doc("Every check-* recipe is in `gate`, check-plugins is first, every step that builds with cargo is in gate's chain with test first, and the chain goes on once a step's nextest run has started.")]
+[doc("Every check-* recipe is in `gate`, check-plugins is first, every step that builds with cargo is in gate's chain with test first unless it builds where the chain takes no lock, and the chain goes on once a step's nextest run has started.")]
 check-gate-runs-every-check:
     @steps=$(printf '%s\n' {{ gate_steps }}); \
     defined=$(grep -oE '^check-[a-z0-9-]+' justfile | sort -u); \
@@ -6361,14 +6372,42 @@ check-gate-runs-every-check:
         echo "found no cargo_steps line in just --show gate, so the arm below would compare nothing"; \
         exit 1; \
     fi; \
+    apart=$(printf '%s\n' \
+        'check-fuzz-builds|cd fuzz|fuzz/ is a workspace of its own, with a build directory of its own' \
+        'check-release-build|--cargo-profile release|it builds the release profile, whose locks sit under release/ and no chained step builds there' \
+        'check-timing-hooked-calls|cd fuzz|fuzz/ is a workspace of its own, with a build directory of its own' \
+        'check-wildcards|CARGO_BUILD_BUILD_DIR=|it builds in a build directory of its own (docs/decisions.md §474.9)'); \
+    off=$(printf '%s\n' "$apart" | cut -d'|' -f1 | sort); \
+    both=$(printf '%s\n' "$apart" | while IFS='|' read -r step marker why; do \
+        printf '%s\n' "$chain" | grep -qx "$step" && echo "  $step: $why"; \
+    done); \
+    if [ -n "$both" ]; then \
+        echo "gate's cargo_steps line holds steps that share no cargo lock with the chain:"; \
+        printf '%s\n' "$both"; \
+        echo "such a step starts at once beside the chain instead of waiting its turn on it"; \
+        echo "(docs/decisions.md §372.15)"; \
+        exit 1; \
+    fi; \
+    lost=$(printf '%s\n' "$apart" | while IFS='|' read -r step marker why; do \
+        {{ just_executable() }} --show "$step" | grep -v '^ *#' | grep -qF -- "$marker" \
+            || echo "  $step no longer says '$marker', and that was why it is off the line: $why"; \
+    done); \
+    if [ -n "$lost" ]; then \
+        echo "a step kept off gate's cargo_steps line has lost what kept it out of the chain's locks:"; \
+        printf '%s\n' "$lost"; \
+        echo "put it back on the line, or write here what else keeps its build apart (docs/decisions.md §372.15)"; \
+        exit 1; \
+    fi; \
     builds='(^[[:space:]]*@?|\$\(|&& *|; *|! *)([A-Z_]+=[^ ]* +)*cargo +(\+[a-z]+ +)?(build|check|clippy|nextest|test|run|bench|doc|llvm-cov|fuzz)( |$)|just_executable\(\) *\}\} +t( |$)'; \
     cargo=$(for step in $steps; do \
         {{ just_executable() }} --show "$step" | grep -v '^ *#' | grep -qE "$builds" && echo "$step"; \
     done | sort); \
-    if [ "$cargo" != "$chain" ]; then \
-        echo "gate's cargo_steps line and the steps whose recipes run cargo disagree:"; \
-        for step in $cargo; do printf '%s\n' "$chain" | grep -qx "$step" || echo "  $step runs cargo and is not on the line"; done; \
+    want=$(printf '%s\n' "$chain" "$off" | sort); \
+    if [ "$cargo" != "$want" ]; then \
+        echo "the steps whose recipes run cargo are not gate's cargo_steps line and the steps kept off it:"; \
+        for step in $cargo; do printf '%s\n' "$want" | grep -qx "$step" || echo "  $step runs cargo and is not on the line"; done; \
         for step in $chain; do printf '%s\n' "$cargo" | grep -qx "$step" || echo "  $step is on the line and its recipe builds nothing with cargo"; done; \
+        for step in $off; do printf '%s\n' "$cargo" | grep -qx "$step" || echo "  $step is kept off the line and its recipe builds nothing with cargo"; done; \
         echo "a cargo step off the line waits on cargo's lock beside test (docs/decisions.md §372.10)"; \
         exit 1; \
     fi; \
