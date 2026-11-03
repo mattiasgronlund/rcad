@@ -54,7 +54,9 @@ list:
 # first.** It says two things: which failure the block names first when several
 # fail, and the order in which steps take a free slot. The steps that build with
 # cargo take theirs in the order of `gate`'s own `cargo_steps` line, `test`
-# first (§372.14).
+# first (§372.14). When `test` and `test-slow` are both to run, `test-slow`
+# takes no slot of its own: the slow tier runs inside `test`'s nextest run, and
+# `test-slow` is still reported and recorded as its own step (§397.10).
 #
 # **One step per line, joined by `\` into a single-line value.** The value is
 # what it always was — every consumer below word-splits it and none can tell —
@@ -1824,12 +1826,15 @@ _code-fingerprint of="":
 # `check-enums` never got to `test`, and a block that printed `0 tests run`
 # there would be describing the gate's own failure as a clean empty suite.
 #
-# **Every count line is reported, never the last one.** The gate has two nextest
-# runs — `test` and `check-release-build` — and eight `test result:` lines, one
-# per crate, out of `cargo test --doc`. Reading the last of each got `3 tests
-# run` over a suite of 1869 and `2 passed` over 24 doc tests, on a real green
-# gate. A number that small and that wrong is worse than none, because it reads
-# as a real total. So the `Summary` lines are all printed, each under its own
+# **Every count line is reported, never the last one.** The gate's nextest runs
+# are `test`'s and `check-release-build`'s, and `test-slow`'s when it runs
+# apart from `test`. When both are to run, the slow tier runs inside `test`'s
+# run, whose one `Summary` line counts both tiers, and `test-slow`'s log holds
+# no count, so neither tier is counted twice (§397.10). `cargo test --doc` adds
+# eight `test result:` lines, one per crate. Reading the last of each got
+# `3 tests run` over a suite of 1869 and `2 passed` over 24 doc tests, on a
+# real green gate. A number that small and that wrong is worse than none,
+# because it reads as a real total. So the `Summary` lines are all printed, each under its own
 # `tests:` label, and the doc tests are added up.
 #
 # **A served run prints the counts of the gate that served it**, marked as such.
