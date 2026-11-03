@@ -15158,7 +15158,8 @@ check-clean-targets-selftest:
     # the recipe prints the paths it resolved.
     dir=$(realpath -e "$(mktemp -d)")
     running=""
-    trap '[ -z "$running" ] || kill "$running" 2>/dev/null || true; rm -rf "$dir"' EXIT
+    nextest=""
+    trap '[ -z "$running" ] || kill "$running" 2>/dev/null || true; [ -z "$nextest" ] || kill "$nextest" 2>/dev/null || true; rm -rf "$dir"' EXIT
     root="$dir/zram/targets"
     store="$dir/zram/kache"
     old() { find "$1" -exec touch -d '4 hours ago' {} +; }
@@ -15221,9 +15222,13 @@ check-clean-targets-selftest:
         echo "clean-targets-selftest: find read a directory with mode 000, so this is running as root and the unreadable case cannot be built"
         exit 1
     fi
-    # What a run killed between its rename and its rm leaves behind.
-    mkdir -p "$root/.clearing-1a-half/debug/deps"
-    old "$root/.clearing-1a-half"
+    # A build a nextest run finished more than 30 minutes ago: no lock held, and
+    # between two tests no program running from it.
+    build 12/between debug
+    # A cargo that opened the lock file before the run and is waiting for it.
+    # Cleared in place, the file at that path is still the one it opened.
+    idle_lock="$root/0a/idle/debug/.cargo-build-lock"
+    idle_inode=$(stat -c %i "$idle_lock")
 
     got=""
     fail() {
@@ -15257,12 +15262,36 @@ check-clean-targets-selftest:
     grep -qF "$dir/unmounted does not exist" <<<"$got" \
         || fail "a run over a disk that is not there did not say so"
 
+    mkdir -p "$dir/bin"
+    cp /bin/sleep "$dir/bin/cargo-nextest"
+    "$dir/bin/cargo-nextest" 300 &
+    nextest=$!
+    for _ in $(seq 100); do
+        [ "$(cat "/proc/$nextest/comm" 2>/dev/null || true)" = cargo-nextest ] && break
+        sleep 0.05
+    done
+    got=$(just clean-targets "$root" "$store" 2>&1) || fail "a run with a nextest running exited non-zero"
+    kill "$nextest"
+    wait "$nextest" 2>/dev/null || true
+    [ -f "$root/12/between/debug/deps/artifact" ] \
+        || fail "a build directory was cleared while a nextest was running, though between two tests nothing in it shows it is in use"
+    [ -f "$root/0a/idle/debug/deps/artifact" ] \
+        || fail "an idle build directory was cleared while a nextest was running"
+    grep -qxF "kept (a cargo-nextest is running, and between two of its tests nothing shows which build directory it uses): $root/12/between" <<<"$got" \
+        || fail "the build directory kept for a running nextest was not reported as kept"
+
+    # What a run killed between its rename and its rm leaves behind.
+    mkdir -p "$root/.clearing-1a-half/debug/deps"
+    old "$root/.clearing-1a-half"
     got=$(just clean-targets "$root" "$store" 2>&1) || fail "the ordinary run exited non-zero"
     [ -f "$store/store/ab/entry" ] || fail "kache's store lost a file (§474.7)"
-    [ ! -e "$root/0a/idle" ] || fail "an idle build directory, no lock held and no program running from it, was kept"
+    [ ! -e "$root/0a/idle/debug/deps" ] || fail "an idle build directory, no lock held and no program running from it, was kept"
+    [ "$(stat -c %i "$idle_lock")" = "$idle_inode" ] \
+        || fail "the cleared build directory's lock file is not the one a waiting cargo opened, so a second cargo would not be kept out (§474.11)"
     grep -qE "^cleared [0-9.]+K: $root/0a/idle$" <<<"$got" \
         || fail "the idle build directory was not reported as cleared"
-    [ ! -e "$root/0b/fuzz" ] || fail "an idle build directory whose only lock is under a target triple was kept"
+    [ ! -e "$root/0b/fuzz/x86_64-unknown-linux-gnu/release/deps" ] || fail "an idle build directory whose only lock is under a target triple was kept"
+    [ ! -e "$root/12/between/debug/deps" ] || fail "an idle build directory was kept once the nextest had gone"
     [ -f "$root/0c/fresh/debug/deps/fresh" ] \
         || fail "a build directory was cleared with a file in it written a moment ago (§474.5)"
     grep -qxF "kept (something in it changed in the last 30 minutes): $root/0c/fresh" <<<"$got" \
@@ -15291,6 +15320,12 @@ check-clean-targets-selftest:
         || fail "the half-cleared leftover was not reported"
     grep -qE "^[0-9.]+K cleared; 6 build directories kept$" <<<"$got" \
         || fail "the tally is wrong, so a run that found nothing would read like a tidy machine"
+
+    got=$(just clean-targets "$root" "$store" 2>&1) || fail "the run over already-cleared directories exited non-zero"
+    grep -qxF "kept (only its lock files are left, so there is nothing to clear): $root/0a/idle" <<<"$got" \
+        || fail "a build directory with only its lock files left was not reported as kept"
+    grep -qE "^0 cleared; 9 build directories kept$" <<<"$got" \
+        || fail "a run over already-cleared directories did not clear nothing and keep nine"
 
 # Mark worktrees whose run is over, so `prune-worktrees` removes them without
 # waiting out its hour (§315.2).
