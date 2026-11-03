@@ -19934,6 +19934,8 @@ check-queue-api-selftest:
     got=$(q "$writes_wt" show "$held_wrong" 2>&1) || fail "show failed after writes corrected a held row"
     grep -qxF "narrowed to docs/decisions.d/, taken with -" <<<"$got" \
         && fail "show still said the held row was narrowed, though writes moved what it was taken with too"
+    grep -qxF 'write set set to docs/decisions.d/ by `writes`, - in docs/queue.md' <<<"$got" \
+        || fail "show did not print the held row's write set against the stale docs/queue.md column (§230.3, Q2975)"
 
     # Q2670: writes on a held row moves the set it was taken with, not only
     # the write set itself, so a later narrow can reach what writes just
@@ -19984,6 +19986,8 @@ check-queue-api-selftest:
     got=$(q "$writes_wt" show "$fresh_write" 2>&1) || fail "show failed after taking the fresh-write row"
     grep -qF "narrowed to" <<<"$got" \
         && fail "show said the freshly taken row was narrowed, though its write set is what it was taken with"
+    grep -qxF 'write set set to docs/q2670-fresh.md by `writes`, - in docs/queue.md' <<<"$got" \
+        || fail "show did not print the taken row's write set against the stale docs/queue.md column (§230.3, Q2975)"
 
     # Q252 (§263.3, §263.4): `give` releases a hold and restores the state
     # the take replaced, an after: list included since take's own claims event
