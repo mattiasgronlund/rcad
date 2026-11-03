@@ -9176,7 +9176,16 @@ fuzz-overnight window="28800" pause_start="" pause_end="":
         [ "$pause_until" -ge "$deadline" ] || second=1
     fi
 
-    left=$(( first_stop - $(date +%s) ))
+    # Whole seconds a target may run, counted from the clock in milliseconds
+    # when a pause is what ends the stretch. A clock rounded down reads a
+    # whole second left in the last second before the pause, and a target
+    # given it runs into the pause (Q3062). The deadline is left on the
+    # coarse clock: a window of one second must still fuzz for it.
+    if [ "$first_stop" -eq "$deadline" ]; then
+        left=$(( first_stop - $(date +%s) ))
+    else
+        left=$(( (first_stop * 1000 - $(date +%s%3N)) / 1000 ))
+    fi
     if [ -n "$second" ] && [ "$left" -lt 1 ]; then
         echo "started inside the pause, so nothing runs before it"
     else
@@ -10110,6 +10119,9 @@ check-fuzz-overnight-selftest:
     # recipe at instead, armed by `STUB_TIMING_HOOKED`.
     cat >"$dir/bin/timing-check-stub.sh" <<'STUB'
     #!/usr/bin/env bash
+    while [ -n "${STUB_CHECK_UNTIL_MS:-}" ] && [ "$(date +%s%3N)" -lt "$STUB_CHECK_UNTIL_MS" ]; do
+        sleep 0.05
+    done
     if [ -n "${STUB_TIMING_HOOKED:-}" ]; then
         echo "stub-binary: 1 call from rcad_fuzz_timing reaches a memcmp-family hook outside SlowRun::is"
         exit 1
@@ -11465,10 +11477,13 @@ check-fuzz-overnight-selftest:
 
     # Thirty-five: a pause that ends at or after the deadline ends the night
     # where it starts. Nothing waits for its end, and nothing runs after it.
+    # Seven seconds before the pause, the most a window of eight allows: the
+    # build and two checks come out of it, and took three seconds under load
+    # (Q3062).
     thirty_five() {
     : >"$dir/log"
     t0=$(date +%s)
-    pause_from=$(( t0 + 5 ))
+    pause_from=$(( t0 + 7 ))
     pause_until=$(( t0 + 60 ))
     run 8 "@$pause_from" "@$pause_until" \
         || fail "a night whose pause outlasts it failed: $(cat "$dir/out")"
@@ -11559,6 +11574,25 @@ check-fuzz-overnight-selftest:
         || fail "a build that wrote no timing rlib did not read as a build failure in the summary"
     [ "$(grep -c 'fuzz run' "$dir/log")" -eq 0 ] \
         || fail "the night fuzzed targets with no timing rlib to check"
+    }
+
+    # Forty-two (Q3062): less than a second before the pause is not time to
+    # fuzz. The build waits until half a second into the last second before
+    # the pause, where a clock rounded down still reads a whole second left
+    # and the targets, given one second, would run into the pause. Nothing
+    # may run inside it.
+    forty_two() {
+    : >"$dir/log"
+    t0=$(date +%s)
+    pause_from=$(( t0 + 4 ))
+    pause_until=$(( t0 + 6 ))
+    STUB_CHECK_UNTIL_MS=$(( (t0 + 3) * 1000 + 500 )) run 8 "@$pause_from" "@$pause_until" \
+        || fail "a night with half a second before its pause failed: $(cat "$dir/out")"
+    grep -q 'started inside the pause' "$dir/out" \
+        || fail "a night with half a second before its pause did not wait for the pause: $(cat "$dir/out")"
+    got=$(when_against_the_pause)
+    ! grep -q inside <<<"$got" \
+        || fail "a night with half a second before its pause ran into it; launches and stops, against it: $(tr '\n' ',' <<<"$got")"
     }
 
     # Forty: this build's rlib is clean and a sancov one is left under
@@ -11710,7 +11744,7 @@ check-fuzz-overnight-selftest:
         fourteen fifteen seventeen eighteen nineteen twenty twenty_one \
         twenty_two twenty_four twenty_five twenty_seven twenty_eight \
         thirty thirty_one thirty_two thirty_four thirty_five thirty_six thirty_seven \
-        thirty_eight thirty_nine
+        thirty_eight thirty_nine forty_two
     settle
     overlap 5
     rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*-"$tag"
