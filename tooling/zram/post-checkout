@@ -10,8 +10,8 @@
 # that script has none, and is left as it is.
 #
 # It always exits 0, so it can never fail a checkout. The script asks cargo for
-# two build directories, about a tenth of a second, and prints what it made;
-# that goes nowhere, and only a link it could not make is said, on stderr.
+# the tree's build directory, about a tenth of a second, and prints what it
+# made; that goes nowhere, and only a link it could not make is said, on stderr.
 case "$1" in
 0000000000000000000000000000000000000000 | 0000000000000000000000000000000000000000000000000000000000000000) ;;
 *) exit 0 ;;

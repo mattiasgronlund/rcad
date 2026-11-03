@@ -15298,10 +15298,10 @@ check-clean-targets-selftest:
 # disk, or installs the post-checkout hook that does it on `git worktree add`
 # (docs/decisions.d/476).
 #
-# `links` runs `tooling/zram/link-targets.sh` on `tree`: target/debug,
-# target/release and fuzz/target/x86_64-unknown-linux-gnu/release become links
-# to `<artifacts>/<xx>/<hash>/...`, keyed by the tree's build directory under
-# `targets`, and a link whose destination is gone gets it made again. A
+# `links` runs `tooling/zram/link-targets.sh` on `tree`: target/debug and
+# target/release become links to `<artifacts>/<xx>/<hash>/...`, keyed by the
+# tree's build directory under `targets`, and a link whose destination is gone
+# gets it made again. The fuzz workspace's directory is not linked yet (476.5). A
 # `cargo clean` deletes the links (476.5), and the build after it puts a real
 # target/debug back on the SSD, so run this in between.
 #
@@ -15310,7 +15310,7 @@ check-clean-targets-selftest:
 # and no gate step needs the hook installed. It refuses a post-checkout hook
 # that is not rcad's, which it would otherwise destroy, and a repository with
 # `core.hooksPath` set, where git would never run the copy.
-[doc("Link target/debug, target/release and the fuzz release directory to the zram disk, or install the post-checkout hook that does it on git worktree add.")]
+[doc("Link target/debug and target/release to the zram disk, or install the post-checkout hook that does it on git worktree add.")]
 link-targets-to-zram action="links" tree="." targets="/var/cache/zram/targets" artifacts="/var/cache/zram/artifacts":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -15371,7 +15371,6 @@ check-link-targets-to-zram-selftest:
     printf '%s\n' '#!/usr/bin/env bash' \
         '[ -z "${STUB_CARGO_FAILS:-}" ] || exit 101' \
         'key=ab/0123456789abcd' \
-        'if [ "$1" = +nightly ]; then shift; key=cd/fedcba98765432; fi' \
         '[ "$1" = metadata ] || exit 101' \
         'build="$RCAD_ZRAM_TARGETS/$key"' \
         '[ -z "${STUB_BUILD_DIR_UNSET:-}" ] || build="$PWD/target"' \
@@ -15392,15 +15391,19 @@ check-link-targets-to-zram-selftest:
         [ "$(readlink "$1/$2" || true)" = "$art/$3" ] || fail "$4: $1/$2 is not a link to $art/$3"
         [ -d "$art/$3" ] || fail "$4: the destination $art/$3 of $1/$2 was not made"
     }
+    # The fuzz workspace's directory stays on the SSD until
+    # check-fuzz-overnight-selftest keeps its fixtures somewhere else: they
+    # need ext4's directory order, and the zram disk is xfs (476.5).
     linked_all() {
         linked "$1" target/debug ab/0123456789abcd/debug "$2"
         linked "$1" target/release ab/0123456789abcd/release "$2"
-        linked "$1" fuzz/target/x86_64-unknown-linux-gnu/release cd/fedcba98765432/x86_64-unknown-linux-gnu/release "$2"
         [ -d "$1/target" ] && [ ! -L "$1/target" ] \
             || fail "$2: $1/target is not a real directory, and the tooling keeps what it writes there"
+        [ ! -e "$1/fuzz/target" ] && [ ! -L "$1/fuzz/target" ] \
+            || fail "$2: something was made under $1/fuzz/target, where check-fuzz-overnight-selftest needs the SSD's directory order (476.5)"
     }
     unlinked() {
-        for at in target/debug target/release fuzz/target/x86_64-unknown-linux-gnu/release; do
+        for at in target/debug target/release fuzz/target; do
             [ ! -e "$1/$at" ] && [ ! -L "$1/$at" ] || fail "$2: $1/$at was made"
         done
     }

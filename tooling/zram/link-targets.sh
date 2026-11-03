@@ -6,20 +6,20 @@
 #   link-targets.sh <tree>
 #
 # `target/` itself stays a real directory on disk: the tooling keeps what it
-# writes there, and a reboot empties the zram disk (476.2). Only these go:
+# writes there, and a reboot empties the zram disk (476.2). Only the root
+# workspace's `target/debug` and `target/release` go. 476.5 says how that list
+# was read off a build, and why the fuzz workspace's
+# `fuzz/target/x86_64-unknown-linux-gnu/release` is not on it yet: a selftest
+# keeps fixtures there that need the SSD's ext4 directory order, and the zram
+# disk is xfs.
 #
-#   target/debug, target/release                  the root workspace
-#   fuzz/target/x86_64-unknown-linux-gnu/release  the fuzz workspace (474.9)
-#
-# 476.5 says how that list was read off a build.
-#
-# Each workspace's links go under `<artifacts>/<xx>/<hash>`, the last two parts
-# of the build directory `cargo metadata` names, so the key pairs with
-# `<targets>/<xx>/<hash>` the way inari's whole-`target` links do, and one boot
-# step makes the destinations of both (476.3). A workspace whose build
-# directory is not `<targets>/<xx>/<hash>` is left alone: with build-dir unset,
-# as on CI, cargo builds into `target/` and a link would only move the build's
-# copies away from it.
+# The links go under `<artifacts>/<xx>/<hash>`, the last two parts of the build
+# directory `cargo metadata` names, so the key pairs with `<targets>/<xx>/<hash>`
+# the way inari's whole-`target` links do, and one boot step makes the
+# destinations of both (476.3). A tree whose build directory is not
+# `<targets>/<xx>/<hash>` is left alone: with build-dir unset, as on CI, cargo
+# builds into `target/` and a link would only move the build's copies away from
+# it.
 #
 # A directory that is already a real directory is reported and kept; replacing
 # one is Q3070's, under clean-targets' rules for idle trees. A link whose
@@ -30,8 +30,7 @@
 # selftest can point both at a scratch directory.
 #
 # Prints one line per directory to stdout. Exits 1 only when it could not make
-# a link or a destination it should have; a workspace it skips is not a
-# failure.
+# a link or a destination it should have; a tree it skips is not a failure.
 set -uo pipefail
 
 tree=${1:?usage: link-targets.sh <tree>}
@@ -41,15 +40,14 @@ artifacts=${RCAD_ZRAM_ARTIFACTS:-/var/cache/zram/artifacts}
 failed=0
 
 link_workspace() {
-    local workspace=$1 toolchain=$2
-    shift 2
-    local where=$tree${workspace:+/$workspace}
+    local where=$1
+    shift
     [ -f "$where/Cargo.toml" ] || { echo "skipped $where: no Cargo.toml"; return; }
     local metadata
     # The rustup proxy installs a missing pinned toolchain before it runs
     # anything, which on a hook would be a download inside `git worktree add`.
     # So no install, and a bound on the wait.
-    metadata=$(cd "$where" && RUSTUP_AUTO_INSTALL=0 timeout 20 cargo ${toolchain:+"$toolchain"} metadata \
+    metadata=$(cd "$where" && RUSTUP_AUTO_INSTALL=0 timeout 20 cargo metadata \
         --format-version 1 --no-deps --offline 2>/dev/null) || {
         echo "skipped $where: cargo metadata failed, so its build directory is not known"
         return
@@ -121,6 +119,5 @@ link_one() {
     fi
 }
 
-link_workspace "" "" debug release
-link_workspace fuzz +nightly x86_64-unknown-linux-gnu/release
+link_workspace "$tree" debug release
 exit "$failed"
