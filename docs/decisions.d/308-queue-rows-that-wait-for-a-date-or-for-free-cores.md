@@ -115,8 +115,8 @@ old, fixed summer-time window (which would have ended at 06:10Z) but inside
 the shifted one (23:10–07:10Z), so it only passes when the code reads the
 zone rather than keeping summer time's offset. A fourth point, 07:30:00Z the
 same day (outside even the shifted window), was checked by hand in a
-throwaway script, `target/check-night.sh`, and is not part of the committed
-fixture.
+throwaway script, `target/check-night.sh`, and was not part of the committed
+fixture until §308.8 pinned it for a night row.
 
 ### 308.5 Why this is not §254's and §296's 21:50–06:00Z
 
@@ -183,3 +183,106 @@ would fail the same way, but only `mixed-come` was observed failing there.
   Q733, `cores:2` on Q187, `cores:8` on Q243, `cores:1` on Q2390. Q12 has
   none, since it must run beside the night fuzz to see its load. Q174, the
   row a date was first meant for, was done before the merge.
+
+### 308.8 A row that runs only by night
+
+*Queue row Q3150, 2026-11-04. Lane `lane-q3150-a-row-that-runs-only-by-night`
+off `21aa4650`, in three relays. Q12 must run beside the night fuzz to see its
+load, which is why §308.7 left it without a `cores:` entry, but nothing in the
+file said so: a daytime fill offered it first for its Sonnet slot, and the
+dispatcher passed it over by hand (`8f35c06a`).*
+
+**The entry and its verb.** A write set may hold the word `night`
+(`NIGHT_ENTRY` in `queue.py`). It says when the row runs, not what it writes.
+`just queue night <id> on|off` sets it on an open row or takes it off
+(`night_step`, built the way `cores_step` is). `on` refuses a row that has it
+already, `off` a row that has none, and both refuse a closed row. Taking it off
+a write set that holds nothing else leaves `-`. `add` and `writes` accept it
+through `parsed_write_set`, and `_queue-check`'s `entry()` accepts it before
+it falls through to `path#item`, so it is never looked for among the tracked
+files.
+
+**It never meets a path.** Like `cores:`, `night` matches only itself.
+`entry_holds` in `queue.py` compares it as exact text, so `narrow` keeps it,
+and `entries_meet` in the fill returns false when either side is `night`, so
+two night rows never hold each other back on that word.
+
+**It is refused beside `cores:`.** The night fuzz holds every thread in its
+window (§308.3), so a row holding both could never fit and would never be
+offered. `refuse_night_beside_cores` refuses the pair in `cores`, `night`,
+`add` and `writes`, and `_queue-check` refuses it in the file in the same
+words:
+
+```
+T1: night and cores:2 cannot share a write set: a night row runs beside the night fuzz, which holds every thread then (§308.8)
+```
+
+**The fill passes a night row over by day.** `night_skip(i, say)` is checked
+first in `blocked`, ahead of `cores_fit_skip`. While `night` (§308.4) says the
+clock sits outside the window, a row whose write set holds `night` is skipped
+with a line that names the next window in UTC:
+
+```
+skip Q12 (tier 2.5): its night entry fits only inside the night fuzz's window, 23:10Z to 07:10Z
+```
+
+The next window starts at today's local 00:10 when the clock has not reached
+it yet, and at tomorrow's otherwise. Tomorrow's local date is read from today's
+local noon plus 86400 seconds, not from now plus 86400 seconds: the day of the
+spring change is 23 hours long, so at 23:30 local on 2027-03-27 now plus a day
+lands at 00:30 on 03-29, and the line would name the window after the one that
+comes next. The window ends at its start plus `fuzz-overnight`'s 28800
+seconds, as §308.4 has it, since that is how long the timer's run lasts.
+
+**`meets` is exempt.** `take`, `narrow` and `writes` ask the fill's `meets`
+mode whether a write set meets another hold (`the_hold_it_meets` in
+`queue.py`). That question is about paths, and the clock must not refuse it: a
+lane that took a night row at 05:00Z narrows its hold after the window has
+closed. So `night_skip` returns 0 in `meets` mode.
+
+**The queue page reads the line.** `render.py`'s `NIGHT_LINE` and
+`parse_blocked_line` read it as `shared` `"night"`, with the window and no
+holders, and `meeting_reason` words it as "waits for the night: `night` runs
+only inside the night fuzz's window, ...". Without them `parse_blocked_line`'s
+assert would fire on every daytime render with a night row open.
+
+**The tests.**
+
+- `check-queue-selftest`: `passes night` and `refused night-cores` in the
+  shape check. The `corenight` fixture gains Q2, a `todo` night row, and Q3, a
+  running night row whose entry Q2 must not meet, and drives them at eight
+  times. 2026-10-19T02:00Z is night, so Q2 is taken, and 12:00Z is day, so it
+  is skipped naming 22:10Z to 06:10Z. 2026-10-26T06:30Z sits inside only the
+  window the 10-25 change moved, so Q2 is taken, and 07:30Z is just after it,
+  so Q2 is skipped naming 23:10Z to 07:10Z: the point §308.4 checked only by
+  hand. 2026-10-25T22:30Z is day after the change, though summer time's offset
+  would put it in the window, and 23:20Z is night. 2026-10-24T22:05Z, local
+  00:05 on the change day, names the window that starts five minutes later,
+  22:10Z to 06:10Z, and not the one after it. 2027-03-27T22:30Z, the evening
+  before the spring change, names that night's window, 23:10Z to 07:10Z, which
+  now plus a day would step past. Then `queue meets` by day: a write set of
+  `night` alone against a hold on `night,docs/a.md` meets nothing, and
+  `night,docs/a.md` meets it on `docs/a.md` alone.
+- `check-queue-api-selftest`'s Q3150 block, in a worktree of its own: `night
+  on` and `off`, with the write set each reports and writes; each refusal
+  above (a second `on`, a second `off`, a switch that is neither, a closed row,
+  `cores` beside `night` and `night` beside `cores:`, in `add` and in
+  `writes`); and `queue blocked` by day and by night on the copy it wrote.
+- `check-queue-page-selftest`'s `night_check`: the line read by
+  `parse_blocked_line` and worded by `meeting_reason`. Run against the base's
+  `render.py`, in a `git archive` copy, it fails on the assert:
+  `` `just queue blocked` printed a line this cannot read ``.
+
+**What this leaves.**
+
+- Q12 is the row this was built for. A lane runs no queue verb on the queue
+  (Q983), so the dispatcher runs `just queue night Q12 on` once this is on
+  main.
+- `cores` cannot take a `cores:` entry off, though §308.2, `cores_step`'s
+  docstring and `queue.py`'s usage say it removes one: it refuses everything
+  but a count or `all`, so only `writes` can. Filed as a row of its own.
+- `narrowed` in `queue.py` hands the fill a todo row's latest `writes` from
+  the claims file in place of the file's column whenever the two differ. So a
+  `night on` or a `cores` run on a todo row after a `writes` would, by reading
+  the code, be hidden from the fill. Nobody has run it; filed as a row of its
+  own. Q12 has no `writes`, `narrow` or take event in the claims file.

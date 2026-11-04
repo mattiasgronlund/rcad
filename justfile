@@ -17211,9 +17211,10 @@ _queue-rows file:
 # `tooling/queue/families.py`.
 #
 # **The verbs change the file, one row at a time** (§263): `take`, `add`,
-# `done`, `drop`, `park`, `after`, `rank`, `tier`, `tag`, `pick`, `pin` and
-# `unpin`, with `show`, `running` and `families` to read, and `narrow`, which changes a hold
-# and no row. `tier` moves an open row to another tier and, like
+# `done`, `drop`, `park`, `after`, `cores`, `night`, `rank`, `tier`, `tag`,
+# `pick`, `pin` and `unpin`, with `show`, `running` and `families` to read, and
+# `narrow`, which changes a hold and no row. `cores` and `night` set an entry
+# of the write set that names no path (§308, §308.8). `tier` moves an open row to another tier and, like
 # `add`, writes that tier's heading when the file has none (§307). `tag` sets,
 # replaces or removes a row's class or `small` (§352.2), and a class moves the
 # row to the tier it names (§403.4). `pin` and `unpin` are Mattias's alone
@@ -17265,7 +17266,8 @@ _queue-rows file:
 # running one's.
 #
 # **Every verb that writes — `take`, `add`, `done`, `drop`, `park`, `after`,
-# `rank`, `tier`, `tag`, `pick`, `pin`, `unpin`, `apply`, `narrow`, `writes`, `give`, `sweep`, `reword` — also runs `queue-page` after it**, so the page
+# `cores`, `night`, `rank`, `tier`, `tag`, `pick`, `pin`, `unpin`, `apply`,
+# `narrow`, `writes`, `give`, `sweep`, `reword` — also runs `queue-page` after it**, so the page
 # stays current as a side effect instead of needing its own trigger (Q254). Its
 # own exit code is what this returns; a render that fails says so on stderr and
 # fails nothing, since a bad page is not a reason to lose a queue write that
@@ -17276,7 +17278,7 @@ queue mode="" *args:
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|cores|rank|tier|tag|pick|pin|unpin|apply|narrow|writes|give|sweep|reword)
+        take|add|done|drop|park|after|cores|night|rank|tier|tag|pick|pin|unpin|apply|narrow|writes|give|sweep|reword)
             now_iso='{{ queue_now }}'
             [ -n "$now_iso" ] || now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
@@ -17312,6 +17314,7 @@ queue mode="" *args:
                 'just queue after <id> -                      a row that waits goes back to todo, for a row whose wait was dropped (§451)' \
                 'just queue give <id>                         give a take back: release the hold and restore the state take replaced; refuses while the branch has a tree or commits main lacks (§263.3, §263.4)' \
                 'just queue cores <id> <n>|all                set, in the write set, how many hardware threads the row pins while it runs (§308)' \
+                'just queue night <id> on|off                 set or take off the night entry: the fill offers the row only inside the night fuzz'"'"'s window, never beside cores: (§308.8)' \
                 'just queue rank <id> before <id>             move a row to sit just before another, in their shared tier' \
                 'just queue tier <id> <tier>                  move an open row to the foot of another tier' \
                 'just queue tag <id> <class>|small|-          set, replace or remove a row class or small mark' \
@@ -17384,9 +17387,19 @@ queue mode="" *args:
     night=0
     if [ "$now_epoch" -ge "$start_today" ] && [ "$now_epoch" -lt "$((start_today + 28800))" ]; then night=1; fi
     if [ "$now_epoch" -ge "$start_yesterday" ] && [ "$now_epoch" -lt "$((start_yesterday + 28800))" ]; then night=1; fi
+    # §308.8: the next window, in UTC, for a night row's skip line. Tomorrow's
+    # local date is read from today's noon plus a day, since now plus a day
+    # lands two dates on when the spring change makes a day 23 hours long.
+    noon_today=$(TZ=Europe/Stockholm date -d "$today_local 12:00:00" +%s)
+    tomorrow_local=$(TZ=Europe/Stockholm date -d "@$((noon_today + 86400))" +%Y-%m-%d)
+    start_tomorrow=$(TZ=Europe/Stockholm date -d "$tomorrow_local 00:10:00" +%s)
+    next_start=$start_today
+    [ "$now_epoch" -lt "$start_today" ] || next_start=$start_tomorrow
+    night_window="$(date -u -d "@$next_start" +%H:%MZ) to $(date -u -d "@$((next_start + 28800))" +%H:%MZ)"
     { printf '%s\n' "$rows"; [ -z "$elsewhere" ] || printf '%s\n' "$elsewhere"; [ -z "$narrowed" ] || printf '%s\n' "$narrowed"; } \
         | LC_ALL=C awk -v mode="$mode" -v n="$n" -v machine="$machine" -v cand_id="${2:-}" -v cand_ws="${3:-}" \
         -v families="$families" -v now_date="$now_date" -v threads="$threads" -v night="$night" \
+        -v night_window="$night_window" \
         -v slots='{{ queue_slots }}' -v bundle='{{ queue_bundle }}' -v file='{{ queue_file }}' \
         -v shared_files='{{ queue_shared_files }}' '
         BEGIN {
@@ -17670,6 +17683,7 @@ queue mode="" *args:
         # kept per shared path in `sharedcount`/`h1`/`h2`, not summed across
         # every path a pair meets on.
         function blocked(i, say,    j, k, p, sharedcount, h1, h2) {
+            if (night_skip(i, say)) return 1
             if (cores_fit_skip(i, say)) return 1
             for (j = 1; j <= r; j++)
                 if (kind[j] == "running" && sets_meet(ws[i], ws[j])) {
@@ -17743,6 +17757,20 @@ queue mode="" *args:
                 }
             return 0
         }
+        # §308.8: a `night` entry names no path either; it says the row runs
+        # only beside the night fuzz, so the fill passes it over by day. `meets`
+        # asks for the paths alone, so that take, narrow and writes by day are
+        # not refused for the clock.
+        function night_skip(i, say,    n, part, k) {
+            if (night || mode == "meets") return 0
+            n = split(ws[i], part, ",")
+            for (k = 1; k <= n; k++)
+                if (part[k] == "night") {
+                    if (say) printf "skip %s (tier %s): its night entry fits only inside the night fuzz\047s window, %s\n", id[i], tier[i], night_window
+                    return 1
+                }
+            return 0
+        }
         function take_bundle(m,    y, ids, allsonnet) {
             ids = ""
             allsonnet = 1
@@ -17775,7 +17803,7 @@ queue mode="" *args:
         function entries_meet(x, y,    px, py, ix, iy, h, m) {
             shared_match = 0
             if (x == "-" || y == "-") return 0
-            if (x ~ /^cores:/ || y ~ /^cores:/) return 0
+            if (x ~ /^cores:/ || y ~ /^cores:/ || x == "night" || y == "night") return 0
             px = x; ix = ""; h = index(x, "#")
             if (h) { px = substr(x, 1, h - 1); ix = substr(x, h + 1) }
             py = y; iy = ""; h = index(y, "#")
@@ -17920,6 +17948,12 @@ queue-page:
 # out by hand from the fixture logs. A second render then checks the fuzz
 # cache both ways: a log left alone is served from it, a log that grew is read
 # again.
+#
+# Last, skip lines are fed straight to parse_blocked_line and meeting_reason,
+# which must read each and word it for the table: both `cores:` forms (§308),
+# the pinned-and-skipped-above line and the shared line (§430.7), and the
+# `night` line (§308.8), which hangs on the real clock and so cannot come from
+# a render of the scratch repository by day and by night alike.
 [private]
 [doc("queue-page's charts, tables, row and input pages and fuzzing section, checked against hand counts of a scratch repository and fixture fuzz nights.")]
 check-queue-page-selftest:
@@ -18690,7 +18724,38 @@ check-queue-page-selftest:
     ) || fail "parse_blocked_line or meeting_reason could not read the pinned-and-skipped-above line §430.7"
     [ "$pinned_check" = "ok" ] || fail "the pinned-skip check did not print ok: $pinned_check"
 
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the Queue section counts each tier's ready and blocked rows by model and lists them in runs, every Q id that is a row links to that row's page, which gives its tier, class, write set, text, where it came from and what came from it, every other row and input linked to it and its commits, every fuzz target and STEP file a row is linked to has a page of its own, the lineage cache serves a kept commit and works out a new one, the fuzzing section matches its fixture nights, both forms of a cores-skip line read as a row waiting for threads, and a row whose write set meets a pinned row already skipped reads as pinned and skipped above too"
+    # Q3150 (§308.8): the fill's night_skip prints a fifth shape, for a row
+    # whose `night` entry keeps it for the night fuzz's window while the clock
+    # sits outside it. It names a window and no holder, so it needs its own
+    # regex (NIGHT_LINE) and branch; without them parse_blocked_line's assert
+    # fires on every daytime render that has a night row open.
+    night_check=$(python3 - '{{ justfile_directory() }}/tooling/queue-page' <<'PY'
+    import sys
+
+    sys.path.insert(0, sys.argv[1])
+    import render
+
+
+    class Links:
+        def ref(self, row_id):
+            return f"<{row_id}>"
+
+
+    night = render.parse_blocked_line(
+        "skip Q12 (tier 2.5): its night entry fits only inside the night fuzz's window, 22:10Z to 06:10Z")
+    assert night == {
+        "id": "Q12", "mine": "night", "shared": "night", "window": "22:10Z to 06:10Z", "holders": [],
+    }, night
+    assert render.meeting_reason(night, Links()) == (
+        "waits for the night: <code>night</code> runs only inside the night fuzz's window, 22:10Z to 06:10Z"
+    ), render.meeting_reason(night, Links())
+
+    print("ok")
+    PY
+    ) || fail "parse_blocked_line or meeting_reason could not read the night-skip line §308.8"
+    [ "$night_check" = "ok" ] || fail "the night-skip check did not print ok: $night_check"
+
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the Queue section counts each tier's ready and blocked rows by model and lists them in runs, every Q id that is a row links to that row's page, which gives its tier, class, write set, text, where it came from and what came from it, every other row and input linked to it and its commits, every fuzz target and STEP file a row is linked to has a page of its own, the lineage cache serves a kept commit and works out a new one, the fuzzing section matches its fixture nights, both forms of a cores-skip line read as a row waiting for threads, a row whose write set meets a pinned row already skipped reads as pinned and skipped above, and the night-skip line reads as a row waiting for the night too"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
@@ -18852,7 +18917,13 @@ _queue-check file decisions:
             } else if (model != "opus" && model != "sonnet") err(line, id ": model \"" model "\" is not opus or sonnet")
             if (ws != "-") {
                 m = split(ws, e, ",")
-                for (i = 1; i <= m; i++) entry(line, id, e[i], closed)
+                hasnight = 0; hascores = ""
+                for (i = 1; i <= m; i++) {
+                    entry(line, id, e[i], closed)
+                    if (e[i] == "night") hasnight = 1
+                    if (e[i] ~ /^cores:/) hascores = e[i]
+                }
+                if (hasnight && hascores != "") err(line, id ": night and " hascores " cannot share a write set: a night row runs beside the night fuzz, which holds every thread then (§308.8)")
             }
             n = split(what, w, " ")
             if (n == 0 || w[n] !~ /^§[0-9]+(\.[0-9]+)?$/) err(line, id ": the description does not end in a §N or §N.M")
@@ -18952,6 +19023,7 @@ _queue-check file decisions:
         function entry(line, id, x, closed,    p, h) {
             if (x == "-") { err(line, id ": \"-\" stands alone in a write set, and here it has company"); return }
             if (x ~ /^cores:([1-9][0-9]*|all)$/) return
+            if (x == "night") return
             if (x !~ /^[A-Za-z0-9._\/-]+(#[A-Za-z0-9_-]+)?$/ || x ~ /^\// || x ~ /\/\//) {
                 err(line, id ": \"" x "\" is not a path, a directory ending in /, or path#item")
                 return
@@ -19037,7 +19109,11 @@ _queue-check file decisions:
 # clock and thread count: a `cores:` row that fits the machine's free threads
 # and one that does not, `cores:all` beside a row that holds some threads and
 # beside none, and the night-fuzz window holding every thread, moved an hour
-# later in UTC once Stockholm leaves summer time.
+# later in UTC once Stockholm leaves summer time. §308.8 adds a `night` entry,
+# accepted alone and refused beside `cores:`; and a night row taken inside the
+# window and skipped outside it, naming the next window in UTC, on both sides
+# of the window before and after the change of 2026-10-25 and on the evening
+# before the spring change of 2027-03-28, a running night row never meeting it.
 [private]
 [doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
 check-queue-selftest:
@@ -19262,6 +19338,12 @@ check-queue-selftest:
         'is not a path, a directory ending in /, or path#item'
     passes  cores-all   's/justfile#queue  pinned/justfile#queue,cores:all  pinned/' \
         'a row with a cores:all entry in its write set was refused'
+    # §308.8 (Q3150): a night entry, read as a word and not as a path, and
+    # refused beside a cores: entry, since the night fuzz holds every thread.
+    passes  night       's/justfile#queue  pinned/justfile#queue,night  pinned/' \
+        'a row with a night entry in its write set was refused'
+    refused night-cores 's/justfile#queue  pinned/justfile#queue,night,cores:2  pinned/' \
+        'T1: night and cores:2 cannot share a write set: a night row runs beside the night fuzz, which holds every thread then (§308.8)'
 
     fence() { { echo '```'; cat; echo '```'; } > "$dir/$1.md"; }
     drive() {
@@ -19809,8 +19891,19 @@ check-queue-selftest:
     # 2026-10-26 sits in the second only if the code reads the zone rather
     # than keeping summer time's offset, since 06:30Z was outside the window
     # before the clocks changed.
+    #
+    # §308.8 (Q3150): Q2 runs only by night, and Q3, running, has the same
+    # entry, which never meets Q2's. By night Q1 is skipped and Q2 fits; by day
+    # Q2 is skipped with the next window named in UTC. 22:30Z on 2026-10-25 is
+    # day, though summer time's offset would put it inside the window, and
+    # 22:05Z on 2026-10-24, local 00:05 on the change day, names the window that
+    # starts five minutes later rather than the one after it. 22:30Z on
+    # 2027-03-27, the evening before the spring change, names that night's
+    # window, which a day of 86400 seconds would step past.
     fence corenight <<'MD'
     Q1  1  todo  opus  cores:2  a row that pins 2 of the machine's threads §230
+    Q2  1  todo  opus  night  a row that runs only beside the night fuzz §230
+    Q3  1  lane:lane-q3  opus  night  a running row beside the night fuzz too, whose night Q2 never meets §230
     MD
     driveclock corenight 4 2026-10-19T02:00:00Z blocked
     [ "$got" = "skip Q1 (tier 1): its cores:2 does not fit the 4 threads of the machine: the night fuzz holds them" ] \
@@ -19820,6 +19913,34 @@ check-queue-selftest:
     driveclock corenight 4 2026-10-26T06:30:00Z blocked
     [ "$got" = "skip Q1 (tier 1): its cores:2 does not fit the 4 threads of the machine: the night fuzz holds them" ] \
         || fail "the night window did not move an hour later in UTC once Stockholm left summer time on 2026-10-25"
+    summer="skip Q2 (tier 1): its night entry fits only inside the night fuzz's window, 22:10Z to 06:10Z"
+    winter="skip Q2 (tier 1): its night entry fits only inside the night fuzz's window, 23:10Z to 07:10Z"
+    driveclock corenight 4 2026-10-19T02:00:00Z next 1
+    [ "$(takes)" = "Q2 " ] || fail "a night row inside the night-fuzz window, in summer time, was not taken"
+    driveclock corenight 4 2026-10-19T12:00:00Z blocked
+    [ "$got" = "$summer" ] || fail "a night row by day, in summer time, was not skipped naming the next window"
+    driveclock corenight 4 2026-10-26T06:30:00Z next 1
+    [ "$(takes)" = "Q2 " ] || fail "a night row inside only the window moved an hour later on 2026-10-25 was not taken"
+    driveclock corenight 4 2026-10-26T07:30:00Z blocked
+    [ "$got" = "$winter" ] || fail "a night row just after the moved window ends was not skipped naming the moved window"
+    driveclock corenight 4 2026-10-25T22:30:00Z blocked
+    [ "$got" = "$winter" ] || fail "a night row at 22:30Z after the clocks changed was not skipped, as if summer time still held"
+    driveclock corenight 4 2026-10-25T23:20:00Z next 1
+    [ "$(takes)" = "Q2 " ] || fail "a night row inside the first window after the clocks changed was not taken"
+    driveclock corenight 4 2026-10-24T22:05:00Z blocked
+    [ "$got" = "$summer" ] || fail "a night row five minutes before the window of the change day was not skipped naming that window"
+    driveclock corenight 4 2027-03-27T22:30:00Z blocked
+    [ "$got" = "$winter" ] || fail "a night row the evening before the spring change was not skipped naming that night's window, rather than the night after"
+    # `meets`, which take, narrow and writes ask, reads paths alone, so by day
+    # a night entry neither skips the row nor meets another hold's night.
+    nightheld=$(printf 'R\037elsewhere\037\0376\037Q8\037-\037lane:lane-q8\037-\037night,docs/a.md\037(held in /a/tree)\037-\037Q8')
+    got=$("$j" --set queue_now 2026-10-19T12:00:00Z queue meets Q9 night <<<"$nightheld" 2>&1) \
+        || fail "queue meets failed on a night write set by day"
+    [ -z "$got" ] || fail "meets by day passed a night write set over for the clock, or met another hold's night"
+    got=$("$j" --set queue_now 2026-10-19T12:00:00Z queue meets Q9 night,docs/a.md <<<"$nightheld" 2>&1) \
+        || fail "queue meets failed on a night write set with a path by day"
+    [ "$got" = "skip Q9 (tier -): its docs/a.md meets Q8's docs/a.md, held elsewhere by lane:lane-q8" ] \
+        || fail "meets by day did not meet on the path a night write set shares with another hold"
 
     fence blocked <<'MD'
     Q1  1  lane:lane-q1  opus  docs/a.md  running §230
@@ -20431,7 +20552,11 @@ check-queue-merge-driver:
 # after: row inside one apply once every row it still waits on is
 # lane:<that same branch>, set by an earlier take step of the same apply,
 # and still refusing it when that earlier take landed on a different
-# branch. The
+# branch. Q3150's: `night` setting and taking off a row's night entry,
+# refusing it twice, a switch that is neither on nor off, a closed row and a
+# `cores:` entry beside it, as `cores`, `add` and `writes` refuse the same
+# pair; and `blocked` skipping the row by day, naming the next window, and
+# not by night (§308.8). The
 # hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
@@ -21652,6 +21777,54 @@ check-queue-api-selftest:
     got=$(q "$header_wt" apply header "$heading_header" 2>&1) && fail "header accepted a replacement with its own '## ' heading"
     grep -qF "the new header may hold no fenced block and no '## ' heading of its own" <<<"$got" \
         || fail "header did not refuse a heading in the new text"
+
+    # Q3150 (§308.8): `night` sets and takes off a row's night entry, refused
+    # beside a cores: entry in the verb, in `add` and in `writes`; the fill
+    # skips the row by day, naming the next window in UTC, and not by night.
+    night_wt="$root/rcad-worktrees/night"
+    g "$hub" worktree add -q -b night "$night_wt" main
+    night_row=$(q "$night_wt" add 2 opus - "from/- a row that runs only beside the night fuzz §230") \
+        || fail "add for the night row failed"
+    got=$(q "$night_wt" night "$night_row" on 2>&1) || fail "night on refused an open row"
+    grep -qxF "$night_row: write set - -> night" <<<"$got" || fail "night on did not report the write set it set"
+    got=$(awk -v id="$night_row" '$1 == id { print $5 }' "$night_wt/docs/queue.md")
+    [ "$got" = night ] || fail "night on did not write night into the row's write set"
+    got=$(check "$night_wt") || fail "the file night on wrote fails check-queue"
+    got=$(q "$night_wt" night "$night_row" on 2>&1) && fail "night on accepted a row that runs only by night already"
+    grep -qF "$night_row runs only by night already" <<<"$got" \
+        || fail "a second night on did not say the row runs only by night already"
+    got=$(q "$night_wt" cores "$night_row" 2 2>&1) && fail "cores set a count beside a night entry"
+    grep -qF "night and cores:2 cannot share a write set" <<<"$got" \
+        || fail "cores beside a night entry did not say why it was refused"
+    blocked_at() { "$j" --justfile '{{ justfile() }}' --working-directory "$night_wt" --set queue_slots 6 --set queue_now "$1" queue blocked 2>&1; }
+    got=$(blocked_at 2026-10-19T12:00:00Z) || fail "blocked failed by day on the night row's copy"
+    grep -qxF "skip $night_row (tier 2): its night entry fits only inside the night fuzz's window, 22:10Z to 06:10Z" <<<"$got" \
+        || fail "blocked by day did not skip the night row naming the next window"
+    got=$(blocked_at 2026-10-19T02:00:00Z) || fail "blocked failed by night on the night row's copy"
+    grep -qF "skip $night_row " <<<"$got" && fail "blocked by night skipped the night row"
+    got=$(q "$night_wt" night "$night_row" off 2>&1) || fail "night off refused a row with a night entry"
+    grep -qxF "$night_row: write set night -> -" <<<"$got" || fail "night off did not report the write set it left"
+    got=$(q "$night_wt" night "$night_row" off 2>&1) && fail "night off accepted a row with no night entry"
+    grep -qF "$night_row has no night entry" <<<"$got" || fail "a second night off did not say the row has no night entry"
+    got=$(q "$night_wt" night "$night_row" maybe 2>&1) && fail "night accepted maybe"
+    grep -qF "'maybe' is not on or off" <<<"$got" || fail "night did not refuse a switch that is neither on nor off"
+    got=$(q "$night_wt" cores "$night_row" 2 2>&1) || fail "cores refused a row once its night entry was off"
+    got=$(q "$night_wt" night "$night_row" on 2>&1) && fail "night on set the entry beside a cores: entry"
+    grep -qF "night and cores:2 cannot share a write set" <<<"$got" \
+        || fail "night on beside cores: did not say why it was refused"
+    got=$(q "$night_wt" night T1 on 2>&1) && fail "night on changed a closed row"
+    grep -qF "T1 is closed" <<<"$got" || fail "night on did not refuse T1 by name"
+    got=$(q "$night_wt" add 2 opus 'docs/a.md,night' "from/- a row on a file that runs only by night §230" 2>&1) \
+        || fail "add refused a write set with a night entry beside a path"
+    got=$(q "$night_wt" add 2 opus 'night,cores:2' "from/- a night row that pins threads §230" 2>&1) \
+        && fail "add accepted night beside cores:2"
+    grep -qF "night and cores:2 cannot share a write set" <<<"$got" \
+        || fail "add did not say why night beside cores:2 was refused"
+    got=$(q "$night_wt" writes "$night_row" 'docs/a.md,night,cores:1' 2>&1) && fail "writes accepted night beside cores:1"
+    grep -qF "night and cores:1 cannot share a write set" <<<"$got" \
+        || fail "writes did not say why night beside cores:1 was refused"
+    got=$(q "$night_wt" writes "$night_row" night 2>&1) || fail "writes refused a night entry"
+    got=$(check "$night_wt") || fail "the file the night cases wrote fails check-queue"
 
     # §309.3: the lock must stay held for the whole batch, not only within
     # each step. The §309.3.2 case above shows a batch's own claims events

@@ -79,13 +79,14 @@ import lineage  # noqa: E402
 
 QUEUE_PATH = "docs/queue.md"
 CLOSED_ROWS_SHOWN = 12
-# The four lines `just queue blocked` prints: a row's path meets a running
+# The five lines `just queue blocked` prints: a row's path meets a running
 # lane's or a row held elsewhere's, or meets a pinned row that one of those
 # already holds back (§430.7), or it is one of `queue_shared_files` and two
 # holds already have it (§424.4), or its `cores:` entry does not fit the
-# machine's free threads (§308). The blocked mode takes no row, so none of the
-# four names a row taken above; only the `cores:` one can, since that hold is
-# a sum, not a path.
+# machine's free threads (§308), or its `night` entry keeps it for the night
+# fuzz's window and the clock sits outside it (§308.8). The blocked mode takes
+# no row, so none of the path lines names a row taken above; only the `cores:`
+# one can, since that hold is a sum, not a path.
 MEETS_LINE = re.compile(r"^skip (\S+) \(tier (\S+)\): its (\S+) meets (\S+)'s (\S+), held (by|elsewhere by) (\S+)$")
 PINNED_LINE = re.compile(r"^skip (\S+) \(tier (\S+)\): its (\S+) meets (\S+)'s (\S+), pinned and skipped above$")
 SHARED_LINE = re.compile(r"^skip (\S+) \(tier (\S+)\): its (\S+) is shared, and (\S.*\)) and (\S.*\)) already hold it$")
@@ -100,6 +101,9 @@ CORES_LINE = re.compile(
     r"^skip (\S+) \(tier (\S+)\): its cores:(\S+) does not fit the (\d+) threads of the machine: (.+) holds them$")
 CORES_HELD_ITEM = re.compile(r"^(\S+) \(held (by|elsewhere by) (\S+)\)$")
 CORES_TAKEN_ITEM = re.compile(r"^(\S+) \(taken above\)$")
+NIGHT_LINE = re.compile(
+    r"^skip (\S+) \(tier (\S+)\): its night entry fits only inside the night fuzz's window, "
+    r"(\d\d:\d\dZ to \d\d:\d\dZ)$")
 ANY_ROW_ID = re.compile(r"^[TDQ][0-9]+$")
 ROW_REF = re.compile(r"(?<![0-9A-Za-z])Q[0-9]+(?![0-9A-Za-z])")
 
@@ -517,11 +521,13 @@ def blocked_lines(tree):
 def parse_blocked_line(line):
     """One line of `just queue blocked`'s output, as a dict the rest of this module reads.
 
-    `shared` tells the four shapes apart: `False` for one hold met, whether
+    `shared` tells the five shapes apart: `False` for one hold met, whether
     that hold is a running lane, a row held elsewhere or a pinned row already
-    skipped, `True` for a shared path two holds already have, and the string
+    skipped, `True` for a shared path two holds already have, the string
     `"cores"` for a `cores:` entry that does not fit the machine's free
-    threads (§308). `holders` is always a list of `(id-or-"the night fuzz",
+    threads (§308), and the string `"night"` for a `night` entry outside the
+    night fuzz's window, with `window` the next one in UTC and no holders
+    (§308.8). `holders` is always a list of `(id-or-"the night fuzz",
     path-or-None, how, holder)` tuples; `how` is `None` for the night fuzz,
     `"taken above"` for a row the fill already walked past, `"pinned and
     skipped above"` (with `holder` then `None` too) for a pinned row a running
@@ -542,6 +548,10 @@ def parse_blocked_line(line):
         row_id, _, mine, first, second = shared.groups()
         return {"id": row_id, "mine": mine, "shared": True,
                 "holders": [shared_holder(first, line), shared_holder(second, line)]}
+    night = NIGHT_LINE.match(line)
+    if night:
+        row_id, _, window = night.groups()
+        return {"id": row_id, "mine": "night", "shared": "night", "window": window, "holders": []}
     cores = CORES_LINE.match(line)
     assert cores, f"`just queue blocked` printed a line this cannot read: {line!r}"
     row_id, _, need, threads, names = cores.groups()
@@ -951,6 +961,9 @@ def meeting_reason(line, links):
         holders = join_and(cores_holder_text(other, how, holder, links) for other, _, how, holder in line["holders"])
         return (f"waits for threads: <code>{html.escape(line['mine'])}</code> does not fit the "
                 f"{html.escape(line['threads'])} threads of the machine, held by {holders}")
+    if line["shared"] == "night":
+        return (f"waits for the night: <code>{html.escape(line['mine'])}</code> runs only inside the night "
+                f"fuzz's window, {html.escape(line['window'])}")
     if line["shared"]:
         holders = " and ".join(shared_holder_text(other, how, holder, links)
                                for other, _, how, holder in line["holders"])

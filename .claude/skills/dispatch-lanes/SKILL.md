@@ -126,7 +126,11 @@ write set does: a row whose `after:` names a date not yet come, or whose
 `cores:` entry does not fit the machine's free threads (summed over the
 running, held-elsewhere and already-taken rows, the night fuzz holding every
 thread in its own window) is `waiting` or skipped like any other blocked row,
-not offered for a second `next` to pass over by hand (§308).
+not offered for a second `next` to pass over by hand (§308). The same goes by
+day for a row whose write set holds `night`: `next` offers it only while the
+clock sits inside the night fuzz's window, and otherwise skips it with a line
+naming the next window in UTC (§308.8). Mark a row that must run beside the
+night fuzz with `just queue night <id> on`; it is refused beside `cores:`.
 
 **If `queue next` refuses, naming `just fuzz-triage-row`**, a fuzz night has
 left groups that no open row names and no triage row is open yet (§418.2).

@@ -55,6 +55,7 @@ SHA = re.compile(r"^[0-9a-f]{7,40}$")
 SECTION = re.compile(r"^§?([0-9]+(\.[0-9]+)?)$")
 AT_ID = re.compile(r"^@([0-9]+)$")
 CORES_ENTRY = re.compile(r"^cores:([1-9][0-9]*|all)$")
+NIGHT_ENTRY = "night"
 
 USAGE = """\
 just queue                                 ready rows by tier, then running, waiting, parked
@@ -110,6 +111,9 @@ just queue give <id>                       give a take back: release the hold an
 just queue cores <id> <n>|all              set, replace or remove the write set's cores:<n> or cores:all entry
                                             (§308); the fill skips a row whose count does not fit the machine's
                                             free threads, and cores:all fits only when nothing else holds any
+just queue night <id> on|off               set or take off the write set's night entry (§308.8); the fill offers the
+                                            row only inside the night fuzz's window and skips it by day; refused
+                                            beside a cores: entry, since the night fuzz holds every thread then
 just queue rank <id> before <id>           move <id> to sit just before the other id, within their shared tier
 just queue pick <id> ours|theirs           keep one side of a row the merge driver left in conflict
 just queue pin <id> [<id>...]              Mattias's alone (§430): pinned/<n> in front of each open row's description,
@@ -1096,7 +1100,41 @@ def cores_step(queue, claims, here, args, batch):
         raise Refused(f"{row_id} is closed: {row.state}")
     entries = [entry for entry in entries_of(row.write_set) if not entry.startswith("cores:")]
     entries.append(f"cores:{n}")
+    refuse_night_beside_cores(entries)
     write_set = ",".join(entries)
+    queue.replace(row, row.with_write_set(write_set))
+    message = f"{row_id}: write set {row.write_set} -> {write_set}"
+    return queue, message, None
+
+
+def night_step(queue, claims, here, args, batch):
+    """Set or take off the `night` entry of an open row's write set (§308.8).
+
+    A row that must run beside the night fuzz, to see the machine under its
+    load, says so with this entry, and the fill offers it only inside the
+    night fuzz's window. Like `cores:`, it never meets a path, as `entry_holds`
+    says, and it is refused beside a `cores:` entry, since the night fuzz holds
+    every thread then.
+    """
+    need(args, 2, "night <id> on|off")
+    row_id, switch = args
+    if switch not in ("on", "off"):
+        raise Refused(f"'{switch}' is not on or off")
+    refuse_conflicted(here, queue)
+    row = require_row(queue, here, row_id)
+    if row.is_closed():
+        raise Refused(f"{row_id} is closed: {row.state}")
+    entries = entries_of(row.write_set)
+    if switch == "on":
+        if NIGHT_ENTRY in entries:
+            raise Refused(f"{row_id} runs only by night already: {row.write_set}")
+        entries.append(NIGHT_ENTRY)
+        refuse_night_beside_cores(entries)
+    else:
+        if NIGHT_ENTRY not in entries:
+            raise Refused(f"{row_id} has no night entry: {row.write_set}")
+        entries.remove(NIGHT_ENTRY)
+    write_set = ",".join(entries) or "-"
     queue.replace(row, row.with_write_set(write_set))
     message = f"{row_id}: write set {row.write_set} -> {write_set}"
     return queue, message, None
@@ -1476,7 +1514,8 @@ def ids_of(args, usage):
 
 STEP_FUNCS = {
     "take": take_step, "add": add_step, "done": done_step, "drop": drop_step, "park": park_step,
-    "after": after_step, "cores": cores_step, "rank": rank_step, "tier": tier_step, "tag": tag_step,
+    "after": after_step, "cores": cores_step, "night": night_step, "rank": rank_step, "tier": tier_step,
+    "tag": tag_step,
     "pick": pick_step, "pin": pin_step, "unpin": unpin_step, "give": give_step, "sweep": sweep_step,
     "reword": reword_step, "header": header_step,
 }
@@ -1572,11 +1611,11 @@ def parsed_write_set(here, write_set, fix_directories=False):
     for entry in entries:
         if entry == "-":
             raise Refused('"-" stands alone in a write set, and here it has company')
-        if CORES_ENTRY.match(entry):
+        if CORES_ENTRY.match(entry) or entry == NIGHT_ENTRY:
             fixed.append(entry)
             continue
         if not WRITE_SET_ENTRY.match(entry) or entry.startswith("/") or "//" in entry:
-            raise Refused(f'"{entry}" is not a path, a directory ending in /, path#item, or cores:<n>|all')
+            raise Refused(f'"{entry}" is not a path, a directory ending in /, path#item, cores:<n>|all or night')
         path, _, item = entry.partition("#")
         if item and not (path.endswith(".rs") or path == "justfile"):
             raise Refused(f'"{entry}" names an item, and only a .rs file or the justfile has items')
@@ -1585,7 +1624,20 @@ def parsed_write_set(here, write_set, fix_directories=False):
                 raise Refused(f'"{path}" is a directory; write it as {path}/ so it meets the files under it')
             entry = entry + "/"
         fixed.append(entry)
+    refuse_night_beside_cores(fixed)
     return fixed
+
+
+def refuse_night_beside_cores(entries):
+    """Refuse a write set holding both `night` and a `cores:` entry (§308.8).
+
+    The night fuzz holds every thread while a night row runs, so a `cores:`
+    entry beside it could never fit, and the row would never be offered.
+    """
+    cores = next((entry for entry in entries if entry.startswith("cores:")), None)
+    if NIGHT_ENTRY in entries and cores is not None:
+        raise Refused(f"night and {cores} cannot share a write set: a night row runs beside the night fuzz, "
+                      f"which holds every thread then (§308.8)")
 
 
 def entries_of(write_set):
@@ -1599,9 +1651,10 @@ def entry_holds(holder, entry):
     exact text, never a path and never a different `cores:` entry: the fill's
     thread-fit check is numeric, not a meet (§308). Matching itself is what
     lets `narrow` keep a row's `cores:` entry rather than reading it as outside
-    the set the row was taken with.
+    the set the row was taken with. A `night` entry is a word of the same kind:
+    it says when the row runs, not what it writes (§308.8).
     """
-    if holder.startswith("cores:") or entry.startswith("cores:"):
+    if holder.startswith("cores:") or entry.startswith("cores:") or NIGHT_ENTRY in (holder, entry):
         return holder == entry
     holder_path, _, holder_item = holder.partition("#")
     path, _, item = entry.partition("#")
