@@ -161,12 +161,11 @@ use crate::enclosure::{cross_enclosing, dot_enclosing, exactly, gap_enclosing};
 use crate::exact::Exact;
 use crate::intersect::{
     HowTwoConesOffOneAxisCross, a_loop_and_two_branches_that_nearly_meet,
-    every_point_of_both_in_the_box_is_on,
-    halfway_between_a_cones_apex_and_a_ball_on_its_axis, how_a_ball_on_a_cones_axis_meets_it,
-    how_a_plane_leans_against_a_pipe, how_two_cones_off_one_axis_cross,
-    is_the_flat_surface_halfway_between, whether_a_ball_runs_through_a_cones_apex,
-    whether_a_ball_sits_on_a_cones_axis, whether_a_cone_and_a_pipe_share_an_axis,
-    whether_two_cones_share_an_axis,
+    every_point_of_both_in_the_box_is_on, halfway_between_a_cones_apex_and_a_ball_on_its_axis,
+    how_a_ball_on_a_cones_axis_meets_it, how_a_plane_leans_against_a_pipe,
+    how_two_cones_off_one_axis_cross, is_the_flat_surface_halfway_between,
+    whether_a_ball_runs_through_a_cones_apex, whether_a_ball_sits_on_a_cones_axis,
+    whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
 };
 use crate::{
     Cone, Cylinder, Error, HalfSpace, HalfSpaceThroughAPoint, Picker, Plane, Point, Result, Sphere,
@@ -1197,10 +1196,9 @@ fn the_way_a_loop_two_cones_cross_in_off_one_axis_winds(
         Decision::Zero | Decision::Undecidable { .. } => return Ok(WhichWayItWinds::CannotTell),
         other => unreachable!("unhandled decision: {other:?}"),
     };
-    if crossing
-        .branches
-        .is_some_and(|branches| comes_out == branches.the_loop_is_where_the_axis_points(&crossing.ruled))
-    {
+    if crossing.branches.is_some_and(|branches| {
+        comes_out == branches.the_loop_is_where_the_axis_points(&crossing.ruled)
+    }) {
         return Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed);
     }
     let ruled_first = crossing.ruled.apex() == one.apex();
@@ -1848,25 +1846,35 @@ impl TheTwoBranches {
 }
 
 impl TwoConesReadAlongOne {
-    /// A point no branch of the two reaches round the ruled cone's axis: one
-    /// at the angle half a turn from where both are centred.
+    /// A point no branch of the two reaches round the ruled cone's axis.
     ///
     /// With `v` the ruled cone's axis, `w` the crossed cone's and `c = w·v`,
     /// a straight line `b + t·d` of the ruled cone has `d = v + s‖v‖e` for a
     /// unit `e` square to `v`, and the crossed cone's form along it opens
     /// upward or downward by the sign of `Q(d) = VW(1 + s²) − k(d·w)²`, for
-    /// `V = v·v`, `W = w·w` and the crossed cone's `k`. That turns on `e`
-    /// through `d·w = c + s‖v‖(e·w)` alone, so it is most where `|d·w|` is
-    /// least, at `e` along `−sign(c)·û`, for `û` the way `w` leans off `v`,
-    /// and least at `e` along `sign(c)·û`. Both proofs read it above nothing
-    /// on some lines and below on others, so it is above nothing at its most
-    /// and below at its least. The branch beyond is on the lines where `Q(d)`
-    /// is above nothing, at a `t` of sign `ν`, and the other on those where it
-    /// is below, at a `t` of sign `−ν`, and a point `b + t·d` is at the angle
-    /// of `sign(t)·e` round the axis. So the angle of `ν·sign(c)·û` is off
-    /// both: the branch beyond would need `Q(d)` above nothing at its least,
-    /// and the other below nothing at its most. The point handed back is
-    /// `b + ν·sign(c)·(V·w − c·v)`, enclosed in a box.
+    /// `V = v·v`, `W = w·w` and the crossed cone's `k`, which is nothing where
+    /// `|d·w| = Λ`, `Λ² = VW(1 + s²)/k`. That turns on `e` through
+    /// `d·w = c + s·S(e·û)` alone, for `û` the way `w` leans off `v` and
+    /// `S = ‖v‖` times the length of `w` square to `v`.
+    ///
+    /// - At `e = sign(c)·û`, `|d·w|` is `|c| + s·S`, its most, so `Q(d)` is
+    ///   at its least, and both proofs read `Q(d)` below nothing on some line,
+    ///   so below nothing there.
+    /// - At `e = −sign(c)·û`, `|d·w|` is `||c| − s·S|`, below `Λ`, so `Q(d)`
+    ///   is above nothing there: `a_loop_and_two_branches` in `intersect.rs`
+    ///   proves `|c| > s·S`, so that is the least of `|d·w|` and `Q(d)` at its
+    ///   most, which it reads above nothing on some line, and
+    ///   [`a_loop_and_two_branches_that_nearly_meet`]'s test 2,
+    ///   `|Λ − |c|| < s·S < Λ + |c|`, is `||c| − s·S| < Λ` whatever the most.
+    ///
+    /// The branch beyond is on the lines where `Q(d)` is above nothing, at a
+    /// `t` of sign `ν`, and the other on those where it is below, at a `t` of
+    /// sign `−ν`, and a point `b + t·d` is at the angle of `sign(t)·e` round
+    /// the axis. So the angle of `ν·sign(c)·û` is off both: the branch beyond
+    /// would need `Q(d)` above nothing at `e = sign(c)·û`, and the other below
+    /// nothing at `e = −sign(c)·û`. The point handed back is
+    /// `b + ν·sign(c)·(V·w − c·v)`, enclosed in a box, and `V·w − c·v` is `V`
+    /// times the part of `w` square to `v`, so along `û`.
     ///
     /// Nothing where the sign of `c` could not be worked out.
     ///
@@ -1924,10 +1932,7 @@ impl TwoConesReadAlongOne {
 /// two of one slope side by side, whose crossing is one hyperbola.
 ///
 /// Whatever else either refuses, [`Error::Undecidable`] among them.
-fn how_two_cones_off_one_axis_are_read(
-    one: &Cone,
-    other: &Cone,
-) -> Result<TwoConesReadAlongOne> {
+fn how_two_cones_off_one_axis_are_read(one: &Cone, other: &Cone) -> Result<TwoConesReadAlongOne> {
     if one.apex() == other.apex() {
         return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
     }
@@ -3621,6 +3626,298 @@ mod tests {
             [!ways[0]; 8],
             "and the other way round the second"
         );
+    }
+
+    /// Two pointed cones that cross in one loop and two branches that run off
+    /// for ever: the upright one of slope a half, and one leaning off it,
+    /// turned `0.3` about the line along `x` through `(0, 0, 4)` with the
+    /// turn's `sin` and `cos` rounded once each, as in `rcad-topo`'s
+    /// `a_funnel_with_a_leaning_spout.rs`. Of slope a half too, the two nearly
+    /// meet, and only [`a_loop_and_two_branches_that_nearly_meet`] proves the
+    /// crossing; of slope a quarter, [`how_two_cones_off_one_axis_cross`] does,
+    /// the fourth way.
+    ///
+    /// Each straight line of the ruled cone is crossed where the other's form
+    /// is nothing, worked out here in `f64` and not by the code under test, and
+    /// its crossings are told apart by the signs of the roots alone: where the
+    /// form opens upward along the line both roots have one sign, the nearer
+    /// is on the loop and the further on the branch beyond it; where it opens
+    /// downward the root of that sign is on the loop and the other on the far
+    /// branch.
+    ///
+    /// Every two points of a branch come back in the order `∇S × ∇T` runs,
+    /// with the ways out `W y − k(y·w) w` worked here, so the ordering starts
+    /// where neither branch reaches; and the other way round for the pair the
+    /// other way round. Both branches run one way round the ruled cone's axis
+    /// and the loop the other. Three points of the loop come back in the order
+    /// it runs, and a start on a branch is refused as not closed. A branch is
+    /// picked by one picker of its own, and nothing else is a branch.
+    #[test]
+    fn points_along_a_loop_and_two_branches_of_two_cones_come_in_the_order_their_ways_out_say() {
+        let (sin, cos) = 0.3_f64.sin_cos();
+        let upright = a_cone_up_z(0.0, 0.5);
+        for (slope, proved_the_fourth_way) in [(0.5, false), (0.25, true)] {
+            let leaning = Cone::new(
+                Axis::new(
+                    Point::new(0.0, 4.0 * sin, 4.0 - 4.0 * cos),
+                    Vector::new(0.0, -sin, cos),
+                )
+                .expect("an axis"),
+                slope,
+            )
+            .expect("a slope");
+            let what = format!("the leaning cone of slope {slope}");
+            let proved = how_two_cones_off_one_axis_cross(
+                &upright,
+                &leaning,
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            );
+            assert_eq!(
+                matches!(
+                    &proved,
+                    Ok(HowTwoConesOffOneAxisCross::HeldApart(crossing)) if crossing.apex.is_some()
+                ),
+                proved_the_fourth_way,
+                "{what}: {proved:?}"
+            );
+            let read = how_two_cones_off_one_axis_are_read(&upright, &leaning).expect("read");
+            let branches = read.branches.expect("a loop and two branches");
+            for (picked_by, a_branch) in [
+                (vec![branches.beyond], true),
+                (vec![Picker::from(branches.apex.reversed())], true),
+                (vec![Picker::from(branches.apex)], false),
+                (vec![branches.beyond, branches.beyond], false),
+            ] {
+                for [this, partner] in [[&upright, &leaning], [&leaning, &upright]] {
+                    assert_eq!(
+                        this.is_a_branch_it_crosses_a_cone_off_its_axis_in(partner, &picked_by),
+                        Ok(a_branch),
+                        "{what}: {picked_by:?}"
+                    );
+                }
+            }
+
+            let runs_ahead = |at: [f64; 3], ahead: [f64; 3]| {
+                out_of_a_cone(&upright, at)
+                    .cross(out_of_a_cone(&leaning, at))
+                    .dot(Vector::from(ahead) - Vector::from(at))
+                    > 0.0
+            };
+            let pieces = the_crossing_along_the_lines_of(&read.ruled, &read.crossed);
+            let ways = pieces.each_ref().map(|piece| {
+                let ways: Vec<bool> = piece
+                    .iter()
+                    .map(|(at, ahead)| runs_ahead(*at, *ahead))
+                    .collect();
+                assert!(
+                    ways.len() > 20 && ways.iter().all(|way| *way == ways[0]),
+                    "{what}: one way all along each piece: {ways:?}"
+                );
+                ways[0]
+            });
+            assert_eq!(
+                ways,
+                [!ways[1], ways[1], ways[1]],
+                "{what}: the loop runs one way round the ruled axis, and both branches the other"
+            );
+            let ordered = |runs_ahead: bool| {
+                if runs_ahead {
+                    (Decision::Pos, Decision::Neg)
+                } else {
+                    (Decision::Neg, Decision::Pos)
+                }
+            };
+
+            for (which, piece) in ["beyond the loop", "behind the apex"]
+                .into_iter()
+                .zip(&pieces[1..])
+            {
+                let (in_order, out_of_order) = ordered(ways[1]);
+                for (at, ahead) in piece {
+                    let [at, ahead] = [*at, *ahead].map(PredicatePoint::from);
+                    assert_eq!(
+                        upright.which_comes_first_along_a_branch_it_crosses_a_cone_in(
+                            &leaning, at, ahead
+                        ),
+                        Ok(in_order),
+                        "{what}, the branch {which}, at {at:?}"
+                    );
+                    assert_eq!(
+                        leaning.which_comes_first_along_a_branch_it_crosses_a_cone_in(
+                            &upright, at, ahead
+                        ),
+                        Ok(out_of_order),
+                        "{what}, the branch {which}, at {at:?}, the pair the other way round"
+                    );
+                    assert_eq!(
+                        upright.which_comes_first_along_a_branch_it_crosses_a_cone_in(
+                            &leaning, at, at
+                        ),
+                        Ok(Decision::Zero),
+                        "{what}, the branch {which}, at {at:?} twice"
+                    );
+                }
+                let some: Vec<PredicatePoint> = piece
+                    .iter()
+                    .step_by(piece.len() / 12)
+                    .map(|(at, _)| PredicatePoint::from(*at))
+                    .collect();
+                for (first, one) in some.iter().enumerate() {
+                    for other in &some[first + 1..] {
+                        assert_eq!(
+                            upright.which_comes_first_along_a_branch_it_crosses_a_cone_in(
+                                &leaning, *one, *other
+                            ),
+                            Ok(in_order),
+                            "{what}, the branch {which}: {one:?} before {other:?}"
+                        );
+                    }
+                }
+            }
+
+            let (in_order, out_of_order) = ordered(ways[0]);
+            let [up, lean] = [upright, leaning].map(Surface::Cone);
+            let the_loop = &pieces[0];
+            for start in (0..the_loop.len() - 3).step_by(the_loop.len() / 8) {
+                let [from, one, other] =
+                    [start, start + 1, start + 3].map(|at| PredicatePoint::from(the_loop[at].0));
+                assert_eq!(
+                    which_comes_first_round_a_crossing([&up, &lean], from, one, other),
+                    Ok(in_order),
+                    "{what}, round the loop from {from:?}"
+                );
+                assert_eq!(
+                    which_comes_first_round_a_crossing([&lean, &up], from, one, other),
+                    Ok(out_of_order),
+                    "{what}, round the loop from {from:?}, the pair the other way round"
+                );
+            }
+            for branch in &pieces[1..] {
+                let [from, one, other] = [0, 1, 3].map(|at| PredicatePoint::from(branch[at].0));
+                assert_eq!(
+                    which_comes_first_round_a_crossing([&up, &lean], from, one, other),
+                    Err(Error::TheCrossingOfTheseTwoSurfacesIsNotClosed),
+                    "{what}, from {from:?} on a branch"
+                );
+            }
+        }
+    }
+
+    /// The way out of `cone` at `at`, `W y − k(y·w) w` for `y` the step from
+    /// its apex, `w` its axis direction, `W = w·w` and `k` one more than its
+    /// slope squared: worked out here and not by the code under test.
+    fn out_of_a_cone(cone: &Cone, at: [f64; 3]) -> Vector {
+        let up = cone.axis().direction();
+        let step = Vector::from(at) - Vector::from(cone.apex().coordinates());
+        step * up.length_squared() - up * ((1.0 + cone.slope() * cone.slope()) * step.dot(up))
+    }
+
+    /// Where the straight lines of `ruled` cross `crossed`, the loop first,
+    /// then the branch beyond it, then the branch behind `ruled`'s apex, each
+    /// point with one a ten-thousandth of a radian further round on the same
+    /// piece, worked out in `f64` and not by the code under test. A line
+    /// `b + t·d`, `d = v + s‖v‖e`, crosses where
+    /// `q(t) = Q(d) t² + 2(W d·z − k(d·w)(z·w)) t + Q(z)` is nothing, for
+    /// `Q(y) = W|y|² − k(y·w)²` and `z = b − a`.
+    ///
+    /// The loop is in the order the lines turn round `ruled`'s axis, and each
+    /// branch in that order too from where its lines are not, so from where
+    /// `Q(d)` is least for the branch beyond and most for the branch behind.
+    /// Lines whose two roots are within a hundredth of each other, or which
+    /// cross further than a thousand from the apex, are left out.
+    fn the_crossing_along_the_lines_of(
+        ruled: &Cone,
+        crossed: &Cone,
+    ) -> [Vec<([f64; 3], [f64; 3])>; 3] {
+        const LINES: u32 = 720;
+        let turns: Vec<f64> = (0..LINES)
+            .map(|line| f64::from(line) * core::f64::consts::TAU / f64::from(LINES))
+            .collect();
+        let read = |turned: f64| a_line_of_one_cone_across_another(ruled, crossed, turned);
+        let nappe = turns
+            .iter()
+            .filter_map(|turned| match read(*turned) {
+                (opens, _, Some(roots)) if opens > 0.0 => Some(roots[0].signum()),
+                _ => None,
+            })
+            .reduce(|one, other| {
+                assert_eq!(one, other, "both roots of one sign where q opens upward");
+                one
+            })
+            .expect("q opens upward along some lines");
+        let pieces_at = |turned: f64| -> [Option<[f64; 3]>; 3] {
+            let (opens, at, Some([near, far])) = read(turned) else {
+                return [None; 3];
+            };
+            if (far - near).abs() < 1e-2 || far.abs() > 1e3 {
+                return [None; 3];
+            }
+            if opens > 0.0 {
+                assert_eq!(near.signum(), far.signum(), "{turned}");
+                [Some(at(near)), Some(at(far)), None]
+            } else if near.signum() == nappe {
+                [Some(at(near)), None, Some(at(far))]
+            } else {
+                [Some(at(far)), None, Some(at(near))]
+            }
+        };
+        let opens: Vec<f64> = turns.iter().map(|turned| read(*turned).0).collect();
+        let most = |towards: f64| {
+            turns[(0..turns.len())
+                .max_by(|one, other| (towards * opens[*one]).total_cmp(&(towards * opens[*other])))
+                .expect("lines")]
+        };
+        let starts = [0.0, most(-1.0), most(1.0)];
+        core::array::from_fn(|which| {
+            let mut piece: Vec<(f64, ([f64; 3], [f64; 3]))> = turns
+                .iter()
+                .filter_map(|turned| {
+                    let at = pieces_at(*turned)[which]?;
+                    let ahead = pieces_at(turned + 1e-4)[which]?;
+                    Some((
+                        (turned - starts[which]).rem_euclid(core::f64::consts::TAU),
+                        (at, ahead),
+                    ))
+                })
+                .collect();
+            piece.sort_by(|one, other| one.0.total_cmp(&other.0));
+            piece.into_iter().map(|(_, points)| points).collect()
+        })
+    }
+
+    /// The straight line of `ruled` `turned` round its axis from a direction
+    /// square to it: `Q(d)`, how to get the point `t` along it, and the two
+    /// roots of `q`, the nearer to the apex first, or nothing where they are
+    /// not real.
+    fn a_line_of_one_cone_across_another(
+        ruled: &Cone,
+        crossed: &Cone,
+        turned: f64,
+    ) -> (f64, impl Fn(f64) -> [f64; 3], Option<[f64; 2]>) {
+        let along = ruled.axis().direction();
+        let square = along.cross(Vector::new(1.0, 0.0, 0.0));
+        let square = square * (1.0 / square.length());
+        let other_square = along.cross(square) * (1.0 / along.length());
+        let (sin, cos) = turned.sin_cos();
+        let d = along + (square * cos + other_square * sin) * (ruled.slope() * along.length());
+        let up = crossed.axis().direction();
+        let widening = 1.0 + crossed.slope() * crossed.slope();
+        let form = |one: Vector, other: Vector| {
+            up.length_squared() * one.dot(other) - widening * one.dot(up) * other.dot(up)
+        };
+        let apex = Vector::from(ruled.apex().coordinates());
+        let z = apex - Vector::from(crossed.apex().coordinates());
+        let [opens, half, at_the_apex] = [form(d, d), form(d, z), form(z, z)];
+        let at = move |t: f64| (apex + d * t).components();
+        let gap = half * half - opens * at_the_apex;
+        if gap < 0.0 {
+            return (opens, at, None);
+        }
+        let far = -(half + half.signum() * gap.sqrt());
+        let mut roots = [far / opens, at_the_apex / far];
+        roots.sort_by(|one, other| one.abs().total_cmp(&other.abs()));
+        (opens, at, Some(roots))
     }
 
     /// Past the flat surface between the two loops two cones off one axis
