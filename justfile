@@ -20563,7 +20563,9 @@ check-queue-merge-driver:
 # the pointer to docs/where-a-rule-goes.md that agent-file-written.sh
 # prints, for a write set naming .claude/agents/lane.md, CLAUDE.md and
 # AGENTS.md, or .claude/, and nothing for one naming none, with stdout as
-# it was (§479). The
+# it was (§479). Q3161's: `night` and `cores` on a todo row a `writes` had
+# set starting from that set and leaving the claims file agreeing with the
+# column, so `narrowed` says nothing about the row (§308). The
 # hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
@@ -21876,6 +21878,31 @@ check-queue-api-selftest:
         || fail "writes did not say why night beside cores:1 was refused"
     got=$(q "$night_wt" writes "$night_row" night 2>&1) || fail "writes refused a night entry"
     got=$(check "$night_wt") || fail "the file the night cases wrote fails check-queue"
+
+    # Q3161 (§308): a `writes` on a todo row, then `night` or `cores`, left the
+    # claims file on the older set while the column held the newer, so `narrowed`
+    # handed the fill the older set. Both verbs now start from the set the fill
+    # reads and leave the claims file agreeing with the column.
+    after_wt="$root/rcad-worktrees/after-writes"
+    g "$hub" worktree add -q -b after-writes "$after_wt" main
+    after_row=$(q "$after_wt" add 2 opus - "from/- a row whose writes is followed by night and cores §230") \
+        || fail "add for the after-writes row failed"
+    got=$(q "$after_wt" writes "$after_row" docs/aw1.md 2>&1) || fail "writes refused the after-writes row"
+    got=$(q "$after_wt" night "$after_row" on 2>&1) || fail "night on refused a row a writes had set"
+    grep -qxF "$after_row: write set docs/aw1.md -> docs/aw1.md,night" <<<"$got" \
+        || fail "night on did not start from the set writes gave the row"
+    narrowed_of() { (cd "$1" && python3 "$hub/tooling/queue/queue.py" narrowed 2>&1); }
+    got=$(narrowed_of "$after_wt") || fail "narrowed failed after writes and night"
+    grep -qF "$after_row" <<<"$got" \
+        && fail "narrowed still tells the fill a set other than the column's after writes and night"
+    got=$(q "$after_wt" night "$after_row" off 2>&1) || fail "night off refused the after-writes row"
+    got=$(q "$after_wt" writes "$after_row" docs/aw2.md 2>&1) || fail "second writes refused the after-writes row"
+    got=$(q "$after_wt" cores "$after_row" 2 2>&1) || fail "cores refused a row a writes had set"
+    grep -qxF "$after_row: write set docs/aw2.md -> docs/aw2.md,cores:2" <<<"$got" \
+        || fail "cores did not start from the set writes gave the row"
+    got=$(narrowed_of "$after_wt") || fail "narrowed failed after writes and cores"
+    grep -qF "$after_row" <<<"$got" \
+        && fail "narrowed still tells the fill a set other than the column's after writes and cores"
 
     # §309.3: the lock must stay held for the whole batch, not only within
     # each step. The §309.3.2 case above shows a batch's own claims events
