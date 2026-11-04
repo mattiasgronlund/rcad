@@ -5144,7 +5144,10 @@ impl<'f> Arrangement<'f> {
     /// [`round_a_closed_crossing_and_what_it_measures`] reads such a node first
     /// already, against each node clear of it and of the start that the sweep
     /// cannot place, wherever the run at the start is proved to be something
-    /// (Q2118). It was left here while that arm left it too, for what lay past
+    /// (Q2118). One whose box misses the start it reads first where the box
+    /// the start is held as holds it and it is not exactly on the line the
+    /// loop runs along from the start ([`the_start_is_a_rounding_off`],
+    /// Q3007). It was left here while that arm left it too, for what lay past
     /// it (Q1914): the rim of the lid in
     /// `a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model` has
     /// such a node, the box `[−0, 0] × [3 − 1.8e-15, 3 + 1.3e-15] × [4, 4]`
@@ -17787,6 +17790,16 @@ fn lies_inside(inner: PredicatePoint, outer: PredicatePoint) -> bool {
 /// place the start was rounded off, since the box the start is held as holds
 /// it, and leaves the point across, a chord away, to the sweep.
 ///
+/// So does a node square to the run that the sweep from the start along the
+/// run gives no side, where the box the start is held as holds it and its own
+/// box misses the start. The circle the side `x = −0.3` of a block cuts a ball
+/// about `(1.27, −7.37, 15)` in is walked from a rounding off its lowest point
+/// along `x`, and the block's side `y = −7.37`, through the ball's centre,
+/// crosses it there in a box that holds the start's `z` and not its `x`. That
+/// node, the start and the node at the top sweep exactly zero, and every fuse
+/// of the two was refused until [`the_start_is_a_rounding_off`] read the node
+/// first (Q3007).
+///
 /// **A node can be the start without being named it.** A circle a ball and
 /// a plane cross in starts where the walk starts, and a third surface can
 /// cross the circle right there: the half ball `x ≥ 0` cut by `z ≤ 0.5` has the
@@ -18012,7 +18025,8 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// the crossing straight out from the start, square to the way the crossing
 /// runs there, and the start lies a rounding inside the crossing, or a
 /// rounding outside it with `place` inside `node`, the box the start is held
-/// as.
+/// as, or `place`'s box misses the start, is inside `node` and gets no side of
+/// the run at all.
 ///
 /// The crossing runs along `∇S × ∇T` and turns to one side of that line, the
 /// side [`which_comes_first_round_a_crossing`] winds to. From a start on the
@@ -18059,6 +18073,36 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// `node`'s diagonal, which would read the place across `true` too, has not
 /// been built.
 ///
+/// **A place the sweep gives no side reads `true` the same way, where `node`
+/// holds every point of its box and the box misses the start.** It is a point
+/// of the crossing square to the run that `node` holds, and by the argument
+/// above that is the place the start was rounded off and not the place
+/// across, whichever side of the run it lies on. The dome of
+/// `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step` with its rim written flat is
+/// the shape (Q3007,
+/// `a_ball_and_a_block_whose_side_runs_through_its_centre_answer_every_fuse`).
+/// The circle the side `x = −0.3` of a block cuts the ball of radius `2.5`
+/// about `(1.27, −7.37, 15)` in is walked from `(−0.30000000000000004, −7.37,
+/// 13.054466654102274)`, a rounding off its lowest point along `x`, where it
+/// runs exactly along `y`. The block's side `y = −7.37`, through the ball's
+/// centre, crosses it there in the box `[−0.3, −0.3] × [−7.37, −7.37] ×
+/// [13.054466654102272, 13.054466654102274]`, which reads `[0, 0]` along the
+/// run and, seen down `x`, holds the start at its top end, so the sweep from
+/// the start along the run gives it no side. The sweep of the start, that node
+/// and the node at the top is exactly zero, and every fuse of the ball and the
+/// block was refused until this read the bottom node first. A quarter bend of
+/// ring 4 round a tube of 1 and the frustum of the cone `ρ = (z + 8) / 2` on
+/// its axis have such a node where the bend's cap cuts the circle `z = 0.894`
+/// the cone crosses the tube in: the box `[−0, 0] × [4.447213595499957,
+/// 4.447213595499958] × [0.8944271909999157, 0.8944271909999161]`, which
+/// misses the walked start `(0, 4.447213595499958, 0.8944271909999166)` along
+/// `z`. Every fuse of the two was refused on the order along that circle, and
+/// each now answers one solid whose volume is within the measure's error of
+/// the closed form's. A box that holds the start is left to the arms of
+/// [`round_a_closed_crossing_and_what_it_measures`] that read a box round the
+/// start, and a place that reads [`Decision::Zero`], on the line along the
+/// run, to the sweep.
+///
 /// **The one loop a ball off a pipe's axis crosses it in, or two pipes cross
 /// in, has no such side.** `rcad-geom` orders each round a line — the ball's
 /// by angle round the line through its centre square to the pipe's axis, two
@@ -18076,7 +18120,9 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// ([`Arrangement::cut_the_crossings_into_arcs`]), so where no node on it is
 /// the start by name, first and last cut the same arcs. One that is comes
 /// ahead of either, and a loop with both has not been built. A place whose
-/// box straddles the start's angle reads `false`.
+/// box straddles the start's angle reads `true` where `node` holds it and it
+/// misses the start, as it would at that angle or short of it, and `false`
+/// otherwise.
 ///
 /// The window from the start's angle to that of `start + runs` is not a hair
 /// wide: `runs` grows with the square of the shape's size. A place in it is
