@@ -781,6 +781,10 @@ struct Arrangement<'f> {
     touches: Vec<(Surface, PredicatePoint)>,
     /// Which crossing each boundary edge lies on, by wire and position.
     crossing_of_edge: Vec<Vec<usize>>,
+    /// Each boundary edge whose own crossing was folded into another, as one
+    /// straight line ([`Arrangement::fold_the_straight_cuts_along_one_line`]).
+    /// Empty for nearly every face.
+    sides_folded_onto_another_line: Vec<SideFoldedOntoAnotherLine>,
     /// Which node each edge of each wire starts at, by wire and position.
     node_of_corner: Vec<Vec<usize>>,
     /// Which node each of them stops at.
@@ -1036,6 +1040,13 @@ impl Crossing {
             .chain(&self.also_cut_by)
             .chain(&self.also_drawn_by)
     }
+
+    /// Whether the side of the partner a walk along it has on its left is
+    /// read off `∇S × ∇Q`, as it is everywhere but along a touch and through
+    /// a cone's apex.
+    fn runs_along_its_gradients(&self) -> bool {
+        self.touching.is_none() && self.through_an_apex.is_none()
+    }
 }
 
 /// What [`Arrangement::whether_past_the_picker`] makes of one node against one
@@ -1273,6 +1284,18 @@ struct Boundary {
     position: usize,
 }
 
+/// A boundary edge drawn on another edge's crossing because the two are one
+/// straight line, and the name it keeps.
+struct SideFoldedOntoAnotherLine {
+    wire: usize,
+    position: usize,
+    /// The partner of the edge's own crossing, which still names the side.
+    partner: Surface,
+    /// Whether the edge's own crossing ran forward the way the one it is
+    /// drawn on does.
+    the_same_way: bool,
+}
+
 /// A way to leave a node: along a crossing, one way or the other.
 #[derive(Clone, Copy, PartialEq)]
 struct Direction {
@@ -1335,6 +1358,7 @@ impl<'f> Arrangement<'f> {
             cut_crossings: Vec::new(),
             touches: Vec::new(),
             crossing_of_edge: Vec::new(),
+            sides_folded_onto_another_line: Vec::new(),
             node_of_corner: Vec::new(),
             node_of_the_end: Vec::new(),
             leaving: Vec::new(),
@@ -9215,14 +9239,15 @@ impl<'f> Arrangement<'f> {
         // and puts a crossing drawn before that one on, so neither changes
         // which nodes the cut runs through: its list is still right.
         for (cut, on_the_cut) in nodes_on.iter().enumerate() {
-            if !self.crossings[cut].reaches_the_face
-                || !self.crossings[cut].order.runs_straight()
-                || self
-                    .crossing_of_edge
-                    .iter()
-                    .flatten()
-                    .any(|&along| along == cut)
-            {
+            if !self.crossings[cut].reaches_the_face || !self.crossings[cut].order.runs_straight() {
+                continue;
+            }
+            let along_an_edge = self
+                .crossing_of_edge
+                .iter()
+                .flatten()
+                .any(|&along| along == cut);
+            if along_an_edge && !self.crossings[cut].runs_along_its_gradients() {
                 continue;
             }
             let mut met_before_it: Vec<usize> = on_the_cut
@@ -9232,12 +9257,34 @@ impl<'f> Arrangement<'f> {
                 .collect();
             met_before_it.sort_unstable();
             met_before_it.dedup();
-            let Some(kept) = met_before_it
+            let Some((kept, the_same_way)) = met_before_it
                 .into_iter()
-                .find(|&earlier| self.one_straight_line(earlier, cut, on_the_cut))
+                .filter(|&earlier| {
+                    !along_an_edge || self.crossings[earlier].runs_along_its_gradients()
+                })
+                .find_map(|earlier| {
+                    self.one_straight_line(earlier, cut, on_the_cut)
+                        .map(|the_same_way| (earlier, the_same_way))
+                })
             else {
                 continue;
             };
+            if along_an_edge {
+                for (wire, on) in self.crossing_of_edge.iter_mut().enumerate() {
+                    for (position, along) in on.iter_mut().enumerate() {
+                        if *along == cut {
+                            *along = kept;
+                            self.sides_folded_onto_another_line
+                                .push(SideFoldedOntoAnotherLine {
+                                    wire,
+                                    position,
+                                    partner: self.crossings[cut].partner,
+                                    the_same_way,
+                                });
+                        }
+                    }
+                }
+            }
             for &node in on_the_cut {
                 let crossings = &mut self.nodes[node].crossings;
                 let at = crossings
@@ -9267,15 +9314,20 @@ impl<'f> Arrangement<'f> {
     /// The dot product is what tells a line from a crossing with no direction
     /// at the node, whose way out is the zero vector and is parallel to
     /// everything.
-    fn one_straight_line(&self, earlier: usize, later: usize, on_the_later: &[usize]) -> bool {
+    fn one_straight_line(
+        &self,
+        earlier: usize,
+        later: usize,
+        on_the_later: &[usize],
+    ) -> Option<bool> {
         if !self.crossings[earlier].reaches_the_face
             || !self.crossings[earlier].order.runs_straight()
         {
-            return false;
+            return None;
         }
-        on_the_later.iter().any(|&node| {
+        on_the_later.iter().find_map(|&node| {
             if !self.nodes[node].crossings.contains(&earlier) {
-                return false;
+                return None;
             }
             let [one, other] = [earlier, later].map(|crossing| {
                 self.way_out_of(
@@ -9287,10 +9339,11 @@ impl<'f> Arrangement<'f> {
                 )
             });
             let along = dot_of(one, other).sign();
-            cross_of_intervals(one, other)
+            let parallel = cross_of_intervals(one, other)
                 .iter()
-                .all(|component| component.sign() == Decision::Zero)
-                && (along == Decision::Pos || along == Decision::Neg)
+                .all(|component| component.sign() == Decision::Zero);
+            (parallel && (along == Decision::Pos || along == Decision::Neg))
+                .then_some(along == Decision::Pos)
         })
     }
 
@@ -15988,7 +16041,8 @@ impl<'f> Arrangement<'f> {
                     None => Decision::Pos,
                 };
                 let (partner, material_side) = self
-                    .named_by_the_plane_it_lies_in(half_edge, material_side)
+                    .named_by_its_own_line(arc.boundary, material_side)
+                    .or_else(|| self.named_by_the_plane_it_lies_in(half_edge, material_side))
                     .unwrap_or((crossing.partner, material_side));
                 Ok(FaceMeet {
                     carried_by: [self.surface, partner],
@@ -16006,6 +16060,36 @@ impl<'f> Arrangement<'f> {
                 })
             })
             .collect()
+    }
+
+    /// The partner a side of the face's own boundary is named by where its
+    /// edge was drawn on another edge's crossing as one straight line
+    /// ([`Arrangement::fold_the_straight_cuts_along_one_line`]), and the side
+    /// of it the material is on, given `material_side`, the side of the
+    /// crossing's partner; `None` for every other side.
+    ///
+    /// **Each side keeps the name of the face across it.** The face across
+    /// names their edge by the two of them, and so does the assembly that
+    /// puts the pieces back together, so a side named by the other edge's
+    /// partner would be an edge no face across has. The two crossings run one
+    /// way or opposite ways along their one line, and left of forward is the
+    /// partner's negative side for both, so the side is the same or turned
+    /// round as they do.
+    fn named_by_its_own_line(
+        &self,
+        boundary: Option<Boundary>,
+        material_side: Decision,
+    ) -> Option<(Surface, Decision)> {
+        let boundary = boundary?;
+        let folded = self
+            .sides_folded_onto_another_line
+            .iter()
+            .find(|side| side.wire == boundary.wire && side.position == boundary.position)?;
+        if folded.the_same_way {
+            Some((folded.partner, material_side))
+        } else {
+            Some((folded.partner, the_other_way(material_side)))
+        }
     }
 
     /// The plane a side along `half_edge` is named by in place of its
