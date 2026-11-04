@@ -150,10 +150,10 @@
 //!   whose front is `y = -6.35` and whose axis is 15 up and of the D3 whose
 //!   axis is 6 up, are refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`.
 //! - The far boxes of the D5 whose axis is 9 up and of the D3 whose axis is
-//!   10 up are refused `TwoCurvesTouchWithoutCrossing` on face slot 18, the
+//!   10 up were refused `TwoCurvesTouchWithoutCrossing` on face slot 18, the
 //!   side `x = -0.3` of a lead: what the D3 whose axis is 2 up, in
-//!   `an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`, is refused on the side
-//!   `x = 0.3` of its lead.
+//!   `an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`, was refused on the
+//!   side `x = 0.3` of its lead.
 //! - The far box of `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step` is refused
 //!   `Invalid(WireTooShort { count: 2 })`: a piece of a face bounded by two
 //!   straight sides.
@@ -167,9 +167,30 @@
 //! across the front. That box is where the body's front disc meets the body's
 //! pipe written twice, worked out about the axis of a pipe the disc is a
 //! rounding off square to, and it is now narrowed onto the plane it lies on
-//! (Q3111). The far box is refused now `TwoCurvesTouchWithoutCrossing` on face
-//! slot 18, the side `x = -0.3` of a lead, as the far boxes of the D5 whose
-//! axis is 9 up and of the D3 whose axis is 10 up are.
+//! (Q3111). The far box was refused then `TwoCurvesTouchWithoutCrossing` on
+//! face slot 18, the side `x = -0.3` of a lead, as the far boxes of the D5
+//! whose axis is 9 up and of the D3 whose axis is 10 up were.
+//!
+//! Each lead's side is two faces joined, and its edge along the line
+//! `x = -0.3, y = -0.3` is written twice, below the bend corner on the plane
+//! `y = -0.3` and above it on the plane of the bend's slanted leg, which
+//! crosses the side a rounding off that line. Each writing ran on past the
+//! corner beside the other. Two crossings of a face's own edges that are one
+//! straight line are now folded into one, each side keeping the name of the
+//! face across it, and where a third surface meets the two writings is one
+//! place (Q3112). The far box of each of these three now answers under
+//! intersection, with nothing. Under difference:
+//!
+//! - The D5 whose axis is 9 up and the D3 whose axis is 10 up are refused
+//!   `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` on the flange's rim, at
+//!   the front `y = -6.35`, where a lead's plane `z = c` along the rim meets
+//!   the flange's front and the body's front disc at one `f64` triple: the
+//!   stop of the D3 whose axis is 2 up, in
+//!   `an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`.
+//! - The D5 whose front is `y = -3.81` and whose axis is 15 up is refused
+//!   `DynamicRangeTooWide`, at a ratio of `4.0e16`.
+//!
+//! Untraced, both.
 
 use std::{env, fs, path::PathBuf};
 
@@ -194,44 +215,55 @@ const TWO_MORE_WHERE_THREE_SURFACES_MEET: [&str; 2] = [
     "LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step",
 ];
 
-/// The two LED files whose far box stops on the side `x = -0.3` of a lead.
-const ON_THE_SIDE_OF_A_LEAD: [&str; 2] = [
-    "LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step",
-    "LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step",
+/// The two LED files whose far box's difference stops on the flange's rim at
+/// the front, each with the radius of that rim.
+const ON_THE_RIM: [(&str, f64); 2] = [
+    ("LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step", 2.9),
+    ("LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step", 1.9),
 ];
 
 #[test]
 fn three_leds_get_past_their_front_written_twice_and_stop_where_three_surfaces_meet() {
-    every_fuse_refuses(THIS_ONE, &[FAR_OFF, ON_THE_FLAT], |_, error| {
-        where_three_surfaces_meet_needs_two_of_them_flat(error)
-    });
+    every_fuse_refuses(
+        THIS_ONE,
+        &both_rules_round(&[FAR_OFF, ON_THE_FLAT]),
+        |_, error| where_three_surfaces_meet_needs_two_of_them_flat(error),
+    );
     for file in TWO_MORE_WHERE_THREE_SURFACES_MEET {
-        every_fuse_refuses(file, &[FAR_OFF], |_, error| {
+        every_fuse_refuses(file, &both_rules_round(&[FAR_OFF]), |_, error| {
             where_three_surfaces_meet_needs_two_of_them_flat(error)
         });
     }
 }
 
+/// Since Q3112 the two writings of the edge along each lead's side are one
+/// line, and the far box shares nothing with either LED.
 #[test]
-fn two_leds_get_past_their_front_written_twice_and_stop_where_two_curves_touch_on_the_side_of_a_lead()
+fn two_leds_get_past_the_sides_of_their_leads_and_stop_where_their_rim_meets_their_front_written_twice()
  {
-    for file in ON_THE_SIDE_OF_A_LEAD {
-        every_fuse_refuses(file, &[FAR_OFF], two_curves_touch_on_the_side_of_a_lead);
+    for (file, radius) in ON_THE_RIM {
+        the_far_box_shares_nothing_with(file);
+        every_fuse_refuses(file, &[(FAR_OFF, Rule::Difference)], |model, error| {
+            two_ends_round_to_one_point_on_the_front_of_a_rim(radius, model, error)
+        });
     }
 }
 
 /// The D5 whose front is `y = -3.81` and whose axis is 15 up puts in order the
 /// places where its body's front disc meets its body's pipe written twice
-/// since Q3111, and its far box stops where two curves touch on the side
-/// `x = -0.3` of a lead.
+/// since Q3111, and since Q3112 the two writings of the edge along each lead's
+/// side are one line. Its far box shares nothing with it, and the difference
+/// is refused for its range.
 #[test]
-fn a_d5_led_15_up_gets_past_where_its_disc_meets_its_pipe_written_twice_and_stops_where_two_curves_touch_on_the_side_of_a_lead()
- {
-    every_fuse_refuses(
-        "LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step",
-        &[FAR_OFF],
-        two_curves_touch_on_the_side_of_a_lead,
-    );
+fn a_d5_led_15_up_gets_past_the_sides_of_its_leads_and_its_difference_is_refused_for_its_range() {
+    let file = "LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step";
+    the_far_box_shares_nothing_with(file);
+    every_fuse_refuses(file, &[(FAR_OFF, Rule::Difference)], |_, error| {
+        matches!(
+            error,
+            Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (4.0e16..4.1e16).contains(ratio)
+        )
+    });
 }
 
 #[test]
@@ -239,42 +271,74 @@ fn a_d3_led_2_up_gets_past_where_its_flat_meets_its_front_written_twice_and_is_r
  {
     every_fuse_refuses(
         "LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step",
-        &[FAR_OFF],
+        &both_rules_round(&[FAR_OFF]),
         |_, error| matches!(error, Error::Invalid(Invalid::WireTooShort { count: 2 })),
     );
 }
 
-/// The LED in `file` and a box of side 0.2 centred on each of `centres`, fused
-/// under intersection and under difference, each refused as `the_refusal`
-/// takes, handed the model it was refused in, which holds every face of the
-/// LED.
+/// The LED in `file` and the far box, fused under intersection, answer with
+/// nothing, and leave a model `validate` accepts.
+fn the_far_box_shares_nothing_with(file: &str) {
+    let (mut model, solid) = the_led(file);
+    let knife = a_box_round(&mut model, FAR_OFF);
+    let fused = model
+        .fuse(
+            &[solid],
+            &[knife],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{file}: the far box refused: {why:?}"));
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| {
+            panic!("{file}: the far box left a model that is not valid: {why:?}")
+        });
+    assert!(
+        fused.solids().is_empty(),
+        "{file}: the far box shares {} solids with the LED, and it shares none",
+        fused.solids().len()
+    );
+}
+
+/// A box round each centre, to be fused with the LED under intersection and
+/// under difference.
+fn both_rules_round(centres: &[[f64; 3]]) -> Vec<([f64; 3], Rule)> {
+    centres
+        .iter()
+        .flat_map(|&centre| [Rule::Intersection, Rule::Difference].map(|rule| (centre, rule)))
+        .collect()
+}
+
+/// The LED in `file` and a box of side 0.2 centred on each centre of `fuses`,
+/// fused under its rule, each refused as `the_refusal` takes, handed the model
+/// it was refused in, which holds every face of the LED.
 fn every_fuse_refuses(
     file: &str,
-    centres: &[[f64; 3]],
+    fuses: &[([f64; 3], Rule)],
     the_refusal: impl Fn(&Model, &Error) -> bool,
 ) {
     let (led, solid) = the_led(file);
-    for &centre in centres {
-        for rule in [Rule::Intersection, Rule::Difference] {
-            let mut model = led.clone();
-            let knife = a_box_round(&mut model, centre);
-            match model.fuse(
-                &[solid],
-                &[knife],
-                rule,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            ) {
-                Err(error) => assert!(
-                    the_refusal(&model, &error),
-                    "{file}: {rule:?} with a box round {centre:?} refused {error:?}, which is not \
-                     the refusal this pins"
-                ),
-                Ok(_) => panic!(
-                    "{file}: {rule:?} with a box round {centre:?} answers: check its volume as \
-                     f179ca02a did"
-                ),
-            }
+    for &(centre, rule) in fuses {
+        let mut model = led.clone();
+        let knife = a_box_round(&mut model, centre);
+        match model.fuse(
+            &[solid],
+            &[knife],
+            rule,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        ) {
+            Err(error) => assert!(
+                the_refusal(&model, &error),
+                "{file}: {rule:?} with a box round {centre:?} refused {error:?}, which is not the \
+                 refusal this pins"
+            ),
+            Ok(_) => panic!(
+                "{file}: {rule:?} with a box round {centre:?} answers: check its volume as \
+                 f179ca02a did"
+            ),
         }
     }
 }
@@ -286,21 +350,21 @@ fn where_three_surfaces_meet_needs_two_of_them_flat(error: &Error) -> bool {
     )
 }
 
-/// Refused `TwoCurvesTouchWithoutCrossing` on a lead's side, the plane
-/// `x = -0.3` with one wire.
-fn two_curves_touch_on_the_side_of_a_lead(model: &Model, error: &Error) -> bool {
-    let Error::TwoCurvesTouchWithoutCrossing { face } = error else {
+/// Refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` on a flange's
+/// rim, a pipe of `radius`, at a point of the LED's front `y = -6.35`.
+fn two_ends_round_to_one_point_on_the_front_of_a_rim(
+    radius: f64,
+    model: &Model,
+    error: &Error,
+) -> bool {
+    let Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face, at } = error else {
         return false;
     };
     let face = model.face(*face).expect("the face is the LED's own");
-    let Surface::Plane(plane) = face.surface() else {
+    let Surface::Cylinder(rim) = face.surface() else {
         return false;
     };
-    let [x, y, z, d] = plane.coefficients();
-    face.wire_count() == 1
-        && [x + 1.0, y, z, d + 0.3]
-            .iter()
-            .all(|part| part.abs() < 1e-9)
+    (rim.radius() - radius).abs() < 1e-9 && (at.y() + 6.35).abs() < 1e-9
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
@@ -316,86 +380,6 @@ fn the_led(file: &str) -> (Model, SolidKey) {
         panic!("{file} is one solid, not {}", import.solids().len())
     };
     (import.model().clone(), solid)
-}
-
-#[test]
-fn probe_q3112() {
-    let only = env::var("PROBE_ONLY").ok();
-    let fuses: &[(&str, &[[f64; 3]])] = &[
-        (
-            "LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step",
-            &[[-0.23, -6.35, 1.999999956464], [-0.23, -7.35, 2.0], FAR_OFF],
-        ),
-        ("LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step", &[FAR_OFF]),
-        ("LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step", &[FAR_OFF]),
-        ("LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step", &[FAR_OFF]),
-        (
-            "LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step",
-            &[[-0.23, -3.81, 6.0 - 4.3536e-8], FAR_OFF],
-        ),
-    ];
-    for &(file, centres) in fuses {
-        let (led, solid) = the_led(file);
-        let (led_volume, _) = probe_volume_of(&led, &[solid]);
-        for &centre in centres {
-            for rule in [Rule::Intersection, Rule::Difference] {
-                if let Some(only) = &only
-                    && *only != format!("{file} {rule:?} {centre:?}")
-                {
-                    continue;
-                }
-                let mut model = led.clone();
-                let knife = a_box_round(&mut model, centre);
-                let policy = if env::var("PROBE_TOLERANT").is_ok() {
-                    Policy::tolerant(10.0)
-                } else {
-                    Policy::certified()
-                };
-                match model.fuse(&[solid], &[knife], rule, &policy, &mut ProvenanceLog::new()) {
-                    Err(error) => {
-                        let face = match &error {
-                            Error::TwoCurvesTouchWithoutCrossing { face }
-                            | Error::CannotTellTheCellsOfAFaceApart { face }
-                            | Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint {
-                                face, ..
-                            } => model
-                                .face(*face)
-                                .ok()
-                                .map(|f| format!("{:?} wires {}", f.surface(), f.wire_count())),
-                            _ => None,
-                        };
-                        let text = format!("{error:?}");
-                        let cut: String = text.chars().take(1500).collect();
-                        eprintln!("PROBE {file} {rule:?} {centre:?}: REFUSED {cut} face {face:?}");
-                    }
-                    Ok(fused) => {
-                        let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
-                        let (volume, error) = probe_volume_of(&model, fused.solids());
-                        eprintln!(
-                            "PROBE {file} {rule:?} {centre:?}: ANSWERS volume {volume} ± {error}, \
-                             LED {led_volume}, valid {:?}",
-                            valid.err()
-                        );
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn probe_volume_of(model: &Model, solids: &[SolidKey]) -> (f64, f64) {
-    solids.iter().fold((0.0, 0.0), |(volume, error), &solid| {
-        let measured = model
-            .solid(solid)
-            .expect("a solid of this model")
-            .measure(
-                rcad_geom::Deflection::for_scale(model.scale()),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .expect("it measures");
-        (volume + measured.volume(), error + measured.volume_error())
-    })
 }
 
 fn a_box_round(model: &mut Model, centre: [f64; 3]) -> SolidKey {
