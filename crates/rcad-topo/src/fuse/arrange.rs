@@ -7440,10 +7440,14 @@ impl<'f> Arrangement<'f> {
         let way = cross_of_intervals(own_way, partner_way);
         let turns =
             is_below(dot_of(cuts[1].normal().components().map(Interval::exactly), way).sign())?;
-        let step = match self.side_of_a_cut_at_a_meet_of_two_quadrics(first, &cuts[1])? {
-            Decision::Zero => return Some(Decision::Zero),
-            side if is_below(side)? == turns => way.map(|along| -along),
-            _ => way,
+        let side = self.side_of_a_cut_at_a_meet_of_two_quadrics(first, &cuts[1])?;
+        if side == Decision::Zero {
+            return Some(Decision::Zero);
+        }
+        let step = if is_below(side)? == turns {
+            way.map(|along| -along)
+        } else {
+            way
         };
         cones[0]
             .which_comes_first_along_a_branch_a_step_apart(&cones[1], one, other, step)
