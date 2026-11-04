@@ -4519,7 +4519,8 @@ fn the_sign_of_a_sum_with_a_root_in_it(
 /// Where the plane beside the axis meets the circle at `height`, which it
 /// does not miss: the foot, where the plane comes nearest the circle's centre
 /// in the circle's own plane, where it only touches the circle, and the
-/// chord's two ends, the `−(n × w)` side first, where it cuts it.
+/// chord's two ends, the `−(n × w)` side first, where it cuts it. Each box is
+/// [`narrowed_onto_the_plane`].
 fn the_ends_of_the_chord_at(
     flat: &Plane,
     axis: &AnAxis,
@@ -4544,7 +4545,7 @@ fn the_ends_of_the_chord_at(
             )
     });
     if it_only_touches {
-        return smallvec![the_point_a_box_names(foot)];
+        return smallvec![the_point_a_box_names(narrowed_onto_the_plane(flat, foot))];
     }
     let out_there = reach.squared.enclosure() * (height * height)
         + Interval::exactly(2.0) * reach.half_linear.enclosure() * height
@@ -4560,11 +4561,55 @@ fn the_ends_of_the_chord_at(
     [-half, half]
         .into_iter()
         .map(|side| {
-            the_point_a_box_names(core::array::from_fn(|coordinate| {
-                foot[coordinate] + side * sideways[coordinate]
-            }))
+            the_point_a_box_names(narrowed_onto_the_plane(
+                flat,
+                core::array::from_fn(|coordinate| foot[coordinate] + side * sideways[coordinate]),
+            ))
         })
         .collect()
+}
+
+/// `boxed`, a box round a point of `flat`, with its side along the largest
+/// part of the plane's normal narrowed to what the plane makes of the other
+/// two sides: `(d − n₁x₁ − n₂x₂)/n₀`, in intervals, for `n·p = d` as stored.
+/// A box with a side that runs on for ever is handed back as it was.
+///
+/// **Why the chords need it.** The foot is a quotient by `|n × w|²`, which
+/// is near nothing where the plane is near square to the axis, and what the
+/// quotient rounds then lies along `n`, since there `w` is near a multiple of
+/// it. The body's front disc of `LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step`,
+/// `(5.55e−17, 1, 0)·p = −1.27`, and its pipe written as the disc's edge runs
+/// along it, `(0, −1, 1.1e−15)`, have `|n × w|²` about `1.2e−30`, and handed
+/// each of their four places back `0.16` long across the disc and a few
+/// roundings wide along it (Q3111).
+///
+/// # Panics
+///
+/// If the plane's box and `boxed` do not overlap, as
+/// [`where_two_boxes_of_one_number_overlap`] does: a point of the plane in
+/// `boxed` is in both.
+fn narrowed_onto_the_plane(flat: &Plane, boxed: [Interval; 3]) -> [Interval; 3] {
+    if !boxed
+        .iter()
+        .all(|side| side.lo().is_finite() && side.hi().is_finite())
+    {
+        return boxed;
+    }
+    let normal = flat.normal().components();
+    let off = (0..3)
+        .max_by(|i, j| normal[*i].abs().total_cmp(&normal[*j].abs()))
+        .expect("three numbers");
+    let from_the_others = (0..3)
+        .filter(|&axis| axis != off)
+        .fold(Interval::exactly(flat.offset()), |so_far, axis| {
+            so_far - Interval::exactly(normal[axis]) * boxed[axis]
+        });
+    let mut narrowed = boxed;
+    narrowed[off] = where_two_boxes_of_one_number_overlap(
+        quotient_or_everything(from_the_others, Interval::exactly(normal[off])),
+        boxed[off],
+    );
+    narrowed
 }
 
 /// What a plane leaves of the three where it cuts each of the two curved
@@ -9178,7 +9223,8 @@ mod tests {
     /// `what_a_plane_one_wall_mirrors_with_both_leaves` answers them, and handed
     /// each back `0.16` long along `y`. One, at `x = -1.22688`, `z = 3.124844`,
     /// could then not be put in order round the disc's edge against the edge's
-    /// meet with the flange's front `0.0143` from it (Q3111).
+    /// meet with the flange's front `0.0143` from it. Each box is now narrowed
+    /// onto the disc's plane (Q3111).
     #[test]
     fn a_disc_and_its_pipe_written_twice_meet_in_boxes_that_lie_on_the_disc() {
         let disc = Surface::Plane(
