@@ -2828,17 +2828,31 @@ impl<'f> Arrangement<'f> {
     }
 
     /// Whether, where the face's surface and the partners of `stays` and
-    /// `gone` meet, the face on the partner of `stays` leaves out its crossing
-    /// with the partner of `gone` too, so that it splits `stays` nowhere there
-    /// and neither may this face.
+    /// `gone` meet, the face across the edges along `stays` leaves out its
+    /// crossing with the partner of `gone` too, so that it splits `stays`
+    /// nowhere there and neither may this face.
     ///
     /// **Both curves the partner of `gone` crosses the other two in lie past
     /// one plane every face carrying it lies behind, wherever a face carrying
     /// the other surface is** ([`Arrangement::a_curve_of_two_lies_past`]). The
     /// one through the face's surface is `gone`, and the one through the
-    /// partner of `stays` is the crossing the face across draws there. Asked
+    /// surface of the face across is the crossing that face draws there. Asked
     /// of the two the same way and in either order, so the face across asks
     /// just this of the same three and gets the same answer.
+    ///
+    /// **The face across, and not the partner of `stays`**
+    /// ([`Arrangement::the_surface_of_the_face_across`]). The two differ on a
+    /// rim two curved faces touch round, which bake reads against the rim's
+    /// plane, and no face carries that plane. A KiCad LED's dome touches its
+    /// body's pipe round the rim `y = -7.37`, and the flange's flat
+    /// `x = -1.23`, which lies in front of the back plane `y = -2.27`, touches
+    /// the pipe along `z = 15` but as written cuts it in two lines `8.2e-8`
+    /// apart. The pipe left those lines out, since its face lies behind the
+    /// back plane, but asked of the rim's plane whether its faces lie across
+    /// it too, it found none, and split its rim where the lines meet it. The
+    /// dome draws no crossing with the flat, which touches it at one point,
+    /// so its side of the rim was whole, and every difference of the LED with
+    /// a box was refused `ResultIsNotManifold` (Q3164).
     ///
     /// **Past wherever a face of it is, and not only wholly past** (Q2619).
     /// A face leaves out a crossing that lies wholly past such a plane, and
@@ -2874,7 +2888,7 @@ impl<'f> Arrangement<'f> {
         };
         let places: SmallVec<[PredicatePoint; 2]> =
             places.iter().copied().map(as_exact_as_it_is).collect();
-        let across = self.crossings[stays].partner;
+        let across = self.the_surface_of_the_face_across(stays);
         self.crossings[gone]
             .every_surface_that_draws_it()
             .all(|&third| {
@@ -4538,7 +4552,7 @@ impl<'f> Arrangement<'f> {
         cut: Surface,
         at: PredicatePoint,
     ) -> bool {
-        let across = self.crossings[along].partner;
+        let across = self.the_surface_of_the_face_across(along);
         let places = [at];
         let mut past_across = false;
         for side in self.the_sides_its_faces_lie_in(cut) {
@@ -4558,6 +4572,35 @@ impl<'f> Arrangement<'f> {
             }
         }
         past_across
+    }
+
+    /// The surface of the face across the boundary edges along `crossing`:
+    /// the crossing's partner, but where every such edge is a side between
+    /// two curved faces that bake reads against a plane its run names
+    /// ([`the_curved_surface_across`]), the one curved surface those sides
+    /// name.
+    ///
+    /// **The partner is then a plane no face carries**, and what a face
+    /// across the edge leaves out is a question about the face that is there.
+    /// Asked of the rim's plane, every list of the sides a surface's faces
+    /// lie in says nothing, since no face is on it
+    /// ([`Arrangement::the_face_across_leaves_it_out_too`], Q3164).
+    fn the_surface_of_the_face_across(&self, crossing: usize) -> Surface {
+        let partner = self.crossings[crossing].partner;
+        let mut named: Option<Surface> = None;
+        for (wire, on) in self.crossing_of_edge.iter().enumerate() {
+            for (position, _) in on.iter().enumerate().filter(|&(_, &on)| on == crossing) {
+                let edge = &self.face.wires[wire][position];
+                let Some(curved) = the_curved_surface_across(edge, self.surface) else {
+                    return partner;
+                };
+                if named.is_some_and(|known| known != curved) {
+                    return partner;
+                }
+                named = Some(curved);
+            }
+        }
+        named.unwrap_or(partner)
     }
 
     /// The sides of planes every face carrying `surface` lies in, as
@@ -21395,6 +21438,34 @@ fn the_axis_of_a_cone_or_a_pipe(round: &Surface) -> Option<Axis> {
         return None;
     };
     Some(pipe.axis())
+}
+
+/// The curved surface of the face across `edge` from a face on `mine`, where
+/// bake reads the side against a plane its run names and not against that
+/// face ([`BakedEdge::across`](super::bake::BakedEdge::across)): the one
+/// curved surface besides `mine` round both its corners. `None` for any other
+/// edge, and where its corners name no such surface or more than one.
+///
+/// **Bake reads a side so only between two curved faces, and the plane is
+/// then round neither corner.** Every face that meets at a corner puts its
+/// surface in [`BakedCorner::around`] as bake writes it for `across`, so a
+/// face across on that plane would be round both. A KiCad LED's dome meets
+/// its body's pipe round the rim `y = -7.37`, and each corner of the rim has
+/// the ball and the pipe round it, and nothing else (Q3164).
+fn the_curved_surface_across(edge: &super::bake::BakedEdge, mine: Surface) -> Option<Surface> {
+    edge.across.as_plane()?;
+    if mine.as_plane().is_some()
+        || [&edge.start, &edge.end]
+            .iter()
+            .any(|corner| corner.around.contains(&edge.across))
+    {
+        return None;
+    }
+    let mut round_both = edge.start.around.iter().filter(|&&round| {
+        round != mine && round.as_plane().is_none() && edge.end.around.contains(&round)
+    });
+    let curved = *round_both.next()?;
+    round_both.next().is_none().then_some(curved)
 }
 
 /// Whether the curve the two surfaces cross in through `places`, points on
