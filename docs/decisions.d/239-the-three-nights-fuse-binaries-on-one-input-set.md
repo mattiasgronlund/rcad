@@ -315,3 +315,15 @@ bisect, not from replaying what that night ran. Also not run: a night past job
 300, Q12's other four targets beside the fuse, where the 3.5 s goes in
 `05206e64f`'s answer, and whether `main` still takes it. Q3151 asks the last
 two.
+
+**Q269 and Q296 are dropped here.** Q296 ran §296.7's with-C measurement
+for hours instead of 2 700 s, and only if Q269 left §254.5's reading standing.
+Q269 asked how set C's share of the fuzzer's effort
+makes up the with-C arm's 1.4 to 1.7 times (§296.6), and it needs set C's 923
+files, of which neither the files nor the list of their names survives. The
+list was `setC_names.txt` in Q244's `target/q244/`, and the two corpora were in
+§296's scratchpad. On 2026-11-04 neither was anywhere under `/tmp`,
+`~/rcad-probes`, `~/rcad-tree-archive` or the worktrees, and the corpus no
+longer dates its files (239.9). Q62's stand-ins could take C's place, but they
+would answer a different question, and the night that question came from is
+answered above.
