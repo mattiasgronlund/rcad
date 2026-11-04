@@ -114,7 +114,7 @@ just queue cores <id> <n>|all              set, replace or remove the write set'
 just queue night <id> on|off               set or take off the write set's night entry (§308.8); the fill offers the
                                             row only inside the night fuzz's window and skips it by day; refused
                                             beside a cores: entry, since the night fuzz holds every thread then
-just queue rank <id> before <id>          move <id> to sit just before the other id, within their shared tier
+just queue rank <id> before <id>           move <id> to sit just before the other id, within their shared tier
 just queue pick <id> ours|theirs           keep one side of a row the merge driver left in conflict
 just queue pin <id> [<id>...]              Mattias's alone (§430): pinned/<n> in front of each open row's description,
                                             n one past the highest open pin, the row moved to tier 1 after the pinned
