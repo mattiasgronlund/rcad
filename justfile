@@ -9965,6 +9965,7 @@ check-fuzz-overnight-selftest:
             exit 0 ;;
     esac
     printf '%s [timings=%s] [at=%s]\n' "$*" "${RCAD_FUZZ_TIMINGS:-unset}" "$stub_started" >>"$STUB_LOG"
+    printf '%s %s\n' "$(date +%s%3N)" "$*" >>"$STUB_LOG.ms"
     case " $* " in
         *" build "*)
             # `STUB_BUILD_SLEEP` makes a build that takes time, the way a
@@ -11612,6 +11613,31 @@ check-fuzz-overnight-selftest:
         || fail "a night with half a second before its pause ran into it; launches and stops, against it: $(tr '\n' ',' <<<"$got")"
     }
 
+    # Forty-five (Q3101): the stretch after a pause is given whole seconds
+    # counted from the clock in milliseconds too. The pause is over before the
+    # build's check lets the night go on, and that happens half a second into
+    # a second, where a clock rounded down reads a second more than is left and
+    # the targets run past the end of the window. The stub's millisecond log
+    # says when each launched; none may be given time that ends after it.
+    forty_five() {
+    : >"$dir/log"
+    : >"$dir/log.ms"
+    t0=$(date +%s)
+    pause_from=$(( t0 + 1 ))
+    pause_until=$(( t0 + 2 ))
+    STUB_CHECK_UNTIL_MS=$(( (t0 + 3) * 1000 + 500 )) run 8 "@$pause_from" "@$pause_until" \
+        || fail "a night whose pause ended during its build failed: $(cat "$dir/out")"
+    late=$(awk -v floor="$(( (t0 + 3) * 1000 ))" -v end_ms="$(( (t0 + 8) * 1000 ))" '
+        /max_total_time=/ && $1 >= floor {
+            match($0, /max_total_time=[0-9]+/)
+            if ($1 + substr($0, RSTART + 15, RLENGTH - 15) * 1000 > end_ms) print
+        }' "$dir/log.ms")
+    [ -z "$late" ] \
+        || fail "a night given a pause that ended in its build ran targets past the window: $(tr '\n' ',' <<<"$late")"
+    [ "$(grep -c 'max_total_time' "$dir/log.ms")" -ge 1 ] \
+        || fail "the night after a pause that ended in its build fuzzed nothing: $(cat "$dir/out")"
+    }
+
     # Forty-three (Q3050): a night's artifacts land in this run's own tree
     # and never in the real `fuzz/artifacts/`, where a sibling gate running
     # this same recipe would count them as new tonight. Alone, because it
@@ -11777,7 +11803,7 @@ check-fuzz-overnight-selftest:
         fourteen fifteen seventeen eighteen nineteen twenty twenty_one \
         twenty_two twenty_four twenty_five twenty_seven twenty_eight \
         thirty thirty_one thirty_two thirty_four thirty_five thirty_six thirty_seven \
-        thirty_eight thirty_nine forty_two forty_four
+        thirty_eight thirty_nine forty_two forty_four forty_five
     settle
     overlap 5
     rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*-"$tag"
