@@ -606,6 +606,61 @@ fn three_more_d3_leds_less_a_box_round_either_corner_or_far_off_and_what_the_two
     }
 }
 
+/// Q2930's box inside the body of each of three more `D3.0` LEDs, round a
+/// point of the body's axis 3 behind the front, shares all of itself with the
+/// LED. The LED less it and what the two share add up to the LED, and all six
+/// of its walls are inside the LED.
+#[test]
+fn three_more_d3_leds_less_a_box_inside_their_body_and_what_the_two_share_add_up_to_the_led() {
+    for (file, front, axis) in THREE_MORE_D3 {
+        let inside = CutOut {
+            centre: [1.27, front - 3.0, axis],
+            shared: (2.0 * HALF) * (2.0 * HALF) * (2.0 * HALF),
+            walls_inside: 6,
+        };
+        the_led_and_a_box_share(file, inside.centre, inside.shared);
+        the_led_less_each_box_and_what_they_share_add_up_to_the_led(file, &[inside]);
+    }
+}
+
+/// A box across the top of the body's pipe, 3 behind the front, of each of
+/// three more `D3.0` LEDs (Q2930's) and of the `Z3.0` and `Z15.0` `D5.0` LEDs
+/// shares with the LED the part of the box below the pipe's top. The LED less
+/// that box is refused `CannotNameWhichPieceOfACrossingThisIs` (Q3094).
+///
+/// **The box makes a hole in the middle of the pipe.** The pipe's pieces then
+/// join into a face of three rings: the ring where the pipe leaves the flange
+/// and the dome's rim, both right round, and the hole.
+/// `a_seam_across_the_band` in `fuse/assemble.rs` keeps a seam only across a
+/// band of two rings, so the pipe stays in the pieces the fuse cut it into.
+/// Among the edges between those pieces are the pieces of a thin loop where
+/// the pipe and the dome cross as stored: the dome's centre is stored a hair
+/// off the pipe's axis, about `2e-16` in a `D3.0` LED, so the loop stays
+/// within about `2.5e-8` of the rim. Nesting the answer's shells measures
+/// them, which meshes them, and the mesher cannot walk that loop. The box
+/// round the back corner notches the pipe where it leaves the flange, which
+/// leaves two rings, so the pipe joins back across the loop and that
+/// difference answers. The answer is the LED less the part of the box inside
+/// it: one solid, with five of the box's walls inside it, all but the high wall
+/// square to `z`.
+#[test]
+fn five_leds_share_a_box_across_the_top_of_their_pipe_and_less_it_are_refused_naming_a_piece_of_a_crossing()
+ {
+    let d3 = THREE_MORE_D3.map(|(file, front, axis)| (file, [1.27, front - 3.0, axis + 1.5], 1.5));
+    let d5 = [
+        (Z3, [1.27, -1.27 - 3.0, 3.0 + 2.5], 2.5),
+        (Z15, [1.27, -1.27 - 3.0, 15.0 + 2.5], 2.5),
+    ];
+    for (file, centre, radius) in d3.into_iter().chain(d5) {
+        the_led_and_a_box_share(
+            file,
+            centre,
+            what_a_box_across_the_top_of_a_body_shares(radius),
+        );
+        the_led_less_a_box_is_refused_naming_a_piece_of_a_crossing(file, centre);
+    }
+}
+
 /// The box round a `D3.0` LED's front corner, which shares with it what the
 /// box round a `D5.0` LED's does, and four of whose walls are inside it, as
 /// they are for the `Z3.0` LED: all but the low wall square to `x` and the
@@ -757,6 +812,29 @@ fn the_led_less_each_box_and_what_they_share_add_up_to_the_led(file: &str, cut_o
     }
 }
 
+/// The LED in `file` less a box of side `2 * HALF` centred on `centre` is
+/// refused `CannotNameWhichPieceOfACrossingThisIs`.
+fn the_led_less_a_box_is_refused_naming_a_piece_of_a_crossing(file: &str, centre: [f64; 3]) {
+    let (mut model, solid) = the_led(file);
+    let knife = a_box_round(&mut model, centre);
+    let said = model.fuse(
+        &[solid],
+        &[knife],
+        Rule::Difference,
+        &Policy::certified(),
+        &mut ProvenanceLog::new(),
+    );
+    assert!(
+        matches!(
+            said,
+            Err(rcad_topo::Error::Geometry(
+                rcad_geom::Error::CannotNameWhichPieceOfACrossingThisIs
+            ))
+        ),
+        "{file}: less the box round {centre:?} said {said:?}"
+    );
+}
+
 /// How many faces of `solid` lie on each of the six walls of a box of side
 /// `2 * HALF` centred on `centre`: the low and the high wall square to `x`,
 /// then to `y`, then to `z`.
@@ -797,11 +875,22 @@ fn faces_on_each_wall_of_a_box_round(
 /// touches. Radius 2.5 is a `D5.0` LED's, and 1.5 a `D3.0` LED's.
 fn what_a_box_round_the_back_corner_shares(radius: f64) -> f64 {
     let flange_in_the_box = HALF * HALF * (2.0 * HALF);
-    let body_in_the_box = HALF
-        * (HALF * (radius * radius - HALF * HALF).sqrt()
-            + radius * radius * (HALF / radius).asin()
-            - 2.0 * HALF * (radius - HALF));
+    let body_in_the_box = HALF * a_slice_of_a_box_across_the_side_of_a_body(radius);
     flange_in_the_box + body_in_the_box
+}
+
+/// What a box of side `2 * HALF` across the top of a body's pipe of `radius`
+/// shares with it: the part of the box below the pipe's top, for the whole
+/// length of the box along the pipe.
+fn what_a_box_across_the_top_of_a_body_shares(radius: f64) -> f64 {
+    2.0 * HALF * a_slice_of_a_box_across_the_side_of_a_body(radius)
+}
+
+/// The area of a square of side `2 * HALF`, centred where a circle of `radius`
+/// crosses a line through its centre, that is inside the circle.
+fn a_slice_of_a_box_across_the_side_of_a_body(radius: f64) -> f64 {
+    HALF * (radius * radius - HALF * HALF).sqrt() + radius * radius * (HALF / radius).asin()
+        - 2.0 * HALF * (radius - HALF)
 }
 
 /// The volume of `solids` together, and how far measuring it may be off.
