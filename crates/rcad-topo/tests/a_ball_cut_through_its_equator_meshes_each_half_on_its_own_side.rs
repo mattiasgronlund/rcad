@@ -49,6 +49,16 @@
 //! on the equator, on either side of the plane. They were written after the
 //! narrow copy was gone, so they have not been run against it.
 //!
+//! **The two on the far side of a wall moved near the notch's corner with
+//! Q3164**: a ball is no longer cut by a plane where the box round it lies
+//! wholly on the side of another plane that the plane's faces never reach.
+//! Each wall's face ends at the corner `(5, 6)` on the other wall's plane,
+//! and the far side of a wall is on the block only past that corner. So the
+//! balls at `(2.25, 4.25)` and `(7.5, 4.45)`, whose boxes lie wholly past the
+//! other wall's plane, came back whole: one face each, valid, and a ball's
+//! volume. The two draws now stand `1.25` along `x` from the corner, where the
+//! box reaches across.
+//!
 //! # The oracle
 //!
 //! Which side of the plane each face lies on is read here off the model and
@@ -81,7 +91,10 @@ const DEFLECTION: f64 = 0.01;
 /// one unit up. The walls of the notch run along `y = 0.8x + 2` and
 /// `y = 10 − 0.8x`, and each centre below is `0.45` across from one of those
 /// lines, `0.351` off its plane, on the side of the wall the block is on or on
-/// the other, and more than two units from every other wall. Neither wall's
+/// the other. It is more than two units from every other wall, but for the two
+/// on the other side, which are `1.21` from the other wall of the notch: the
+/// box round the ball has to reach across that wall's plane, or the fuse
+/// proves the ball out of this wall's reach and leaves it whole. Neither wall's
 /// plane runs through a corner of the outline, which `(5, 5)` would put both
 /// through, and the fuse then cannot order that corner along the crossing.
 ///
@@ -93,9 +106,9 @@ const DEFLECTION: f64 = 0.01;
 fn each_half_of_a_ball_cut_upright_through_its_equator_is_meshed_on_its_own_side() {
     let draws = [
         ([7.75, 7.75], "y = 0.8x + 2, the block's side"),
-        ([2.25, 4.25], "y = 0.8x + 2, the other side"),
+        ([3.75, 5.45], "y = 0.8x + 2, the other side"),
         ([2.5, 7.55], "y = 10 − 0.8x, the block's side"),
-        ([7.5, 4.45], "y = 10 − 0.8x, the other side"),
+        ([6.25, 5.45], "y = 10 − 0.8x, the other side"),
     ];
     let wrong: Vec<String> = draws
         .into_iter()
