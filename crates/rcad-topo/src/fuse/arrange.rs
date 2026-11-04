@@ -5869,9 +5869,11 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::as_three_planes_through_one_line_say`]), two meets on
     /// one line in the flat surface halfway between two mirror cones
     /// ([`Arrangement::as_a_line_in_the_cut_halfway_between_mirror_cones_says`])
-    /// and the sign of one quadric where a line meets another
+    /// the sign of one quadric where a line meets another
     /// ([`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`])
-    /// are not asked: no ray here has been shown to need any of them.
+    /// and the side of a plane two meets on a branch of two cones are on
+    /// ([`Arrangement::as_two_cuts_across_a_branch_say`]) are not asked: no
+    /// ray here has been shown to need any of them.
     fn which_comes_first(&self, crossing: usize, first: usize, second: usize) -> Option<Decision> {
         if let Some(read) = self.as_read_round_a_corner(crossing, first, second) {
             return Some(read);
@@ -5911,6 +5913,9 @@ impl<'f> Arrangement<'f> {
     /// crossing's meet with another of those, read off the sign of the other's
     /// expression at the first
     /// ([`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`]),
+    /// two meets of a branch two cones cross in with two planes, read off which
+    /// side of the second's plane the first is
+    /// ([`Arrangement::as_two_cuts_across_a_branch_say`]),
     /// two meets of a plane's line on a pipe with two planes that cross it in
     /// parallel lines
     /// ([`Arrangement::as_two_cuts_crossing_the_plane_in_parallel_lines_say`]),
@@ -7393,7 +7398,8 @@ impl<'f> Arrangement<'f> {
     /// times the determinant's, and `σ (g_S × g_P)` over the box is the step
     /// `rcad-geom` puts the two in order by
     /// ([`Cone::which_comes_first_along_a_branch_a_step_apart`]). Where `Q(X)`
-    /// is nothing, so is `σ`, and the two nodes are one point.
+    /// is nothing and the determinant keeps one sign, `σ` is nothing, and the
+    /// two nodes are one point.
     ///
     /// **What it is for.** The funnel file's two pointed cones of one slope,
     /// the second turned `0.3` about `x` through `(0, 0, 4)`, meet `z = 8` and
@@ -7432,15 +7438,12 @@ impl<'f> Arrangement<'f> {
         let [own_way, partner_way] =
             [&own, &partner].map(|surface| gradient_at(surface, room).enclosure());
         let way = cross_of_intervals(own_way, partner_way);
-        let turns = dot_of(cuts[1].normal().components().map(Interval::exactly), way).sign();
-        let side = self.side_of_a_cut_at_a_meet_of_two_quadrics(first, &cuts[1])?;
-        if side == Decision::Zero {
-            return Some(Decision::Zero);
-        }
-        let step = if is_below(side)? == is_below(turns)? {
-            way.map(|along| -along)
-        } else {
-            way
+        let turns =
+            is_below(dot_of(cuts[1].normal().components().map(Interval::exactly), way).sign())?;
+        let step = match self.side_of_a_cut_at_a_meet_of_two_quadrics(first, &cuts[1])? {
+            Decision::Zero => return Some(Decision::Zero),
+            side if is_below(side)? == turns => way.map(|along| -along),
+            _ => way,
         };
         cones[0]
             .which_comes_first_along_a_branch_a_step_apart(&cones[1], one, other, step)
@@ -7467,7 +7470,8 @@ impl<'f> Arrangement<'f> {
     /// of theirs, and `P(Z)`'s is worked out exactly from `Q₁`, `Q₂`, `S` and
     /// `P`, never from `Z`'s box
     /// ([`MeetOfThree::how_one_quadric_leans_where_the_line_meets_another`]).
-    /// Where `P(Z)` is nothing, so is `τ`, and `X` is `Z`, on `cut`.
+    /// Where `P(Z)` is nothing and the first determinant keeps one sign, `τ`
+    /// is nothing, and `X` is `Z`, on `cut`.
     ///
     /// **What it is for.** The funnel file's two pointed cones of one slope,
     /// the second turned `0.3` about `x` through `(0, 0, 4)`: the meet of both
@@ -7521,6 +7525,7 @@ impl<'f> Arrangement<'f> {
                         let along = cross_of_intervals(own_way, flat_way);
                         let [partner_turns, cut_turns] =
                             [partner_way, cut_way].map(|way| is_below(dot_of(way, along).sign()));
+                        let partner_turns = partner_turns?;
                         let leans = [self.nodes[corner].point, self.narrowed_box_of(corner)]
                             .into_iter()
                             .find_map(|near| {
@@ -7534,7 +7539,7 @@ impl<'f> Arrangement<'f> {
                         if leans == Decision::Zero {
                             return Some(Decision::Zero);
                         }
-                        let below = [is_below(leans)?, partner_turns?, cut_turns?]
+                        let below = [is_below(leans)?, partner_turns, cut_turns?]
                             .into_iter()
                             .fold(true, |so_far, below| so_far != below);
                         Some(if below { Decision::Neg } else { Decision::Pos })
@@ -13959,6 +13964,15 @@ impl<'f> Arrangement<'f> {
     /// The funnel file's two pointed cones, one leaning off the other, have
     /// such a node a rounding off the leaning cone, and asked its box alone
     /// every fuse of the two was refused `Undecidable` (Q2961).
+    ///
+    /// **A node where a plane meets two balls, pipes or cones is read against
+    /// another plane exactly, where its box cannot tell and one of the two
+    /// meets both planes at another node**
+    /// ([`Arrangement::side_of_a_cut_at_a_meet_of_two_quadrics`]). On the
+    /// leaning cone's wall of the same two cones, the meet of both cones with
+    /// `z = 8` is a node `4e-16` below the plane of that wall's own cap, and
+    /// asked its box alone every fuse of the two was refused `Undecidable`
+    /// (Q3133).
     fn which_side_of_everything(
         &self,
         cycle: usize,
@@ -13984,7 +13998,8 @@ impl<'f> Arrangement<'f> {
             let partner = self.crossings[crossing].partner;
             let mut first_undecided = None;
             for &half_edge in &self.cycles[cycle] {
-                let node = &self.nodes[self.arcs[half_edge / 2].ends[half_edge % 2]];
+                let at_node = self.arcs[half_edge / 2].ends[half_edge % 2];
+                let node = &self.nodes[at_node];
                 match self.whether_past_the_picker(crossing, node.point) {
                     PastThePicker::No => (),
                     PastThePicker::Yes(facing) => {
@@ -14020,6 +14035,9 @@ impl<'f> Arrangement<'f> {
                                                 )
                                             },
                                         )
+                                    })
+                                    .or_else(|| {
+                                        self.side_of_a_cut_at_a_meet_of_two_quadrics(at_node, plane)
                                     })
                             })
                             .or_else(|| {
@@ -18511,7 +18529,7 @@ fn every_point_between_lies_within(surface: &Surface, ends: [[Interval; 3]; 2], 
 ///
 /// **Round a cone it parts two meets of a cap's rim a rounding apart.** The
 /// upright cone of
-/// `two_pointed_cones_one_leaning_off_the_other_answer_every_fuse`
+/// `two_pointed_cones_one_leaning_off_the_other_are_refused_a_point_inside_a_piece_a_rounding_across`
 /// in `tests/a_funnel_with_a_leaning_spout.rs`, of slope a half up `z`, has its
 /// cap's rim, where `z = 8` cuts it, walked from `(0, 4, 8)`. Near `(−3.9541,
 /// −0.6045, 8)` the leaning cone crosses that rim, and the leaning cone's cap
@@ -33071,7 +33089,7 @@ mod two_loops_of_two_leaning_pipes {
 #[cfg(test)]
 mod two_points_a_rounding_apart_on_a_cone_caps_rim {
     //! The rim of the upright cone's cap in
-    //! `two_pointed_cones_one_leaning_off_the_other_answer_every_fuse`
+    //! `two_pointed_cones_one_leaning_off_the_other_are_refused_a_point_inside_a_piece_a_rounding_across`
     //! in `tests/a_funnel_with_a_leaning_spout.rs`: the cone of slope a half
     //! up `z` from the origin, cut by `z = 8` in a circle of radius 4, walked
     //! from `(0, 4, 8)`. Two of its nodes are a rounding apart near
