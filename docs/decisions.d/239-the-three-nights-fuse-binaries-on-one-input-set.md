@@ -14,6 +14,7 @@ ran after 21:50Z.*
   239.6   What it shows for §234.4's leg
   239.7   What the 09-21 column says
   239.8   What was not run
+  239.9   The two bisects, 2026-11-04
 
 ### 239.1 What was built, and why the same bytes make the same solids on all three
 
@@ -227,3 +228,53 @@ inputs of graded difficulty, but that was not chased.
 - **Load is not removed, only shared.** Other sessions built throughout
   (2.3 – 43.2); the order rotation spreads it and the ratios survive it, and
   the ten-round rerun is there because single runs did not.
+
+### 239.9 The two bisects, 2026-11-04
+
+*Q60 and Q62, two read-only lanes. Their scripts, logs and binaries are in
+`~/rcad-probes/q60` and `~/rcad-probes/q62`, outside git. Neither set B nor set C
+can be picked out by date any more: the corpus was rewritten on 2026-10-28, and
+no file keeps a 09-21 or 09-22 mtime.*
+
+**What made the fuse faster is `b782b51cd`**, "fix(mesh): a curved face never
+cuts straight across a corner inside one edge", 2026-09-21 19:10, a work in
+progress commit with three red tests. Q60 timed all 20 630 corpus files on the
+09-21 binary and bisected on the ten slowest, 4.4 to 5.2 s each: the top of
+239.7's three levels. Those ten take 47 387 ms together at its parent
+`f0829431d` and 73 ms at `b782b51cd` (`t10-f0829431.txt`, `t10-b782b51c.txt`).
+Every commit the bisect timed fell clearly on one side, 45 166 to 47 387 ms or
+62 to 119 ms (`bisect.log`). Its message says the pointed cone at 1e-4 now runs
+out of room. So the fast binary may be refusing where the slow one answered,
+and the three levels may be rounds of a finer mesh. That was not checked; Q3148
+asks it.
+
+**On stand-ins for set C, the slowdown comes in with `b53344c9e`**, "fix(validate):
+mesh finer when the sweep's own coarse chords cross a hole", 18:37 the same day.
+Its parent is `f0829431d` too, so the two commits are on two branches, and
+both reach `79eedce7`. The stand-ins are the 1 213 inputs `79eedce7` kept in
+four minutes of fuzzing and the 842 files added from 10-29 to 11-04, 2 055 in
+all. Of those, 201 run slower on `79eedce7` than on `ae124a29` (`S.txt`), and
+the rest run the same. The 201, summed from the per-file times in
+`tm-<sha>-1.txt` and `-2.txt`:
+
+| commit | run 1 | run 2 |
+|---|---|---|
+| `ae124a29` | 4 417 ms | 4 441 ms |
+| `f0829431d` | 6 827 ms | 4 455 ms |
+| `b782b51cd` | 4 776 ms | 5 779 ms |
+| `b53344c9e` | 8 242 ms | 8 481 ms |
+| `79eedce7` | 7 144 ms | 6 697 ms |
+
+`79eedce7` over `ae124a29` is about 1.5, close to C's 1.6. The parent's two
+runs differ by half, so the 201 alone place the step loosely. Over all 2 055,
+in 200-file batches with the two binaries taking turns, three repeats put
+`b53344c9e` over `f0829431d` at 1.18, 1.21 and 1.21 (`X1.out` to `X3.out`).
+The finer mesh is retried on purpose, so no defect is claimed.
+
+**A binary does not run its own finds slowly.** Inputs `ae124a29` found ran
+91.9 ms each on `ae124a29`, against 4.8 ms on `79eedce7` (`Nae.out`).
+
+Not run: set C itself, which is gone; `7dda6ab5d`, "stop the finer-mesh retry at
+half the closest corner pair", which follows `b53344c9e` and may be why
+`79eedce7` is faster than `b53344c9e` on the 201; and why the retry fires more
+often on those 201.
