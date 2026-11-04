@@ -1608,9 +1608,10 @@ def writes(here, args):
 
 AGENT_FILE = re.compile(r"^(.*/)?(CLAUDE|AGENTS)\.md$|^\.claude/agents/.*\.md$")
 AGENT_FILE_POINTER = (
-    "CLAUDE.md, AGENTS.md and .claude/agents/*.md are read once, when a claude process starts, so a change to one "
-    "leaves every running dispatcher on the old text until a new process starts: docs/where-a-rule-goes.md says "
-    "what belongs in them and where the rest goes, and the commit that changes one says why its rule had to go there.")
+    "A running claude reads .claude/agents/*.md once, when its process starts, and CLAUDE.md (AGENTS.md links to it) "
+    "when its session starts or clears (§266.6), so a change to one leaves every running dispatcher on the old text: "
+    "docs/where-a-rule-goes.md says what belongs in them and where the rest goes, and the commit that changes one "
+    "says why its rule had to go there.")
 
 
 def agent_file_pointer(row_id, entries):
