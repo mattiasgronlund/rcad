@@ -934,6 +934,36 @@ rule for what it asks of rcad**: rcad answers to STEP and to the kernel, never
 to rcad-brep, and rcad-brep adapts to rcad as it is. Read that row rather than
 a summary here.
 
+### What it asks for
+
+Two demands, drafted 2026-10-20 and filed here 2026-11-04. The draft sat in a
+stash in this repo and was never committed, which rcad-brep's own
+`docs/decisions.md` §40 found. Neither is agreed. **Its `docs/decisions.md` §6
+holds the demand text**: the signatures, the code that waits on them, and what
+it does if refused. Read that rather than trusting this summary.
+
+- **What an edge runs along, from an explicit curve.** rcad-step's private
+  `run_along` and `round_run` in `crates/rcad-step/src/brep.rs` already turn a
+  line, circle or ellipse, its two ends and its faces' surfaces into an
+  `EdgeRun`. But `run_along` reads its curve and ends out of a STEP file by
+  `EntityId`, so making it public would not be enough. The ask is an entry
+  point that takes the geometry instead, proposed as `edge_run_along(curve:
+  &ExplicitCurve, ends: [Point; 2], along_the_curve: bool, faces: &[Surface])
+  -> Result<EdgeRun, Error>`. rcad-step could call it in place of its own, and
+  rcad's tests could ask for an arc on two faces without writing a file. If
+  refused, rcad-brep writes its own on the facade's public API, which is a
+  second answer to a question rcad has already answered. Until then,
+  rcad-brep refuses every edge that is not a line.
+- **An `Isometry` from a frame or a 3×4 matrix.** OCCT writes a location as a
+  matrix, and `Isometry` has no constructor that takes one or a frame
+  (`crates/rcad-geom/src/isometry.rs`). Proposed: `Isometry::from_frame(origin,
+  z, x)` or `Isometry::from_matrix(rows: [[f64; 4]; 3])`, either refusing by
+  rcad's own bound what is not a rotation. Either serves. The frame form is also
+  what rcad-step's `Refusal::APlacementThisReaderCannotApply` needs to lift,
+  since `AXIS2_PLACEMENT_3D` is a frame. rcad-brep will not turn a matrix into
+  an axis and angle itself, since that adds a rounding rcad's bound does not
+  cover. If refused, it keeps refusing every location that turns.
+
 ### What rcad answered
 
 - **An edge with four faces along it** (`docs/decisions.md` §469). OCCT's
@@ -956,4 +986,6 @@ a summary here.
 - **Never work around a refusal**, for the reason given under rscene above.
 - **Say so if a `.brep` ever holds six or more faces along one edge.** No solid
   in rcad's STEP corpus does (§469.2), so it would be the first real solid to
-  reach Q2912's question.
+  reach Q2912's question. rcad-brep's answer, so far: no solid in 1584 `.brep`
+  files counted has six or more (its `docs/decisions.md` §37), and in OCCT's
+  test data no shell has an edge of more than four uses (its §40).
