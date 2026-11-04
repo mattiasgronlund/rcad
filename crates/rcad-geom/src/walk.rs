@@ -1641,11 +1641,12 @@ fn follow_a_branch_between_two_corners(
 /// asked ([`TheRulingsAcrossABranch::walk`]), and a walk with room to spare,
 /// the coarse one a caller makes to find out how big a crossing is, passes
 /// it with one piece from corner to corner. That piece is the corners' own
-/// chord, a straight line, and shows none of the bend. Eight pieces are what a
-/// branch is walked into however much room it has. The branch the cones of
-/// `a_funnel_with_a_leaning_spout.rs` cross in between their two corners at
-/// `z = 8` turns twice, a right angle each time, and eight pieces put three
-/// of them between the two turns.
+/// chord, a straight line, and shows none of the bend. Eight pieces are the
+/// fewest a branch is walked into however much room it has. The branch the
+/// cones of `a_funnel_with_a_leaning_spout.rs` cross in between their two
+/// corners at `z = 8` turns twice, a right angle each time: its corners lean
+/// `±1.7225` round the ruled cone and its turns `±1.494`, so most of those
+/// pieces fall between the two turns, and the first and last cross one.
 const MOST_OF_A_BRANCH_ONE_STEP_SPANS: f64 = 1.0 / 8.0;
 
 /// The straight lines of `pieces.ruled` out of its apex, across the branch
