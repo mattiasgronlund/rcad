@@ -16370,20 +16370,36 @@ mod tests {
     }
 
     /// A crossing the answer's mesh cannot follow, along a piece of an input
-    /// edge, names that input edge.
+    /// edge, comes back with the model the answer was meshed in, which holds
+    /// the edge it names, and with the input edge that one is a piece of.
     ///
-    /// The edge named was a key into the model `Assembly::nest_the_shells`
-    /// meshes the answer in and drops, so the caller's model answered
-    /// `KeyFromAnotherModel` for it (Q2889), as it did for a face before Q2288.
+    /// The edge named is a key into the model `Assembly::nest_the_shells`
+    /// meshes the answer in, so the caller's model answered
+    /// `KeyFromAnotherModel` for it (Q2889). Naming the input edge instead
+    /// said which input edge and not which piece of it (Q3153).
     #[test]
-    fn a_crossing_the_answers_mesh_cannot_follow_names_the_input_edge_it_is_a_piece_of() {
+    fn a_crossing_the_answers_mesh_cannot_follow_comes_back_with_its_model_and_the_input_edge() {
         let (model, inputs, mut assembly, _) =
             a_dome_on_a_shaft_with_its_rim_written_between_the_pipe_and_the_ball();
         let refused =
             assembly.nest_the_shells(&model, &Policy::certified(), &mut ProvenanceLog::new());
-        let Err(Error::ACrossingAlongThisEdgeCouldNotBeFollowed { edge, .. }) = refused else {
+        let Err(Error::TheFuseWasRefusedInAModelOfItsOwn {
+            refused,
+            model: apart,
+            callers_edge,
+            ..
+        }) = refused
+        else {
             panic!("the pipe and the ball only touch along the rim: {refused:?}");
         };
+        let Error::ACrossingAlongThisEdgeCouldNotBeFollowed { edge, .. } = *refused else {
+            panic!("the pipe and the ball only touch along the rim: {refused:?}");
+        };
+        apart
+            .model()
+            .edge(edge)
+            .expect("the model handed back holds the edge the refusal names");
+        let callers_edge = callers_edge.expect("the rim is a piece of the shaft's own");
         let faces_of_the_inputs: Vec<FaceKey> = inputs
             .into_iter()
             .flat_map(|solid| {
@@ -16396,58 +16412,127 @@ mod tests {
             })
             .collect();
         let along = model
-            .edge(edge)
-            .expect("the caller's model holds the edge the refusal names");
+            .edge(callers_edge)
+            .expect("the caller's model holds the caller's edge");
         assert!(
             along
                 .neighbouring_faces()
                 .all(|face| faces_of_the_inputs.contains(&face)),
-            "{edge:?} is no edge of the shaft or the dome"
+            "{callers_edge:?} is no edge of the shaft or the dome"
         );
     }
 
     /// A crossing the answer's mesh cannot follow, along an edge the fuse
-    /// invented, is the walk's own refusal: there is no edge of the caller's
-    /// to attach to it, and a key into the model the answer was meshed in
-    /// names nothing once the fuse returns (Q2889).
+    /// invented, comes back with the model the answer was meshed in, the only
+    /// model that holds that edge, and with no edge of the caller's. It came
+    /// back as the walk's own [`Error::Geometry`], which says nothing of where
+    /// (Q2889, Q3153).
     ///
     /// Two faces of one input that only touch, but are stored a rounding
     /// apart, cross in a thin loop the fuse writes as an edge of its own, and
     /// the `D5.0` LED of `an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`
-    /// less a box is refused there under a tolerant policy. Here the rim the
+    /// less a box was refused there under a tolerant policy. Here the rim the
     /// shaft's top and the dome share is made such an edge by hand.
     #[test]
-    fn a_crossing_the_answers_mesh_cannot_follow_along_an_edge_the_fuse_invented_names_no_edge() {
+    fn a_crossing_the_answers_mesh_cannot_follow_along_an_edge_the_fuse_invented_comes_back_with_its_model()
+     {
         let (model, _, mut assembly, rim) =
             a_dome_on_a_shaft_with_its_rim_written_between_the_pipe_and_the_ball();
         assembly.edges[rim].from.clear();
         let refused =
             assembly.nest_the_shells(&model, &Policy::certified(), &mut ProvenanceLog::new());
-        let Err(Error::Geometry(
-            rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent { surfaces, .. },
-        )) = &refused
+        let Err(Error::TheFuseWasRefusedInAModelOfItsOwn {
+            refused,
+            model: apart,
+            callers_edge,
+            ..
+        }) = &refused
         else {
             panic!("the pipe and the ball only touch along the rim: {refused:?}");
+        };
+        assert_eq!(*callers_edge, None, "the fuse invented the rim");
+        let Error::ACrossingAlongThisEdgeCouldNotBeFollowed { edge, why } = &**refused else {
+            panic!("the pipe and the ball only touch along the rim: {refused:?}");
+        };
+        let rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent { surfaces, .. } =
+            &**why
+        else {
+            panic!("the pipe and the ball only touch along the rim: {why:?}");
         };
         assert!(
             matches!(**surfaces, [Surface::Cylinder(_), Surface::Sphere(_)]),
             "{surfaces:?}"
         );
+        let rim = apart
+            .model()
+            .edge(*edge)
+            .expect("the model handed back holds the edge the refusal names");
+        assert!(rim.is_closed().expect("the rim is drawn"), "{edge:?}");
+        assert!(
+            model.edge(*edge).is_err(),
+            "the caller's model holds no key of the fuse's own model"
+        );
     }
 
-    /// The answer's mesh refusing an edge for the faces along it is the fuse's
-    /// broken answer, as the sweep of that answer says, and names no edge. The
-    /// faces along it are the answer's, which the fuse put there, and not the
-    /// ones along the caller's edge it is a piece of, so naming that edge
-    /// would say something false of the caller's model (Q2889).
+    /// A model a fuse hands back with a refusal prints as how many of each
+    /// entity it holds, not as the entities, and writes out and reads back
+    /// whole, for a probe to load.
+    #[test]
+    fn a_model_handed_back_with_a_refusal_prints_as_its_counts_and_writes_out_whole() {
+        let (model, _, mut assembly, rim) =
+            a_dome_on_a_shaft_with_its_rim_written_between_the_pipe_and_the_ball();
+        assembly.edges[rim].from.clear();
+        let refused =
+            assembly.nest_the_shells(&model, &Policy::certified(), &mut ProvenanceLog::new());
+        let Err(error) = refused else {
+            panic!("the pipe and the ball only touch along the rim");
+        };
+        let printed = format!("{error:?}");
+        let Error::TheFuseWasRefusedInAModelOfItsOwn { model: apart, .. } = error else {
+            panic!("the pipe and the ball only touch along the rim: {printed}");
+        };
+        let held = apart.model();
+        assert!(
+            printed.contains(&format!(
+                "model: a model of {} solids, {} shells, {} faces, {} wires, {} coedges, {} edges \
+                 and {} vertices",
+                held.solid_count(),
+                held.shell_count(),
+                held.face_count(),
+                held.wire_count(),
+                held.coedge_count(),
+                held.edge_count(),
+                held.vertex_count(),
+            )),
+            "{printed}"
+        );
+        assert!(
+            !printed.contains(&format!("{held:?}")),
+            "the refusal prints the whole model: {printed}"
+        );
+
+        let held = apart.into_model();
+        let bytes = postcard::to_allocvec(&held).expect("the model writes out");
+        let read_back: Model = postcard::from_bytes(&bytes).expect("and reads back");
+        assert_eq!(
+            [read_back.face_count(), read_back.edge_count()],
+            [held.face_count(), held.edge_count()]
+        );
+    }
+
+    /// The answer's mesh refusing an edge for the faces along it comes back
+    /// with the model the answer was meshed in, whose faces along that edge
+    /// are the ones refused, and with the caller's edge it is a piece of. It
+    /// came back as the fuse's broken answer, naming no edge, since naming
+    /// the caller's would say something false of the faces along that one
+    /// (Q2889, Q3153).
     ///
     /// Here the union of a unit cube and a ball on its top has the edge its
     /// sides `x = 1` and `y = 1` meet along written by hand as a piece of a
     /// crossing with one of those two planes. That names nothing curved, so
     /// neither plane along the edge can say where it bends.
     #[test]
-    fn a_mesh_refusing_an_edge_of_the_answer_for_its_flat_faces_is_a_broken_answer_and_names_no_edge()
-     {
+    fn a_mesh_refusing_an_edge_of_the_answer_for_its_flat_faces_comes_back_with_its_model() {
         let policy = Policy::certified();
         let mut log = ProvenanceLog::new();
         let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
@@ -16496,14 +16581,45 @@ mod tests {
         };
 
         let refused = assembly.nest_the_shells(&model, &policy, &mut log);
+        let Err(Error::TheFuseWasRefusedInAModelOfItsOwn {
+            refused,
+            model: apart,
+            callers_edge,
+            ..
+        }) = refused
+        else {
+            panic!("{refused:?}");
+        };
+        let Error::AnEdgeBendsButEveryFaceAlongItIsFlat { edge } = *refused else {
+            panic!("{refused:?}");
+        };
+        let held = apart.model();
+        let along = held
+            .edge(edge)
+            .expect("the model handed back holds the edge the refusal names");
         assert!(
-            matches!(
-                refused,
-                Err(Error::TheFuseWroteABrokenAnswer {
-                    broken: Invalid::AnEdgeBendsButNothingAlongItIsCurved
-                })
-            ),
-            "{refused:?}"
+            along.neighbouring_faces().all(|face| matches!(
+                held.face(face)
+                    .expect("an edge's faces are its model's")
+                    .surface(),
+                Surface::Plane(_)
+            )),
+            "every face along {edge:?} is flat"
+        );
+        let callers_edge = callers_edge.expect("the edge is a piece of the cube's own");
+        let faces_of_the_cube: Vec<FaceKey> = model
+            .solid(cube)
+            .expect("this model made the key")
+            .faces()
+            .map(|face| face.key())
+            .collect();
+        assert!(
+            model
+                .edge(callers_edge)
+                .expect("the caller's model holds the caller's edge")
+                .neighbouring_faces()
+                .all(|face| faces_of_the_cube.contains(&face)),
+            "{callers_edge:?} is no edge of the cube"
         );
     }
 
