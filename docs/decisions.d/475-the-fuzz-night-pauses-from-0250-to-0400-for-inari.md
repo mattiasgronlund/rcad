@@ -73,8 +73,40 @@ Option (a)'s first run would have linked and merged inside the hour too, and
 ended at about 02:58. systemd then took up to two more minutes to call the unit
 stopped: on 10-30 and 10-31 the unit stopped 2 minutes after the recipe exited.
 
-The night loses 4200 s of its 28 800. Option (a) would have given 9600 + 14 400
-= 24 000 s, about the same, less a second build.
+The hour itself loses 4200 s of the night's 28 800. Option (a) would have given
+9600 + 14 400 = 24 000 s, about the same, less a second build. That is the idle
+time and not the whole loss: see the next paragraphs.
+
+**The real loss, measured on the first night that ran with the pause
+(2026-11-04).** In fork mode a run first reads its whole corpus, and prints no
+`cov:` line until that pass is done. The run after 04:00 reads the corpus again,
+now larger by what the first run found. The `time:` on a target's first `cov:`
+line is the seconds since that run started, so it is what the run spent before
+fuzzing. From `~/rcad-fuzz-logs/2026-11-04/<target>.log`, the first `cov:` line
+before and after the second `INFO: Seed:` line:
+
+| target | run before 02:50 | run after 04:00 | corpus read again |
+|---|---|---|---|
+| fuzz-reader | 36 s | 168 s | 3835 inputs |
+| fuzz-writer | 5930 s | 5465 s | 5660 inputs |
+| fuzz-fuse | 3019 s | 2629 s | 7243 inputs |
+| fuzz-cones-and-tori | 66 s | 69 s | 2321 inputs |
+| fuzz | 690 s | 684 s | 1746 inputs |
+
+A night without the pause pays that pass once. With the pause it is paid twice,
+so the second figure is lost on top of the 4200 s. Per target that is
+`fuzz-reader` 168 s, `fuzz-cones-and-tori` 69 s and `fuzz` 684 s, which are
+small, and `fuzz-writer` 5465 s and `fuzz-fuse` 2629 s, which are not: the
+writer's second run spends 5465 of its 15 000 s reading the corpus before it
+fuzzes, and the fuse's 2629. With the 4200 s, a night that pauses loses about
+9700 s of fuzzing on `fuzz-writer` (a third of 28 800) and about 6800 s on
+`fuzz-fuse`, against about 4400 to 5100 s on the other three. The first runs
+ended at 9410 to 9444 s and the second at 15 004 to 15 074 s for the targets
+whose second run had ended when the logs were read; `fuzz-fuse` had not ended
+yet, and its figure is its start-up plus the 4200 s.
+
+The 4200 s is therefore the least a pause costs. A target whose corpus pass
+takes hours pays an hour of idle time and then the pass again.
 
 ### 475.3 What the pause does not cover
 
