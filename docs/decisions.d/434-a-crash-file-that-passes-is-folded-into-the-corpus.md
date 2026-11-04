@@ -263,7 +263,14 @@ morning triage that runs this recipe (434.6).
   the `EXIT` trap, and the merge now runs in the background and is waited for,
   since bash holds a trap back until a foreground child ends. The selftest's
   seventeen-and-a-half arm pins it. Not traced: why a bare `bash` ran the trap
-  where this one did not.
+  where this one did not. **A second `SIGTERM` (Q3176):** the first fix reset
+  the trap to the default on the way into `stop`, and `just` passes the signal
+  on to the shell while systemd signals the whole unit, so a second `TERM`
+  arriving during `cleanup` ended the shell with the copy still in place. The
+  arm failed that way in four merge gates at load 26 to 54 and passed alone.
+  The arm now sends `TERM` to the shell for as long as it lives, which fails at
+  the base on the first run, and `stop` ignores the three signals instead of
+  resetting them.
 
 **The first real fold, read from journalctl, ran on 2026-10-13.** `journalctl
 --user -u rcad-fuzz-triage` holds a morning for every day from 10-07 to

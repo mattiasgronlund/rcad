@@ -13093,7 +13093,11 @@ fuzz-triage night="" against="main":
     trap cleanup EXIT
     merge_pid=""
     stop() {
-        trap - TERM INT HUP
+        # Ignored, not reset to the default: `just` passes a TERM it was sent on
+        # to this shell and systemd signals the whole unit, so a second one
+        # arrives while `cleanup` runs, and the default action would end the
+        # shell before it had taken its copy of the corpus away (Q3176).
+        trap '' TERM INT HUP
         [ -z "$merge_pid" ] || kill -TERM "$merge_pid" 2>/dev/null || true
         exit 143
     }
@@ -13962,6 +13966,16 @@ check-fuzz-triage-selftest:
     shell_pid=$(ps -o pid= --ppid "$just_pid" | tr -d ' ')
     merge_pid=$(cat "$bin/$reader.blocked")
     kill -TERM "$just_pid" "$shell_pid" "$merge_pid"
+    # And again for as long as the shell is there: `just` passes the signal it
+    # was sent on to the shell, and systemd signals the whole unit, so a second
+    # TERM reaches the shell while it is still cleaning up (Q3176). A pass
+    # through that window by luck of timing is what made this arm fail under
+    # load and nowhere else.
+    waited=0
+    while kill -0 "$shell_pid" 2>/dev/null && [ "$waited" -lt 100000 ]; do
+        kill -TERM "$shell_pid" 2>/dev/null || true
+        waited=$((waited + 1))
+    done
     waited=0
     while kill -0 "$just_pid" 2>/dev/null && [ "$waited" -lt 150 ]; do
         sleep 0.2
