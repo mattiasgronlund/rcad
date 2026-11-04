@@ -11507,7 +11507,7 @@ check-fuzz-overnight-selftest:
     t0=$(date +%s)
     pause_from=$(( t0 + 15 ))
     pause_until=$(( t0 + 60 ))
-    run 16"@$pause_from" "@$pause_until" \
+    run 16 "@$pause_from" "@$pause_until" \
         || fail "a night whose pause outlasts it failed: $(cat "$dir/out")"
     ! grep -q 'pausing until' "$dir/out" \
         || fail "a night whose pause outlasts it waited for the pause to end: $(cat "$dir/out")"
