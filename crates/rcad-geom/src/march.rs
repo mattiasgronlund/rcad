@@ -483,7 +483,7 @@ pub(crate) fn march_to(
             which_way_the_crossing_runs(surfaces, next)?,
             step,
             room,
-            inside,
+            &|at| inside(at) && goes_on(at, behind),
         )?;
     }
 }
