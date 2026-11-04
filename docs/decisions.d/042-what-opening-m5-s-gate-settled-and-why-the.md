@@ -501,6 +501,31 @@ cylinders. Every other surface kind is refused by the name the file gives it. A
 model that imports is internally sound and is not checked for interference with
 anything else in the file unless you ask.*
 
+> **2026-11-04 note (Q85): the table's last row is stale.** The reader now holds
+> cones and tori. The surface kinds it still refuses by name are the B-spline
+> surface (`B_SPLINE_SURFACE_WITH_KNOTS`, or the rational complex form it names
+> `BOUNDED_SURFACE`), the surface of revolution and the surface of linear
+> extrusion. Counted on `98c9684d` by `blocker_depth_probe`, which walks on past
+> a refusal, and by a text search for each kind's entity, one count per corpus
+> file as `how_often_a_real_file_imports` counts them:
+>
+> | surface kind | KiCad files holding it | refused for it | refused for it alone | NIST holding | refused | alone |
+> |---|---|---|---|---|---|---|
+> | surface of revolution | 24 | 24 | 6 | 0 | 0 | 0 |
+> | B-spline surface, either form | 17 | 17 | 1 | 17 | 14 | 0 |
+> | surface of linear extrusion | 1 | 1 | 0 | 0 | 0 | 0 |
+>
+> 41 KiCad files are refused for a surface kind, 7 of them for nothing else.
+> Three NIST files hold a B-spline surface and stop on the length units or the
+> size before any face is read. Every NIST file refused for a surface kind is also
+> refused for something else, mostly `B_SPLINE_CURVE_WITH_KNOTS`. The probe's
+> nested union (§171.3) prices them together: B-spline curves alone free 17 files,
+> curves and `B_SPLINE_SURFACE_WITH_KNOTS` 37, adding the surface of revolution
+> 61, adding `BOUNDED_SURFACE` 69. So the surface of revolution blocks the most
+> KiCad files and frees the most alone, and the B-spline curve and surface
+> together free the most across both corpora. Which comes next is a new unit, and
+> §0 leaves that to Mattias.
+
 ### 42.12 M5 exit criteria
 
 Fourteen. §31.7's shape, and §30.3's warning applies to all of them: **every name
