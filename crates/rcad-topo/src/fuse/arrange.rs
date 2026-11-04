@@ -9186,8 +9186,9 @@ impl<'f> Arrangement<'f> {
         Some(*cut)
     }
 
-    /// Fold each cut that runs straight along a straight crossing drawn before
-    /// it into that crossing, so that one line is one crossing.
+    /// Fold each crossing that runs straight along a straight crossing drawn
+    /// before it into that crossing, so that one line is one crossing: a cut
+    /// into any crossing, and the crossing of a boundary edge into another's.
     ///
     /// [`Arrangement::crossing_like`] folds two partners that cut the face in
     /// one curve by asking about the partners alone: two planes through one
@@ -9213,11 +9214,30 @@ impl<'f> Arrangement<'f> {
     /// the cap circle at two meets, one per crossing, and they become one node
     /// only in [`Arrangement::merge_points_that_are_one_point`].
     ///
-    /// Only a cut goes, and into a crossing drawn before it, so the crossing
-    /// of a boundary edge always stays: every one of them is drawn before the
-    /// first cut ([`Arrangement::draw_the_crossings`]). The cut's nodes move
-    /// onto the crossing it is folded into, and a cut surface that turned into
-    /// it now turns into that one.
+    /// **A crossing goes into one drawn before it, so the crossing of a
+    /// boundary edge goes only into another's**: every one of them is drawn
+    /// before the first cut ([`Arrangement::draw_the_crossings`]). A face can
+    /// have one side written twice. The side `x = 0.3` of a lead in
+    /// `LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step` is two faces joined, and its
+    /// edge along the line `x = 0.3, y = -0.3` is written below the bend corner
+    /// on the plane `y = -0.3` and above it on the plane of the bend's slanted
+    /// leg, which crosses the side a rounding off that line. Each writing ran
+    /// on past the corner beside the other, and
+    /// [`Arrangement::sorted_anticlockwise`] refused every fuse of the LED with
+    /// [`Error::TwoCurvesTouchWithoutCrossing`] at that corner (Q3112).
+    ///
+    /// **An edge drawn on the crossing it was folded into keeps its own
+    /// partner as its name** ([`Arrangement::named_by_its_own_line`]), which
+    /// reads the side of that partner the material is on off whether the two
+    /// crossings run one way or opposite ways. That reading holds where both
+    /// take the side off their gradients, so a boundary crossing folds only
+    /// into one that does too, and only if it does, never along a touch or
+    /// through a cone's apex ([`Crossing::runs_along_its_gradients`]).
+    ///
+    /// The folded crossing's nodes move onto the one it is folded into, a cut
+    /// surface that turned into it now turns into that one, and where a third
+    /// surface meets the two writings of one line is then one node
+    /// ([`Arrangement::join_the_meets_of_one_curve_with_two_writings_of_one_line`]).
     ///
     /// **Only the crossings through the cut's own nodes are asked**, lowest
     /// first, and only at those nodes: a crossing that shares no node with
@@ -9236,9 +9256,9 @@ impl<'f> Arrangement<'f> {
                 }
             }
         }
-        // Every fold before a cut takes a cut drawn before it off its nodes
-        // and puts a crossing drawn before that one on, so neither changes
-        // which nodes the cut runs through: its list is still right.
+        // Every fold before a crossing takes one drawn before it off its
+        // nodes and puts one drawn before that on, so neither changes which
+        // nodes the crossing runs through: its list is still right.
         for (cut, on_the_cut) in nodes_on.iter().enumerate() {
             if !self.crossings[cut].reaches_the_face || !self.crossings[cut].order.runs_straight() {
                 continue;
@@ -10293,7 +10313,8 @@ impl<'f> Arrangement<'f> {
                         // a `3 × 4` block corner on a bar of radius five, whose
                         // two walls cut the bar's along the one ruling
                         // `(3, 4, z)`, reached this until queue row Q930
-                        // (§38.2, §39.4).
+                        // (§38.2, §39.4), and a lead's side whose one edge two
+                        // planes write a rounding apart until Q3112.
                         if turn == Decision::Zero {
                             return Err(Error::TwoCurvesTouchWithoutCrossing {
                                 face: self.face.keys[0],
