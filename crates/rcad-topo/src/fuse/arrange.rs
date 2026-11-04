@@ -6113,6 +6113,11 @@ impl<'f> Arrangement<'f> {
             decided = proved;
         }
         if matches!(decided, Decision::Undecidable { .. })
+            && let Some(proved) = self.as_two_cuts_across_a_branch_say(crossing, first, second)
+        {
+            decided = proved;
+        }
+        if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) =
                 self.as_two_cuts_crossing_the_plane_in_parallel_lines_say(crossing, first, second)
         {
@@ -7371,29 +7376,24 @@ impl<'f> Arrangement<'f> {
     }
 
     /// Which of two nodes on a branch two cones cross in comes first along it,
-    /// where each is the branch's meet with a plane of its own and a third
-    /// node of the face is the meet of the face's cone with both planes:
-    /// `None` everywhere else.
+    /// where each is the branch's meet with a plane of its own and the first
+    /// is shown on one side of the second's plane, or on it
+    /// ([`Arrangement::side_of_a_cut_at_a_meet_of_two_quadrics`]): `None`
+    /// everywhere else.
     ///
-    /// **The sign of the partner cone at the third node says which way the
-    /// branch steps from the first node to the second.** Write `S` for the
-    /// face's cone, `P` for the partner, `Q₁` and `Q₂` for the first and the
-    /// second node's planes, with normals `n₁` and `n₂`, `X`, `Y` and `Z` for
-    /// the first node, the second and the third, and `R` for the box round
-    /// the three. `R` holds the straight step between each two of them, so
-    /// along a step each surface changes by its gradient at some point of `R`
-    /// dotted with the step. `X − Z` keeps `S` and `Q₁`, so it is
-    /// `τ (g_S × n₁)`, and `Y − X` keeps `S` and `P`, so it is
-    /// `σ (g_S × g_P)`, each gradient taken somewhere in `R`. Then
-    /// `−P(Z) = τ det(g_P, g_S, n₁)`, `Q₂(X) = τ det(n₂, g_S, n₁)` and
-    /// `−Q₂(X) = σ det(n₂, g_S, g_P)`. Where each determinant keeps one sign
-    /// over `R`, `σ` has the sign of `P(Z)` times the three determinants', and
-    /// `P(Z)`'s is worked out exactly from `Q₁`, `Q₂` and the two cones, never
-    /// from `Z`'s box
-    /// ([`MeetOfThree::how_one_quadric_leans_where_the_line_meets_another`]).
-    /// Where `P(Z)` is nothing, so are `τ` and then `σ`, and the three nodes are
-    /// one point. `σ (g_S × g_P)` over `R` is the step `rcad-geom` puts the two
-    /// in order by ([`Cone::which_comes_first_along_a_branch_a_step_apart`]).
+    /// **Which side of the second node's plane the first is on says which way
+    /// the branch steps from the first to the second.** Write `S` for the
+    /// face's cone, `P` for the partner, `Q` for the second node's plane, with
+    /// normal `n`, and `X` and `Y` for the first node and the second. Along
+    /// the straight step from `X` to `Y` each surface changes by its gradient
+    /// at some point of the box round the two, dotted with the step. The step
+    /// keeps `S` and `P`, so it is `σ (g_S × g_P)` for gradients taken in that
+    /// box, and `−Q(X) = Q(Y) − Q(X) = σ det(n, g_S, g_P)`. Where that
+    /// determinant keeps one sign over the box, `σ` has the sign of `−Q(X)`
+    /// times the determinant's, and `σ (g_S × g_P)` over the box is the step
+    /// `rcad-geom` puts the two in order by
+    /// ([`Cone::which_comes_first_along_a_branch_a_step_apart`]). Where `Q(X)`
+    /// is nothing, so is `σ`, and the two nodes are one point.
     ///
     /// **What it is for.** The funnel file's two pointed cones of one slope,
     /// the second turned `0.3` about `x` through `(0, 0, 4)`, meet `z = 8` and
@@ -7402,9 +7402,7 @@ impl<'f> Arrangement<'f> {
     /// cross in there meets `z = 8` and the leaning cap's plane `4e-16` apart,
     /// in boxes that share a point, so no box put the two in order along the
     /// branch and every fuse of the two was refused (Q3133,
-    /// `tests/a_funnel_with_a_leaning_spout.rs`). The meet of that wall with
-    /// both planes is a node of the same face, on its rim or on the line the
-    /// leaning cap crosses it in.
+    /// `tests/a_funnel_with_a_leaning_spout.rs`).
     fn as_two_cuts_across_a_branch_say(
         &self,
         crossing: usize,
@@ -7429,58 +7427,117 @@ impl<'f> Arrangement<'f> {
         if cuts[0] == cuts[1] {
             return None;
         }
-        let the_corner = [own, Surface::Plane(cuts[0]), Surface::Plane(cuts[1])];
         let [one, other] = [first, second].map(|node| self.nodes[node].point);
-        let below = |value: Interval| {
-            let sign = value.sign();
-            matches!(sign, Decision::Pos | Decision::Neg).then_some(sign == Decision::Neg)
+        let room = the_box_round_both(one, other);
+        let [own_way, partner_way] =
+            [&own, &partner].map(|surface| gradient_at(surface, room).enclosure());
+        let way = cross_of_intervals(own_way, partner_way);
+        let turns = dot_of(cuts[1].normal().components().map(Interval::exactly), way).sign();
+        let side = self.side_of_a_cut_at_a_meet_of_two_quadrics(first, &cuts[1])?;
+        if side == Decision::Zero {
+            return Some(Decision::Zero);
+        }
+        let step = if is_below(side)? == is_below(turns)? {
+            way.map(|along| -along)
+        } else {
+            way
         };
-        let normals = cuts.map(|cut| cut.normal().components().map(Interval::exactly));
-        (0..self.nodes.len())
-            .filter(|&corner| {
-                self.the_one_meet_it_stands_for(corner)
-                    .is_some_and(|(surfaces, _)| the_corner.iter().all(|s| surfaces.contains(s)))
-            })
-            .find_map(|corner| {
-                let room =
-                    the_box_round_both(the_box_round_both(one, other), self.nodes[corner].point);
-                let [own_way, partner_way] =
-                    [&own, &partner].map(|surface| gradient_at(surface, room).enclosure());
-                let det = |a, b, c| below(dot_of(a, cross_of_intervals(b, c)));
-                let dets = [
-                    det(partner_way, own_way, normals[0])?,
-                    det(normals[1], own_way, normals[0])?,
-                    det(normals[1], own_way, partner_way)?,
-                ];
-                let leans = [self.nodes[corner].point, self.narrowed_box_of(corner)]
-                    .into_iter()
-                    .find_map(|near| {
-                        MeetOfThree::how_one_quadric_leans_where_the_line_meets_another(
-                            [&cuts[0], &cuts[1]],
-                            &own,
-                            &partner,
-                            near,
-                        )
-                    })?;
-                if leans == Decision::Zero {
-                    return Some(Decision::Zero);
-                }
-                let leans_below = matches!(leans, Decision::Pos | Decision::Neg)
-                    .then_some(leans == Decision::Neg)?;
-                let way = cross_of_intervals(own_way, partner_way);
-                let backwards = dets
-                    .into_iter()
-                    .fold(leans_below, |so_far, det| so_far != det);
-                let step = if backwards {
-                    way.map(|side| -side)
-                } else {
-                    way
-                };
-                cones[0]
-                    .which_comes_first_along_a_branch_a_step_apart(&cones[1], one, other, step)
-                    .ok()
-                    .filter(|decided| {
-                        matches!(decided, Decision::Pos | Decision::Neg | Decision::Zero)
+        cones[0]
+            .which_comes_first_along_a_branch_a_step_apart(&cones[1], one, other, step)
+            .ok()
+            .filter(|decided| matches!(decided, Decision::Pos | Decision::Neg | Decision::Zero))
+    }
+
+    /// Which side of `cut` a node is, where it stands for one meet of a plane
+    /// and two balls, pipes or cones, and another node of the face is the meet
+    /// of one of those two with that plane and `cut`: `Pos` on the side `cut`'s
+    /// normal points to, `Neg` on the other and `Zero` on it, or `None`
+    /// everywhere else.
+    ///
+    /// **The other quadric's sign at the second node says which side.** Write
+    /// `X` for the node, `Q₁` for its plane, with normal `n₁`, `Z` for the
+    /// second node, `S` for the quadric it is on and `P` for the other, and
+    /// `Q₂` for `cut`, with normal `n₂`. Along the straight step from `Z` to
+    /// `X` each surface changes by its gradient at some point of the box round
+    /// the two, dotted with the step. The step keeps `S` and `Q₁`, so it is
+    /// `τ (g_S × n₁)` for `g_S` taken in that box. Then
+    /// `−P(Z) = P(X) − P(Z) = τ det(g_P, g_S, n₁)` and
+    /// `Q₂(X) = Q₂(X) − Q₂(Z) = τ det(n₂, g_S, n₁)`. Where both determinants
+    /// keep one sign over the box, `Q₂(X)` has the sign of `−P(Z)` times both
+    /// of theirs, and `P(Z)`'s is worked out exactly from `Q₁`, `Q₂`, `S` and
+    /// `P`, never from `Z`'s box
+    /// ([`MeetOfThree::how_one_quadric_leans_where_the_line_meets_another`]).
+    /// Where `P(Z)` is nothing, so is `τ`, and `X` is `Z`, on `cut`.
+    ///
+    /// **What it is for.** The funnel file's two pointed cones of one slope,
+    /// the second turned `0.3` about `x` through `(0, 0, 4)`: the meet of both
+    /// cones with `z = 8` is a node of the leaning cone's wall about `4e-16`
+    /// below the plane of its own cap, and its box could not tell which side
+    /// of that plane it is. Once the order along the branch the two cones
+    /// cross in was read there, every fuse of the two was refused on that side
+    /// (Q3133, `tests/a_funnel_with_a_leaning_spout.rs`). The meet of that wall
+    /// with `z = 8` and that plane is a node of the wall too, on its rim, and
+    /// the same reading orders two nodes along the branch
+    /// ([`Arrangement::as_two_cuts_across_a_branch_say`]).
+    fn side_of_a_cut_at_a_meet_of_two_quadrics(
+        &self,
+        node: usize,
+        cut: &Plane,
+    ) -> Option<Decision> {
+        let (surfaces, _) = self.the_one_meet_it_stands_for(node)?;
+        let ([Surface::Plane(flat), one, other]
+        | [one, Surface::Plane(flat), other]
+        | [one, other, Surface::Plane(flat)]) = surfaces
+        else {
+            return None;
+        };
+        let is_a_quadric = |surface: &Surface| {
+            matches!(
+                surface,
+                Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+            )
+        };
+        if flat == *cut || !(is_a_quadric(&one) && is_a_quadric(&other)) {
+            return None;
+        }
+        let [flat_way, cut_way] =
+            [flat, *cut].map(|plane| plane.normal().components().map(Interval::exactly));
+        let at = self.nodes[node].point;
+        [(one, other), (other, one)]
+            .into_iter()
+            .find_map(|(own, partner)| {
+                let the_corner = [own, Surface::Plane(flat), Surface::Plane(*cut)];
+                (0..self.nodes.len())
+                    .filter(|&corner| {
+                        self.the_one_meet_it_stands_for(corner)
+                            .is_some_and(|(surfaces, _)| {
+                                the_corner.iter().all(|surface| surfaces.contains(surface))
+                            })
+                    })
+                    .find_map(|corner| {
+                        let room = the_box_round_both(at, self.nodes[corner].point);
+                        let [own_way, partner_way] =
+                            [&own, &partner].map(|surface| gradient_at(surface, room).enclosure());
+                        let along = cross_of_intervals(own_way, flat_way);
+                        let [partner_turns, cut_turns] =
+                            [partner_way, cut_way].map(|way| is_below(dot_of(way, along).sign()));
+                        let leans = [self.nodes[corner].point, self.narrowed_box_of(corner)]
+                            .into_iter()
+                            .find_map(|near| {
+                                MeetOfThree::how_one_quadric_leans_where_the_line_meets_another(
+                                    [&flat, cut],
+                                    &own,
+                                    &partner,
+                                    near,
+                                )
+                            })?;
+                        if leans == Decision::Zero {
+                            return Some(Decision::Zero);
+                        }
+                        let below = [is_below(leans)?, partner_turns?, cut_turns?]
+                            .into_iter()
+                            .fold(true, |so_far, below| so_far != below);
+                        Some(if below { Decision::Neg } else { Decision::Pos })
                     })
             })
     }
@@ -17675,6 +17732,12 @@ fn the_box_round_both(one: PredicatePoint, other: PredicatePoint) -> PredicatePo
         )
         .expect("two boxes' lowest end is below their highest")
     }))
+}
+
+/// `Some(true)` for a sign below nothing, `Some(false)` above, and `None` for
+/// nothing or a sign not settled.
+fn is_below(sign: Decision) -> Option<bool> {
+    matches!(sign, Decision::Pos | Decision::Neg).then_some(sign == Decision::Neg)
 }
 
 /// The box grown by its widest side along every axis, rounded outward.
