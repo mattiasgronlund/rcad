@@ -113,7 +113,7 @@ pub use builder::{
     DraftCoedge, DraftEdge, DraftFace, DraftStep, DraftVertex, DraftWire, SolidBuilder,
 };
 pub use classify::Containment;
-pub use error::{Error, Invalid, Result};
+pub use error::{AModelOfTheFusesOwn, Error, Invalid, Result};
 pub use fuse::{Fused, Rule};
 pub use holds::OnAFace;
 pub use key::{CoedgeKey, EdgeKey, FaceKey, ShellKey, SolidKey, VertexKey, WireKey};
