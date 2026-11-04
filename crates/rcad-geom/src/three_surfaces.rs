@@ -6293,7 +6293,51 @@ fn it_keeps_one_sign_over(coefficients: &[Exact], inside: Interval) -> bool {
     let wide = (Interval::exactly(inside.hi()) - Interval::exactly(inside.lo())).hi();
     let from_the_end = Interval::new(0.0, wide).expect("a box runs upwards");
     let reach = at_the_end.enclosure() + the_value_over(&slope, inside) * from_the_end;
+    !reach.contains_zero() || it_keeps_one_sign_past(coefficients, inside.lo(), from_the_end)
+}
+
+/// Whether the polynomial `coefficients`, lowest power first, keeps one sign
+/// at every `start + h` for `h` inside `past`.
+///
+/// **By the polynomial moved to `start`, worked out exactly.** Its numbers are
+/// what `p` and its slopes come to at `start`, so over `past` it is `p(start)`
+/// plus terms that each carry a power of `h`, and Horner's rule in intervals
+/// over `past` spreads by little where `past` is narrow. Where the turning
+/// point is far from nothing, [`it_keeps_one_sign_over`]'s slope over the box
+/// is what spreads: each of its terms is the size of the leading coefficient
+/// times a power of where the box is, and they cancel to a slope near
+/// nothing, so a rounding of one of them is far larger than the slope itself.
+///
+/// **Measured on an LED's flange flat leaning a rounding**, which cuts its
+/// dome in a circle `5.6·10⁻⁸` across inside its body's pipe
+/// (`LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step`, Q3113): the quartic in `y`
+/// turns once near the dome's centre without reaching nothing, and its slope
+/// over that box one rounding wide by Horner's rule did not clear it.
+fn it_keeps_one_sign_past(coefficients: &[Exact], start: f64, past: Interval) -> bool {
+    let Some(moved) = the_polynomial_moved_to(coefficients, start) else {
+        return false;
+    };
+    let reach = moved
+        .iter()
+        .rev()
+        .fold(Interval::exactly(0.0), |so_far, number| {
+            so_far * past + number.enclosure()
+        });
     !reach.contains_zero()
+}
+
+/// The polynomial `coefficients`, lowest power first, written in `h` for
+/// `start + h`, every number exactly; or `None` where a product falls out of
+/// range.
+fn the_polynomial_moved_to(coefficients: &[Exact], start: f64) -> Option<Vec<Exact>> {
+    let step = Exact::of(start);
+    let mut moved = coefficients.to_vec();
+    for done in 0..moved.len().saturating_sub(1) {
+        for power in (done..moved.len() - 1).rev() {
+            moved[power] = moved[power].plus(&moved[power + 1].times(&step)?);
+        }
+    }
+    Some(moved)
 }
 
 /// The polynomial `coefficients`, lowest power first, at `place`, exactly, by
@@ -9257,6 +9301,76 @@ mod tests {
                 across.hi() - across.lo() < 1e-14,
                 "a place on the disc in a box {across:?} across it: {places:?}"
             );
+        }
+    }
+
+    /// **An LED's flange flat leaning a rounding, against its dome and its
+    /// body's pipe** (Q3113): `LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step`, the
+    /// one 15 up, and `LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step`, as each
+    /// stores them. The flat cuts the dome in a circle about `5.6e-8` across,
+    /// and over the rationals the stored numbers name that circle is inside the
+    /// pipe all the way round: at its centre the pipe's expression is
+    /// `-4.7e-15`, and the circle's squared radius is `3.0e-15` (`-1.9e-15` and
+    /// `1.2e-15` in the D3). So the three meet nowhere. The quartic in `y` turns
+    /// once near the dome's centre without reaching nothing, and the slope over
+    /// that box one rounding wide did not clear it, so the three were refused
+    /// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`.
+    #[test]
+    fn an_leds_leaning_flat_cuts_its_dome_in_a_circle_inside_its_body_and_meets_both_nowhere() {
+        for (normal, offset, centre, origin, radius) in [
+            (
+                [-1.0, -1.020894735288e-16, 1.069665918538e-31],
+                1.2300000000000006,
+                [1.27, -12.45, 3.0],
+                [1.27, -6.35, 3.0],
+                2.5,
+            ),
+            (
+                [-1.0, -1.020894735288e-16, 1.131295676758e-31],
+                1.2300000000000006,
+                [1.27, -12.45, 15.0],
+                [1.27, -6.35, 15.0],
+                2.5,
+            ),
+            (
+                [-1.0, -1.55820775386e-16, 1.924578414602e-31],
+                0.23000000000000115,
+                [1.27, -10.15, 6.0],
+                [1.27, -6.35, 6.0],
+                1.5,
+            ),
+        ] {
+            let flat = Plane::from_point_and_normal_as_written(
+                Point::new(-offset, 0.0, 0.0),
+                Vector::new(normal[0], normal[1], normal[2]),
+            )
+            .expect("a plane");
+            assert_eq!(
+                (flat.normal().components(), flat.offset()),
+                (normal, offset)
+            );
+            let flat = Surface::Plane(flat);
+            let dome = Surface::Sphere(
+                Sphere::new(Point::new(centre[0], centre[1], centre[2]), radius).expect("a ball"),
+            );
+            let body = Surface::Cylinder(
+                Cylinder::new(
+                    Axis::as_written(
+                        Point::new(origin[0], origin[1], origin[2]),
+                        Vector::new(-5.551115123126e-17, -1.0, 0.0),
+                    )
+                    .expect("an axis"),
+                    radius,
+                )
+                .expect("a radius"),
+            );
+            for order in [
+                [&flat, &dome, &body],
+                [&body, &flat, &dome],
+                [&dome, &body, &flat],
+            ] {
+                assert_eq!(meet(order), Ok(MeetOfThree::Nowhere), "{order:?}");
+            }
         }
     }
 }
