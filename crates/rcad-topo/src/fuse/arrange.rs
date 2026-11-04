@@ -18142,10 +18142,13 @@ fn the_start_is_a_rounding_off(
     }
     let ahead = PredicatePoint::Constructed([0, 1, 2].map(|axis| start[axis] + runs[axis]));
     // Compared rather than matched: only a proved `Neg` puts `place` outside
-    // the line, only a proved `Pos` inside it, and every other answer leaves it
-    // where the sweep puts it (§40).
+    // the line, and only a proved `Pos`, or no side at all for a box that
+    // misses the start, leaves it to `node`; a `Zero` leaves it where the
+    // sweep puts it (§40).
     let side = which_comes_first_round_a_crossing(pair, from, ahead, place)?;
-    Ok(side == Decision::Neg || (side == Decision::Pos && holds_every_point_of(node, place)))
+    let read_by_node = side == Decision::Pos
+        || (matches!(side, Decision::Undecidable { .. }) && !boxes_overlap(place, from));
+    Ok(side == Decision::Neg || (read_by_node && holds_every_point_of(node, place)))
 }
 
 /// Whether every point of `inner`'s box lies in `outer`'s.
