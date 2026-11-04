@@ -1599,8 +1599,8 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_cross_in_corners_
 /// away. Narrowed ([`rcad_geom::MeetOfThree::boxed_tight`]), the two boxes
 /// are one `f64` along `y` each and share an end, but the policy was asked of
 /// the step between the own boxes (Q2946). It is asked now how far apart a
-/// point of one narrowed box may be from a point of the other, at most
-/// `2.3e−16`.
+/// point of one narrowed box may be from a point of the other: with the
+/// upright frustum first, at most `3.2e−16`, round a far cap.
 ///
 /// With the upright frustum first, each fuse was then refused on which way the
 /// crossing of the two cones runs out of the apex they share (Q3004). They
@@ -1608,10 +1608,10 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_cross_in_corners_
 /// `y = 0`, which lie either side of the flat surface `y = 0` that tells them
 /// apart, and the enclosure of the way out of each reached that surface: the
 /// root that parts the two rulings was taken of `−E·‖w₁‖²` worked out on the
-/// enclosure of the flat surface `n₋` they lie on, which is about `4ε` and was
-/// enclosed below nothing. It is taken now of the enclosure `rcad-geom` parts
-/// them by, built on the exact numbers `E`'s sign is read off (Q3144), and the
-/// way out of each half is read on its own side of `y = 0`.
+/// enclosure of the flat surface `n₋` they lie on, which is about `4ε`, and
+/// that enclosure reached below nothing. It is taken now of the enclosure
+/// `rcad-geom` parts them by, built on the exact numbers `E`'s sign is read off
+/// (Q3144), and the way out of each half is read on its own side of `y = 0`.
 ///
 /// **Every fuse is refused `CannotTellTheCellsOfAFaceApart`**: with the upright
 /// frustum first on its side, the upright cone, and with the lying one first on
@@ -1622,13 +1622,17 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_
     let policy = Policy::tolerant(100.0);
     for (rule, first_first) in six_fuses() {
         let mut model = a_model();
-        let said = fuse_under(
-            &mut model,
-            the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation,
-            rule,
-            first_first,
-            &policy,
-        );
+        let [first, second] =
+            the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation(&mut model);
+        let (arguments, tools) = if first_first {
+            ([first], [second])
+        } else {
+            ([second], [first])
+        };
+        let mut log = ProvenanceLog::new();
+        let said = model
+            .fuse(&arguments, &tools, rule, &policy, &mut log)
+            .map(|answer| answer.solids().to_vec());
         let what = format!("{rule:?} (first first: {first_first}): {said:?}");
         let Err(rcad_topo::Error::CannotTellTheCellsOfAFaceApart { face }) = said else {
             panic!("{what}");
@@ -1648,6 +1652,26 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_
                 Vector::new(0.0, 0.0, 1.0),
                 "{what}: refused on {surface:?}"
             );
+            let narrowed: Vec<&Record> = log
+                .records()
+                .iter()
+                .filter(|record| {
+                    record.approximation().is_some()
+                        && record.inputs().iter().all(|input| {
+                            input.enclosure().iter().all(|along| along.width() < 1e-15)
+                        })
+                })
+                .collect();
+            assert!(!narrowed.is_empty(), "{what}: {log:#?}");
+            for record in narrowed {
+                assert_eq!(
+                    record.predicate(),
+                    "order along a crossing",
+                    "{what}: {record:#?}"
+                );
+                assert_eq!(record.outcome(), Decision::Zero, "{what}: {record:#?}");
+                assert!(record.enclosure() <= 3.2e-16, "{what}: {record:#?}");
+            }
         } else {
             let Surface::Plane(near) = surface else {
                 panic!("{what}: refused on {surface:?}");

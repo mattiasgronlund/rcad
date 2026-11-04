@@ -22918,7 +22918,8 @@ fn a_half_ruling_two_cones_share(
 /// **Every enclosure here is interval `+ − ×` on the stored numbers, and the
 /// one root is [`root_enclosing`], the same copy `rcad-geom` rounds its own
 /// cone-apex root with** (Q1234; this used to carry its own, always a step
-/// looser).
+/// looser). Two cones on one apex take that root of `rcad-geom`'s enclosure of
+/// `−E·‖w‖²` instead, built on exact numbers (Q3144).
 ///
 /// # Panics
 ///
