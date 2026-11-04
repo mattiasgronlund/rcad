@@ -26,8 +26,9 @@
 //! on the line the caps cross in. Since row Q3124 it orders points along the
 //! loop and along each branch round the ruled cone's axis, and since row Q3133
 //! it orders two of the four points along a branch that reaches each cone's
-//! wall there by an exact sign too, so every fuse of the pair answers. With
-//! the leaning one ten high the caps' rims are apart, and every fuse is
+//! wall there by an exact sign too, but every fuse of the pair is still
+//! refused, now finding a point inside a piece of a face a rounding across.
+//! With the leaning one ten high the caps' rims are apart, and every fuse is
 //! refused marching along that branch.
 //!
 //! A third shape came with row Q2818: two pointed cones of different slopes,
@@ -65,8 +66,8 @@
 //! less the other is that solid less the intersection.
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{Model, Rule, SolidKey};
+use rcad_predicates::{Policy, ProvenanceLog, Record};
+use rcad_topo::{Error, Model, Rule, SolidKey};
 
 mod cones;
 
@@ -151,13 +152,28 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 /// boxes that share a point, and how far round the axis each is cannot be told
 /// apart by those boxes. Every fuse was refused undecided there until row
 /// Q3133. Since Q3133 the fuse reads which way the branch steps from one to
-/// the other from the exact sign of one cone at the meet of the two caps'
-/// planes on the other, so **every fuse answers**, under every rule both ways
-/// round.
+/// the other from which side of the leaning cap's plane the first is, and
+/// reads that side from the exact sign of the upright cone at the meet of the
+/// leaning cone and both caps' planes. The meet of both cones with `z = 8` is
+/// `4e-16` below the leaning cap's plane, and the same reading tells the
+/// leaning cone's wall that side as well, where its box could not.
+///
+/// **Every fuse is still refused**, under every rule both ways round, now
+/// finding a point inside a piece of a face whose three corners lie in boxes
+/// about `1e-14` across near `(−3.9541, −0.6045, 8)`, two of them on `z = 8`.
 #[test]
-fn two_pointed_cones_one_leaning_off_the_other_answer_every_fuse() {
-    assert_eq!(every_fuse_of(two_pointed_cones).refusals(), [[None; 2]; 3]);
+fn two_pointed_cones_one_leaning_off_the_other_are_refused_a_point_inside_a_piece_a_rounding_across()
+ {
+    assert_eq!(
+        every_fuse_of(two_pointed_cones).refusals(),
+        [[Some(NO_POINT_INSIDE_A_PIECE_A_ROUNDING_ACROSS); 2]; 3]
+    );
 }
+
+/// What a fuse is refused with where no point is found inside a piece of a
+/// face whose corners are a rounding apart.
+const NO_POINT_INSIDE_A_PIECE_A_ROUNDING_ACROSS: &str =
+    "could not settle 1 decisions the answer depends on: a point inside a piece of a face";
 
 /// **The same two, the leaning one ten high**, row Q2917, so the two caps'
 /// rims are apart. `intersect` names the crossing as one loop and two
@@ -585,7 +601,7 @@ fn every_fuse_of(shape: fn(&mut Model) -> (SolidKey, SolidKey)) -> Fused {
         let mut log = ProvenanceLog::new();
         let fused = answer
             .fuse(&[argument], &[tool], rule, &policy, &mut log)
-            .map_err(|why| why.to_string())?;
+            .map_err(|why| the_words_of(&why))?;
         assert!(log.is_empty(), "a certified fuse logs nothing: {log:?}");
         answer
             .validate(&policy, &mut ProvenanceLog::new())
@@ -684,6 +700,18 @@ fn every_fuse_of(shape: fn(&mut Model) -> (SolidKey, SolidKey)) -> Fused {
         }
     }
     Fused { answers }
+}
+
+/// The words of a refusal, and where the arithmetic could not settle a
+/// decision, what each one it could not settle asked, so two such refusals
+/// in different places read apart.
+fn the_words_of(refusal: &Error) -> String {
+    let words = refusal.to_string();
+    let Error::Undecidable { records } = refusal else {
+        return words;
+    };
+    let asked: Vec<&str> = records.records().iter().map(Record::predicate).collect();
+    format!("{words}: {}", asked.join(", "))
 }
 
 /// Fails unless `got` and `want`, each a volume and the error published with
