@@ -1316,7 +1316,7 @@ impl<'f> Arrangement<'f> {
         arrangement.work_out_how_each_crossing_runs(log)?;
         arrangement.fold_the_meets_by_a_corner_off_their_crossing_into_it()?;
         arrangement.merge_points_that_are_one_point(policy, log)?;
-        arrangement.fold_the_straight_cuts_along_one_line();
+        arrangement.fold_the_straight_cuts_along_one_line()?;
         arrangement.cut_the_crossings_into_arcs(policy, log)?;
         arrangement.walk_the_cycles(policy, log)?;
         arrangement.count_the_windings_inside_each_lump();
@@ -9226,7 +9226,8 @@ impl<'f> Arrangement<'f> {
     /// drawn before the cut at every node of the face cost the fuse in
     /// `PinHeader_1x39_P2.54mm_Vertical.step`'s round trip 25 s on one face
     /// of 404 crossings and 61 973 nodes (Q3082).
-    fn fold_the_straight_cuts_along_one_line(&mut self) {
+    fn fold_the_straight_cuts_along_one_line(&mut self) -> Result<()> {
+        let mut folds: Vec<(usize, Vec<usize>)> = Vec::new();
         let mut nodes_on: Vec<Vec<usize>> = vec![Vec::new(); self.crossings.len()];
         for (node, at) in self.nodes.iter().enumerate() {
             for &crossing in &at.crossings {
@@ -9285,6 +9286,7 @@ impl<'f> Arrangement<'f> {
                     }
                 }
             }
+            let mut brought_over = Vec::new();
             for &node in on_the_cut {
                 let crossings = &mut self.nodes[node].crossings;
                 let at = crossings
@@ -9294,6 +9296,7 @@ impl<'f> Arrangement<'f> {
                 crossings.remove(at);
                 if let Err(place) = crossings.binary_search(&kept) {
                     crossings.insert(place, kept);
+                    brought_over.push(node);
                 }
             }
             for turned_into in self.cut_crossings.iter_mut().flatten() {
@@ -9303,7 +9306,97 @@ impl<'f> Arrangement<'f> {
             }
             self.crossings[kept].cuts = true;
             self.crossings[cut].reaches_the_face = false;
+            folds.push((kept, brought_over));
         }
+        self.join_the_meets_of_one_curve_with_two_writings_of_one_line(&folds)
+    }
+
+    /// Join each node a fold brought onto a line with the node already on it
+    /// where the same crossings meet the line, when nothing tells the two apart
+    /// along it. `folds` is each line a fold kept, with the nodes it brought
+    /// onto it.
+    ///
+    /// **A fold takes two writings of one line as one line, and then a curve
+    /// meets that line where it meets either.** Two cuts folded are one line
+    /// to the last bit, and their meets with a third surface are one point,
+    /// which [`Arrangement::merge_points_that_are_one_point`] has made one
+    /// node already. Two sides of the face are one line only to a rounding:
+    /// the input says they meet at the corner they share and run along one
+    /// direction, but writes each on its own plane. On the lead's side
+    /// `x = 0.3` of `LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step`, the side
+    /// below the bend corner `(0.3, -0.3, 1.7)` is on the plane `y = -0.3`
+    /// and the side above it on the plane of the bend's slanted leg, which
+    /// crosses `x = 0.3` at `y = -0.2999999999999994`. The flange's rim, a
+    /// pipe of radius `1.9`, meets each of the two near `z = 0.366`, and once
+    /// the fold put both meets on one line, no reading could put them in
+    /// order along it, and every fuse of the LED was refused `Undecidable`
+    /// on order along a crossing (Q3112).
+    ///
+    /// **Only a pair on the same crossings, and only where it is one pair.**
+    /// Two nodes proved in order along the line, or one of them a corner
+    /// of the face's own and the other one too, or the middle of a half,
+    /// stay two. So does a node with two such partners, or a partner with
+    /// two such nodes: a curve that grazes the line meets it twice, and
+    /// which of its meets with one writing is which with the other is
+    /// nothing these can say.
+    ///
+    /// # Errors
+    ///
+    /// What [`Arrangement::order_along`] refuses before it asks any policy.
+    fn join_the_meets_of_one_curve_with_two_writings_of_one_line(
+        &mut self,
+        folds: &[(usize, Vec<usize>)],
+    ) -> Result<()> {
+        let mut pairs: Vec<[usize; 2]> = Vec::new();
+        for (kept, brought_over) in folds {
+            let already_on_it: Vec<usize> = (0..self.nodes.len())
+                .filter(|&node| {
+                    self.nodes[node].crossings.contains(kept) && !brought_over.contains(&node)
+                })
+                .collect();
+            for &brought in brought_over {
+                for &there in &already_on_it {
+                    if self.one_place_on_the_line(*kept, brought, there)? {
+                        pairs.push([brought, there]);
+                    }
+                }
+            }
+        }
+        let once =
+            |side: usize, node: usize| pairs.iter().filter(|pair| pair[side] == node).count() == 1;
+        let mut same = Sameness::of(self.nodes.len());
+        for &[brought, there] in &pairs {
+            if once(0, brought) && once(1, there) {
+                same.join(brought, there);
+            }
+        }
+        if same.joined_anything() {
+            self.fold_the_nodes(&mut same)?;
+            let on_each = self.the_nodes_on_each_crossing();
+            self.count_each_loop_from_the_node_round_its_start(&on_each);
+        }
+        Ok(())
+    }
+
+    /// Whether `brought`, brought onto the line `kept` by a fold, and `there`,
+    /// already on it, are where the same crossings meet it, and no reading
+    /// [`Arrangement::order_along`] asks before a policy puts them in order
+    /// along it.
+    fn one_place_on_the_line(&self, kept: usize, brought: usize, there: usize) -> Result<bool> {
+        let [one, other] = [brought, there].map(|node| &self.nodes[node]);
+        if one.crossings != other.crossings
+            || one.crossings.len() < 2
+            || one.half_way_round
+            || other.half_way_round
+            || (one.vertex.is_some() && other.vertex.is_some())
+        {
+            return Ok(false);
+        }
+        let (decided, _) = self.as_proved_before_any_policy(kept, brought, there)?;
+        Ok(matches!(
+            decided,
+            Decision::Zero | Decision::Undecidable { .. }
+        ))
     }
 
     /// Whether two crossings are straight and share a node whose two ways out
