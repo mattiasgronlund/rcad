@@ -16294,6 +16294,128 @@ mod tests {
         );
     }
 
+    /// A crossing the answer's mesh cannot follow, along a piece of an input
+    /// edge, names that input edge.
+    ///
+    /// The edge named was a key into the model `Assembly::nest_the_shells`
+    /// meshes the answer in and drops, so the caller's model answered
+    /// `KeyFromAnotherModel` for it (Q2889), as it did for a face before Q2288.
+    #[test]
+    fn a_crossing_the_answers_mesh_cannot_follow_names_the_input_edge_it_is_a_piece_of() {
+        let (model, inputs, mut assembly, _) =
+            a_dome_on_a_shaft_with_its_rim_written_between_the_pipe_and_the_ball();
+        let refused =
+            assembly.nest_the_shells(&model, &Policy::certified(), &mut ProvenanceLog::new());
+        let Err(Error::ACrossingAlongThisEdgeCouldNotBeFollowed { edge, .. }) = refused else {
+            panic!("the pipe and the ball only touch along the rim: {refused:?}");
+        };
+        let faces_of_the_inputs: Vec<FaceKey> = inputs
+            .into_iter()
+            .flat_map(|solid| {
+                model
+                    .solid(solid)
+                    .expect("this model made the key")
+                    .faces()
+                    .map(|face| face.key())
+                    .collect::<Vec<FaceKey>>()
+            })
+            .collect();
+        let along = model
+            .edge(edge)
+            .expect("the caller's model holds the edge the refusal names");
+        assert!(
+            along
+                .neighbouring_faces()
+                .all(|face| faces_of_the_inputs.contains(&face)),
+            "{edge:?} is no edge of the shaft or the dome"
+        );
+    }
+
+    /// A crossing the answer's mesh cannot follow, along an edge the fuse
+    /// invented, is the walk's own refusal: there is no edge of the caller's
+    /// to attach to it, and a key into the model the answer was meshed in
+    /// names nothing once the fuse returns (Q2889).
+    ///
+    /// Two faces of one input that only touch, but are stored a rounding
+    /// apart, cross in a thin loop the fuse writes as an edge of its own, and
+    /// the `D5.0` LED of `an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`
+    /// less a box is refused there under a tolerant policy. Here the rim the
+    /// shaft's top and the dome share is made such an edge by hand.
+    #[test]
+    fn a_crossing_the_answers_mesh_cannot_follow_along_an_edge_the_fuse_invented_names_no_edge() {
+        let (model, _, mut assembly, rim) =
+            a_dome_on_a_shaft_with_its_rim_written_between_the_pipe_and_the_ball();
+        assembly.edges[rim].from.clear();
+        let refused =
+            assembly.nest_the_shells(&model, &Policy::certified(), &mut ProvenanceLog::new());
+        let Err(Error::Geometry(
+            rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent { surfaces, .. },
+        )) = &refused
+        else {
+            panic!("the pipe and the ball only touch along the rim: {refused:?}");
+        };
+        assert!(
+            matches!(**surfaces, [Surface::Cylinder(_), Surface::Sphere(_)]),
+            "{surfaces:?}"
+        );
+    }
+
+    /// The union of a bar of radius one and height two with a ball of its
+    /// radius centred on its top, as far as [`assemble`] takes it, with the rim
+    /// the bar's top and the ball share written to run right round where the
+    /// pipe and the ball either side of it cross, and that rim's index.
+    ///
+    /// The two only touch along the rim, so no walk can follow it there. The
+    /// fuse wrote the rim that way until Q987, and every union of a dome on a
+    /// shaft of its radius was refused for it
+    /// (`a_dome_on_a_shaft_of_its_radius_by_every_rule_against_the_closed_forms`
+    /// in `tests/fuses_that_touch.rs`). It writes the rim against the cap's
+    /// plane now, so only this edit reaches the refusal.
+    fn a_dome_on_a_shaft_with_its_rim_written_between_the_pipe_and_the_ball()
+    -> (Model, [SolidKey; 2], Assembly, usize) {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let shaft = model
+            .add_round_bar(1.0, 2.0, &Isometry::identity())
+            .expect("a bar of radius one");
+        let dome = model
+            .add_ball(
+                1.0,
+                &Isometry::translation(Vector::new(0.0, 0.0, 2.0)).expect("a finite shift"),
+            )
+            .expect("a ball of radius one");
+        let scratch = Scratch::split_both_groups(&model, &[shaft], &[dome], &policy, &mut log)
+            .expect("the shaft and the dome split each other");
+        let chosen = choose(&model, &scratch, Rule::Union, &policy, &mut log).expect("pieces kept");
+        let mut assembly = assemble(
+            &model,
+            &scratch,
+            &chosen,
+            &scratch.names_of_one_point,
+            None,
+            &policy,
+            &mut log,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the union to write");
+        let rims: Vec<usize> = (0..assembly.edges.len())
+            .filter(|&edge| {
+                let [start, end] = assembly.edges[edge].ends;
+                start == end && assembly.corners[start].point.z() == 2.0
+            })
+            .collect();
+        let [rim] = rims[..] else {
+            panic!("the union has one closed edge at the shaft's top, not {rims:?}");
+        };
+        assert!(
+            !assembly.edges[rim].from.is_empty(),
+            "the rim is a piece of the shaft's own"
+        );
+        assembly.runs[rim] = EdgeRun::RightRoundWhereItsFacesCross;
+        (model, [shaft, dome], assembly, rim)
+    }
+
     /// What one write of an answer made, in a form two models can be compared
     /// by.
     ///
