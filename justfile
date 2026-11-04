@@ -16061,7 +16061,10 @@ mark-finished +trees:
 #   `logs/HEAD` rather than `index`, because `git status` rewrites the index and
 #   this recipe runs it. The mark is how a merged run removes its own trees the
 #   minute it lands rather than an hour later (§315.2);
-# - **no process has its working directory inside it;**
+# - **no process has its working directory inside it,** unless `mark-finished`
+#   said the run is over: then each such process is stopped (SIGTERM, SIGKILL
+#   after two seconds) and the tree goes, except that a process this sweep
+#   descends from keeps it (Q3102);
 # - **no second worktree's own path sits inside it.** A lane's gitignored
 #   `target/` can hold a detached scratch worktree of its own, and removing
 #   the lane's tree takes that second worktree's directory with it — on
@@ -16102,13 +16105,52 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
     landed=(main)
     git -C "$here" rev-parse --verify -q origin/main >/dev/null && landed+=(origin/main)
     now=$(date +%s)
-    cwds=$(for p in /proc/[0-9]*; do readlink "$p/cwd" 2>/dev/null || true; done)
+    ancestors=" "
+    for ((p = $$; p > 1; )); do
+        ancestors+="$p "
+        p=$(ps -o ppid= -p "$p" | tr -d ' ') || break
+        [ -n "$p" ] || break
+    done
     git -C "$here" worktree prune
     all_trees=$(git -C "$here" worktree list --porcelain | sed -n 's|^worktree ||p')
     kept=0
     keep() {
         echo "kept ($1): $tree"
         kept=$((kept + 1))
+    }
+    pids_in_tree() {
+        local p cwd
+        for p in /proc/[0-9]*; do
+            cwd=$(readlink "$p/cwd" 2>/dev/null) || continue
+            case "$cwd" in
+            "$tree" | "$tree"/*) echo "${p#/proc/}" ;;
+            esac
+        done
+    }
+    # A tree a merger marked finished has no owner left, so what still runs in
+    # it was left behind (Q3062's lane left four `yes` loops, which only
+    # Mattias could stop). Those get SIGTERM, then SIGKILL after two seconds.
+    # This sweep's own ancestors are never touched: a merger's shell may stand
+    # in its own tree, and that tree is kept (Q3102).
+    in_use() {
+        local pids pid
+        pids=$(pids_in_tree)
+        [ -n "$pids" ] || return 1
+        [ -e "$gitdir/rcad-run-over" ] || return 0
+        for pid in $pids; do
+            case "$ancestors" in *" $pid "*) return 0 ;; esac
+        done
+        echo "stopping leftover process(es) in finished tree $tree: $(echo $pids)"
+        kill -TERM $pids 2>/dev/null || true
+        for _ in 1 2 3 4 5 6 7 8 9 10; do
+            sleep 0.2
+            [ -n "$(pids_in_tree)" ] || return 1
+        done
+        pids=$(pids_in_tree)
+        [ -z "$pids" ] || kill -KILL $pids 2>/dev/null || true
+        sleep 0.2
+        [ -z "$(pids_in_tree)" ] || return 0
+        return 1
     }
     on_a_landed_ref() {
         local ref
@@ -16201,7 +16243,7 @@ prune-worktrees dir="." fuzz_unit=(justfile_directory() / "tooling/systemd/rcad-
             keep "a second worktree, $nested, sits inside it"
         elif [ "$idle" -lt 60 ] && [ ! -e "$gitdir/rcad-run-over" ]; then
             keep "HEAD moved $idle minutes ago"
-        elif printf '%s\n' "$cwds" | awk -v p="$tree" '$0 == p || index($0, p "/") == 1 { found = 1 } END { exit !found }'; then
+        elif in_use; then
             keep "a process is running in it"
         else
             clear_build_dir root "$tree" cargo metadata --no-deps --offline --format-version 1
@@ -16276,8 +16318,9 @@ check-prune-worktrees-selftest:
     # otherwise make the busy tree look idle.
     dir=$(realpath "$(mktemp -d)")
     busy=
+    leftover=
     got=
-    trap '[ -z "$busy" ] || kill "$busy" 2>/dev/null || true; git -C "$dir/hub" worktree unlock "$dir/locked" 2>/dev/null || true; rm -rf "$dir"' EXIT
+    trap '[ -z "$busy" ] || kill "$busy" 2>/dev/null || true; [ -z "$leftover" ] || kill "$leftover" 2>/dev/null || true; git -C "$dir/hub" worktree unlock "$dir/locked" 2>/dev/null || true; rm -rf "$dir"' EXIT
     fail() {
         echo "prune-worktrees drifted from its own fixtures: $1"
         echo "--- got ---"; echo "$got"
@@ -16293,7 +16336,7 @@ check-prune-worktrees-selftest:
     git -C "$dir/hub" worktree add -q "$dir/wave" main
     git -C "$dir/hub" worktree add -q "$dir/runner" -b runner
     git -C "$dir/hub" worktree add -q "$dir/merged" -b merged
-    for name in finished just-started marked fakes unmerged dirty untracked fuzzed locked busy nightly nested; do
+    for name in finished just-started marked leftover fakes unmerged dirty untracked fuzzed locked busy nightly nested; do
         git -C "$dir/hub" worktree add -q --detach "$dir/$name" main
     done
     # A second worktree inside a lane's own gitignored target/: a detached
@@ -16320,7 +16363,7 @@ check-prune-worktrees-selftest:
     mkdir -p "$dir/fuzzed/fuzz/artifacts/target"; echo crash >"$dir/fuzzed/fuzz/artifacts/target/crash-1"
     mkdir -p "$dir/fakes/fuzz/artifacts/target"; echo "what a target found" >"$dir/fakes/fuzz/artifacts/target/slow-unit-overnight-selftest-1-2"
     git -C "$dir/hub" worktree lock --reason "agent-abc since 2026-09-06T00:00:00Z" "$dir/locked"
-    for name in wave runner merged finished fakes unmerged dirty untracked fuzzed locked busy nightly nested; do
+    for name in wave runner merged finished leftover fakes unmerged dirty untracked fuzzed locked busy nightly nested; do
         gitdir=$(git -C "$dir/$name" rev-parse --absolute-git-dir)
         touch -d '2 hours ago' "$gitdir/HEAD" "$gitdir/logs/HEAD"
     done
@@ -16330,7 +16373,7 @@ check-prune-worktrees-selftest:
         || fail "mark-finished marked a locked tree, whose owner is still at work"
     ! just mark-finished "$dir/hub" >/dev/null 2>&1 \
         || fail "mark-finished marked the hub"
-    just mark-finished "$dir/marked" >/dev/null
+    just mark-finished "$dir/marked" "$dir/leftover" >/dev/null
     # A gone tree is skipped, not refused: the live tree named beside it still
     # gets marked.
     got=$(just mark-finished "$dir/gone" "$dir/marked")
@@ -16340,6 +16383,8 @@ check-prune-worktrees-selftest:
         || fail "a live tree alongside a gone one was not marked"
     (cd "$dir/busy/" && exec sleep 300) &
     busy=$!
+    (cd "$dir/leftover/" && exec sleep 300) &
+    leftover=$!
     # A stub cargo, on PATH for both sweeps below, whose `metadata` answers
     # with a build directory derived from its own working directory -- so a
     # removed tree (`merged`) and a kept one (`runner`) each get a build
@@ -16420,11 +16465,17 @@ check-prune-worktrees-selftest:
     [ -d "$dir/nested" ] || fail "the nested tree was removed, taking the worktree inside it with it"
     grep -qF "kept (a second worktree, $dir/nested/target/inner, sits inside it): $dir/nested" <<<"$got" \
         || fail "the nested tree was not reported as kept for the worktree inside it"
-    for name in finished merged marked fakes; do
+    for name in finished merged marked leftover fakes; do
         [ ! -e "$dir/$name" ] || fail "the $name tree was not removed"
         grep -qF "removed: $dir/$name " <<<"$got" || fail "the $name tree was not reported as removed"
     done
-    [ "$(grep -c '^removed' <<<"$got")" = 4 ] || fail "more than the four finished trees were removed"
+    [ "$(grep -c '^removed' <<<"$got")" = 5 ] || fail "more than the five finished trees were removed"
+    ! kill -0 "$leftover" 2>/dev/null \
+        || fail "the process left running in the marked leftover tree was not stopped (Q3102)"
+    grep -qF "stopping leftover process(es) in finished tree $dir/leftover: $leftover" <<<"$got" \
+        || fail "stopping a finished tree's leftover process was not reported"
+    kill -0 "$busy" 2>/dev/null \
+        || fail "the process in the unmarked busy tree was stopped; only a marked tree's may be"
     [ ! -d "$merged_build" ] \
         || fail "merged's build directory, outside the tree, was not cleared when the tree was removed"
     [ -d "$runner_build" ] \
