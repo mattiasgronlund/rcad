@@ -23168,7 +23168,7 @@ check-land-selftest:
         lane_sha=$(git -C "$at/lane" rev-parse HEAD)
     }
     steps_sha() {
-        python3 -c 'import hashlib, sys; lines = [line.rstrip() for line in open(sys.argv[1], encoding="utf-8").read().split("\n")]; last = max([i for i, l in enumerate(lines) if l != ""], default=-1); print(hashlib.sha256("\n".join(lines[: last + 1]).encode("utf-8")).hexdigest())' "$at/lander/target/land-steps.txt"
+        python3 -c 'import hashlib, sys; lines = [line.rstrip() for line in open(sys.argv[1], encoding="utf-8").read().split("\n")]; last = max([i for i, l in enumerate(lines) if l not in ("", "+")], default=-1); print(hashlib.sha256("\n".join(lines[: last + 1]).encode("utf-8")).hexdigest())' "$at/lander/target/land-steps.txt"
     }
     second_lane() {
         git -C "$at/hub" worktree add -q -b lane-y "$at/lane2" origin/main
@@ -23434,6 +23434,14 @@ check-land-selftest:
     run --steps target/land-steps.txt --steps-sha256 "$(steps_sha)" Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     stopped steps
     ! git -C "$at/hub" rev-parse -q --verify merge-x >/dev/null || fail "it branched before it read the steps"
+
+    fixture steps-lone-plus
+    good_sha=$(steps_sha)
+    printf '+\n' >>"$at/lander/target/land-steps.txt"
+    run --steps target/land-steps.txt --steps-sha256 "$good_sha" Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "a lone + line after the last step stopped the land: $(field stop) (Q3068)"
+    [ "$(field rows_added)" = '["Q900 tier 2.2 sonnet: small from/Q1 a row the lane left, ending in §384", "Q901 tier 3 sonnet: small was/Q7 a row the lane filed again, ending in §384"]' ] \
+        || fail "a lone + line after the last step changed the rows added: $(field rows_added)"
 
     fixture steps-sha-comma
     good_sha=$(printf '%s' "$(printf '%s\n' add 2.2 sonnet a,b 'small a row the lane left, ending in §384')" | sha256sum | cut -d' ' -f1)
