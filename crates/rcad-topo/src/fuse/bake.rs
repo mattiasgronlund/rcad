@@ -723,7 +723,7 @@ fn bake_one_solid(
     }
 
     let mut surfaces = surface_of_every_face(model, solid);
-    let groups = faces_baked_as_one(model, solid, &surfaces);
+    let groups = faces_baked_as_one(model, solid, &surfaces, validate_allows);
     spell_each_group_one_way(model, &groups, &mut surfaces);
     let left_out = what_each_edge_left_out_ran_along(model, &groups);
     let corners = corner_of_every_vertex(
@@ -754,7 +754,8 @@ fn bake_one_solid(
 /// ball, pipe, cone or ring used one way round
 /// ([`one_curved_surface_used_one_way`]), one plane written and used one way
 /// ([`one_plane_written_and_used_one_way`]), or one plane written twice a
-/// rounding apart round a curve the edge runs along
+/// rounding apart round a curve the edge runs along, no further apart anywhere
+/// round the two faces than the sweep lets a corner sit off its plane
 /// ([`one_plane_written_twice_round_a_curve`]).
 /// Then the edge is not where the solid's skin stops but only where two faces
 /// of it were written apart, which is what a seam is too. Every other face is a
@@ -763,6 +764,7 @@ fn faces_baked_as_one<'model>(
     model: &'model Model,
     solid: SolidView<'model>,
     surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
+    validate_allows: CornerRoom,
 ) -> Vec<Vec<FaceView<'model>>> {
     let faces: Vec<FaceView<'model>> = solid.faces().collect();
     let position: BTreeMap<FaceSlot, usize> = faces
@@ -779,9 +781,11 @@ fn faces_baked_as_one<'model>(
                     && (one_curved_surface_used_one_way(surfaces[&mine], surfaces[&across])
                         || one_plane_written_and_used_one_way(surfaces[&mine], surfaces[&across])
                         || one_plane_written_twice_round_a_curve(
+                            solid,
                             coedge.edge().stored_run(),
-                            surfaces[&mine],
-                            surfaces[&across],
+                            [*face, faces[position[&across]]],
+                            [surfaces[&mine], surfaces[&across]],
+                            validate_allows.off_a_plane,
                         ))
                 {
                     one_face.join(at, position[&across]);
@@ -856,8 +860,8 @@ fn one_plane_written_and_used_one_way(one: PlacedSurface, other: PlacedSurface) 
 /// out of the solid.
 ///
 /// **Two distinct planes share only a straight line**, so an edge between two
-/// flat faces that is where a ball, a pipe, a cone or a ring crosses them can
-/// only be on one plane, written down twice: the reading
+/// flat faces that is where a ball, a pipe, a cone or a ring crosses them is
+/// on one plane written down twice, unless it is that line: the reading
 /// [`which_two_surfaces_a_run_is_between`] already gives such a run
 /// (`docs/decisions.md` §176.2). A KiCad LED's flange front and its body's
 /// front disc are two such faces, across the circle the body's pipe crosses
@@ -866,15 +870,29 @@ fn one_plane_written_and_used_one_way(one: PlacedSurface, other: PlacedSurface) 
 /// apart, each was a crossing of every face the fuse cut, a rounding from the
 /// other's, and the two met where nothing could put them in order (row Q3141).
 ///
+/// **So the two planes are asked to be one, over both faces**
+/// ([`no_further_apart_anywhere_in`]), against `room`, what the sweep lets a
+/// corner sit off its plane. Two faces that really are two planes are further
+/// apart than that somewhere in the box round them. That holds where the edge
+/// is one of a pipe's own straight lines, or of a cone's through its apex,
+/// which the sweep lets two faces cross in
+/// (`two_faces_crossing_in_a_pipes_own_line_still_build`). It holds too for a
+/// disc tilted a tenth off the lid it is cut from, which the sweep refuses and
+/// a fuse is handed all the same. Joined, the lid was baked on the disc's plane
+/// and its far corner left `0.199` off it, and the fuse refused its own answer
+/// for that (`a_fuse_with_the_tilted_disc_read_back_from_bytes_is_refused_for_the_edge_round_it`).
+///
 /// **Written nearly the same way and used the same way round**, for the reason
 /// [`one_plane_written_and_used_one_way`] gives for two spellings bit for bit:
 /// the group is baked on one of the two with the use of its first face. Two
 /// spellings a rounding apart have normals within a rounding of each other or
 /// of each other's opposite, so the sign of their dot product says which.
 fn one_plane_written_twice_round_a_curve(
+    solid: SolidView<'_>,
     run: &EdgeRun,
-    one: PlacedSurface,
-    other: PlacedSurface,
+    faces: [FaceView<'_>; 2],
+    [one, other]: [PlacedSurface; 2],
+    room: f64,
 ) -> bool {
     let (EdgeRun::PartOfWhereItCrosses { and, .. } | EdgeRun::RightRoundWhereItCrosses { and }) =
         run
@@ -885,9 +903,40 @@ fn one_plane_written_twice_round_a_curve(
     else {
         return false;
     };
-    and.as_plane().is_none()
-        && one.used == other.used
-        && one_plane.normal().dot(other_plane.normal()) > 0.0
+    if and.as_plane().is_some()
+        || one.used != other.used
+        || one_plane.normal().dot(other_plane.normal()) <= 0.0
+    {
+        return false;
+    }
+    let mut round_both = Bounds::nothing();
+    for face in faces {
+        round_both.take_in(Bounds::round_a_face(solid, face));
+    }
+    no_further_apart_anywhere_in(round_both, [one_plane, other_plane], room)
+}
+
+/// Whether two planes facing the same way are no more than `room` apart at
+/// every point of `round`, and `false` for an empty box.
+///
+/// How far a point is in front of a plane is linear in the point, so the
+/// difference between two planes' is too, and over a box it is largest at one
+/// of the box's eight corners.
+fn no_further_apart_anywhere_in(round: Bounds, [one, other]: [&Plane; 2], room: f64) -> bool {
+    if (0..3).any(|axis| round.low[axis] > round.high[axis]) {
+        return false;
+    }
+    (0..8).all(|corner| {
+        let [x, y, z]: [f64; 3] = core::array::from_fn(|axis| {
+            if corner >> axis & 1 == 0 {
+                round.low[axis]
+            } else {
+                round.high[axis]
+            }
+        });
+        let at = Point::new(x, y, z);
+        (one.signed_distance_to(at) - other.signed_distance_to(at)).abs() <= room
+    })
 }
 
 /// Write the one spelling each group is baked on into every face of it, as
