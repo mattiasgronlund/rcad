@@ -3909,6 +3909,106 @@ mod tests {
         }
     }
 
+    /// The two pointed cones of slope a half above, one leaning off the other,
+    /// with each two neighbouring points of a branch put in one box round
+    /// both, so that neither box can tell how the other turns from it round
+    /// the ruled cone's axis, as two meets a rounding apart are boxed in
+    /// `rcad-topo`'s arrangement.
+    ///
+    /// Asked alone, the two in one box are in no order. Handed the step from
+    /// the first to the second, every two come back in the order `∇S × ∇T`
+    /// runs; handed the step turned round, or asked of the pair the other way
+    /// round, in the other order. Only pairs a short step apart are asked: far
+    /// along a branch a ten-thousandth of a radian is a step of tens, and a
+    /// box that wide turns every way round the axis.
+    ///
+    /// A pair whose box reaches `x = 0`, the flat surface both cones are mirror
+    /// images of themselves in, is put in no order, step or no step: its box
+    /// is not placed in either half turn from where the ordering starts.
+    #[test]
+    fn two_points_of_a_branch_in_one_box_come_in_the_order_the_step_between_them_says() {
+        let (sin, cos) = 0.3_f64.sin_cos();
+        let upright = a_cone_up_z(0.0, 0.5);
+        let leaning = Cone::new(
+            Axis::new(
+                Point::new(0.0, 4.0 * sin, 4.0 - 4.0 * cos),
+                Vector::new(0.0, -sin, cos),
+            )
+            .expect("an axis"),
+            0.5,
+        )
+        .expect("a slope");
+        let read = how_two_cones_off_one_axis_are_read(&upright, &leaning).expect("read");
+        let pieces = the_crossing_along_the_lines_of(&read.ruled, &read.crossed);
+        for (which, piece) in ["beyond the loop", "behind the apex"]
+            .into_iter()
+            .zip(&pieces[1..])
+        {
+            let near: Vec<_> = piece
+                .iter()
+                .filter(|(at, ahead)| (Vector::from(*ahead) - Vector::from(*at)).length() < 1e-2)
+                .collect();
+            assert!(near.len() > 20, "{which}: {} steps that short", near.len());
+            for (at, ahead) in near {
+                let runs_ahead = out_of_a_cone(&upright, *at)
+                    .cross(out_of_a_cone(&leaning, *at))
+                    .dot(Vector::from(*ahead) - Vector::from(*at))
+                    > 0.0;
+                let (in_order, out_of_order) = if runs_ahead {
+                    (Decision::Pos, Decision::Neg)
+                } else {
+                    (Decision::Neg, Decision::Pos)
+                };
+                let both = PredicatePoint::Constructed(core::array::from_fn(|axis| {
+                    Interval::new(at[axis].min(ahead[axis]), at[axis].max(ahead[axis]))
+                        .expect("the lower end first")
+                }));
+                let step: [Interval; 3] = core::array::from_fn(|axis| {
+                    Interval::exactly(ahead[axis]) - Interval::exactly(at[axis])
+                });
+                let back = step.map(|along| -along);
+                let what = format!("the branch {which}, from {at:?} to {ahead:?}");
+                if at[0] * ahead[0] <= 0.0 {
+                    assert_eq!(
+                        upright.which_comes_first_along_a_branch_a_step_apart(
+                            &leaning, both, both, step
+                        ),
+                        Ok(NOTHING_IS_KNOWN),
+                        "{what}: across x = 0"
+                    );
+                    continue;
+                }
+                assert!(
+                    matches!(
+                        upright.which_comes_first_along_a_branch_it_crosses_a_cone_in(
+                            &leaning, both, both
+                        ),
+                        Ok(Decision::Undecidable { .. })
+                    ),
+                    "{what}: no order without the step"
+                );
+                assert_eq!(
+                    upright
+                        .which_comes_first_along_a_branch_a_step_apart(&leaning, both, both, step),
+                    Ok(in_order),
+                    "{what}"
+                );
+                assert_eq!(
+                    upright
+                        .which_comes_first_along_a_branch_a_step_apart(&leaning, both, both, back),
+                    Ok(out_of_order),
+                    "{what}, the step turned round"
+                );
+                assert_eq!(
+                    leaning
+                        .which_comes_first_along_a_branch_a_step_apart(&upright, both, both, step),
+                    Ok(out_of_order),
+                    "{what}, the pair the other way round"
+                );
+            }
+        }
+    }
+
     /// The way out of `cone` at `at`, `W y − k(y·w) w` for `y` the step from
     /// its apex, `w` its axis direction, `W = w·w` and `k` one more than its
     /// slope squared: worked out here and not by the code under test.
