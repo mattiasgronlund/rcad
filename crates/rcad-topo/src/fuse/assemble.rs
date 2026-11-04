@@ -106,7 +106,6 @@ use crate::validate::{
     how_much_space_a_curved_solid_encloses, the_curved_one_of, the_narrowest_a_face_is,
     the_way_it_is_parametrised_about, winding_round,
 };
-use crate::error::AModelOfTheFusesOwn;
 use crate::view::how_far_apart;
 use crate::{
     Containment, EdgeKey, EdgeView, Error, FaceKey, Invalid, Model, Result, SolidView, VertexKey,
@@ -883,11 +882,13 @@ impl Assembly {
     ///
     /// Whatever else the sweep says, unchanged — [`Error::Undecidable`] where a
     /// predicate gave up on the answer, say. "The kernel wrote something broken"
-    /// is not what those say. But a refusal that names a face or an edge, such
-    /// as [`Error::AWireWillNotLieFlatOnItsFace`] from meshing the answer, comes
-    /// back inside [`Error::TheFuseWasRefusedInAModelOfItsOwn`] with the
-    /// throwaway, which is the only model its key names anything in
-    /// ([`Assembly::handing_back_the_model_it_was_raised_in`]).
+    /// is not what those say. But a refusal that names an edge, such as
+    /// [`Error::ACrossingAlongThisEdgeCouldNotBeFollowed`] from meshing the
+    /// answer, comes back inside [`Error::TheFuseWasRefusedInAModelOfItsOwn`]
+    /// with the throwaway, which is the only model its key names anything in.
+    /// One that names a face, such as [`Error::AWireWillNotLieFlatOnItsFace`],
+    /// names the caller's face that face of the answer was cut from (Q2288,
+    /// [`Assembly::handing_back_the_model_it_was_raised_in`]).
     ///
     /// # Panics
     ///
@@ -929,9 +930,9 @@ impl Assembly {
             Ok(()) => {}
             Err(Error::Invalid(broken)) => return Err(Error::TheFuseWroteABrokenAnswer { broken }),
             Err(refused) => {
-                return Err(self.handing_back_the_model_it_was_raised_in(
-                    throwaway, &rehearsal, refused,
-                ));
+                return Err(
+                    self.handing_back_the_model_it_was_raised_in(throwaway, &rehearsal, refused)
+                );
             }
         }
 
@@ -6124,9 +6125,10 @@ impl Assembly {
     /// through [`how_much_space_it_encloses`]'s `?`, when a curved shell no
     /// mesh signs whose closest sum is not above zero, and none of whose
     /// corners tells which way its faces point. Whatever else meshing a shell
-    /// refuses, such as [`Error::CannotMeshAFace`], inside
-    /// [`Error::TheFuseWasRefusedInAModelOfItsOwn`] with the model the shells
-    /// were meshed in where it names a face or an edge
+    /// refuses, such as [`Error::CannotMeshAFace`], naming the input face the
+    /// face it could not mesh was cut from where it names a face, and inside
+    /// [`Error::TheFuseWasRefusedInAModelOfItsOwn`], with the model the shells
+    /// were meshed in, where it names an edge
     /// ([`Assembly::handing_back_the_model_it_was_raised_in`]).
     /// [`Error::AFaceTrimmedByACurveThisCannotFollow`]
     /// naming the input face, when no point on a shell could be placed and one
@@ -6156,9 +6158,9 @@ impl Assembly {
             let volume = match how_much_space_it_encloses(apart.solid_at(solid), policy, log) {
                 Ok(volume) => volume,
                 Err(refused) => {
-                    return Err(self.handing_back_the_model_it_was_raised_in(
-                        apart, &written, refused,
-                    ));
+                    return Err(
+                        self.handing_back_the_model_it_was_raised_in(apart, &written, refused)
+                    );
                 }
             };
             if !volume.is_finite() {
@@ -6607,9 +6609,9 @@ impl Assembly {
     /// answers pays nothing for it.
     ///
     /// **A face is still swapped for the caller's (Q2288)**, which says which
-    /// input face and not which piece of it. Handing the model back with it
-    /// too changes what ten tests in `crates/rcad-topo/tests/` read off a
-    /// fuse, which Q3153's lane did not hold.
+    /// input face and not which piece of it. Handing the model back with a
+    /// face too changes what ten tests in `crates/rcad-topo/tests/` read off a
+    /// fuse, and is left to a queue row of its own.
     ///
     /// The two solid keys of [`Error::TwoSolidsShareSpace`] and
     /// [`Error::CannotTellWhetherTwoSolidsShareSpace`] need nothing: only
@@ -6631,13 +6633,13 @@ impl Assembly {
             *face = self.the_input_face_it_was_cut_from(&apart, written, *face);
             return refused;
         }
-        let Some(&edge) = refused.the_edge_it_names() else {
+        let Some(edge) = refused.the_edge_it_names().copied() else {
             return refused;
         };
         Error::TheFuseWasRefusedInAModelOfItsOwn {
             callers_edge: self.the_input_edge_it_is_a_piece_of(&apart, written, edge),
             refused: Box::new(refused),
-            model: AModelOfTheFusesOwn::new(apart),
+            model: crate::error::AModelOfTheFusesOwn::new(apart),
         }
     }
 

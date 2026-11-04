@@ -287,19 +287,19 @@ pub enum Error {
     /// A fuse writes its answer into two models of its own before it writes
     /// it into the caller's: one solid to a shell, to mesh each shell and tell
     /// which is inside which, and then whole, to sweep it. A refusal raised in
-    /// either names a face or an edge of that model, which the caller's model
-    /// holds no key for. `refused` is that refusal as it was raised, and every
-    /// key in it is a key into `model`: look the edge up there, mesh the faces
-    /// along it, or write `model` out with `postcard` and load it in a probe.
-    /// The model is moved into the refusal, so the fuse that answers pays
-    /// nothing for it.
+    /// either that names an edge names an edge of that model, which the
+    /// caller's model holds no key for. `refused` is that refusal as it was
+    /// raised, and its edge is a key into `model`: look the edge up there, mesh
+    /// the faces along it, or write `model` out with `postcard` and load it in
+    /// a probe. The model is moved into the refusal, so the fuse that answers
+    /// pays nothing for it.
     ///
-    /// `callers_face` and `callers_edge` say where in the caller's model that
-    /// face or edge came from. They are lineage, not blame: a refusal for the
-    /// faces along an edge, such as [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`],
-    /// is about the faces along it in `model`, which the fuse put there, and
-    /// says nothing of the caller's edge it is a piece of, which may be
-    /// straight, or have two faces along it in the caller's model.
+    /// `callers_edge` says which edge of the caller's model that edge is a
+    /// piece of. It is lineage, not blame: a refusal for the faces along an
+    /// edge, such as [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`], is about
+    /// the faces along it in `model`, which the fuse put there, and says
+    /// nothing of the caller's edge, which may be straight, or have two faces
+    /// along it in the caller's model.
     ///
     /// **An edge the fuse invented has no caller's edge.** Where two faces of
     /// one input are stored a rounding apart and cross in a thin loop, the
@@ -307,23 +307,24 @@ pub enum Error {
     /// names nothing the caller holds; `model` is then the only place it can
     /// be looked up.
     ///
-    /// **A refusal that names no face or edge comes back as itself**, not as
-    /// this: [`Error::Undecidable`] say, which names points and not keys, and
-    /// which a caller sorts by what gave up (§17.7).
+    /// **A refusal that names a face is not handed back in this.** It names
+    /// the caller's face the face of the fuse's model was cut from instead,
+    /// which says which input face and not which piece of it (Q2288).
+    ///
+    /// **A refusal that names no face or edge comes back as itself**:
+    /// [`Error::Undecidable`] say, which names points and not keys, and which
+    /// a caller sorts by what gave up (§17.7).
     #[error("in a model of the fuse's own: {refused}")]
+    #[non_exhaustive]
     TheFuseWasRefusedInAModelOfItsOwn {
-        /// The refusal as it was raised. Every key in it is a key into
+        /// The refusal as it was raised. The edge it names is a key into
         /// `model`.
         refused: Box<Error>,
         /// The model it was raised in, which holds what the fuse wrote into it
         /// and nothing else.
         model: AModelOfTheFusesOwn,
-        /// The face of the caller's model that the face `refused` names was
-        /// cut from, or `None` where it names no face.
-        callers_face: Option<crate::FaceKey>,
         /// The edge of the caller's model that the edge `refused` names is a
-        /// piece of, or `None` where it names no edge or one the fuse
-        /// invented.
+        /// piece of, or `None` where the fuse invented that edge.
         callers_edge: Option<EdgeKey>,
     },
 
