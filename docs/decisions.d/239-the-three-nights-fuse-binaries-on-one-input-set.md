@@ -278,3 +278,40 @@ Not run: set C itself, which is gone; `7dda6ab5d`, "stop the finer-mesh retry at
 half the closest corner pair", which follows `b53344c9e` and may be why
 `79eedce7` is faster than `b53344c9e` on the 201; and why the retry fires more
 often on those 201.
+
+### 239.10 The third bisect: the 09-23 night, 2026-11-04
+
+*Q245, a read-only lane. Its scripts, the file sample, the per-file times and
+the rebuilt 09-23 binary `bin055` are in `~/rcad-probes/q245`, outside git.*
+
+**Most of the 09-23 night's fall, from 36.7 M runs to 4.6 M, comes in with
+`05206e64f`**, "fix(fuse): a curved piece whose corners all lie on one plane
+gets a point stepped towards every cut's material", 2026-09-22 13:02, in
+`fuse/select.rs`. The nights' own logs show where it starts. Through job 100
+the 09-23 night ran about 245 runs a second against 381 for 09-22, a ratio of
+1.55, near the 1.4 to 1.5 that §254 and §296 measured for set C and the
+finer-mesh retry. From job 103, about 1 560 s in, 71 to 98 of every hundred
+09-23 jobs ran under 60 a second. No 09-22 job did.
+
+On 4 000 files sampled from today's corpus (`q245_files.txt`), the 09-23
+binary `055aa4a9` takes 0.5 to 4.8 s on 65 of them. The same 65 come up in both
+of two runs, and they hold 143 s of the 198 s total (`q245_c2.txt`).
+`79eedce7` takes 15 to 57 ms on those 65, and 66 s on all 4 000
+(`q245_a2.txt`). The 48 commits between the two that touch the crates or the
+fuzz targets were bisected on one of the 65, `7b57e5e4`. The first slow commit
+is `05206e64f`: 3 347 ms there and 23 ms at its parent `f7e9332cb`
+(`q245_probe.sh`).
+
+The reader and writer targets ran at the same rate on both nights, so the
+machine's load is not what changed. Q62's stand-in for `b53344c9e` does not
+finish three corpus files in seven CPU-minutes each, but the real 09-23
+binary runs them in 24 to 32 ms, so that is some other effect. Every timing
+here ran beside other sessions at a load of 8 to 35, so the 1.55 is not a
+controlled number.
+
+Not run: the nights' own mutants, since no copy was kept. That this commit is
+what slowed the 09-23 jobs therefore follows from the log's timing and the
+bisect, not from replaying what that night ran. Also not run: a night past job
+300, Q12's other four targets beside the fuse, where the 3.5 s goes in
+`05206e64f`'s answer, and whether `main` still takes it. Q3151 asks the last
+two.
