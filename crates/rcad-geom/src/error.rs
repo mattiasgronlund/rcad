@@ -490,11 +490,10 @@ pub enum Error {
     /// from it, and `SurfaceMeet` has no answer that says a curve and a point
     /// at once. A gap of the vocabulary rather than of the arithmetic. Off the
     /// axis a ball through the apex is refused too, before any shape is asked:
-    /// `a_ball_off_a_cones_axis` asks where the apex stands first. `walk`
-    /// also refuses under this name a closed run stated on two cones on one
-    /// axis with one apex, which touch only there — a pair `intersect` answers,
-    /// and a name that is wrong for it: `walk.rs`'s `where_two_coaxial_cones_cut`
-    /// says why it stands.
+    /// `a_ball_off_a_cones_axis` asks where the apex stands first. A closed
+    /// run stated on two cones on one axis with one apex, which touch only
+    /// there, is not refused under this name: it is
+    /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`].
     ///
     /// **Naming the coaxial cone and pipe moved no file in the STEP corpus**, and §50.11
     /// measured that before it was written: this variant is raised zero times
