@@ -71,13 +71,16 @@ just queue narrow <id> <write set>         a lane's hold, narrowed to entries in
                                             Widening back is refused while the entry meets another hold (§424.7)
 just queue writes <id> <write set>         set a todo row's or a held row's write set outright, where narrow cannot
                                             reach it because the new set is not inside what the row was taken with;
-                                            written to the claims file alone, refused while it meets another hold
+                                            written to the claims file alone, refused while it meets another hold;
+                                            a set naming an agent file prints add's pointer on stderr too
 just queue meets <id> <write set>          the fill's skip line for the first hold on its input the write set meets;
                                             what narrow and writes ask before either widens a hold back
 just queue take <id> <branch>              dispatch a ready row to <branch>: state lane:<branch>, held until done/drop/park
 just queue add <tier> <model> <write set> <what ending in §N>    a new todo row at the foot of its tier; prints the id
                                             <what> starts with from/<id>, was/<id>, from/-, from/fuzz:<target>
-                                            or from/step:<file>: where the row came from (§432, §433)
+                                            or from/step:<file>: where the row came from (§432, §433);
+                                            a write set naming CLAUDE.md, AGENTS.md or .claude/agents/*.md
+                                            also prints a pointer to docs/where-a-rule-goes.md on stderr (§479)
 just queue tier <id> <tier>                move an open row to the foot of another tier, writing that tier's heading if missing;
                                             a row with a class goes only to the tier its class names; the rows with
                                             no class that wait on it go along when it moves down, and it never moves
@@ -323,11 +326,14 @@ class Batch:
     """The ids this batch's own `add` steps have handed out, for `@1`, `@2`, ... to resolve against,
     and the holds this batch's own `take` steps have written so far, in the shape `claims.holds()`
     returns, for a later `take` step in the same apply to read: `apply` only appends its events to the
-    claims file after every step has run, so `claims.holds()` alone never sees them (§424.10)."""
+    claims file after every step has run, so `claims.holds()` alone never sees them (§424.10).
+    `notes` are lines for stderr once the batch is written, kept off stdout, where `just land`
+    reads the added ids (§479)."""
 
     def __init__(self):
         self.added_ids = []
         self.takes = {}
+        self.notes = []
 
 
 def apply(here, args):
@@ -355,6 +361,8 @@ def apply(here, args):
         write(here, queue)
     for message in messages:
         print(message)
+    for note in batch.notes:
+        print(note, file=sys.stderr)
 
 
 def split_steps(args):
@@ -626,6 +634,9 @@ def add_step(queue, claims, here, args, batch):
     text = f"{row_id:<4} {tier:<4} todo    {model:<7} {write_set}   {what}"
     queue.append_to_block(block, text)
     batch.added_ids.append(row_id)
+    pointer = agent_file_pointer(row_id, entries_of(write_set))
+    if pointer:
+        batch.notes.append(pointer)
     return queue, row_id, ("add", row_id, now(), here.top, text)
 
 
@@ -1590,6 +1601,32 @@ def writes(here, args):
                           f"as the fill says it:\n    {met}")
         claims.append("writes", row_id, now(), here.top, write_set)
     print(f"{row_id}: write set {current} -> {write_set}")
+    pointer = agent_file_pointer(row_id, entries)
+    if pointer:
+        print(pointer, file=sys.stderr)
+
+
+AGENT_FILE = re.compile(r"^(.*/)?(CLAUDE|AGENTS)\.md$|^\.claude/agents/.*\.md$")
+AGENT_FILE_POINTER = (
+    "CLAUDE.md, AGENTS.md and .claude/agents/*.md are read once, when a claude process starts, so a change to one "
+    "leaves every running dispatcher on the old text until a new process starts: docs/where-a-rule-goes.md says "
+    "what belongs in them and where the rest goes, and the commit that changes one says why its rule had to go there.")
+
+
+def agent_file_pointer(row_id, entries):
+    """The line pointing a row that will change an agent file at docs/where-a-rule-goes.md, or None (§479).
+
+    It is the line `.claude/hooks/agent-file-written.sh` puts in front of a
+    model after a write to one, with the row and the entries in front;
+    check-queue-api-selftest holds the two to the same text. A directory entry
+    holding `.claude/agents/`, such as `.claude/`, names every agent file
+    under it, so it counts too. Printed here, at `add` and `writes`, the
+    pointer reaches whoever files the row, before a lane is dispatched on it.
+    """
+    named = [entry for entry in entries if AGENT_FILE.match(entry) or entry_holds(entry, ".claude/agents/")]
+    if not named:
+        return None
+    return f"{row_id}'s write set names {', '.join(named)}. {AGENT_FILE_POINTER}"
 
 
 WRITE_SET_ENTRY = re.compile(r"^[A-Za-z0-9._/-]+(#[A-Za-z0-9_-]+)?$")
