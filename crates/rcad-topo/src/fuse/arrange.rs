@@ -24400,6 +24400,58 @@ mod tests {
             && (way[0] * half[0] + way[1] * half[1] + way[2] * half[2]).sign() == Decision::Pos
     }
 
+    /// The pitch cones of a pair of mitre gears, slope one about `z` and about
+    /// `x`, touch along `(±1, 0, ±1)`. With the second turned onto `x` by a
+    /// rotation rather than a quarter turn, its axis is stored `(1, 0, 2⁻⁵²)`,
+    /// a rounding off square, and they cross instead, in rulings a hair either
+    /// side of `y = 0`. Each half `rcad-geom` names leaves the apex one way,
+    /// read in its own corner (Q3144).
+    #[test]
+    fn each_half_of_two_cones_a_rounding_off_touching_leaves_the_apex_one_way() {
+        use rcad_geom::{EdgeRun, Picker, SurfaceMeet, intersect};
+
+        use super::the_way_a_half_ruling_two_cones_share_leaves_the_apex;
+
+        let upright = Cone::new(Axis::z(), 1.0).expect("a slope above zero");
+        let turn =
+            Isometry::rotation(&Axis::y(), core::f64::consts::FRAC_PI_2).expect("a finite turn");
+        let Surface::Cone(lying) = Surface::Cone(upright).transformed(&turn) else {
+            unreachable!("a movement keeps a cone a cone");
+        };
+        assert_eq!(
+            lying.axis().direction(),
+            Vector::new(1.0, 0.0, f64::EPSILON)
+        );
+        let met = intersect(
+            &Surface::Cone(upright),
+            &Surface::Cone(lying),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(runs)) = &met else {
+            panic!("the halves of where they cross are named: {met:?}");
+        };
+        for named in runs {
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = named.run() else {
+                panic!("a half ruling is part of where the cones cross: {named:?}");
+            };
+            let corner: Vec<&HalfSpace> = picked_by
+                .iter()
+                .map(|picker| {
+                    let Picker::InFrontOf(flat) = picker else {
+                        panic!("a half ruling is picked by flat surfaces: {picker:?}");
+                    };
+                    flat
+                })
+                .collect();
+            assert!(
+                the_way_a_half_ruling_two_cones_share_leaves_the_apex(&upright, &lying, &corner)
+                    .is_some(),
+                "{named:?} leaves the apex one way"
+            );
+        }
+    }
+
     /// A hint that puts a pair the wrong way round comes back the right way
     /// round, and one that is already right is not asked twice about anything.
     ///
