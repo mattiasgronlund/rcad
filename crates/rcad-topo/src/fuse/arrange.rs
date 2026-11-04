@@ -2852,7 +2852,10 @@ impl<'f> Arrangement<'f> {
     /// it too, it found none, and split its rim where the lines meet it. The
     /// dome draws no crossing with the flat, which touches it at one point,
     /// so its side of the rim was whole, and every difference of the LED with
-    /// a box was refused `ResultIsNotManifold` (Q3164).
+    /// a box was refused `ResultIsNotManifold`. Asked of the dome, the ball
+    /// lies wholly behind the back plane
+    /// ([`Arrangement::its_faces_lie_across_the_plane_of`]), and the pipe
+    /// leaves its rim whole too (Q3164).
     ///
     /// **Past wherever a face of it is, and not only wholly past** (Q2619).
     /// A face leaves out a crossing that lies wholly past such a plane, and
@@ -4552,7 +4555,7 @@ impl<'f> Arrangement<'f> {
         cut: Surface,
         at: PredicatePoint,
     ) -> bool {
-        let across = self.the_surface_of_the_face_across(along);
+        let across = self.crossings[along].partner;
         let places = [at];
         let mut past_across = false;
         for side in self.the_sides_its_faces_lie_in(cut) {
@@ -4666,7 +4669,8 @@ impl<'f> Arrangement<'f> {
 
     /// Whether every face carrying `surface` lies in the other closed side of
     /// `side`'s own plane, by the sides of a curved face or a flat one
-    /// ([`BakedFace::lies_in_as_a_flat_face`]).
+    /// ([`BakedFace::lies_in_as_a_flat_face`]), or for a ball by the box round
+    /// it ([`a_ball_wholly_past`]).
     ///
     /// **The other closed side shares the plane, and the inside of no face in
     /// it is on the plane** ([`BakedFace::lies_in`]): so no point of a face in
@@ -4674,10 +4678,18 @@ impl<'f> Arrangement<'f> {
     /// on their boundaries. A flat along a pipe's side, ending on the plane the
     /// pipe ends on, is the shape (Q3048): its crossing with the pipe runs on
     /// past the pipe's end, where no face of the flat reaches it.
+    ///
+    /// **A ball wholly past the plane has every face on it there**, whatever
+    /// the lists say. They hold no sides for a surface of a face across a
+    /// rim, which bake reads against the rim's plane. A KiCad LED's dome, a
+    /// ball of radius 2.5 about `y = -7.37`, is across its body's pipe's rim,
+    /// and its flange's flat lies in front of the back plane `y = -2.27`,
+    /// which the ball is wholly behind (Q3164).
     fn its_faces_lie_across_the_plane_of(&self, surface: Surface, side: ASideOfAPlane) -> bool {
         self.the_sides_its_faces_lie_in(surface)
             .chain(self.the_sides_its_flat_faces_lie_in(surface))
             .any(|theirs| the_other_closed_side_of_its_plane(theirs, side))
+            || a_ball_wholly_past(surface, side)
     }
 
     /// A closed crossing with no node on it still needs one.
@@ -21572,6 +21584,24 @@ fn the_other_closed_side_of_its_plane(one: ASideOfAPlane, other: ASideOfAPlane) 
     } else {
         false
     }
+}
+
+/// Whether `surface` is a ball strictly past `side`'s plane at every point:
+/// the plane gives the box round it, its centre give or take its radius along
+/// each axis, the sign of a point past it.
+///
+/// **A sign over the box is a sign at every point of the ball**, since the box
+/// holds it, so the answer is a proof and not a distance. A ball the plane
+/// runs through, or comes near enough that the box does, proves nothing.
+fn a_ball_wholly_past(surface: Surface, side: ASideOfAPlane) -> bool {
+    let Surface::Sphere(ball) = surface else {
+        return false;
+    };
+    let boxed = ball.centre().coordinates().map(|coordinate| {
+        Interval::around(coordinate, ball.radius())
+            .expect("a ball's centre is finite and its radius a positive length")
+    });
+    side.plane.side_of_point(PredicatePoint::Constructed(boxed)) == side.past_it()
 }
 
 /// Whether, of these three surfaces, a flat one cuts a pipe in a curve that
