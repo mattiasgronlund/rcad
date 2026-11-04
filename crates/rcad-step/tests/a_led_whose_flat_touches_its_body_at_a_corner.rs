@@ -376,8 +376,6 @@ const THREE_MORE_D3: [(&str, f64, f64); 3] = [
 /// How far below its body's axis a `D3.0` LED stores its front corner.
 const BELOW_THE_AXIS: f64 = 4.3536e-8;
 
-const THE_SAME_WAY_ALONG_ONE_LINE: &str = "two ways out of a node along one line";
-
 /// Half the side of the box put round each corner.
 const HALF: f64 = 0.1;
 
@@ -411,7 +409,7 @@ fn a_d5_led_3_up_gets_past_where_its_flat_dome_and_pipe_meet_and_shares_its_back
     a_box_round_shares(
         Z3,
         Z3_BACK_CORNER,
-        what_a_d5_led_shares_round_its_back_corner(),
+        what_a_box_round_the_back_corner_shares(2.5),
     );
     the_far_box_shares_nothing_with(Z3);
     every_fuse_refuses(Z3, &[(Z3_FRONT_CORNER, Rule::Intersection)], |error| {
@@ -458,7 +456,7 @@ fn a_z15_led_leaves_its_bodys_ellipse_off_its_flat_and_shares_its_back_corner_wi
     a_box_round_shares(
         Z15,
         Z15_BACK_CORNER,
-        what_a_d5_led_shares_round_its_back_corner(),
+        what_a_box_round_the_back_corner_shares(2.5),
     );
     the_far_box_shares_nothing_with(Z15);
     every_fuse_refuses(Z15, &[(Z15_FRONT_CORNER, Rule::Intersection)], |error| {
@@ -501,34 +499,46 @@ fn a_d3_led_6_up_gets_past_the_sides_of_its_leads_and_stops_on_a_sliver_of_its_b
     });
 }
 
-/// Past where their flats meet the line their front's plane crosses their
-/// disc's in (Q3071), the boxes round the back corner of four `D3.0` LEDs stop
-/// on two ways out of that corner along one line, one of them a box round
-/// nothing.
+/// Past where its flat meets the line its front's plane crosses its disc's in
+/// (Q3071), the box round the back corner of the `D3.0` LED 6 up stopped on two
+/// ways out of that corner along one line, one of them a box round nothing.
+/// Since Q3142 the ellipse its flange's flat cuts in its body's pipe is no edge
+/// of that flat, which lies in front of the back plane by its two straight
+/// edges across the flange's rim. The box shares with it what the box round a
+/// `D5.0` LED's back corner does, for a body of radius 1.5, and their
+/// difference is refused where the box's top meets the flange's rim at the
+/// front written twice (Q3126).
 #[test]
-fn four_d3_leds_get_past_their_front_written_twice_and_stop_on_two_ways_out_of_their_back_corner_along_one_line()
- {
-    let all_four = [(D3, -3.81, 6.0)].into_iter().chain(THREE_MORE_D3);
-    for (file, front, axis) in all_four {
-        let back_corner = [-0.23, front - 1.0, axis];
-        every_fuse_refuses(file, &a_box_round_each_of(&[back_corner]), |error| {
-            two_ways_out_of_a_corner_are_not_ordered(back_corner, error)
-        });
-    }
+fn a_d3_led_6_up_leaves_its_bodys_ellipse_off_its_flat_and_shares_its_back_corner_with_a_box() {
+    let back_corner = [-0.23, -4.81, 6.0];
+    a_box_round_shares(
+        D3,
+        back_corner,
+        what_a_box_round_the_back_corner_shares(1.5),
+    );
+    every_fuse_refuses(D3, &[(back_corner, Rule::Difference)], |error| {
+        two_ends_round_to_one_point_where_the_box_top_meets_the_rim_at_the_front(
+            back_corner[2] + HALF,
+            error,
+        )
+    });
 }
 
 /// Past where their flats meet the line their front's plane crosses their
 /// disc's in (Q3071), the boxes round the front corner and the far boxes of
 /// three more `D3.0` LEDs are refused a piece of a face bounded by two
-/// straight sides (Q2978).
+/// straight sides (Q2978). Their boxes round the back corner stopped on two
+/// ways out of it along one line, and since Q3142 they are refused that piece
+/// too.
 #[test]
 fn three_more_d3_leds_get_past_their_front_written_twice_and_are_refused_a_piece_of_two_straight_sides()
  {
     for (file, front, axis) in THREE_MORE_D3 {
         let front_corner = [-0.23, front, axis - BELOW_THE_AXIS];
+        let back_corner = [-0.23, front - 1.0, axis];
         every_fuse_refuses(
             file,
-            &a_box_round_each_of(&[front_corner, FAR_OFF]),
+            &a_box_round_each_of(&[front_corner, back_corner, FAR_OFF]),
             |error| matches!(error, Error::Invalid(Invalid::WireTooShort { count: 2 })),
         );
     }
@@ -628,12 +638,12 @@ fn a_box_round_shares(file: &str, corner: [f64; 3], shared: f64) {
     );
 }
 
-/// What a box of side `2 * HALF` round the back corner of a `D5.0` LED shares
-/// with it: in front of the back plane, the quarter of the box past the flat,
-/// in the flange; behind it, the part of the box's quarter past the flat that
-/// is inside the body's pipe of radius 2.5, which the flat touches.
-fn what_a_d5_led_shares_round_its_back_corner() -> f64 {
-    let radius = 2.5_f64;
+/// What a box of side `2 * HALF` round the back corner of an LED whose body's
+/// pipe has `radius` shares with it: in front of the back plane, the quarter
+/// of the box past the flat, in the flange; behind it, the part of the box's
+/// quarter past the flat that is inside the body's pipe, which the flat
+/// touches. Radius 2.5 is a `D5.0` LED's, and 1.5 a `D3.0` LED's.
+fn what_a_box_round_the_back_corner_shares(radius: f64) -> f64 {
     let flange_in_the_box = HALF * HALF * (2.0 * HALF);
     let body_in_the_box = HALF
         * (HALF * (radius * radius - HALF * HALF).sqrt()
@@ -676,19 +686,21 @@ fn a_point_inside_a_sliver_of_the_box_top_is_not_placed(top: f64, error: &Error)
         })
 }
 
-/// Refused `Undecidable` with the one record `two ways out of a node along one
-/// line`, handed `corner` and two ways out of it, one of which is a box round
-/// nothing: each of its sides holds zero and is less than `1e-15` wide.
-fn two_ways_out_of_a_corner_are_not_ordered(corner: [f64; 3], error: &Error) -> bool {
-    let [at, one, other] = the_points_of_the_one_record(THE_SAME_WAY_ALONG_ONE_LINE, error) else {
+/// Refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` at a point where
+/// the box's top `z = top` meets the `D3.0` LED's flange's rim, a pipe of
+/// radius 1.9 round the body's axis `x = 1.27, z = 6`, on its front
+/// `y = -3.81`.
+fn two_ends_round_to_one_point_where_the_box_top_meets_the_rim_at_the_front(
+    top: f64,
+    error: &Error,
+) -> bool {
+    let Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { at, .. } = error else {
         return false;
     };
-    let round_nothing = |way: &Point| {
-        way.enclosure()
-            .iter()
-            .all(|side| side.lo() <= 0.0 && 0.0 <= side.hi() && side.hi() - side.lo() < 1e-15)
-    };
-    is_within_1e_9_of(at, corner) && (round_nothing(one) || round_nothing(other))
+    let from_the_axis = (at.x() - 1.27).hypot(at.z() - 6.0);
+    (from_the_axis - 1.9).abs() < 1e-9
+        && (at.y() + 3.81).abs() < 1e-9
+        && (at.z() - top).abs() < 1e-9
 }
 
 /// The points of the one record of an `Undecidable` refusal, when it is one
@@ -701,20 +713,6 @@ fn the_points_of_the_one_record<'a>(predicate: &str, error: &'a Error) -> &'a [P
         [record] if record.predicate() == predicate => record.inputs(),
         _ => &[],
     }
-}
-
-fn is_within_1e_9_of(point: &Point, at: [f64; 3]) -> bool {
-    is_within_1e_9_of_the_box(point, at.map(|at| [at, at]))
-}
-
-/// Whether each side of `point`'s box ends within `1e-9` of where the same
-/// side of `sides` ends, `[lo, hi]` along each axis.
-fn is_within_1e_9_of_the_box(point: &Point, sides: [[f64; 2]; 3]) -> bool {
-    point
-        .enclosure()
-        .iter()
-        .zip(sides)
-        .all(|(side, [lo, hi])| (side.lo() - lo).abs() < 1e-9 && (side.hi() - hi).abs() < 1e-9)
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
