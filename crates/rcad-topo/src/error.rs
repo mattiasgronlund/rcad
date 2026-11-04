@@ -281,6 +281,53 @@ pub enum Error {
         broken: Invalid,
     },
 
+    /// A fuse was refused in a model of its own, and hands that model back
+    /// with the refusal, so that what the refusal names can be looked at.
+    ///
+    /// A fuse writes its answer into two models of its own before it writes
+    /// it into the caller's: one solid to a shell, to mesh each shell and tell
+    /// which is inside which, and then whole, to sweep it. A refusal raised in
+    /// either that names an edge names an edge of that model, which the
+    /// caller's model holds no key for. `refused` is that refusal as it was
+    /// raised, and its edge is a key into `model`: look the edge up there, mesh
+    /// the faces along it, or write `model` out with `postcard` and load it in
+    /// a probe. The model is moved into the refusal, so the fuse that answers
+    /// pays nothing for it.
+    ///
+    /// `callers_edge` says which edge of the caller's model that edge is a
+    /// piece of. It is lineage, not blame: a refusal for the faces along an
+    /// edge, such as [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`], is about
+    /// the faces along it in `model`, which the fuse put there, and says
+    /// nothing of the caller's edge, which may be straight, or have two faces
+    /// along it in the caller's model.
+    ///
+    /// **An edge the fuse invented has no caller's edge.** Where two faces of
+    /// one input are stored a rounding apart and cross in a thin loop, the
+    /// loop is such an edge, and a refusal to follow the crossing along it
+    /// names nothing the caller holds; `model` is then the only place it can
+    /// be looked up.
+    ///
+    /// **A refusal that names a face is not handed back in this.** It names
+    /// the caller's face the face of the fuse's model was cut from instead,
+    /// which says which input face and not which piece of it (Q2288).
+    ///
+    /// **A refusal that names no face or edge comes back as itself**:
+    /// [`Error::Undecidable`] say, which names points and not keys, and which
+    /// a caller sorts by what gave up (§17.7).
+    #[error("in a model of the fuse's own: {refused}")]
+    #[non_exhaustive]
+    TheFuseWasRefusedInAModelOfItsOwn {
+        /// The refusal as it was raised. The edge it names is a key into
+        /// `model`.
+        refused: Box<Error>,
+        /// The model it was raised in, which holds what the fuse wrote into it
+        /// and nothing else.
+        model: AModelOfTheFusesOwn,
+        /// The edge of the caller's model that the edge `refused` names is a
+        /// piece of, or `None` where the fuse invented that edge.
+        callers_edge: Option<EdgeKey>,
+    },
+
     /// A serialized model was written by a different version of this format.
     #[error("this model was written in format version {found}, and we read version {expected}")]
     WrongFormatVersion {
@@ -853,8 +900,9 @@ pub enum Error {
     /// two coedges, but [`SolidView::mesh`](crate::SolidView::mesh) is public in
     /// its own right and [`Model`](crate::Model) is `Deserialize`, so a solid
     /// that never went through the sweep reaches the mesher first (§16.11).
-    /// A fuse meshes one model of its own before the sweep, and answers this
-    /// there as [`Error::TheFuseWroteABrokenAnswer`] (Q2889).
+    /// A fuse meshes one model of its own before the sweep, and hands this
+    /// back from there inside [`Error::TheFuseWasRefusedInAModelOfItsOwn`],
+    /// with that model.
     #[error("this edge does not have two faces along it to say where it runs")]
     AnEdgeWithoutTwoFacesAlongItCannotBeWalked {
         /// Which edge.
@@ -876,9 +924,10 @@ pub enum Error {
     /// face arrives here, and so does a whole circle, which a file names by its
     /// one corner and no surface.
     ///
-    /// A fuse that meets this meshing one model of its own answers it as
-    /// [`Error::TheFuseWroteABrokenAnswer`]: the faces along the edge are the
-    /// answer's (Q2889).
+    /// A fuse that meets this meshing one model of its own hands it back
+    /// inside [`Error::TheFuseWasRefusedInAModelOfItsOwn`], with that model:
+    /// the faces along the edge are the answer's, and only that model holds
+    /// them.
     #[error("an edge bends but every face along it is flat and nothing names its curve")]
     AnEdgeBendsButEveryFaceAlongItIsFlat {
         /// Which edge.
@@ -1309,9 +1358,10 @@ pub enum Error {
     /// `docs/decisions.md` §110.4 measured at zero matches out of forty-four
     /// files. The key is the address, and the sweep has it in hand.
     ///
-    /// **A fuse names the caller's edge**, the one the edge of its answer is a
-    /// piece of, and hands back the bare [`Error::Geometry`] for an edge it
-    /// invented, which the caller's model has no key for (Q2889).
+    /// **A fuse hands this back inside
+    /// [`Error::TheFuseWasRefusedInAModelOfItsOwn`]**, with the model of its
+    /// own the edge is in, and the caller's edge it is a piece of where it is
+    /// a piece of one.
     #[error("geometry: {why}")]
     ACrossingAlongThisEdgeCouldNotBeFollowed {
         /// The edge whose crossing could not be followed.
@@ -1464,6 +1514,7 @@ impl Error {
             Self::ADraftEdgeHasACrossingThatCannotBeFollowed { why, .. }
             | Self::ACrossingAlongThisEdgeCouldNotBeFollowed { why, .. } => why.limit_or_gap(),
             Self::Invalid(invalid) => invalid.limit_or_gap(),
+            Self::TheFuseWasRefusedInAModelOfItsOwn { refused, .. } => refused.limit_or_gap(),
             Self::KeyFromAnotherModel { .. }
             | Self::TooFewPoints { .. }
             | Self::PointNotFinite { .. }
@@ -1597,6 +1648,7 @@ impl Error {
             | Self::SurfaceAreaTooLargeToMeasure
             | Self::LengthTooLargeToMeasure
             | Self::TheFuseWroteABrokenAnswer { .. }
+            | Self::TheFuseWasRefusedInAModelOfItsOwn { .. }
             | Self::WrongFormatVersion { .. }
             | Self::ArgumentIntersectsItself
             | Self::ResultIsNotManifold { .. }
@@ -1618,17 +1670,19 @@ impl Error {
         }
     }
 
-    /// The edge this refusal names, where it names one, for the same reason
-    /// as [`Error::the_face_it_names`] (Q2889).
+    /// The edge this refusal names, where it names one, so that a refusal
+    /// raised inside a model of the kernel's own can be handed back with that
+    /// model and the caller's edge that edge is a piece of
+    /// ([`Error::TheFuseWasRefusedInAModelOfItsOwn`]).
     ///
     /// [`Error::ADraftEdgeHasACrossingThatCannotBeFollowed`] is not one: it
     /// names an edge of a description by its place in it, which is no key.
-    pub(crate) fn the_edge_it_names(&mut self) -> Option<&mut EdgeKey> {
+    pub(crate) fn the_edge_it_names(&self) -> Option<EdgeKey> {
         match self {
             Self::CannotYetMeasureHowLongThisCurveIs { edge }
             | Self::AnEdgeWithoutTwoFacesAlongItCannotBeWalked { edge }
             | Self::AnEdgeBendsButEveryFaceAlongItIsFlat { edge }
-            | Self::ACrossingAlongThisEdgeCouldNotBeFollowed { edge, .. } => Some(edge),
+            | Self::ACrossingAlongThisEdgeCouldNotBeFollowed { edge, .. } => Some(*edge),
             Self::Geometry(_)
             | Self::CannotMeshAFace { .. }
             | Self::AWireDoesNotFanIntoALoopToMesh { .. }
@@ -1681,6 +1735,7 @@ impl Error {
             | Self::SurfaceAreaTooLargeToMeasure
             | Self::LengthTooLargeToMeasure
             | Self::TheFuseWroteABrokenAnswer { .. }
+            | Self::TheFuseWasRefusedInAModelOfItsOwn { .. }
             | Self::WrongFormatVersion { .. }
             | Self::ArgumentIntersectsItself
             | Self::ResultIsNotManifold { .. }
@@ -1755,6 +1810,50 @@ pub(crate) fn walking_along_this_edge_refused(edge: EdgeKey, why: rcad_geom::Err
     Error::ACrossingAlongThisEdgeCouldNotBeFollowed {
         edge,
         why: Box::new(why),
+    }
+}
+
+/// The model a fuse was refused in, handed back inside
+/// [`Error::TheFuseWasRefusedInAModelOfItsOwn`].
+///
+/// **Its `Debug` prints how many of each entity the model holds**, and not the
+/// entities. A refusal is printed into panics, logs and fuzz reports, and a
+/// whole model printed there buries the refusal it came with.
+pub struct AModelOfTheFusesOwn(Box<crate::Model>);
+
+impl AModelOfTheFusesOwn {
+    pub(crate) fn new(model: crate::Model) -> Self {
+        Self(Box::new(model))
+    }
+
+    /// The model, to look up what the refusal names.
+    #[must_use]
+    pub fn model(&self) -> &crate::Model {
+        &self.0
+    }
+
+    /// The model, kept.
+    #[must_use]
+    pub fn into_model(self) -> crate::Model {
+        *self.0
+    }
+}
+
+impl std::fmt::Debug for AModelOfTheFusesOwn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let model = &self.0;
+        write!(
+            f,
+            "a model of {} solids, {} shells, {} faces, {} wires, {} coedges, {} edges and {} \
+             vertices",
+            model.solid_count(),
+            model.shell_count(),
+            model.face_count(),
+            model.wire_count(),
+            model.coedge_count(),
+            model.edge_count(),
+            model.vertex_count(),
+        )
     }
 }
 
