@@ -2291,7 +2291,15 @@ fn the_sides_a_flat_face_lies_in(face: &BakedFace) -> SmallVec<[ASideOfAPlane; 2
 /// closed `side`:
 ///
 /// - **an edge across the side's plane** lies on it;
-/// - **a straight edge** with both ends in the side lies between them;
+/// - **a straight edge** with both ends in the side lies between them. An edge
+///   across another plane is one, and so is **an edge across a pipe whose
+///   axis the face's plane holds**: such a plane cuts the pipe in two lines,
+///   one or none, and never in a curve that bends
+///   ([`Cylinder::is_cut_in_a_closed_curve_by`](rcad_geom::Cylinder::is_cut_in_a_closed_curve_by)),
+///   so the edge runs along one line. The flat of a KiCad LED's flange is one,
+///   along the flange's rim, and read as an arc it proved nothing (Q3142). A
+///   plane through a cone's apex cuts it in lines too, and nothing needs that
+///   yet (§13);
 /// - **an arc of the curve the face's plane crosses a ball, a pipe or a cone
 ///   in**, with an end on the plane and the other in the side, that leaves
 ///   each end on the plane into the side
@@ -2326,6 +2334,11 @@ fn stays_in_the_side(
         return false;
     };
     if edge.across.as_plane().is_some() {
+        return true;
+    }
+    if let (Surface::Plane(flat), Surface::Cylinder(pipe)) = (&face.surface, &edge.across)
+        && pipe.is_cut_in_a_closed_curve_by(flat) == Some(false)
+    {
         return true;
     }
     matches!(
@@ -3233,6 +3246,96 @@ mod tests {
                     disc.surface
                 );
             }
+        }
+    }
+
+    /// **A flat along a pipe's axis lies between the caps by its straight
+    /// edges across the pipe** ([`super::stays_in_the_side`]). A bar of
+    /// radius one, two high, and a block over all of it past the plane
+    /// `x = 0.5`, under intersection. That plane holds the axis's direction,
+    /// so it cuts the pipe in the two lines
+    /// `y = ±0.866`, and the flat it leaves is a rectangle from `z = 0` to
+    /// `z = 2` with two sides along those lines. Its corners are all on one cap
+    /// or the other, so nothing but the two sides says the flat stays between
+    /// them, and an arc's way out of a cap needs the centre of a closed curve,
+    /// which two lines have none of (Q3142).
+    #[test]
+    fn a_flat_along_a_pipes_axis_lies_between_the_caps_by_its_straight_edges_across_the_pipe() {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let bar = model
+            .add_round_bar(1.0, 2.0, &Isometry::identity())
+            .expect("a bar of radius one, two high");
+        let square =
+            crate::ProfileBuilder::new(vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]])
+                .build(&policy, &mut ProvenanceLog::new())
+                .expect("a square");
+        let block = model
+            .add_extrusion(
+                &square,
+                4.0,
+                &Isometry::translation(Vector::new(0.5, -2.0, -1.0))
+                    .expect("a shift past `x = 0.5`"),
+            )
+            .expect("a block over the bar past `x = 0.5`");
+        let fused = model
+            .fuse(
+                &[bar],
+                &[block],
+                crate::Rule::Intersection,
+                &policy,
+                &mut ProvenanceLog::new(),
+            )
+            .expect("a bar and a block over a slice of it share that slice");
+        let [slice] = fused.solids() else {
+            panic!("a slice of a bar is one solid: {:?}", fused.solids());
+        };
+        let inside = PredicatePoint::from([0.7, 0.0, 1.0]);
+        let past_each_cap = [[0.7, 0.0, -0.5], [0.7, 0.0, 2.5]].map(PredicatePoint::from);
+
+        let baked = baked(&model, &[*slice]);
+
+        let along_the_axis = |surface: &Surface| {
+            surface.as_plane().is_some_and(|plane| {
+                [[0.5, 0.0, 0.0], [0.5, 0.0, 1.0]].iter().all(|&point| {
+                    plane.side_of_point(PredicatePoint::from(point)) == Decision::Zero
+                })
+            })
+        };
+        let [flat] = baked[0]
+            .faces
+            .iter()
+            .filter(|face| along_the_axis(&face.surface))
+            .collect::<Vec<_>>()[..]
+        else {
+            panic!("the slice has one flat along the axis");
+        };
+        let across_the_pipe = flat
+            .wires
+            .iter()
+            .flatten()
+            .filter(|edge| matches!(edge.across, Surface::Cylinder(_)))
+            .count();
+        assert_eq!(
+            across_the_pipe, 2,
+            "two sides of the flat run along the pipe"
+        );
+        assert_eq!(flat.lies_in_as_a_flat_face.len(), 2, "one side of each cap");
+        for side in &flat.lies_in_as_a_flat_face {
+            assert_eq!(
+                side.plane.side_of_point(inside),
+                side.kept(),
+                "inside the slice is on the side kept"
+            );
+        }
+        for point in past_each_cap {
+            assert!(
+                !flat
+                    .lies_in_as_a_flat_face
+                    .iter()
+                    .all(|side| side.plane.side_of_point(point) == side.kept()),
+                "a point past a cap is outside a side"
+            );
         }
     }
 
