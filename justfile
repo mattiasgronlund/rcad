@@ -17948,6 +17948,12 @@ queue-page:
 # out by hand from the fixture logs. A second render then checks the fuzz
 # cache both ways: a log left alone is served from it, a log that grew is read
 # again.
+#
+# Last, skip lines are fed straight to parse_blocked_line and meeting_reason,
+# which must read each and word it for the table: both `cores:` forms (§308),
+# the pinned-and-skipped-above line and the shared line (§430.7), and the
+# `night` line (§308.8), which hangs on the real clock and so cannot come from
+# a render of the scratch repository by day and by night alike.
 [private]
 [doc("queue-page's charts, tables, row and input pages and fuzzing section, checked against hand counts of a scratch repository and fixture fuzz nights.")]
 check-queue-page-selftest:
@@ -18718,7 +18724,38 @@ check-queue-page-selftest:
     ) || fail "parse_blocked_line or meeting_reason could not read the pinned-and-skipped-above line §430.7"
     [ "$pinned_check" = "ok" ] || fail "the pinned-skip check did not print ok: $pinned_check"
 
-    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the Queue section counts each tier's ready and blocked rows by model and lists them in runs, every Q id that is a row links to that row's page, which gives its tier, class, write set, text, where it came from and what came from it, every other row and input linked to it and its commits, every fuzz target and STEP file a row is linked to has a page of its own, the lineage cache serves a kept commit and works out a new one, the fuzzing section matches its fixture nights, both forms of a cores-skip line read as a row waiting for threads, and a row whose write set meets a pinned row already skipped reads as pinned and skipped above too"
+    # Q3150 (§308.8): the fill's night_skip prints a fifth shape, for a row
+    # whose `night` entry keeps it for the night fuzz's window while the clock
+    # sits outside it. It names a window and no holder, so it needs its own
+    # regex (NIGHT_LINE) and branch; without them parse_blocked_line's assert
+    # fires on every daytime render that has a night row open.
+    night_check=$(python3 - '{{ justfile_directory() }}/tooling/queue-page' <<'PY'
+    import sys
+
+    sys.path.insert(0, sys.argv[1])
+    import render
+
+
+    class Links:
+        def ref(self, row_id):
+            return f"<{row_id}>"
+
+
+    night = render.parse_blocked_line(
+        "skip Q12 (tier 2.5): its night entry fits only inside the night fuzz's window, 22:10Z to 06:10Z")
+    assert night == {
+        "id": "Q12", "mine": "night", "shared": "night", "window": "22:10Z to 06:10Z", "holders": [],
+    }, night
+    assert render.meeting_reason(night, Links()) == (
+        "waits for the night: <code>night</code> runs only inside the night fuzz's window, 22:10Z to 06:10Z"
+    ), render.meeting_reason(night, Links())
+
+    print("ok")
+    PY
+    ) || fail "parse_blocked_line or meeting_reason could not read the night-skip line §308.8"
+    [ "$night_check" = "ok" ] || fail "the night-skip check did not print ok: $night_check"
+
+    echo "check-queue-page-selftest: both charts' counts match a hand count at all four commits, so do the statistics table's first three days, the running table names each held row's tier, agent and dispatcher, the pinned table names what holds each pinned row back in the order of its pin, the table of rows the fill will not take puts each reason beside the rows it holds back, the Families section holds a family and not one a trace named, Pace leads the page, the Queue section counts each tier's ready and blocked rows by model and lists them in runs, every Q id that is a row links to that row's page, which gives its tier, class, write set, text, where it came from and what came from it, every other row and input linked to it and its commits, every fuzz target and STEP file a row is linked to has a page of its own, the lineage cache serves a kept commit and works out a new one, the fuzzing section matches its fixture nights, both forms of a cores-skip line read as a row waiting for threads, a row whose write set meets a pinned row already skipped reads as pinned and skipped above, and the night-skip line reads as a row waiting for the night too"
 
 # Holds `docs/queue.md` to the shape §230.2 gives it, because `queue next`
 # dispatches from it and a row it misreads is a lane sent to the wrong place.
