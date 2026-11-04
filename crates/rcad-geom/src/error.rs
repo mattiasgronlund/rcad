@@ -786,7 +786,10 @@ pub enum Error {
     /// crossing that does not close is not a piece of what that run named. So
     /// does one stated closed from a point of the hyperbola that two mirror
     /// cones of one slope that touch cross in, off the ellipse they also cross
-    /// in (Q2887).
+    /// in (Q2887). Two cones off one axis whose crossing is a loop and two
+    /// branches get it as well when a run is stated closed from a point on
+    /// either branch: the branches run off for ever, and only the loop closes
+    /// (Q3124).
     ///
     /// A **limit** and not a gap (§16.10): the vertex this would name does not
     /// exist, because the edge those pairs contribute is cut by corners at both
