@@ -371,12 +371,11 @@
 //! those lines out, since the flat lies in front of the back plane and the
 //! pipe's face behind it, but it asked whether the face across its rim leaves
 //! them out too of the rim's plane, `y = -7.37` in the `Z15.0` LED, which no
-//! face carries, and
-//! split its rim where they meet it. The dome across draws nothing with the
-//! flat, which touches it at one point, so its side of the rim was whole. The
-//! pipe now asks the dome, whose ball lies wholly behind the back plane, and
-//! leaves its rim whole too (Q3164). Every LED here less each box and what the
-//! two share add up to the LED.
+//! face carries, and split its rim where they meet it. The dome across draws
+//! nothing with the flat, which touches it at one point, so its side of the
+//! rim was whole. The pipe now asks the dome, whose ball lies wholly behind
+//! the back plane, and leaves its rim whole too (Q3164). Every LED here less
+//! each box and what the two share add up to the LED.
 
 use std::{env, fs, path::PathBuf};
 
