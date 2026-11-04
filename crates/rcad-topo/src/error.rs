@@ -1607,6 +1607,88 @@ impl Error {
             | Self::Undecidable { .. } => None,
         }
     }
+
+    /// The edge this refusal names, where it names one, for the same reason
+    /// as [`Error::the_face_it_names`] (Q2889).
+    ///
+    /// [`Error::ADraftEdgeHasACrossingThatCannotBeFollowed`] is not one: it
+    /// names an edge of a description by its place in it, which is no key.
+    pub(crate) fn the_edge_it_names(&mut self) -> Option<&mut EdgeKey> {
+        match self {
+            Self::CannotYetMeasureHowLongThisCurveIs { edge }
+            | Self::AnEdgeWithoutTwoFacesAlongItCannotBeWalked { edge }
+            | Self::AnEdgeBendsButEveryFaceAlongItIsFlat { edge }
+            | Self::ACrossingAlongThisEdgeCouldNotBeFollowed { edge, .. } => Some(edge),
+            Self::Geometry(_)
+            | Self::CannotMeshAFace { .. }
+            | Self::AWireDoesNotFanIntoALoopToMesh { .. }
+            | Self::AWireWillNotLieFlatOnItsFace { .. }
+            | Self::CannotTellWhichWayRoundTheRingAFaceGoes { .. }
+            | Self::AMeshCoveredTheWrongSideOfALoop { .. }
+            | Self::AClosedEdgeOfTheAnswerWouldStartAtAPole { .. }
+            | Self::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { .. }
+            | Self::ACurvedFaceGoesRightRoundWithNoSeam { .. }
+            | Self::ACurvedFaceCannotBeCutSmallEnoughToMesh { .. }
+            | Self::CurvedFaceWithAHoleGoesTooFarRound { .. }
+            | Self::NoSuchFaceInThisSolid { .. }
+            | Self::AFaceTrimmedByACurveThisCannotFollow { .. }
+            | Self::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { .. }
+            | Self::CannotFireARayAtAFacesSurface { .. }
+            | Self::AFaceMissesPartOfWhereItsSurfacesCross { .. }
+            | Self::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { .. }
+            | Self::AFaceMeetsItsNeighbourNowhere { .. }
+            | Self::AFaceMeetsItsNeighbourOnItsOwnSurface { .. }
+            | Self::CannotTellWhichCurveOfACrossingAFaceRunsAlong { .. }
+            | Self::TwoCurvesTouchWithoutCrossing { .. }
+            | Self::CannotTellTheCellsOfAFaceApart { .. }
+            | Self::CannotPlaceTheRingsOfAJoinedFlatFace { .. }
+            | Self::ADraftEdgeHasACrossingThatCannotBeFollowed { .. }
+            | Self::Invalid(_)
+            | Self::KeyFromAnotherModel { .. }
+            | Self::TooFewPoints { .. }
+            | Self::PointNotFinite { .. }
+            | Self::RepeatedPoint { .. }
+            | Self::HeightNotPositive { .. }
+            | Self::ACapOfABarFacesIntoIt { .. }
+            | Self::ADraftHandleCameFromAnotherBuilder { .. }
+            | Self::ADraftPointIsNotFinite { .. }
+            | Self::ADraftEdgeHasNoLength { .. }
+            | Self::ADraftWireIsTooShort { .. }
+            | Self::ADraftWireDoesNotClose { .. }
+            | Self::ADraftFaceHasNoWires
+            | Self::ADraftShellHasNoFaces
+            | Self::ADraftEntityIsUsedTwice { .. }
+            | Self::ADraftEntityIsUsedByNothing { .. }
+            | Self::ADraftEdgeIsNotWalkedByTwoCoedges { .. }
+            | Self::ADraftEdgeIsWalkedTheSameWayTwice { .. }
+            | Self::ADraftSolidHasNoShell
+            | Self::ProfileCrossesItself
+            | Self::HoleNotInsideOutline { .. }
+            | Self::HoleInsideAnotherHole { .. }
+            | Self::ACapDoesNotCutRightRoundABar { .. }
+            | Self::TheCapsOfABarMeetInsideIt
+            | Self::VolumeTooLargeToMeasure
+            | Self::SurfaceAreaTooLargeToMeasure
+            | Self::LengthTooLargeToMeasure
+            | Self::TheFuseWroteABrokenAnswer { .. }
+            | Self::WrongFormatVersion { .. }
+            | Self::ArgumentIntersectsItself
+            | Self::ResultIsNotManifold { .. }
+            | Self::DeflectionBelowWhatAMeshCanReach { .. }
+            | Self::TwoPatchesOfTheMeshDrewTheSameSide { .. }
+            | Self::PlacingItTookAwayTheSpaceItsMeshEncloses { .. }
+            | Self::CannotTellWhichWayASolidsFacesPoint { .. }
+            | Self::MoreMeshPointsThanASolidWillHold { .. }
+            | Self::ACrossingThisCannotBeOrderedAlong
+            | Self::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed
+            | Self::ADraftFaceCouldNotBeMeshed { .. }
+            | Self::ASolidBuiltFaceByFaceHasOneShell
+            | Self::TwoSolidsShareSpace { .. }
+            | Self::CannotTellWhetherTwoSolidsShareSpace { .. }
+            | Self::CannotTellWhichWayAClosedEdgeRuns { .. }
+            | Self::Undecidable { .. } => None,
+        }
+    }
 }
 
 /// An undecided *operation* down in `rcad-geom` stays undecided up here rather

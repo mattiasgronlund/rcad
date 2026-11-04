@@ -925,7 +925,7 @@ impl Assembly {
         mine.drain_into(log);
         swept.map_err(|refused| {
             let Error::Invalid(broken) = refused else {
-                return self.naming_the_callers_face(&throwaway, &rehearsal, refused);
+                return self.naming_the_callers_face_or_edge(&throwaway, &rehearsal, refused);
             };
             Error::TheFuseWroteABrokenAnswer { broken }
         })?;
@@ -6140,8 +6140,9 @@ impl Assembly {
 
         let mut volumes = Vec::new();
         for &solid in &written.solids {
-            let volume = how_much_space_it_encloses(apart.solid_at(solid), policy, log)
-                .map_err(|refused| self.naming_the_callers_face(&apart, &written, refused))?;
+            let volume = how_much_space_it_encloses(apart.solid_at(solid), policy, log).map_err(
+                |refused| self.naming_the_callers_face_or_edge(&apart, &written, refused),
+            )?;
             if !volume.is_finite() {
                 return Err(Error::VolumeTooLargeToMeasure);
             }
@@ -6574,14 +6575,37 @@ impl Assembly {
     }
 
     /// `refused`, raised in `apart`, naming in place of the face of `apart` it
-    /// names the caller's face that one was cut out of. `apart` is thrown away
-    /// when the fuse returns, so a key into it would name nothing (Q2288).
+    /// names the caller's face that one was cut out of, and in place of the
+    /// edge the caller's edge that one is a piece of. `apart` is thrown away
+    /// when the fuse returns, so a key into it would name nothing (Q2288,
+    /// Q2889).
+    ///
+    /// **An edge the fuse invented has no edge of the caller's to name**, and
+    /// [`Error::ACrossingAlongThisEdgeCouldNotBeFollowed`] along one is
+    /// handed back as the [`Error::Geometry`] it wraps: the marcher's refusal,
+    /// which names the two surfaces it gave up between in the caller's frame.
+    /// Where two faces of one input are stored a rounding apart and cross in a
+    /// thin loop, that loop is such an edge (the `D5.0` LED of
+    /// `crates/rcad-step/tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`
+    /// less a box, under a tolerant policy).
+    ///
+    /// The two solid keys of [`Error::TwoSolidsShareSpace`] and
+    /// [`Error::CannotTellWhetherTwoSolidsShareSpace`] need nothing: only
+    /// [`Model::check_no_two_solids_share_space`] raises them, and neither
+    /// model of the fuse's own is asked it.
     ///
     /// # Panics
     ///
-    /// As [`Assembly::the_input_face_it_was_cut_from`] does: `apart` holds
-    /// what [`Assembly::write_into`] wrote and nothing else.
-    fn naming_the_callers_face(
+    /// As [`Assembly::the_input_face_it_was_cut_from`] and
+    /// [`Assembly::the_input_edge_it_is_a_piece_of`] do: `apart` holds what
+    /// [`Assembly::write_into`] wrote and nothing else.
+    ///
+    /// If any refusal but that one names an edge the fuse invented. Such an
+    /// edge runs where two input faces cross and is carried by both, so it
+    /// is not refused for having no curved face beside it where it bends, or
+    /// for having other than two faces along it in its one shell. And
+    /// neither model is asked how long an edge is.
+    fn naming_the_callers_face_or_edge(
         &self,
         apart: &Model,
         written: &Written,
@@ -6590,7 +6614,19 @@ impl Assembly {
         if let Some(face) = refused.the_face_it_names() {
             *face = self.the_input_face_it_was_cut_from(apart, written, *face);
         }
-        refused
+        let Some(edge) = refused.the_edge_it_names() else {
+            return refused;
+        };
+        if let Some(input) = self.the_input_edge_it_is_a_piece_of(apart, written, *edge) {
+            *edge = input;
+            return refused;
+        }
+        let Error::ACrossingAlongThisEdgeCouldNotBeFollowed { why, .. } = refused else {
+            panic!(
+                "only a crossing that cannot be followed is refused on an edge the fuse invents: {refused:?}"
+            );
+        };
+        Error::Geometry(*why)
     }
 
     /// The caller's face that `face`, written into `apart`, was cut out of.
@@ -6617,6 +6653,31 @@ impl Assembly {
             .position(|&each| each == slot)
             .expect("every face of `apart` was written from a face of the answer");
         self.faces[index].ancestors[0]
+    }
+
+    /// The caller's edge that `edge`, written into `apart`, is a piece of, or
+    /// `None` for an edge the fuse invented.
+    ///
+    /// The first, where joining two faces made the edges either side of a
+    /// corner one: as [`Assembly::the_input_face_it_was_cut_from`] takes the
+    /// first ancestor of a face.
+    ///
+    /// # Panics
+    ///
+    /// If `edge` is not one [`Assembly::write_into`] wrote into `apart`.
+    fn the_input_edge_it_is_a_piece_of(
+        &self,
+        apart: &Model,
+        written: &Written,
+        edge: EdgeKey,
+    ) -> Option<EdgeKey> {
+        let slot = edge.slot_in(apart.id());
+        let index = written
+            .edges
+            .iter()
+            .position(|&each| each == slot)
+            .expect("every edge of `apart` was written from an edge of the answer");
+        self.edges[index].from.first().copied()
     }
 
     /// What each edge of the result runs along, by §31.3's table.
