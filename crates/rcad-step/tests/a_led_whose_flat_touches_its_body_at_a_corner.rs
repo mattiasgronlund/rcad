@@ -114,13 +114,24 @@
 //! is one of the surfaces round the corner. The face's own plane written a
 //! second time is now always asked (Q3071).
 //!
-//! Every box, the far one included, stops now on `order along a crossing`
+//! Every box, the far one included, stopped then on `order along a crossing`
 //! between two places on the body's pipe near the flat: one in a box at
 //! `x = -1.22688`, `z = 3.12484`, running `0.16` along `y` from `-1.370` to
 //! `-1.210`, across the front, and one on the front at
-//! `(-1.22612, -1.27, 3.13918)`. The `D5` LED whose front is `y = -3.81` and
-//! whose axis is 15 up, in `a_led_whose_front_is_two_planes_a_rounding_apart.rs`,
-//! stops on the same two places, 12 higher. Untraced.
+//! `(-1.22612, -1.27, 3.13918)`. The first is one of four places where the
+//! body's front disc meets the body's pipe written twice, as the face and as
+//! the pipe the disc's edge runs along. The disc is a rounding off square to
+//! that pipe, and its box was worked out about the pipe's axis, which leaves
+//! what rounds across the disc. Each such box is now narrowed onto the plane
+//! it lies on (Q3111). The `D5` LED whose front is `y = -3.81` and whose axis
+//! is 15 up, in `a_led_whose_front_is_two_planes_a_rounding_apart.rs`, stopped
+//! on the same two places, 12 higher, and gets past them too.
+//!
+//! Every box, the far one included, stops now refused
+//! `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, on the flange's flat
+//! `(-1, -3.6e-32, 4.6e-47)` at `1.23`, the dome, a ball of radius 2.5 about
+//! `(1.27, -7.37, 3)`, and the body's pipe along `(-5.55e-17, -1, 0)`.
+//! Untraced.
 //!
 //! These tests pin that. When it answers, each turns back
 //! into the volume check of commit `f179ca02a`: what the box and the LED share
@@ -327,8 +338,6 @@ const THREE_MORE_D3: [(&str, f64, f64); 3] = [
 /// How far below its body's axis a `D3.0` LED stores its front corner.
 const BELOW_THE_AXIS: f64 = 4.3536e-8;
 
-const ALONG_A_CROSSING: &str = "order along a crossing";
-
 const THE_SAME_WAY_ALONG_ONE_LINE: &str = "two ways out of a node along one line";
 
 /// Half the side of the box put round each corner.
@@ -348,26 +357,17 @@ const Z15_BACK_CORNER: [f64; 3] = [-1.23, -2.27, 15.0];
 
 /// The `Z3.0` LED gets past where its flat meets the line its front's plane
 /// crosses its disc's in since Q3071: that line is no longer taken through the
-/// front corner unasked. It stops on two places on its body's pipe near the
-/// flat, one in a box `0.16` long along `y` across the front, the boxes round
-/// either corner and the far box alike.
+/// front corner unasked. Since Q3111 it puts in order the places where its
+/// body's front disc meets its body's pipe written twice, each boxed on the
+/// disc. It stops where its flange's flat, its dome and its body's pipe meet,
+/// the boxes round either corner and the far box alike.
 #[test]
-fn a_d5_led_3_up_gets_past_where_its_flat_meets_its_front_written_twice_and_stops_on_two_places_on_its_body()
+fn a_d5_led_3_up_gets_past_where_its_disc_meets_its_pipe_written_twice_and_stops_where_its_flat_dome_and_pipe_meet()
  {
-    let near_the_flat = [
-        [-1.2268808471946124, -1.2268808471946089],
-        [-1.3697506234414247, -1.210149625935145],
-        [3.124844042359752, 3.124844042359754],
-    ];
-    let on_the_front = [
-        [-1.2261227327833313, -1.2261227327833297],
-        [-1.2700000000000005, -1.2699999999999996],
-        [3.139180827998248, 3.1391808279982496],
-    ];
     every_fuse_refuses(
         Z3,
         &a_box_round_each_of(&[Z3_FRONT_CORNER, [-1.23, -2.27, 3.0], FAR_OFF]),
-        |_, error| two_places_along_a_crossing_are_not_ordered(error, near_the_flat, on_the_front),
+        |_, error| where_three_surfaces_meet_needs_two_of_them_flat(error),
     );
 }
 
@@ -498,19 +498,11 @@ fn every_fuse_refuses(
     }
 }
 
-/// Refused `Undecidable` with the one record `order along a crossing`, handed
-/// two points whose boxes end within `1e-9` of `one` and `other`, either way
-/// round.
-fn two_places_along_a_crossing_are_not_ordered(
-    error: &Error,
-    one: [[f64; 2]; 3],
-    other: [[f64; 2]; 3],
-) -> bool {
-    let [first, second] = the_points_of_the_one_record(ALONG_A_CROSSING, error) else {
-        return false;
-    };
-    (is_within_1e_9_of_the_box(first, one) && is_within_1e_9_of_the_box(second, other))
-        || (is_within_1e_9_of_the_box(first, other) && is_within_1e_9_of_the_box(second, one))
+fn where_three_surfaces_meet_needs_two_of_them_flat(error: &Error) -> bool {
+    matches!(
+        error,
+        Error::Geometry(rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+    )
 }
 
 /// Refused `TwoCurvesTouchWithoutCrossing` on a lead's side, the plane

@@ -154,25 +154,29 @@
 //!   side `x = -0.3` of a lead: what the D3 whose axis is 2 up, in
 //!   `an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`, is refused on the side
 //!   `x = 0.3` of its lead.
-//! - The far box of the D5 whose front is `y = -3.81` and whose axis is 15 up
-//!   is refused `Undecidable` on the order along a crossing of two places on
-//!   the body's pipe near the flat, about `(-1.22688, -3.81, 15.12484)` and
-//!   `(-1.22666, -3.81, 15.12915)`, the first in a box `0.16` long along `y`.
 //! - The far box of `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step` is refused
 //!   `Invalid(WireTooShort { count: 2 })`: a piece of a face bounded by two
 //!   straight sides.
 //!
 //! Untraced, every one. These tests pin each.
+//!
+//! The far box of the D5 whose front is `y = -3.81` and whose axis is 15 up
+//! was refused `Undecidable` on the order along a crossing of two places on
+//! the body's pipe near the flat, about `(-1.22688, -3.81, 15.12484)` and
+//! `(-1.22666, -3.81, 15.12915)`, the first in a box `0.16` long along `y`,
+//! across the front. That box is where the body's front disc meets the body's
+//! pipe written twice, worked out about the axis of a pipe the disc is a
+//! rounding off square to, and it is now narrowed onto the plane it lies on
+//! (Q3111). The far box is refused now `TwoCurvesTouchWithoutCrossing` on face
+//! slot 18, the side `x = -0.3` of a lead, as the far boxes of the D5 whose
+//! axis is 9 up and of the D3 whose axis is 10 up are.
 
 use std::{env, fs, path::PathBuf};
 
 use rcad_geom::Surface;
-use rcad_predicates::{Point, Policy, ProvenanceLog};
+use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
-
-/// What a refusal on which of two places comes first along a crossing names.
-const ALONG_A_CROSSING: &str = "order along a crossing";
 
 /// Where the box that misses the LED goes.
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
@@ -216,23 +220,17 @@ fn two_leds_get_past_their_front_written_twice_and_stop_where_two_curves_touch_o
     }
 }
 
+/// The D5 whose front is `y = -3.81` and whose axis is 15 up puts in order the
+/// places where its body's front disc meets its body's pipe written twice
+/// since Q3111, and its far box stops where two curves touch on the side
+/// `x = -0.3` of a lead.
 #[test]
-fn a_d5_led_15_up_gets_past_where_its_flat_meets_its_front_written_twice_and_stops_on_two_places_on_its_body()
+fn a_d5_led_15_up_gets_past_where_its_disc_meets_its_pipe_written_twice_and_stops_where_two_curves_touch_on_the_side_of_a_lead()
  {
-    let near_the_flat = [
-        [-1.2268808471946124, -1.2268808471946089],
-        [-3.909750623441425, -3.7501496259351446],
-        [15.12484404235975, 15.124844042359756],
-    ];
-    let on_the_front = [
-        [-1.2266616510678683, -1.2266616510678663],
-        [-3.810000000000001, -3.8099999999999987],
-        [15.129153397504941, 15.129153397504949],
-    ];
     every_fuse_refuses(
         "LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step",
         &[FAR_OFF],
-        |_, error| two_places_along_a_crossing_are_not_ordered(error, near_the_flat, on_the_front),
+        two_curves_touch_on_the_side_of_a_lead,
     );
 }
 
@@ -303,43 +301,6 @@ fn two_curves_touch_on_the_side_of_a_lead(model: &Model, error: &Error) -> bool 
         && [x + 1.0, y, z, d + 0.3]
             .iter()
             .all(|part| part.abs() < 1e-9)
-}
-
-/// Refused `Undecidable` with the one record `order along a crossing`, handed
-/// two points whose boxes end within `1e-9` of `one` and `other`, either way
-/// round.
-fn two_places_along_a_crossing_are_not_ordered(
-    error: &Error,
-    one: [[f64; 2]; 3],
-    other: [[f64; 2]; 3],
-) -> bool {
-    let [first, second] = the_points_of_the_one_record(ALONG_A_CROSSING, error) else {
-        return false;
-    };
-    (is_within_1e_9_of_the_box(first, one) && is_within_1e_9_of_the_box(second, other))
-        || (is_within_1e_9_of_the_box(first, other) && is_within_1e_9_of_the_box(second, one))
-}
-
-/// The points of the one record of an `Undecidable` refusal, when it is one
-/// on `predicate`, and none otherwise.
-fn the_points_of_the_one_record<'a>(predicate: &str, error: &'a Error) -> &'a [Point] {
-    let Error::Undecidable { records } = error else {
-        return &[];
-    };
-    match records.records() {
-        [record] if record.predicate() == predicate => record.inputs(),
-        _ => &[],
-    }
-}
-
-/// Whether each side of `point`'s box ends within `1e-9` of where the same
-/// side of `sides` ends, `[lo, hi]` along each axis.
-fn is_within_1e_9_of_the_box(point: &Point, sides: [[f64; 2]; 3]) -> bool {
-    point
-        .enclosure()
-        .iter()
-        .zip(sides)
-        .all(|(side, [lo, hi])| (side.lo() - lo).abs() < 1e-9 && (side.hi() - hi).abs() < 1e-9)
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
