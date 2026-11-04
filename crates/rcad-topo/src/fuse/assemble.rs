@@ -16421,6 +16421,78 @@ mod tests {
         );
     }
 
+    /// The answer's mesh refusing an edge for the faces along it is the fuse's
+    /// broken answer, as the sweep of that answer says, and names no edge. The
+    /// faces along it are the answer's, which the fuse put there, and not the
+    /// ones along the caller's edge it is a piece of, so naming that edge
+    /// would say something false of the caller's model (Q2889).
+    ///
+    /// Here the union of a unit cube and a ball on its top has the edge its
+    /// sides `x = 1` and `y = 1` meet along written by hand as a piece of a
+    /// crossing with one of those two planes. That names nothing curved, so
+    /// neither plane along the edge can say where it bends.
+    #[test]
+    fn a_mesh_refusing_an_edge_of_the_answer_for_its_flat_faces_is_a_broken_answer_and_names_no_edge()
+     {
+        let policy = Policy::certified();
+        let mut log = ProvenanceLog::new();
+        let mut model = Model::new(Scale::millimetres(25.0).expect("25 mm is a working size"));
+        let cube = model
+            .add_cube(1.0, &policy, &mut ProvenanceLog::new())
+            .expect("a unit cube");
+        let ball = model
+            .add_ball(
+                0.5,
+                &Isometry::translation(Vector::new(0.5, 0.5, 1.0)).expect("a finite shift"),
+            )
+            .expect("a ball of radius a half");
+        let scratch = Scratch::split_both_groups(&model, &[cube], &[ball], &policy, &mut log)
+            .expect("the cube and the ball split each other");
+        let chosen = choose(&model, &scratch, Rule::Union, &policy, &mut log).expect("pieces kept");
+        let mut assembly = assemble(
+            &model,
+            &scratch,
+            &chosen,
+            &scratch.names_of_one_point,
+            None,
+            &policy,
+            &mut log,
+            &mut ProvenanceLog::new(),
+        )
+        .expect("the union to write");
+        let upright: Vec<usize> = (0..assembly.edges.len())
+            .filter(|&edge| {
+                assembly.edges[edge].ends.iter().all(|&end| {
+                    let point = assembly.corners[end].point;
+                    point.x() == 1.0 && point.y() == 1.0
+                })
+            })
+            .collect();
+        let [edge] = upright[..] else {
+            panic!("the union has one edge up the cube's corner at x = y = 1, not {upright:?}");
+        };
+        assert!(
+            !assembly.edges[edge].from.is_empty(),
+            "the edge is a piece of the cube's own"
+        );
+        let side = assembly.claimants_of_each_edge()[edge][0].face;
+        assembly.runs[edge] = EdgeRun::PartOfWhereItCrosses {
+            and: assembly.faces[side].surface,
+            picked_by: SmallVec::new(),
+        };
+
+        let refused = assembly.nest_the_shells(&model, &policy, &mut log);
+        assert!(
+            matches!(
+                refused,
+                Err(Error::TheFuseWroteABrokenAnswer {
+                    broken: Invalid::AnEdgeBendsButNothingAlongItIsCurved
+                })
+            ),
+            "{refused:?}"
+        );
+    }
+
     /// The union of a bar of radius one and height two with a ball of its
     /// radius centred on its top, as far as [`assemble`] takes it, with the rim
     /// the bar's top and the ball share written to run right round where the
