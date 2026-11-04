@@ -267,20 +267,21 @@
 //!   `z = 6.1 - 4.35e-8` between the flat `x = -0.23` and the body's pipe at
 //!   `x = -0.22666`, and between the flange's front and the body's front disc,
 //!   the one plane `y = -3.81` written twice a rounding apart. Untraced, both.
-//! - Its box round the back corner `(-0.23, -4.81, 6)` stops `Undecidable`
+//! - Its box round the back corner `(-0.23, -4.81, 6)` stopped `Undecidable`
 //!   with the one record `two ways out of a node along one line`, at that
 //!   corner. One way out runs along `z`, `(0, 1.16e-15, 1)`, and the other is
 //!   a box round nothing, `2.2e-16` either side of zero in `z`: the shape the
-//!   `Z15.0` LED met at its back corner below (Q3043).
+//!   `Z15.0` LED met at its back corner below (Q3043). It gets past it as that
+//!   one does (Q3142).
 //!
 //! `LED_D3.0mm_Horizontal_O1.27mm_Z10.0mm.step`,
 //! `LED_D3.0mm_Horizontal_O1.27mm_Z6.0mm.step` and
 //! `LED_D3.0mm_Horizontal_O3.81mm_Z10.0mm.step` are three more `D3.0` LEDs,
 //! their flats at `x = -0.23`, their fronts at `y = -1.27` or `-3.81` and
 //! their axes 10 or 6 up, each with its front corner stored `4.35e-8` below
-//! the axis. Their boxes round the back corner stop on two ways out of it
-//! along one line, the same shape at the same place. Their boxes round the
-//! front corner and their far boxes are refused
+//! the axis. Their boxes round the back corner stopped on two ways out of it
+//! along one line, the same shape at the same place, until Q3142. Their boxes
+//! round either corner and their far boxes are refused
 //! `Invalid(WireTooShort { count: 2 })`, a piece of a face bounded by two
 //! straight sides, as the far box of `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step`
 //! is in `a_led_whose_front_is_two_planes_a_rounding_apart.rs`. Untraced, both
@@ -344,8 +345,14 @@
 //! round the `Z3.0` LED's does, and the far box shares nothing. The box round
 //! its front corner is refused `ResultIsNotManifold` under intersection, and
 //! every difference `DynamicRangeTooWide` at a ratio of `4.0e16`, both where
-//! Q3136 traced the front written twice (Q3141). The tests pin both LEDs'
-//! stops.
+//! Q3136 traced the front written twice (Q3141). The `D3.0` LEDs get past
+//! their back corners by the same reading. The box round the back corner of
+//! the one whose front is `y = -3.81` and axis 6 up shares with it what the
+//! `D5.0` LEDs' formula gives for a body of radius 1.5, and their difference
+//! is refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` on the
+//! flange's rim at the front, where the box's top `z = 6.1` meets the front
+//! written twice (Q3126). The other three are refused a piece of two straight
+//! sides there. The tests pin every LED's stops.
 
 use std::{env, fs, path::PathBuf};
 
