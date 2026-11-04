@@ -52,8 +52,8 @@ use crate::intersect::{
     whether_a_cone_and_a_pipe_share_an_axis, whether_two_cones_share_an_axis,
 };
 use crate::march::{
-    Marched, how_tightly_a_cone_bends_at, march, march_to, settled_with_a_bound,
-    settled_with_a_bound_where_they_bend,
+    Marched, SAGITTA_MAY_TAKE, SHORTENINGS_BEFORE_GIVING_UP, how_far_off_the_crossing,
+    how_tightly_a_cone_bends_at, march, settled_with_a_bound, settled_with_a_bound_where_they_bend,
 };
 use crate::meet::nowhere_in_particular;
 use crate::{
@@ -421,14 +421,12 @@ impl PointsAlongACrossing {
 ///
 /// [`Error::CannotFollowACrossingBecauseNoStepStaysOnIt`] where two cones off
 /// one axis cross in a loop and two branches, and no shortening of a step
-/// along the loop, or along a run between two corners on a branch, lands a
-/// trial the march keeps, which has to be decided in front of the flat
-/// surfaces that hold that piece apart from the others.
-///
-/// [`Error::CannotFollowACrossingTowardsTheOtherEndOfItsRun`] when a run
-/// between two corners on a branch that runs off for ever, which is marched
-/// from one corner to the other, cannot be walked on towards the second
-/// corner: neither way from the first gets any nearer it, or a step went back.
+/// along the loop lands a trial the march keeps, which has to be decided in
+/// front of the flat surfaces that hold that piece apart from the others; or
+/// no shortening of a step along a run between two corners on a branch, which
+/// is walked one straight line of a cone at a time, lands on a line whose
+/// meeting with the branch is decided in front of the flat surface that holds
+/// the branch apart from the loop, and close enough to the straight piece.
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces on the
 /// run pick both of the two arcs between its ends, or neither, and on a
@@ -1519,7 +1517,8 @@ fn follow_the_quartic(
 }
 
 /// A run between two corners on one of the two branches two cones off one
-/// axis cross in beside their loop, marched from one corner to the other.
+/// axis cross in beside their loop, walked from one corner to the other one
+/// straight line of `pieces.ruled` at a time ([`TheRulingsAcrossABranch`]).
 ///
 /// # How far along the branch a point is
 ///
@@ -1535,13 +1534,14 @@ fn follow_the_quartic(
 /// short of a whole turn, since the lines leaning the other way are not on it:
 /// the angle grows, or falls, the whole way along the branch, and never jumps
 /// a turn. Which of the two it does from the run's first corner to its second
-/// is read off the corners.
+/// is read off the corners, and the walk goes from the line through the first
+/// to the line through the second.
 ///
 /// # What is checked
 ///
-/// Both corners and the march's own bound against half the deflection, as
+/// Both corners and the walk's own bound against half the deflection, as
 /// [`follow_the_quartic`] checks them. Every point against the run's
-/// half-spaces and `beyond`, so that a step onto the loop, whose points lean
+/// half-spaces and `beyond`, so that a point on the loop, whose points lean
 /// as the branch's do, is refused and not drawn. A point whose box shares a
 /// point with a corner's is left out, since nothing tells the two apart.
 ///
@@ -1549,7 +1549,7 @@ fn follow_the_quartic(
 ///
 /// [`Error::CannotPlaceAPointThatCloseToACrossing`] and
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a corner, as
-/// [`follow_the_quartic`] has them, and the first also for the march's bound.
+/// [`follow_the_quartic`] has them, and the first also for the walk's bound.
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the two corners lean
 /// as one straight line does, or a point is decided behind one of the
@@ -1557,7 +1557,7 @@ fn follow_the_quartic(
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when a point has no box round it.
 ///
-/// What [`march_to`] refuses.
+/// What [`TheRulingsAcrossABranch::walk`] and [`settled_with_a_bound`] refuse.
 #[expect(
     clippy::too_many_arguments,
     reason = "the run, its two surfaces, the three things that say which branch it is on, the deflection, the policy and the log are each their own input"
@@ -1589,22 +1589,19 @@ fn follow_a_branch_between_two_corners(
     ];
     let [from, to] = corners.map(|corner| Point::from(corner.enclosure().map(middle_of)));
     let round = |at: Point| how_far_round_the_ruled_cone(&pieces.ruled, middle, at);
-    let (set_out, _) = settled_with_a_bound(surfaces, from)?;
+    let (set_out, off) = settled_with_a_bound(surfaces, from)?;
     let (arrive, _) = settled_with_a_bound(surfaces, to)?;
-    let way = match round(arrive).partial_cmp(&round(set_out)) {
-        Some(Ordering::Greater) => 1.0,
-        Some(Ordering::Less) => -1.0,
+    let rounds = [round(set_out), round(arrive)];
+    match rounds[1].partial_cmp(&rounds[0]) {
+        Some(Ordering::Greater | Ordering::Less) => (),
         Some(Ordering::Equal) | None => return Err(Error::CannotNameWhichPieceOfACrossingThisIs),
+    }
+    let rulings = TheRulingsAcrossABranch {
+        pieces: &pieces,
+        middle,
+        beyond,
     };
-    let walked = march_to(
-        surfaces,
-        from,
-        |at| way * round(at),
-        way * round(arrive),
-        half_the_budget,
-        MOST_POINTS_ALONG_ONE_CROSSING,
-        &|at| decided_in_front_of_every_one(&[beyond], at),
-    )?;
+    let walked = rulings.walk(surfaces, [from, to], rounds, off, half_the_budget)?;
     let deviation = walked.deviation;
     if deviation > half_the_budget && !policy.wobble_is_acceptable(deviation) {
         return Err(Error::CannotPlaceAPointThatCloseToACrossing {
@@ -1635,6 +1632,234 @@ fn follow_a_branch_between_two_corners(
         points,
         deviation: Approximation::new(deviation, Cause::PointAlongACrossing),
     })
+}
+
+/// The most of the way round from one corner of a branch to the other that
+/// one straight piece of it may span: an eighth.
+///
+/// The sagitta against the room is the one question a step along a branch is
+/// asked ([`TheRulingsAcrossABranch::walk`]), and a walk with room to spare,
+/// the coarse one a caller makes to find out how big a crossing is, passes
+/// it with one piece from corner to corner. That piece is the corners' own
+/// chord, a straight line, and shows none of the bend. Eight pieces are the
+/// fewest a branch is walked into however much room it has. The branch the
+/// cones of `a_funnel_with_a_leaning_spout.rs` cross in between their two
+/// corners at `z = 8` turns twice, a right angle each time: its corners lean
+/// `±1.7225` round the ruled cone and its turns `±1.494`, so most of those
+/// pieces fall between the two turns, and the first and last cross one.
+const MOST_OF_A_BRANCH_ONE_STEP_SPANS: f64 = 1.0 / 8.0;
+
+/// The straight lines of `pieces.ruled` out of its apex, across the branch
+/// `beyond` holds, each read by how far round from `middle` it leans
+/// ([`how_far_round_the_ruled_cone`]).
+///
+/// Each of them meets `pieces.crossed` twice, once on the branch and once on
+/// the loop, and the flat surface `beyond` is between the two: `across[1]`
+/// for the branch beyond the loop, and the flat surface through the apex,
+/// turned round, for the branch behind it ([`ALoopAndTwoBranches`],
+/// [`where_one_cone_reaches_across_another`]).
+struct TheRulingsAcrossABranch<'a> {
+    pieces: &'a ALoopAndTwoBranches,
+    middle: Vector,
+    beyond: Picker,
+}
+
+impl TheRulingsAcrossABranch<'_> {
+    /// The points of the run between `ends`, one on each of a row of these
+    /// lines, from the one leaning `rounds[0]` to the one leaning `rounds[1]`,
+    /// with the ends not among them; and how far the furthest of them may sit
+    /// off the crossing, or the first end settled, which sits `off` it.
+    ///
+    /// # Why not marched
+    ///
+    /// Where a branch passes a loop a hair away, the two surfaces lean a hair
+    /// apart, and the branch turns a right angle across a stretch no longer
+    /// than that hair. The upright and leaning cones of
+    /// `a_funnel_with_a_leaning_spout.rs` have their branch beyond the loop
+    /// pass about `3e-8` from it near `(±1.5954, 0.1209, 3.2)`, and a point on
+    /// both cones to a rounding can sit `6e-8` off the crossing there. A march
+    /// along the tangent settles a trial past the turn onto the loop, and
+    /// shortened, its trials land anywhere in those `6e-8`: from
+    /// `(−1.5954, 0.1209, 3.2)`, asked `1.6e-11` they came back `3.2e-8` away,
+    /// and asked `7.9e-12`, `6.4e-8`. The march kept shorter and shorter steps
+    /// until its shortenings ran out, and the other way round it kept 17
+    /// points within `1e-7` of the turn, going back and forth by `5e-9`
+    /// between neighbours (Q3134).
+    ///
+    /// **A line across the branch is where it is placed instead.** Each line
+    /// meets the branch once and the loop once, with `beyond` between the
+    /// two, so where each meets the branch is two roots of one quadratic and
+    /// no settling at all, and the order of the lines is the order along the
+    /// branch, so the points come in that order however near the loop they
+    /// are. Where the two roots are too close for `beyond` to be decided
+    /// between them, neither is placed and the step is shortened, so the next
+    /// one steps over that line. The straight piece that crosses the turn
+    /// cuts its corner, on the side away from the loop, and every point is
+    /// decided in front of `beyond`, so no piece of the drawing is on the
+    /// loop's side of it.
+    ///
+    /// # The step rule
+    ///
+    /// A step is kept when the line half way round between its two ends meets
+    /// the branch no further from the straight piece between them than
+    /// [`SAGITTA_MAY_TAKE`] of `room`. Where that line's two roots cannot be
+    /// told apart by `beyond`, the further of the two is taken. A step that is
+    /// not kept, or whose far end is not placed, is halved, and one that is
+    /// kept is doubled for the next, up to [`MOST_OF_A_BRANCH_ONE_STEP_SPANS`].
+    ///
+    /// **Not [`march`]'s rule that a piece be straighter than it is long.**
+    /// That is asked against a room larger than the whole crossing, and the
+    /// cap on the step is what stands in for it here. At a turn of a right
+    /// angle a piece is never straighter than a quarter of its length until it
+    /// is as short as the turn, and that is the stretch where a point cannot
+    /// be told from the loop.
+    ///
+    /// # Why it terminates
+    ///
+    /// Every point kept is on a line further round than the one before, the
+    /// last is short of `rounds[1]`, and a step is halved
+    /// [`SHORTENINGS_BEFORE_GIVING_UP`] times before the run is refused.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CannotFollowACrossingBecauseNoStepStaysOnIt`] when no halving
+    /// of a step is kept. [`Error::TooManyPointsAlongOneCrossing`] past
+    /// [`MOST_POINTS_ALONG_ONE_CROSSING`] points, and
+    /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when how far a
+    /// point is off the crossing cannot be bounded.
+    fn walk(
+        &self,
+        surfaces: [&Surface; 2],
+        ends: [Point; 2],
+        rounds: [f64; 2],
+        off: f64,
+        room: f64,
+    ) -> Result<Marched> {
+        let [mut here, last] = ends;
+        let [mut at, end] = rounds;
+        let widest = (end - at) * MOST_OF_A_BRANCH_ONE_STEP_SPANS;
+        let mut step = widest;
+        let mut points = Vec::new();
+        let mut deviation = off;
+        loop {
+            let (reached, there) = self.one_step(surfaces, here, at, step, (end, last), room)?;
+            if reached == end {
+                return Ok(Marched { points, deviation });
+            }
+            deviation = deviation.max(how_far_off_the_crossing(surfaces, there)?);
+            points.push(there);
+            if points.len() > MOST_POINTS_ALONG_ONE_CROSSING {
+                return Err(Error::TooManyPointsAlongOneCrossing {
+                    most: MOST_POINTS_ALONG_ONE_CROSSING,
+                });
+            }
+            let taken = reached - at;
+            step = if (taken * 2.0).abs() < widest.abs() {
+                taken * 2.0
+            } else {
+                widest
+            };
+            here = there;
+            at = reached;
+        }
+    }
+
+    /// How far round the next point is, and the point: the line `step` on
+    /// from `at`, or the end the run arrives at, `end`, once a step reaches
+    /// it, halved until the step is kept.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CannotFollowACrossingBecauseNoStepStaysOnIt`] when no halving
+    /// is kept.
+    fn one_step(
+        &self,
+        surfaces: [&Surface; 2],
+        here: Point,
+        at: f64,
+        step: f64,
+        end: (f64, Point),
+        room: f64,
+    ) -> Result<(f64, Point)> {
+        let mut step = step;
+        for _ in 0..SHORTENINGS_BEFORE_GIVING_UP {
+            let trial = if (at + step - end.0) * step >= 0.0 {
+                end.0
+            } else {
+                at + step
+            };
+            let there = if trial == end.0 {
+                Some(end.1)
+            } else {
+                self.where_it_meets_the_branch(trial)
+            };
+            if let Some(there) = there
+                && trial != at
+                && self.how_far_the_branch_bows_off([here, there], at + (trial - at) / 2.0)
+                    <= room * SAGITTA_MAY_TAKE
+            {
+                return Ok((trial, there));
+            }
+            step = (trial - at) / 2.0;
+        }
+        Err(Error::CannotFollowACrossingBecauseNoStepStaysOnIt {
+            surfaces: Box::new([*surfaces[0], *surfaces[1]]),
+            shortenings: SHORTENINGS_BEFORE_GIVING_UP,
+        })
+    }
+
+    /// Where the line leaning `round` meets the branch: the one of its two
+    /// meetings with `crossed` decided in front of `beyond`, and nothing when
+    /// both are or neither is. A meeting that is not a point is in front of
+    /// nothing.
+    fn where_it_meets_the_branch(&self, round: f64) -> Option<Point> {
+        let both = self.where_the_line_meets_the_crossed_cone(round);
+        match both.map(|at| at.is_finite() && decided_in_front_of_every_one(&[self.beyond], at)) {
+            [true, false] => Some(both[0]),
+            [false, true] => Some(both[1]),
+            [true, true] | [false, false] => None,
+        }
+    }
+
+    /// How far from `chord` the line leaning `round` meets the branch, or,
+    /// where that meeting cannot be told from the loop's, the further of the
+    /// two from it. Infinite when either is not a number.
+    fn how_far_the_branch_bows_off(&self, chord: [Point; 2], round: f64) -> f64 {
+        if let Some(at) = self.where_it_meets_the_branch(round) {
+            return how_far_off_the_straight_piece(at, chord);
+        }
+        let [one, other] = self
+            .where_the_line_meets_the_crossed_cone(round)
+            .map(|at| how_far_off_the_straight_piece(at, chord));
+        match one.partial_cmp(&other) {
+            Some(Ordering::Greater | Ordering::Equal) => one,
+            Some(Ordering::Less) => other,
+            None => f64::INFINITY,
+        }
+    }
+
+    /// The two places the line of `ruled` leaning `round` from `middle` meets
+    /// `crossed`.
+    fn where_the_line_meets_the_crossed_cone(&self, round: f64) -> [Point; 2] {
+        let along = self.pieces.ruled.axis().direction();
+        let side = along.cross(self.middle) * along.length().recip();
+        let towards = self.middle * round.cos() + side * round.sin();
+        where_one_cone_reaches_across_another(&self.pieces.ruled, &self.pieces.crossed, towards)
+    }
+}
+
+/// How far `at` is from the nearest point of the straight piece `chord`.
+fn how_far_off_the_straight_piece(at: Point, chord: [Point; 2]) -> f64 {
+    let [from, to] = chord;
+    let along = to - from;
+    let out = at - from;
+    let length = along.length_squared();
+    let share = if length > 0.0 {
+        (out.dot(along) / length).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    (out - along * share).length()
 }
 
 /// Whether `at`, exactly as it is, is decided in front of every one of
@@ -9293,5 +9518,92 @@ mod tests {
             lies_on(&seam),
             Err(Error::CannotNameWhichPieceOfACrossingThisIs)
         ));
+    }
+
+    /// **A run on the branch beyond the loop is walked round the right angle
+    /// it turns to pass the loop.** Two pointed cones of slope a half, the
+    /// second turned `0.3` about the line along `x` through `(0, 0, 4)`, as
+    /// `rcad-topo`'s `a_funnel_with_a_leaning_spout.rs` places it, and the run
+    /// between the two corners `z = 8` puts on the branch beyond the loop,
+    /// `(±3.9541, −0.6045, 8)`. On its way it passes about `3e-8` from the loop
+    /// near `(±1.5954, 0.1209, 3.2)`, and turns a right angle within about
+    /// `1e-7` there. A point on both cones to `3e-16` can be `6e-8` off the
+    /// branch, so a march's trial of `6.0e-8` settled `5.2e-8` from where it
+    /// set out but behind it round the turned cone, and the march was refused
+    /// as going back along its run (Q3134). Walked one straight line of a cone
+    /// at a time instead, every point is on both cones and in front of the
+    /// branch's own flat surface, so none of them is on the loop, and the walk
+    /// goes down past the turn.
+    #[test]
+    fn a_run_on_a_branch_is_walked_round_where_it_turns_a_right_angle_to_pass_the_loop() {
+        let upright = Cone::new(crate::Axis::z(), 0.5).expect("a slope");
+        let through = crate::Axis::new(Point::new(0.0, 0.0, 4.0), Vector::new(1.0, 0.0, 0.0))
+            .expect("a direction");
+        let turn = crate::Isometry::rotation(&through, 0.3).expect("a turn");
+        let pair = [
+            Surface::Cone(upright),
+            Surface::Cone(upright.transformed(&turn)),
+        ];
+        let met = crate::intersect::intersect(
+            &pair[0],
+            &pair[1],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(runs)) = met else {
+            panic!("a loop and two branches, and not {met:?}");
+        };
+        let corners = [3.954_052_393_911_788_4, -3.954_052_393_911_788_4]
+            .map(|x| PredicatePoint::from([x, -0.604_540_872_233_181_6, 8.0]));
+        let beyond: Vec<&NamedRun> = runs
+            .iter()
+            .filter(|run| {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                    panic!("a piece picked out, and not {run:?}");
+                };
+                picked_by.len() == 1
+                    && corners
+                        .iter()
+                        .all(|corner| picked_by[0].side_of_point(*corner) == Decision::Pos)
+            })
+            .collect();
+        let [beyond] = beyond.as_slice() else {
+            panic!("one branch holds both corners: {runs:?}");
+        };
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = beyond.run() else {
+            unreachable!("picked out above");
+        };
+
+        for ends in [corners, [corners[1], corners[0]]] {
+            let between = NamedRun::new(beyond.run().clone(), ends).expect("two ends");
+            for along in [[&pair[0], &pair[1]], [&pair[1], &pair[0]]] {
+                let walked = walk(
+                    &between,
+                    along,
+                    Deflection::of(0.01).expect("a length above zero"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|refused| panic!("{ends:?} is walked, not refused {refused:?}"));
+                let room = walked.deviation().magnitude();
+                let mut lowest = f64::INFINITY;
+                for point in walked.points() {
+                    for surface in along {
+                        let off = how_far_off(surface, *point);
+                        assert!(off <= room, "{point:?} is {off:e} off {surface:?}");
+                    }
+                    assert_eq!(
+                        picked_by[0].side_of_point(PredicatePoint::from(point.coordinates())),
+                        Decision::Pos,
+                        "{point:?} is on the branch and not on the loop"
+                    );
+                    lowest = lowest.min(point.z());
+                }
+                assert!(
+                    lowest < 3.21,
+                    "the run goes down past where it nearly meets the loop: {lowest}"
+                );
+            }
+        }
     }
 }
