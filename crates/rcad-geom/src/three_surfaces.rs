@@ -9373,4 +9373,56 @@ mod tests {
             }
         }
     }
+
+    /// **The floor of a bar of 2 up `z` from `−2`, its wall, and the wall of a
+    /// bar of 1 from `(1, 0, −3)` up `z` turned `10⁻⁸` about `x`**, as
+    /// `two_curves_of_one_pair_that_meet.rs` in `rcad-topo` places them. The
+    /// three meet at `(2, 10⁻⁸·(4 ∓ 2√2), −2)`, `5.7·10⁻⁸` apart in `y` and
+    /// `1.1·10⁻¹⁵` in `x`. The quartic in `x` turns between the two where its
+    /// slope over the box cannot clear it, and the sheared quartic boxes each
+    /// point to a few roundings. [`it_keeps_one_sign_past`] clears that turning
+    /// point, and asked before the sheared quartic (Q3113) it let the quartic
+    /// in `x` answer, with boxes `6.7·10⁻⁸` long in `y` that overlap; the bars'
+    /// union was then refused `order along a crossing` between them.
+    #[test]
+    fn a_bars_floor_meets_its_wall_and_a_thin_bar_turned_a_hair_inside_it_at_two_points_boxed_apart()
+     {
+        let floor = Surface::Plane(
+            Plane::from_point_and_normal_as_written(
+                Point::new(0.0, 0.0, -2.0),
+                Vector::new(0.0, 0.0, -1.0),
+            )
+            .expect("a plane"),
+        );
+        let pipe = |origin: [f64; 3], direction: [f64; 3], radius: f64| {
+            Surface::Cylinder(
+                Cylinder::new(
+                    Axis::as_written(
+                        Point::new(origin[0], origin[1], origin[2]),
+                        Vector::new(direction[0], direction[1], direction[2]),
+                    )
+                    .expect("an axis"),
+                    radius,
+                )
+                .expect("a radius"),
+            )
+        };
+        let thick = pipe([0.0, 0.0, -2.0], [0.0, 0.0, 1.0], 2.0);
+        let thin = pipe([1.0, 3.0000000000000004e-8, -3.0], [0.0, -1e-8, 1.0], 1.0);
+        let MeetOfThree::At(places) =
+            meet([&floor, &thick, &thin]).expect("the three are answered")
+        else {
+            panic!("the floor meets both walls");
+        };
+        let along: Vec<Interval> = places.iter().map(|place| place.enclosure()[1]).collect();
+        let root_two = core::f64::consts::SQRT_2;
+        let [low, high] = [4.0 - 2.0 * root_two, 4.0 + 2.0 * root_two].map(|k| k * 1e-8);
+        assert_eq!(along.len(), 2, "{places:?}");
+        for (y, near) in along.iter().zip([low, high]) {
+            assert!(
+                y.hi() - y.lo() < 1e-20 && (y.lo() - near).abs() < 1e-20,
+                "a place {y:?} along y near {near}: {places:?}"
+            );
+        }
+    }
 }
