@@ -318,6 +318,86 @@ fn the_led(file: &str) -> (Model, SolidKey) {
     (import.model().clone(), solid)
 }
 
+#[test]
+fn probe_q3112() {
+    let only = env::var("PROBE_ONLY").ok();
+    let fuses: &[(&str, &[[f64; 3]])] = &[
+        (
+            "LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step",
+            &[[-0.23, -6.35, 1.999999956464], [-0.23, -7.35, 2.0], FAR_OFF],
+        ),
+        ("LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step", &[FAR_OFF]),
+        ("LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step", &[FAR_OFF]),
+        ("LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step", &[FAR_OFF]),
+        (
+            "LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step",
+            &[[-0.23, -3.81, 6.0 - 4.3536e-8], FAR_OFF],
+        ),
+    ];
+    for &(file, centres) in fuses {
+        let (led, solid) = the_led(file);
+        let (led_volume, _) = probe_volume_of(&led, &[solid]);
+        for &centre in centres {
+            for rule in [Rule::Intersection, Rule::Difference] {
+                if let Some(only) = &only
+                    && *only != format!("{file} {rule:?} {centre:?}")
+                {
+                    continue;
+                }
+                let mut model = led.clone();
+                let knife = a_box_round(&mut model, centre);
+                let policy = if env::var("PROBE_TOLERANT").is_ok() {
+                    Policy::tolerant(10.0)
+                } else {
+                    Policy::certified()
+                };
+                match model.fuse(&[solid], &[knife], rule, &policy, &mut ProvenanceLog::new()) {
+                    Err(error) => {
+                        let face = match &error {
+                            Error::TwoCurvesTouchWithoutCrossing { face }
+                            | Error::CannotTellTheCellsOfAFaceApart { face }
+                            | Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint {
+                                face, ..
+                            } => model
+                                .face(*face)
+                                .ok()
+                                .map(|f| format!("{:?} wires {}", f.surface(), f.wire_count())),
+                            _ => None,
+                        };
+                        let text = format!("{error:?}");
+                        let cut: String = text.chars().take(1500).collect();
+                        eprintln!("PROBE {file} {rule:?} {centre:?}: REFUSED {cut} face {face:?}");
+                    }
+                    Ok(fused) => {
+                        let valid = model.validate(&Policy::certified(), &mut ProvenanceLog::new());
+                        let (volume, error) = probe_volume_of(&model, fused.solids());
+                        eprintln!(
+                            "PROBE {file} {rule:?} {centre:?}: ANSWERS volume {volume} ± {error}, \
+                             LED {led_volume}, valid {:?}",
+                            valid.err()
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn probe_volume_of(model: &Model, solids: &[SolidKey]) -> (f64, f64) {
+    solids.iter().fold((0.0, 0.0), |(volume, error), &solid| {
+        let measured = model
+            .solid(solid)
+            .expect("a solid of this model")
+            .measure(
+                rcad_geom::Deflection::for_scale(model.scale()),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("it measures");
+        (volume + measured.volume(), error + measured.volume_error())
+    })
+}
+
 fn a_box_round(model: &mut Model, centre: [f64; 3]) -> SolidKey {
     let side = 0.2;
     let square = ProfileBuilder::new(vec![[0.0, 0.0], [side, 0.0], [side, side], [0.0, side]])
