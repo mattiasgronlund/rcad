@@ -1670,17 +1670,19 @@ impl Error {
         }
     }
 
-    /// The edge this refusal names, where it names one, for the same reason
-    /// as [`Error::the_face_it_names`] (Q2889).
+    /// The edge this refusal names, where it names one, so that a refusal
+    /// raised inside a model of the kernel's own can be handed back with that
+    /// model and the caller's edge that edge is a piece of
+    /// ([`Error::TheFuseWasRefusedInAModelOfItsOwn`]).
     ///
     /// [`Error::ADraftEdgeHasACrossingThatCannotBeFollowed`] is not one: it
     /// names an edge of a description by its place in it, which is no key.
-    pub(crate) fn the_edge_it_names(&mut self) -> Option<&mut EdgeKey> {
+    pub(crate) fn the_edge_it_names(&self) -> Option<EdgeKey> {
         match self {
             Self::CannotYetMeasureHowLongThisCurveIs { edge }
             | Self::AnEdgeWithoutTwoFacesAlongItCannotBeWalked { edge }
             | Self::AnEdgeBendsButEveryFaceAlongItIsFlat { edge }
-            | Self::ACrossingAlongThisEdgeCouldNotBeFollowed { edge, .. } => Some(edge),
+            | Self::ACrossingAlongThisEdgeCouldNotBeFollowed { edge, .. } => Some(*edge),
             Self::Geometry(_)
             | Self::CannotMeshAFace { .. }
             | Self::AWireDoesNotFanIntoALoopToMesh { .. }

@@ -6633,7 +6633,7 @@ impl Assembly {
             *face = self.the_input_face_it_was_cut_from(&apart, written, *face);
             return refused;
         }
-        let Some(edge) = refused.the_edge_it_names().copied() else {
+        let Some(edge) = refused.the_edge_it_names() else {
             return refused;
         };
         Error::TheFuseWasRefusedInAModelOfItsOwn {
