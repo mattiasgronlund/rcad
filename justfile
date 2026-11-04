@@ -9206,7 +9206,9 @@ fuzz-overnight window="28800" pause_start="" pause_end="":
             echo "pausing until $(date -d "@$pause_until" '+%H:%M:%S')"
             sleep "$(( pause_until - now ))"
         fi
-        left=$(( deadline - $(date +%s) ))
+        # In milliseconds for the same reason as above (Q3101): the coarse
+        # clock reads a second more than is left half a second before the end.
+        left=$(( (deadline * 1000 - $(date +%s%3N)) / 1000 ))
         if [ "$left" -ge 1 ]; then
             fuzz_for "$left" after-pause
         else
