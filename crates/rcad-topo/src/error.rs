@@ -1819,6 +1819,14 @@ pub(crate) fn walking_along_this_edge_refused(edge: EdgeKey, why: rcad_geom::Err
 /// **Its `Debug` prints how many of each entity the model holds**, and not the
 /// entities. A refusal is printed into panics, logs and fuzz reports, and a
 /// whole model printed there buries the refusal it came with.
+///
+/// ```
+/// fn look_inside(refused_in: rcad_topo::AModelOfTheFusesOwn) -> rcad_topo::Model {
+///     let _borrowed: &rcad_topo::Model = refused_in.model();
+///     refused_in.into_model()
+/// }
+/// # let _ = look_inside;
+/// ```
 pub struct AModelOfTheFusesOwn(Box<crate::Model>);
 
 impl AModelOfTheFusesOwn {
