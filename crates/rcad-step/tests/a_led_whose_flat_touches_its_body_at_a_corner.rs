@@ -127,16 +127,20 @@
 //! is 15 up, in `a_led_whose_front_is_two_planes_a_rounding_apart.rs`, stopped
 //! on the same two places, 12 higher, and gets past them too.
 //!
-//! Every box, the far one included, stops now refused
+//! Every box, the far one included, stopped then refused
 //! `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`, on the flange's flat
 //! `(-1, -3.6e-32, 4.6e-47)` at `1.23`, the dome, a ball of radius 2.5 about
-//! `(1.27, -7.37, 3)`, and the body's pipe along `(-5.55e-17, -1, 0)`.
-//! Untraced.
+//! `(1.27, -7.37, 3)`, and the body's pipe along `(-5.55e-17, -1, 0)`. The
+//! flat leans a rounding off `x = -1.23`, as the flats of three LEDs in
+//! `a_led_whose_front_is_two_planes_a_rounding_apart.rs` do, and the check
+//! that a quartic keeps one sign over a box spread too wide to answer it. It
+//! is now also run on the quartic moved to the low end of the box (Q3113).
 //!
-//! These tests pin that. When it answers, each turns back
-//! into the volume check of commit `f179ca02a`: what the box and the LED share
-//! is the box's part inside the LED, and the intersection and the difference
-//! add up to the LED.
+//! The box round the back corner now shares with the LED what commit
+//! `f179ca02a` works out, the far box shares nothing with it, and the rest
+//! stop refused `DynamicRangeTooWide`: the box round the front corner at a
+//! ratio of `1.4e16` under intersection, and every difference at `3.5e17`.
+//! Untraced. These tests pin that.
 //!
 //! `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step` is the same LED with its axis
 //! at `z = 15`, and `LED_D3.0mm_Horizontal_O3.81mm_Z6.0mm.step` a smaller one,
@@ -328,7 +332,7 @@
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Isometry, Surface, Vector};
+use rcad_geom::{Deflection, Isometry, Surface, Vector};
 use rcad_predicates::{Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
@@ -359,6 +363,9 @@ const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 /// The `Z3.0` LED's front corner.
 const Z3_FRONT_CORNER: [f64; 3] = [-1.23, -1.27, 3.0];
 
+/// The `Z3.0` LED's back corner.
+const Z3_BACK_CORNER: [f64; 3] = [-1.23, -2.27, 3.0];
+
 /// The `Z15.0` LED's front corner.
 const Z15_FRONT_CORNER: [f64; 3] = [-1.23, -1.27, 15.0];
 
@@ -369,16 +376,36 @@ const Z15_BACK_CORNER: [f64; 3] = [-1.23, -2.27, 15.0];
 /// crosses its disc's in since Q3071: that line is no longer taken through the
 /// front corner unasked. Since Q3111 it puts in order the places where its
 /// body's front disc meets its body's pipe written twice, each boxed on the
-/// disc. It stops where its flange's flat, its dome and its body's pipe meet,
-/// the boxes round either corner and the far box alike.
+/// disc. Since Q3113 it gets past where its flange's flat, its dome and its
+/// body's pipe meet. The box round its back corner shares with it the box's
+/// part inside it, as commit `f179ca02a` works that out, and the far box
+/// shares nothing. The box round its front corner, and every difference, are
+/// refused for their range.
 #[test]
-fn a_d5_led_3_up_gets_past_where_its_disc_meets_its_pipe_written_twice_and_stops_where_its_flat_dome_and_pipe_meet()
- {
-    every_fuse_refuses(
-        Z3,
-        &a_box_round_each_of(&[Z3_FRONT_CORNER, [-1.23, -2.27, 3.0], FAR_OFF]),
-        |_, error| where_three_surfaces_meet_needs_two_of_them_flat(error),
-    );
+fn a_d5_led_3_up_gets_past_where_its_flat_dome_and_pipe_meet_and_shares_its_back_corner_with_a_box()
+{
+    let radius = 2.5_f64;
+    let flange_in_the_box = HALF * HALF * (2.0 * HALF);
+    let body_in_the_box = HALF
+        * (HALF * (radius * radius - HALF * HALF).sqrt()
+            + radius * radius * (HALF / radius).asin()
+            - 2.0 * HALF * (radius - HALF));
+    a_box_round_shares(Z3, Z3_BACK_CORNER, flange_in_the_box + body_in_the_box);
+    the_far_box_shares_nothing_with(Z3);
+    every_fuse_refuses(Z3, &[(Z3_FRONT_CORNER, Rule::Intersection)], |_, error| {
+        matches!(
+            error,
+            Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (1.39e16..1.40e16).contains(ratio)
+        )
+    });
+    let differences =
+        [Z3_FRONT_CORNER, Z3_BACK_CORNER, FAR_OFF].map(|corner| (corner, Rule::Difference));
+    every_fuse_refuses(Z3, &differences, |_, error| {
+        matches!(
+            error,
+            Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (3.5e17..3.6e17).contains(ratio)
+        )
+    });
 }
 
 /// The `Z15.0` LED gets past its body's pipe since Q2940, and past where its
@@ -516,13 +543,6 @@ fn every_fuse_refuses(
     }
 }
 
-fn where_three_surfaces_meet_needs_two_of_them_flat(error: &Error) -> bool {
-    matches!(
-        error,
-        Error::Geometry(rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
-    )
-}
-
 /// The LED in `file` and the far box, fused under intersection, answer with
 /// nothing, and leave a model `validate` accepts.
 fn the_far_box_shares_nothing_with(file: &str) {
@@ -547,6 +567,50 @@ fn the_far_box_shares_nothing_with(file: &str) {
         "{file}: the far box shares {} solids with the LED, and it shares none",
         fused.solids().len()
     );
+}
+
+/// The LED in `file` and a box of side `2 * HALF` centred on `corner`, fused
+/// under intersection, answer with a model `validate` accepts, and what they
+/// share is `shared` to within what measuring costs.
+fn a_box_round_shares(file: &str, corner: [f64; 3], shared: f64) {
+    let (mut model, solid) = the_led(file);
+    let knife = a_box_round(&mut model, corner);
+    let fused = model
+        .fuse(
+            &[solid],
+            &[knife],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{file}: the box round {corner:?} refused: {why:?}"));
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| {
+            panic!("{file}: the box round {corner:?} left a model that is not valid: {why:?}")
+        });
+    let (common, common_error) = volume_of(&model, fused.solids());
+    assert!(
+        (common - shared).abs() <= common_error + 1e-12,
+        "{file}: the LED and the box round {corner:?} share {common} ± {common_error}, and \
+         {shared} is right"
+    );
+}
+
+/// The volume of `solids` together, and how far measuring it may be off.
+fn volume_of(model: &Model, solids: &[SolidKey]) -> (f64, f64) {
+    solids.iter().fold((0.0, 0.0), |(volume, error), &solid| {
+        let measured = model
+            .solid(solid)
+            .expect("a solid of this model")
+            .measure(
+                Deflection::for_scale(model.scale()),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("it measures");
+        (volume + measured.volume(), error + measured.volume_error())
+    })
 }
 
 /// Refused `Undecidable` with the one record `a point inside a piece of a
