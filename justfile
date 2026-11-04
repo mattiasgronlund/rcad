@@ -19262,6 +19262,12 @@ check-queue-selftest:
         'is not a path, a directory ending in /, or path#item'
     passes  cores-all   's/justfile#queue  pinned/justfile#queue,cores:all  pinned/' \
         'a row with a cores:all entry in its write set was refused'
+    # §308.8 (Q3150): a night entry, read as a word and not as a path, and
+    # refused beside a cores: entry, since the night fuzz holds every thread.
+    passes  night       's/justfile#queue  pinned/justfile#queue,night  pinned/' \
+        'a row with a night entry in its write set was refused'
+    refused night-cores 's/justfile#queue  pinned/justfile#queue,night,cores:2  pinned/' \
+        'T1: night and cores:2 cannot share a write set: a night row runs beside the night fuzz, which holds every thread then (§308.8)'
 
     fence() { { echo '```'; cat; echo '```'; } > "$dir/$1.md"; }
     drive() {
