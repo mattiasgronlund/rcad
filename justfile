@@ -9964,6 +9964,10 @@ check-fuzz-overnight-selftest:
     printf '%s [timings=%s] [at=%s]\n' "$*" "${RCAD_FUZZ_TIMINGS:-unset}" "$stub_started" >>"$STUB_LOG"
     case " $* " in
         *" build "*)
+            # `STUB_BUILD_SLEEP` makes a build that takes time, the way a
+            # loaded machine's does. It goes first, ahead of the early exit
+            # below, so every kind of build can be slow.
+            [ -z "${STUB_BUILD_SLEEP:-}" ] || sleep "$STUB_BUILD_SLEEP"
             # The real build's rlib is what §292's guard reads back, so every
             # arm needs one here too, real or not — clean unless
             # `STUB_TIMING_SANCOV` asks for the kind that must fail the night,
@@ -11465,6 +11469,26 @@ check-fuzz-overnight-selftest:
         || fail "a night started inside its pause ran something inside it; launches and stops, against it: $(tr '\n' ',' <<<"$got")"
     }
 
+    # Forty-four (Q3061): a night whose build ends after its pause does still
+    # started inside the pause, because the pause is judged against the moment
+    # the night began and not a clock read after the build. Thirty-four cannot
+    # tell: its build is instant, so it only fails on a loaded machine. Here the
+    # pause ends at three seconds and the build takes five, with room left in
+    # the window after it.
+    forty_four() {
+    : >"$dir/log"
+    t0=$(date +%s)
+    pause_from=$(( t0 - 60 ))
+    pause_until=$(( t0 + 3 ))
+    STUB_BUILD_SLEEP=5 run 14 "@$pause_from" "@$pause_until" \
+        || fail "a night whose build outlasted its pause failed: $(cat "$dir/out")"
+    grep -q 'started inside the pause' "$dir/out" \
+        || fail "a night started inside its pause, whose build then outlasted the pause, did not say so: $(cat "$dir/out")"
+    got=$(when_against_the_pause)
+    [ "$got" = $'launch after 5\nstop after 5' ] \
+        || fail "a night whose build outlasted its pause ran something inside it; launches and stops, against it: $(tr '\n' ',' <<<"$got")"
+    }
+
     # Thirty-five: a pause that ends at or after the deadline ends the night
     # where it starts. Nothing waits for its end, and nothing runs after it.
     # Seven seconds before the pause, the most a window of eight allows: the
@@ -11750,7 +11774,7 @@ check-fuzz-overnight-selftest:
         fourteen fifteen seventeen eighteen nineteen twenty twenty_one \
         twenty_two twenty_four twenty_five twenty_seven twenty_eight \
         thirty thirty_one thirty_two thirty_four thirty_five thirty_six thirty_seven \
-        thirty_eight thirty_nine forty_two
+        thirty_eight thirty_nine forty_two forty_four
     settle
     overlap 5
     rm -rf fuzz/target/x86_64-unknown-linux-gnu/release/build/rcad-fuzz-timing/selftest-*-"$tag"
