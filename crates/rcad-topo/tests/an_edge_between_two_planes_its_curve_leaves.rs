@@ -340,7 +340,10 @@ fn a_half_disc_leaning_off_the_lid_answers_and_a_disc_is_refused_for_the_edge_ro
 /// with the bar and the cube, and an intersection with the block from
 /// `z = −1` with the bar, in a model the sweep accepts. Q2117 found the disc
 /// leaning panicking, the half disc leaning refused `Undecidable`, and the two
-/// above refused as a face that meets its neighbour nowhere (Q2125).
+/// above refused as a face that meets its neighbour nowhere (Q2125). Until
+/// Q3141 read the lid and its piece as one plane, each was refused as an
+/// answer with an edge only one face runs along, but for the half disc above,
+/// still a face that meets its neighbour nowhere.
 #[test]
 fn a_piece_a_hair_off_the_lid_of_a_short_bar_answers_a_union_and_an_intersection() {
     let the_bar = 36.0 * PI;
