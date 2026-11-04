@@ -207,7 +207,10 @@ def read_steps(path, expected_sha256):
     branches on the file at all, so a file the lander wrote differently from
     what it was told -- a comma turned into a line break, one id swapped for
     another the same length -- stops here instead of reaching `queue apply`
-    with the wrong row (Q1409).
+    with the wrong row (Q1409). Trailing blank lines and trailing lone `+`
+    lines are dropped before hashing and splitting: a `+` with no step after it
+    changes no step, and a lander has added one to the text it copied twice
+    (Q2923, Q3059; Q3068).
     """
     if path is None:
         return []
@@ -217,7 +220,7 @@ def read_steps(path, expected_sha256):
     except OSError as error:
         raise Stop("steps", f"cannot read the steps file {path}: {error}")
     lines = [line.rstrip() for line in text.split("\n")]
-    while lines and lines[-1] == "":
+    while lines and lines[-1] in ("", "+"):
         lines.pop()
     actual_sha256 = hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
     if actual_sha256 != expected_sha256:

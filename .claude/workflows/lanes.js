@@ -1352,8 +1352,9 @@ function landCommand(lane, prior) {
 
 // Pure JS: the script has no Node API access, so this cannot reach for
 // `crypto`. `land.py` hashes the file after the same trim -- trailing blank
-// lines dropped, joined back with `\n` -- so a trailing newline the Write
-// tool adds costs nothing; only a changed word or line does (Q1409).
+// lines and trailing lone `+` lines dropped, joined back with `\n` -- so a
+// trailing newline the Write tool adds, or a `+` with no step after it,
+// costs nothing; only a changed word or line does (Q1409, Q3068).
 function sha256Hex(text) {
   const bytes = utf8Bytes(text)
   const k = [
