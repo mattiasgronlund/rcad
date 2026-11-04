@@ -4454,13 +4454,15 @@ test-ignored:
 # is named here rather than hidden. The shared 24 have a runner of their own in
 # the marketplace repo now.
 #
-# The four hooks below it are rcad's own, need no plugin, and run either way —
+# The five hooks below it are rcad's own, need no plugin, and run either way —
 # which is why the skip wraps one line and not the recipe. The fourth is the
 # guard that sends a write to `docs/queue.md` through `just queue` (§263.7) and
 # also refuses a kill that picks its targets by pattern (§454): its cases hold
 # each writing form refused, each reading form allowed, each form that runs
 # `pin` or `unpin` asked about, since only Mattias pins (§430), and each kill
-# form refused or allowed.
+# form refused or allowed. The fifth points a write to `CLAUDE.md`,
+# `AGENTS.md` or `.claude/agents/*.md` at `docs/where-a-rule-goes.md` (§479):
+# its cases are a write to each of those names and one to the guide itself.
 #
 # `queue-write-cases.json` cannot hold the two cases below: each needs a pid
 # that is actually running, and a case there is a fixed JSON string with no
@@ -4482,6 +4484,7 @@ check-hooks:
     .claude/hooks/check-session-start-hub.sh
     .claude/hooks/check-decisions-zero.sh
     .claude/hooks/check-queue-write-guard.sh
+    .claude/hooks/check-agent-file-written.sh
     tree=$(pwd)
     sleep 5 &
     inside_pid=$!
@@ -20556,7 +20559,11 @@ check-queue-merge-driver:
 # refusing it twice, a switch that is neither on nor off, a closed row and a
 # `cores:` entry beside it, as `cores`, `add` and `writes` refuse the same
 # pair; and `blocked` skipping the row by day, naming the next window, and
-# not by night (§308.8). The
+# not by night (§308.8). Q3162's: `add` and `writes` printing on stderr
+# the pointer to docs/where-a-rule-goes.md that agent-file-written.sh
+# prints, for a write set naming .claude/agents/lane.md, CLAUDE.md and
+# AGENTS.md, or .claude/, and nothing for one naming none, with stdout as
+# it was (§479). The
 # hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
@@ -21599,6 +21606,45 @@ check-queue-api-selftest:
         && fail "show said the freshly taken row was narrowed, though its write set is what it was taken with"
     grep -qxF 'write set set to docs/q2670-fresh.md by `writes`, - in docs/queue.md' <<<"$got" \
         || fail "show did not print the taken row's write set against the stale docs/queue.md column (§230.3, Q2975)"
+
+    # Q3162 (§479): `add` and `writes` print the pointer to
+    # docs/where-a-rule-goes.md on stderr when a write set names an agent file,
+    # the same line agent-file-written.sh puts in front of a model after a
+    # write to one. stdout stays the id alone, which `just land` and every
+    # `$(q ... add ...)` above read.
+    pointer=$(printf '{"tool_input":{"file_path":"%s"}}' /rcad/CLAUDE.md \
+        | '{{ justfile_directory() }}/.claude/hooks/agent-file-written.sh' \
+        | jq -r '.hookSpecificOutput.additionalContext // empty')
+    [ -n "$pointer" ] || fail "agent-file-written.sh printed no pointer for a write to CLAUDE.md"
+    agent_wt="$root/rcad-worktrees/agent-file"
+    g "$hub" worktree add -q -b agent-file "$agent_wt" main
+    mkdir -p "$agent_wt/.claude/agents"
+    printf 'lane\n' > "$agent_wt/.claude/agents/lane.md"
+    g "$agent_wt" add .claude/agents/lane.md
+    g "$agent_wt" commit -qm "an agent file for add and writes to name"
+    agent_row=$(q "$agent_wt" add 2 opus .claude/agents/lane.md "from/- a row that changes an agent file §230" 2>"$root/agent-err") \
+        || { got=$(cat "$root/agent-err"); fail "add refused a row whose write set names .claude/agents/lane.md"; }
+    got=$agent_row
+    [[ "$agent_row" =~ ^Q[0-9]+$ ]] || fail "add printed more than the new id on stdout for a row naming an agent file"
+    got=$(cat "$root/agent-err")
+    grep -qxF "$agent_row's write set names .claude/agents/lane.md. $pointer" <<<"$got" \
+        || fail "add did not print the agent file pointer for a write set naming .claude/agents/lane.md"
+    got=$(q "$agent_wt" writes "$agent_row" CLAUDE.md,AGENTS.md 2>"$root/agent-err") \
+        || { got=$(cat "$root/agent-err"); fail "writes refused to set CLAUDE.md,AGENTS.md"; }
+    [ "$got" = "$agent_row: write set .claude/agents/lane.md -> CLAUDE.md,AGENTS.md" ] \
+        || fail "writes printed more on stdout than the write set it set"
+    got=$(cat "$root/agent-err")
+    grep -qxF "$agent_row's write set names CLAUDE.md, AGENTS.md. $pointer" <<<"$got" \
+        || fail "writes did not print the agent file pointer naming both CLAUDE.md and AGENTS.md"
+    got=$(q "$agent_wt" writes "$agent_row" .claude/ 2>&1) \
+        || fail "writes refused to set .claude/"
+    grep -qxF "$agent_row's write set names .claude/. $pointer" <<<"$got" \
+        || fail "writes did not print the agent file pointer for a directory holding .claude/agents/"
+    got=$(q "$agent_wt" writes "$agent_row" docs/q3162-plain.md 2>&1) || fail "writes refused to set docs/q3162-plain.md"
+    grep -qF 'where-a-rule-goes' <<<"$got" && fail "writes printed the agent file pointer for a write set naming no agent file"
+    got=$(q "$agent_wt" add 2 opus docs/a.md "from/- a row that changes no agent file §230" 2>&1) \
+        || fail "add refused a row on docs/a.md"
+    grep -qF 'where-a-rule-goes' <<<"$got" && fail "add printed the agent file pointer for a write set naming no agent file"
 
     # Q252 (§263.3, §263.4): `give` releases a hold and restores the state
     # the take replaced, an after: list included since take's own claims event
