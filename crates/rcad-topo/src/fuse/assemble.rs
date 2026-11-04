@@ -106,6 +106,7 @@ use crate::validate::{
     how_much_space_a_curved_solid_encloses, the_curved_one_of, the_narrowest_a_face_is,
     the_way_it_is_parametrised_about, winding_round,
 };
+use crate::error::AModelOfTheFusesOwn;
 use crate::view::how_far_apart;
 use crate::{
     Containment, EdgeKey, EdgeView, Error, FaceKey, Invalid, Model, Result, SolidView, VertexKey,
@@ -882,14 +883,11 @@ impl Assembly {
     ///
     /// Whatever else the sweep says, unchanged — [`Error::Undecidable`] where a
     /// predicate gave up on the answer, say. "The kernel wrote something broken"
-    /// is not what those say. But a refusal that names a face, such as
-    /// [`Error::AWireWillNotLieFlatOnItsFace`] from meshing the answer, names
-    /// the caller's face that face of the answer was cut from: the throwaway is
-    /// dropped when this returns, so a key into it would name nothing (Q2288).
-    /// One that names an edge names the caller's edge that edge of the answer
-    /// is a piece of, and [`Error::ACrossingAlongThisEdgeCouldNotBeFollowed`]
-    /// along an edge the fuse invented is the [`Error::Geometry`] it wraps
-    /// (Q2889, [`Assembly::naming_the_callers_face_or_edge`]).
+    /// is not what those say. But a refusal that names a face or an edge, such
+    /// as [`Error::AWireWillNotLieFlatOnItsFace`] from meshing the answer, comes
+    /// back inside [`Error::TheFuseWasRefusedInAModelOfItsOwn`] with the
+    /// throwaway, which is the only model its key names anything in
+    /// ([`Assembly::handing_back_the_model_it_was_raised_in`]).
     ///
     /// # Panics
     ///
@@ -927,12 +925,15 @@ impl Assembly {
         let mut mine = ProvenanceLog::new();
         let swept = throwaway.check_everything_but_the_coordinate_range(policy, &mut mine);
         mine.drain_into(log);
-        swept.map_err(|refused| {
-            let Error::Invalid(broken) = refused else {
-                return self.naming_the_callers_face_or_edge(&throwaway, &rehearsal, refused);
-            };
-            Error::TheFuseWroteABrokenAnswer { broken }
-        })?;
+        match swept {
+            Ok(()) => {}
+            Err(Error::Invalid(broken)) => return Err(Error::TheFuseWroteABrokenAnswer { broken }),
+            Err(refused) => {
+                return Err(self.handing_back_the_model_it_was_raised_in(
+                    throwaway, &rehearsal, refused,
+                ));
+            }
+        }
 
         let approximation_before = model.worst_approximation();
         let written = self.write_into(model, &self.solids, &self.runs);
@@ -6123,14 +6124,10 @@ impl Assembly {
     /// through [`how_much_space_it_encloses`]'s `?`, when a curved shell no
     /// mesh signs whose closest sum is not above zero, and none of whose
     /// corners tells which way its faces point. Whatever else meshing a shell
-    /// refuses, such as [`Error::CannotMeshAFace`], naming the input face the
-    /// face it could not mesh was cut from where it names a face, and the input
-    /// edge an edge is a piece of where it names an edge.
-    /// [`Error::Geometry`], the marcher's own refusal, when the mesh could not
-    /// follow a crossing along an edge the fuse invented.
-    /// [`Error::TheFuseWroteABrokenAnswer`] when the mesh refuses an edge for
-    /// the faces along it, as the sweep in [`Assembly::commit`] would
-    /// ([`Assembly::naming_the_callers_face_or_edge`]).
+    /// refuses, such as [`Error::CannotMeshAFace`], inside
+    /// [`Error::TheFuseWasRefusedInAModelOfItsOwn`] with the model the shells
+    /// were meshed in where it names a face or an edge
+    /// ([`Assembly::handing_back_the_model_it_was_raised_in`]).
     /// [`Error::AFaceTrimmedByACurveThisCannotFollow`]
     /// naming the input face, when no point on a shell could be placed and one
     /// met a face of another shell that nobody can follow.
@@ -6156,9 +6153,14 @@ impl Assembly {
 
         let mut volumes = Vec::new();
         for &solid in &written.solids {
-            let volume = how_much_space_it_encloses(apart.solid_at(solid), policy, log).map_err(
-                |refused| self.naming_the_callers_face_or_edge(&apart, &written, refused),
-            )?;
+            let volume = match how_much_space_it_encloses(apart.solid_at(solid), policy, log) {
+                Ok(volume) => volume,
+                Err(refused) => {
+                    return Err(self.handing_back_the_model_it_was_raised_in(
+                        apart, &written, refused,
+                    ));
+                }
+            };
             if !volume.is_finite() {
                 return Err(Error::VolumeTooLargeToMeasure);
             }
@@ -6590,32 +6592,24 @@ impl Assembly {
         point.is_finite().then_some(point)
     }
 
-    /// `refused`, raised in `apart`, naming in place of the face of `apart` it
-    /// names the caller's face that one was cut out of, and in place of the
-    /// edge the caller's edge that one is a piece of. `apart` is thrown away
-    /// when the fuse returns, so a key into it would name nothing (Q2288,
-    /// Q2889).
+    /// `refused`, raised in `apart`, handed back with `apart` inside
+    /// [`Error::TheFuseWasRefusedInAModelOfItsOwn`] where it names an edge,
+    /// with the caller's edge that edge is a piece of; naming in place of the
+    /// face of `apart` it names the caller's face that one was cut out of; and
+    /// as itself where it names neither.
     ///
-    /// **An edge the fuse invented has no edge of the caller's to name**, and
-    /// [`Error::ACrossingAlongThisEdgeCouldNotBeFollowed`] along one is
-    /// handed back as the [`Error::Geometry`] it wraps: the marcher's refusal,
-    /// which names the two surfaces it gave up between in the caller's frame.
-    /// Where two faces of one input are stored a rounding apart and cross in a
-    /// thin loop, that loop is such an edge (the `D5.0` LED of
-    /// `crates/rcad-step/tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`
-    /// less a box, under a tolerant policy).
+    /// `apart` is dropped when the fuse returns, so a key into it named
+    /// nothing. Swapping in the caller's edge (Q2889) said which input edge
+    /// and not which piece of it; it left an edge the fuse invented, such as
+    /// the thin loop two faces of one input stored a rounding apart cross in,
+    /// nothing to name at all; and a refusal for the faces along an edge named
+    /// no edge (Q3153). The model moves into the refusal, so the fuse that
+    /// answers pays nothing for it.
     ///
-    /// **A refusal for the faces along an edge is the fuse's broken answer**,
-    /// whether or not the edge is a piece of the caller's:
-    /// [`Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked`] and
-    /// [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`] come back as the
-    /// [`Error::TheFuseWroteABrokenAnswer`] the sweep in
-    /// [`Assembly::commit`] says of that edge. The faces along it are the
-    /// answer's, which the fuse put there, so the refusal says nothing of the
-    /// caller's edge, which may be straight, or have two faces along it in
-    /// the caller's model. The sweep asks the same two rules of every edge
-    /// before it meshes anything, so it refuses the answer the same way when
-    /// it meets such an edge first.
+    /// **A face is still swapped for the caller's (Q2288)**, which says which
+    /// input face and not which piece of it. Handing the model back with it
+    /// too changes what ten tests in `crates/rcad-topo/tests/` read off a
+    /// fuse, which Q3153's lane did not hold.
     ///
     /// The two solid keys of [`Error::TwoSolidsShareSpace`] and
     /// [`Error::CannotTellWhetherTwoSolidsShareSpace`] need nothing: only
@@ -6627,73 +6621,24 @@ impl Assembly {
     /// As [`Assembly::the_input_face_it_was_cut_from`] and
     /// [`Assembly::the_input_edge_it_is_a_piece_of`] do: `apart` holds what
     /// [`Assembly::write_into`] wrote and nothing else.
-    ///
-    /// As [`Assembly::the_broken_answer_the_sweep_finds_along`] does, where
-    /// the sweep passes an edge the mesher refused for its faces.
-    ///
-    /// If [`Error::CannotYetMeasureHowLongThisCurveIs`] names an edge the fuse
-    /// invented. Only [`EdgeView::length`] raises it,
-    /// and nothing in this crate asks a length of either model of the fuse's
-    /// own: the only caller of `EdgeView::length` in this crate is
-    /// [`WireView::length`](crate::WireView::length), and nothing in this
-    /// crate calls that. With both renamed, `cargo check -p rcad-topo --lib`
-    /// fails at that one call and nowhere else (Q2889, 2026-11-04).
-    fn naming_the_callers_face_or_edge(
+    fn handing_back_the_model_it_was_raised_in(
         &self,
-        apart: &Model,
+        apart: Model,
         written: &Written,
         mut refused: Error,
     ) -> Error {
         if let Some(face) = refused.the_face_it_names() {
-            *face = self.the_input_face_it_was_cut_from(apart, written, *face);
-        }
-        if let Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked { edge }
-        | Error::AnEdgeBendsButEveryFaceAlongItIsFlat { edge } = refused
-        {
-            return Self::the_broken_answer_the_sweep_finds_along(apart, edge, &refused);
-        }
-        let Some(edge) = refused.the_edge_it_names() else {
-            return refused;
-        };
-        if let Some(input) = self.the_input_edge_it_is_a_piece_of(apart, written, *edge) {
-            *edge = input;
+            *face = self.the_input_face_it_was_cut_from(&apart, written, *face);
             return refused;
         }
-        let Error::ACrossingAlongThisEdgeCouldNotBeFollowed { why, .. } = refused else {
-            panic!("neither model of the fuse's own is asked how long an edge is: {refused:?}");
+        let Some(&edge) = refused.the_edge_it_names() else {
+            return refused;
         };
-        Error::Geometry(*why)
-    }
-
-    /// What the sweep in [`Assembly::commit`] says of `edge` of `apart`, which
-    /// the mesher `refused` for the faces along it: the first of
-    /// `check_edge`'s two rules about those faces that refuses it, as
-    /// [`Error::TheFuseWroteABrokenAnswer`].
-    ///
-    /// # Panics
-    ///
-    /// If the sweep passes `edge`. The mesher refuses an edge three or more
-    /// faces of one solid walk, and the sweep one not walked by exactly two
-    /// coedges. The mesher refuses a bent edge with only flat faces along it
-    /// by [`nothing_curved_says_where_it_bends`](crate::validate::nothing_curved_says_where_it_bends),
-    /// and the sweep asks that same
-    /// rule, of the faces either side, which are the faces of one shell.
-    fn the_broken_answer_the_sweep_finds_along(
-        apart: &Model,
-        edge: EdgeKey,
-        refused: &Error,
-    ) -> Error {
-        let slot = edge.slot_in(apart.id());
-        let checked = apart
-            .check_edge_is_walked_by_two_opposite_coedges(slot)
-            .and_then(|()| apart.check_something_curved_says_where_this_edge_bends(slot));
-        let Err(Error::Invalid(broken)) = checked else {
-            panic!(
-                "the sweep refuses every edge the mesher refuses for the faces along it, and \
-                 passed the one {refused:?} names: {checked:?}"
-            );
-        };
-        Error::TheFuseWroteABrokenAnswer { broken }
+        Error::TheFuseWasRefusedInAModelOfItsOwn {
+            callers_edge: self.the_input_edge_it_is_a_piece_of(&apart, written, edge),
+            refused: Box::new(refused),
+            model: AModelOfTheFusesOwn::new(apart),
+        }
     }
 
     /// The caller's face that `face`, written into `apart`, was cut out of.
