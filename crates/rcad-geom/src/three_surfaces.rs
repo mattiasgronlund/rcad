@@ -149,6 +149,19 @@
 //! one axis and a ball, or two bars running the same way and a third.
 //! [`where_three_curved_surfaces_meet`].
 //!
+//! **A tolerant policy takes two circles within its wobble of each other as
+//! one.** Where the roads do not prove that a plane and two curved surfaces
+//! share a curve, and the plane cuts both in circles — a ball under any plane,
+//! a pipe or a cone under one square to its axis — that are within
+//! [`Policy::max_wobble`] of each other, centre and radius together, the three
+//! are taken to share the one circle, through [`Policy::take_as_one_point`]. A
+//! rod with a ball of its radius on its cap, placed by a turn, is it: the
+//! stored numbers part the ball's circle from the rim by `1e−16` or less, and
+//! every exact answer leaves the cap a ring or two lunes `1e16` and more times
+//! smaller than the rod, past the range §3.5 lets a model span. A certified
+//! policy takes nothing, and the roads' answer stands.
+//! [`where_one_plane_and_two_curved_surfaces_meet`].
+//!
 //! What is left over is refused by name (§16.10, §31.2): one plane and two
 //! quadrics that no road above answers and that the thirteenth hands on —
 //! two conics whose numbers it cannot multiply out within `f64`'s range, two
@@ -2256,10 +2269,12 @@ const TWO_CIRCLES_TAKEN_AS_ONE: &str = "two circles on one plane taken as one";
 /// Turned, the stored numbers part them by roundings: with a radius of 1 the
 /// ball's centre is on the pipe's axis exactly but a few roundings off the
 /// cap, so [`what_a_plane_square_to_their_one_axis_leaves`] proves the ball's
-/// circle about `1e−32` narrower than the rim, and with a radius of 2.5 the
-/// centre is off the axis too and every road answers circles that cross or
-/// keep apart. Either way the cap keeps a ring or two lunes far thinner than
-/// the wobble, and the fuse refuses it.
+/// circle about `1e−32` narrower than the rim and answers that the three
+/// share nothing; with a radius of 2.5 the centre is off the axis too, by
+/// `1e−18` to `3e−16`, and a later road proves the two circles cross in two
+/// points. Either way the cap keeps a ring or two lunes far thinner than the
+/// wobble, and the fuse refused it. `rcad-topo`'s
+/// `a_bar_and_a_ball_on_its_cap_turned.rs` fuses 24 such rods four ways.
 ///
 /// Nothing is worked out under a certified policy, which takes nothing.
 fn the_policy_takes_their_two_circles_as_one(
