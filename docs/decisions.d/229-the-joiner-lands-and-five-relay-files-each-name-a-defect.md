@@ -238,3 +238,42 @@ purpose.
   meshed the wrong way round.
 - §39.4's catalogue should say the two torus pins now refuse `Undecidable` and
   why; `§37`, `§39` and `§31` cite test names `lane-land-cone-and-copy` renamed.
+
+### 229.8 Why the rest of the corpus fails to import, 2026-11-04
+
+*Q32, a read-only lane, on `120da740`, and the dispatcher's own run of the same
+test after it. Each file is counted by the first refusal it meets (§45.2), as
+`mise exec -- just t how_often_a_real_file_imports --no-capture` prints it.*
+
+**KiCad imports 165 of 323 and NIST 1 of 44**, where 229.4 had 161 of 323.
+What stops the other 158 KiCad files and 43 NIST files:
+
+| refused first for | KiCad | NIST | where it stands |
+|---|---|---|---|
+| a corner is not on the curved face the file says it is on | 95 | 4 | 94 KiCad and all 4 NIST are off by a modelling tolerance (the median over the 95 is 516 spacings), which only healing would read, and §42.9 bars healing. `SW_Slide_SPDT_Angled_CK_OS102011MA1Q` is 0.681 spacings off: Q3170 |
+| a curve or surface this kernel does not hold | 53 | 26 | `B_SPLINE_CURVE_WITH_KNOTS` 30 and 25, `B_SPLINE_SURFACE_WITH_KNOTS` 13, `SURFACE_OF_REVOLUTION` 6, `SURFACE_CURVE` 2, `HYPERBOLA` 1, `SURFACE_OF_LINEAR_EXTRUSION` 1, and one NIST `BOUNDED_CURVE`: features, not built without a consumer (§13) |
+| a solid with a void in it | 3 | | a feature: `LED_D20.0mm`, `Relay_SPDT_Finder_40.11`, `Relay_SPDT_Finder_40.41` |
+| a placement the reader cannot apply: `NEXT_ASSEMBLY_USAGE_OCCURRENCE` | 2 | | a feature |
+| a crossing too nearly parallel to follow | 2 | | the two Fujitsu FTR-F1 relays, limits by §16.10 (§335.5) |
+| a torus crossing another curved surface | 1 | | `Relay_SPDT_Finder_34.51_Horizontal`: Q564 |
+| both coedges of an edge run the same way round | 1 | | `Relay_SPST_Panasonic_ADW11`: §174.9, perhaps a malformed export, not proved |
+| an edge walked by 4 coedges | 1 | | `Fuseholder_Blade_Mini_Keystone_3568`: §469.2, refused whatever is done with that edge |
+| a loop this reader does not walk: `VERTEX_LOOP` | | 3 | `nist_ctc_04_asme1_ap203` and both `nist_ftc_06_asme1_rd`, a cone apex a modelling tolerance off: Q751, parked |
+| a vertex of a face 3.9e-8 off the plane of the face | | 3 | `nist_ctc_03_asme1_ap203` and both `nist_ctc_03_asme1_rc`: a modelling tolerance |
+| a face walks a closed edge against the way its surface winds | | 2 | both `nist_ftc_11_asme1_rb`: Q347 |
+| the file declares two different length units | | 2 | both `nist_ftc_07_asme1_rd`: not looked at |
+| a hole in a face winds the same way as the outer wire | | 1 | `nist_stc_06_asme1_ap242-e3`: Q2517, then Q1159 |
+| could not settle 1 decisions the answer depends on | | 1 | `nist_ftc_08_asme1_ap242-e2`: Q3171 |
+| the file has no size | | 1 | `nist_ftc_08_asme1_ap242-e1-tg`: not looked at |
+
+**Two refusals had neither a row nor a trace, and now have rows.**
+`SW_Slide_SPDT_Angled_CK_OS102011MA1Q` is the only file of the 95 whose corner
+the test counts inside one spacing, where the test's own doc says the refusal
+is about what a `Decision` can certify and not about the file. §174.6 measured
+that corner's true miss as 5.55e-17 against the 8.9e-16 `how_far_off` reports,
+and wrote it down without a row; Q3170 asks whether it is a gap.
+`nist_ftc_08_asme1_ap242-e2` is `Error::Undecidable` on a real file, traced
+nowhere; Q3171 traces it.
+
+§0 says no corpus file reaches *too nearly parallel to follow* since §190.2.
+Two do, and §335.5 found both are limits, so its unit stays closed.
