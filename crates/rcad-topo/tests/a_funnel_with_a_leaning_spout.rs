@@ -149,6 +149,20 @@ fn two_pointed_cones_one_leaning_off_the_other_are_refused_ordering_along_a_bran
     );
 }
 
+/// **The same two, the leaning one ten high**, row Q2917, so the two caps'
+/// rims are apart. `intersect` names the crossing as one loop and two
+/// branches that nearly meet, as for the pair both eight high. Every fuse is
+/// to answer, under every rule both ways round. Until the fuse orders points
+/// along the loop and each branch round the ruled cone's axis, every fuse is
+/// refused as a crossing nothing can put points in order along.
+#[test]
+fn two_pointed_cones_eight_and_ten_high_one_leaning_off_the_other_answer_every_fuse() {
+    assert_eq!(
+        every_fuse_of(two_pointed_cones_eight_and_ten_high).refusals(),
+        [[None; 2]; 3]
+    );
+}
+
 /// What a fuse is refused with where nothing puts points in order along a
 /// curve it is cut by.
 const NOTHING_ORDERS_ALONG_A_BRANCH: &str = "nothing can put points in order along this curve";
@@ -450,6 +464,17 @@ fn funnel_and_spout(model: &mut Model) -> (SolidKey, SolidKey) {
 fn two_pointed_cones(model: &mut Model) -> (SolidKey, SolidKey) {
     let upright = a_pointed_cone(model, 0.5, 8.0);
     let leaning = a_pointed_cone(model, 0.5, 8.0);
+    let through =
+        Axis::new(Point::new(0.0, 0.0, 4.0), Vector::new(1.0, 0.0, 0.0)).expect("an axis");
+    model
+        .place_solid(leaning, &Isometry::rotation(&through, 0.3).expect("a turn"))
+        .expect("this model made the key");
+    (upright, leaning)
+}
+
+fn two_pointed_cones_eight_and_ten_high(model: &mut Model) -> (SolidKey, SolidKey) {
+    let upright = a_pointed_cone(model, 0.5, 8.0);
+    let leaning = a_pointed_cone(model, 0.5, 10.0);
     let through =
         Axis::new(Point::new(0.0, 0.0, 4.0), Vector::new(1.0, 0.0, 0.0)).expect("an axis");
     model
