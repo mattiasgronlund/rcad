@@ -222,13 +222,24 @@
 //! touches that crossing, `1.8e15` out along `-y`, where the pipe's axis,
 //! leaning `5.55e-17` off `y`, has drifted to `x = 1.17`, and a point below
 //! the axis at `(1.17, -32.395, 0.5020008)`. Untraced.
+//!
+//! The flange's front and the body's front disc are two flat faces along one
+//! closed edge, the circle of the hole, so they are one plane, and each face
+//! cut by both cut its own line a rounding from the other's. Bake now reads
+//! the two as one plane where a closed edge between them says so (Q3141). The
+//! stops above on the rim at the front, on `DynamicRangeTooWide` and on
+//! `WireTooShort` are gone with it: every far box here but one answers under
+//! intersection and under difference with the LED, and the box on this LED's
+//! flat answers both. The one is the far box of
+//! `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step`, which shares nothing with it,
+//! and the LED less it is refused `ResultIsNotManifold` on the dome's rim
+//! (Q3164).
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::Surface;
 use rcad_predicates::{Interval, Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
-use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
 /// Where the box that misses the LED goes.
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
@@ -242,90 +253,74 @@ const ON_THE_FLAT: [f64; 3] = [-1.23, -6.35, 3.0];
 /// Where the box whose floor `z = 0.5` rests on this LED's body pipe goes.
 const ON_THE_PIPE: [f64; 3] = [1.27, -6.35, 0.6];
 
-/// The three LED files whose flange's flat, dome and body's pipe meet nowhere,
-/// each with the radius of its flange's rim.
-const PAST_WHERE_THEIR_FLAT_DOME_AND_PIPE_MEET: [(&str, f64); 3] = [
-    (THIS_ONE, 2.9),
-    ("LED_D5.0mm_Horizontal_O6.35mm_Z15.0mm.step", 2.9),
-    ("LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step", 1.9),
+/// The three LED files whose flange's flat, dome and body's pipe meet nowhere.
+const PAST_WHERE_THEIR_FLAT_DOME_AND_PIPE_MEET: [&str; 3] = [
+    THIS_ONE,
+    "LED_D5.0mm_Horizontal_O6.35mm_Z15.0mm.step",
+    "LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step",
 ];
 
-/// The two LED files whose far box's difference stops on the flange's rim at
-/// the front, each with the radius of that rim.
-const ON_THE_RIM: [(&str, f64); 2] = [
-    ("LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step", 2.9),
-    ("LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step", 1.9),
+/// The two LED files whose far box's difference stopped on the flange's rim at
+/// the front until Q3141.
+const ON_THE_RIM: [&str; 2] = [
+    "LED_D5.0mm_Horizontal_O6.35mm_Z9.0mm.step",
+    "LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step",
 ];
 
 /// Since Q3113 the flange's flat, the dome and the body's pipe of each of
-/// three LEDs meet nowhere. Each far box shares nothing with its LED, and its
-/// difference stops where the flange's rim meets the front written twice, as
-/// the two of `ON_THE_RIM` do. So does the difference with the box on this
-/// LED's flat, and its intersection is refused for its range.
+/// three LEDs meet nowhere, and since Q3141 the flange's front and the body's
+/// front disc are one plane. Each far box shares nothing with its LED, and the
+/// LED less it is the LED. The box on this LED's flat shares with it the
+/// quarter of the box behind the flat and behind the front, and the four walls
+/// of it inside the LED are all but `x = -1.33` and `y = -6.25`.
 #[test]
-fn three_leds_get_past_where_their_flat_dome_and_pipe_meet_and_stop_where_their_rim_meets_their_front_written_twice()
+fn three_leds_read_their_front_written_twice_as_one_plane_and_a_box_on_the_flat_cuts_its_corner_out()
  {
-    for (file, radius) in PAST_WHERE_THEIR_FLAT_DOME_AND_PIPE_MEET {
+    for file in PAST_WHERE_THEIR_FLAT_DOME_AND_PIPE_MEET {
         the_far_box_shares_nothing_with(file);
-        every_fuse_refuses(file, &[(FAR_OFF, Rule::Difference)], |model, error| {
-            two_ends_round_to_one_point_on_the_front_of_a_rim(radius, model, error)
-        });
+        the_led_less_the_far_box_is_the_led(file);
     }
-    every_fuse_refuses(
-        THIS_ONE,
-        &[(ON_THE_FLAT, Rule::Difference)],
-        |model, error| two_ends_round_to_one_point_on_the_front_of_a_rim(2.9, model, error),
-    );
-    every_fuse_refuses(
-        THIS_ONE,
-        &[(ON_THE_FLAT, Rule::Intersection)],
-        |_, error| {
-            matches!(
-                error,
-                Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (7.2e15..7.3e15).contains(ratio)
-            )
-        },
-    );
+    let shared = 0.1 * 0.1 * 0.2;
+    the_led_and_a_box_share(THIS_ONE, ON_THE_FLAT, shared);
+    the_led_less_a_box_and_what_they_share_add_up_to_the_led(THIS_ONE, ON_THE_FLAT, shared, 4);
 }
 
 /// Since Q3112 the two writings of the edge along each lead's side are one
-/// line, and the far box shares nothing with either LED.
+/// line, and since Q3141 the flange's front and the body's front disc are one
+/// plane. The far box shares nothing with either LED, and each LED less it is
+/// the LED.
 #[test]
-fn two_leds_get_past_the_sides_of_their_leads_and_stop_where_their_rim_meets_their_front_written_twice()
- {
-    for (file, radius) in ON_THE_RIM {
+fn two_leds_read_their_front_written_twice_as_one_plane_and_less_the_far_box_are_the_led() {
+    for file in ON_THE_RIM {
         the_far_box_shares_nothing_with(file);
-        every_fuse_refuses(file, &[(FAR_OFF, Rule::Difference)], |model, error| {
-            two_ends_round_to_one_point_on_the_front_of_a_rim(radius, model, error)
-        });
+        the_led_less_the_far_box_is_the_led(file);
     }
 }
 
 /// The D5 whose front is `y = -3.81` and whose axis is 15 up puts in order the
 /// places where its body's front disc meets its body's pipe written twice
-/// since Q3111, and since Q3112 the two writings of the edge along each lead's
-/// side are one line. Its far box shares nothing with it, and the difference
-/// is refused for its range.
+/// since Q3111, since Q3112 the two writings of the edge along each lead's
+/// side are one line, and since Q3141 its flange's front and its body's front
+/// disc are one plane. Its far box shares nothing with it, and the LED less
+/// the far box is the LED.
 #[test]
-fn a_d5_led_15_up_gets_past_the_sides_of_its_leads_and_its_difference_is_refused_for_its_range() {
+fn a_d5_led_15_up_reads_its_front_written_twice_as_one_plane_and_less_the_far_box_is_the_led() {
     let file = "LED_D5.0mm_Horizontal_O3.81mm_Z15.0mm.step";
     the_far_box_shares_nothing_with(file);
-    every_fuse_refuses(file, &[(FAR_OFF, Rule::Difference)], |_, error| {
-        matches!(
-            error,
-            Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (4.0e16..4.1e16).contains(ratio)
-        )
-    });
+    the_led_less_the_far_box_is_the_led(file);
 }
 
+/// Since Q3141 the flange's front and the body's front disc are one plane, and
+/// the far box shares nothing with the LED. The LED less the far box is
+/// refused not manifold, where four edges of the dome's rim are claimed by one
+/// face (Q3164).
 #[test]
-fn a_d3_led_2_up_gets_past_where_its_flat_meets_its_front_written_twice_and_is_refused_a_piece_of_two_straight_sides()
- {
-    every_fuse_refuses(
-        "LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step",
-        &both_rules_round(&[FAR_OFF]),
-        |_, error| matches!(error, Error::Invalid(Invalid::WireTooShort { count: 2 })),
-    );
+fn a_d3_led_2_up_shares_nothing_with_the_far_box_and_its_difference_is_refused_not_manifold() {
+    let file = "LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step";
+    the_far_box_shares_nothing_with(file);
+    every_fuse_refuses(file, &[(FAR_OFF, Rule::Difference)], |_, error| {
+        matches!(error, Error::ResultIsNotManifold { count: 1 })
+    });
 }
 
 /// Since Q3114 the box whose floor rests on the body's pipe gets past where
@@ -368,13 +363,115 @@ fn the_far_box_shares_nothing_with(file: &str) {
     );
 }
 
-/// A box round each centre, to be fused with the LED under intersection and
-/// under difference.
-fn both_rules_round(centres: &[[f64; 3]]) -> Vec<([f64; 3], Rule)> {
-    centres
-        .iter()
-        .flat_map(|&centre| [Rule::Intersection, Rule::Difference].map(|rule| (centre, rule)))
-        .collect()
+/// The LED in `file` less the far box is the LED, as
+/// [`the_led_less_a_box_round`] takes it.
+fn the_led_less_the_far_box_is_the_led(file: &str) {
+    the_led_less_a_box_round(file, FAR_OFF, 0.0);
+}
+
+/// The LED in `file` and a box of side 0.2 centred on `centre`, fused under
+/// intersection, answer with a model `validate` accepts, and what they share
+/// is `shared` to within what measuring costs.
+fn the_led_and_a_box_share(file: &str, centre: [f64; 3], shared: f64) {
+    let (mut model, solid) = the_led(file);
+    let knife = a_box_round(&mut model, centre);
+    let fused = model
+        .fuse(
+            &[solid],
+            &[knife],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{file}: the box round {centre:?} refused: {why:?}"));
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| {
+            panic!("{file}: the box round {centre:?} left a model that is not valid: {why:?}")
+        });
+    let (common, error) = volume_of(&model, fused.solids());
+    assert!(
+        (common - shared).abs() <= error + 1e-12,
+        "{file}: the LED and the box round {centre:?} share {common} ± {error}, and {shared} is \
+         right"
+    );
+}
+
+/// The LED in `file` less a box of side 0.2 centred on `centre` is the LED
+/// less `shared`, as [`the_led_less_a_box_round`] takes it, and has a face
+/// for each face of the LED less the far box and for each of the box's
+/// `walls_inside` it. Measuring is too coarse to see a box this small in the
+/// LED's volume, and the faces are what show it was cut out where it is.
+fn the_led_less_a_box_and_what_they_share_add_up_to_the_led(
+    file: &str,
+    centre: [f64; 3],
+    shared: f64,
+    walls_inside: usize,
+) {
+    let untouched = the_led_less_a_box_round(file, FAR_OFF, 0.0);
+    assert_eq!(
+        the_led_less_a_box_round(file, centre, shared),
+        untouched + walls_inside,
+        "{file}: less the box round {centre:?} is not the {untouched} faces of the LED less the \
+         far box and the box's {walls_inside} walls inside it"
+    );
+}
+
+/// The LED in `file` less a box of side 0.2 centred on `centre` answers with
+/// one solid in a model `validate` accepts, and what is left and `shared`,
+/// what the two share, add up to the LED to within what measuring costs. Hands
+/// back how many faces are left.
+fn the_led_less_a_box_round(file: &str, centre: [f64; 3], shared: f64) -> usize {
+    let (mut model, solid) = the_led(file);
+    let (whole, whole_error) = volume_of(&model, &[solid]);
+    let knife = a_box_round(&mut model, centre);
+    let fused = model
+        .fuse(
+            &[solid],
+            &[knife],
+            Rule::Difference,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{file}: less the box round {centre:?} refused: {why:?}"));
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| {
+            panic!("{file}: less the box round {centre:?} left a model that is not valid: {why:?}")
+        });
+    let [left_solid] = fused.solids()[..] else {
+        panic!(
+            "{file}: less the box round {centre:?} is {} solids, not one",
+            fused.solids().len()
+        )
+    };
+    let (left, error) = volume_of(&model, &[left_solid]);
+    assert!(
+        (left + shared - whole).abs() <= error + whole_error + 1e-12,
+        "{file}: less the box round {centre:?} leaves {left} ± {error}, which with {shared} \
+         shared is not the LED's {whole} ± {whole_error}"
+    );
+    model
+        .solid(left_solid)
+        .expect("a solid of this model")
+        .faces()
+        .count()
+}
+
+/// The volume of `solids` together, and how far measuring it may be off.
+fn volume_of(model: &Model, solids: &[SolidKey]) -> (f64, f64) {
+    solids.iter().fold((0.0, 0.0), |(volume, error), &solid| {
+        let measured = model
+            .solid(solid)
+            .expect("a solid of this model")
+            .measure(
+                rcad_geom::Deflection::for_scale(model.scale()),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("it measures");
+        (volume + measured.volume(), error + measured.volume_error())
+    })
 }
 
 /// The LED in `file` and a box of side 0.2 centred on each centre of `fuses`,
@@ -407,23 +504,6 @@ fn every_fuse_refuses(
             ),
         }
     }
-}
-
-/// Refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` on a flange's
-/// rim, a pipe of `radius`, at a point of the LED's front `y = -6.35`.
-fn two_ends_round_to_one_point_on_the_front_of_a_rim(
-    radius: f64,
-    model: &Model,
-    error: &Error,
-) -> bool {
-    let Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face, at } = error else {
-        return false;
-    };
-    let face = model.face(*face).expect("the face is the LED's own");
-    let Surface::Cylinder(rim) = face.surface() else {
-        return false;
-    };
-    (rim.radius() - radius).abs() < 1e-9 && (at.y() + 6.35).abs() < 1e-9
 }
 
 /// Refused `Undecidable` with the one record order along a crossing, between
