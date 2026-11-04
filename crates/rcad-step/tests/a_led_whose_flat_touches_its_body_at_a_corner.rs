@@ -362,16 +362,27 @@
 //! the box's top, on the rim at the front and on a piece of two straight sides
 //! is gone with it. The box round either corner of every LED here shares with
 //! it what it should, and the far box shares nothing. The `Z3.0` LED less each
-//! box and what the two share add up to the LED. Every other difference is
-//! refused `ResultIsNotManifold`, where four edges of the dome's rim are
-//! claimed by one face (Q3164). The tests pin every LED's stops.
+//! box and what the two share add up to the LED.
+//!
+//! Every other difference was then refused `ResultIsNotManifold`, where four
+//! edges of the dome's rim were claimed by one face. The flat touches the
+//! body's pipe along the line through its corners, but as written cuts it in
+//! two lines `8.2e-8` apart (`4.69e-8` in the `D3.0` LEDs). The pipe left
+//! those lines out, since the flat lies in front of the back plane and the
+//! pipe's face behind it, but it asked whether the face across its rim leaves
+//! them out too of the rim's plane, `y = -7.37` in the `Z15.0` LED, which no
+//! face carries, and split its rim where they meet it. The dome across draws
+//! nothing with the flat, which touches it at one point, so its side of the
+//! rim was whole. The pipe now asks the dome, whose ball lies wholly behind
+//! the back plane, and leaves its rim whole too (Q3164). Every LED here less
+//! each box and what the two share add up to the LED.
 
 use std::{env, fs, path::PathBuf};
 
 use rcad_geom::{Deflection, Isometry, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
-use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 const Z3: &str = "LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step";
 const Z15: &str = "LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step";
@@ -470,24 +481,39 @@ fn a_d5_led_3_up_less_a_box_round_either_corner_or_far_off_and_what_the_two_shar
 /// ellipse's end, two with each of the two planes the front is written as.
 /// Since Q3142 that ellipse is no edge of its flange's flat, which lies in
 /// front of the back plane by its two straight edges across the flange's rim.
-/// Since Q3141 its flange's front and its body's front disc are one plane. The
-/// boxes round its corners share with it what the boxes round the `Z3.0` LED's
-/// do, and the far box shares nothing. Every difference is refused not
-/// manifold (Q3164).
+/// Since Q3141 its flange's front and its body's front disc are one plane.
+/// Since Q3164 its body's pipe asks the dome across its rim, and not the rim's
+/// plane, whether it leaves out where the flat cuts the pipe too. The boxes
+/// round its corners share with it what the boxes round the `Z3.0` LED's do,
+/// and the far box shares nothing. The LED less each box and what the two
+/// share add up to the LED, with the walls of each box inside it that the
+/// `Z3.0` LED's has.
 #[test]
-fn a_z15_led_shares_a_box_round_either_corner_and_less_any_box_is_refused_not_manifold() {
+fn a_z15_led_less_a_box_round_either_corner_or_far_off_and_what_the_two_share_add_up_to_the_led() {
+    let back = what_a_box_round_the_back_corner_shares(2.5);
     the_led_and_a_box_share(
         Z15,
         Z15_FRONT_CORNER,
         WHAT_A_BOX_ROUND_THE_FRONT_CORNER_SHARES,
     );
-    the_led_and_a_box_share(
-        Z15,
-        Z15_BACK_CORNER,
-        what_a_box_round_the_back_corner_shares(2.5),
-    );
+    the_led_and_a_box_share(Z15, Z15_BACK_CORNER, back);
     the_far_box_shares_nothing_with(Z15);
-    every_difference_is_refused_not_manifold(Z15, &[Z15_FRONT_CORNER, Z15_BACK_CORNER, FAR_OFF]);
+    the_led_less_each_box_and_what_they_share_add_up_to_the_led(
+        Z15,
+        &[
+            CutOut {
+                centre: Z15_FRONT_CORNER,
+                shared: WHAT_A_BOX_ROUND_THE_FRONT_CORNER_SHARES,
+                walls_inside: 4,
+            },
+            CutOut {
+                centre: Z15_BACK_CORNER,
+                shared: back,
+                walls_inside: 5,
+            },
+            THE_FAR_BOX,
+        ],
+    );
 }
 
 /// The `D3.0` LED tells the cells of its front apart since Q2974. Since Q2988
@@ -500,16 +526,24 @@ fn a_z15_led_shares_a_box_round_either_corner_and_less_any_box_is_refused_not_ma
 /// front's plane crosses its disc's in. Since Q3112 the two writings of the
 /// edge along each lead's side are one line. Since Q3141 its flange's front
 /// and its body's front disc are one plane, so no sliver of the box's top lies
-/// between them. Its box round the front corner shares with it what the
-/// `D5.0` LEDs' do, and its far box shares nothing. The LED less either box is
-/// refused not manifold (Q3164).
+/// between them. Since Q3164 its body's pipe asks the dome across its rim
+/// whether it leaves out where the flat cuts the pipe too. Its box round the
+/// front corner shares with it what the `D5.0` LEDs' do, and its far box
+/// shares nothing. The LED less either box and what the two share add up to
+/// the LED, with the walls inside it that the `D5.0` LEDs' boxes have.
 #[test]
-fn a_d3_led_6_up_shares_a_box_round_its_front_corner_and_less_it_or_the_far_box_is_refused_not_manifold()
+fn a_d3_led_6_up_less_a_box_round_its_front_corner_or_far_off_and_what_the_two_share_add_up_to_the_led()
  {
     let front_corner = [-0.23, -3.81, 6.0 - BELOW_THE_AXIS];
     the_led_and_a_box_share(D3, front_corner, WHAT_A_BOX_ROUND_THE_FRONT_CORNER_SHARES);
     the_far_box_shares_nothing_with(D3);
-    every_difference_is_refused_not_manifold(D3, &[front_corner, FAR_OFF]);
+    the_led_less_each_box_and_what_they_share_add_up_to_the_led(
+        D3,
+        &[
+            a_box_round_a_d3_leds_front_corner(front_corner),
+            THE_FAR_BOX,
+        ],
+    );
 }
 
 /// Past where its flat meets the line its front's plane crosses its disc's in
@@ -520,27 +554,37 @@ fn a_d3_led_6_up_shares_a_box_round_its_front_corner_and_less_it_or_the_far_box_
 /// edges across the flange's rim. The box shares with it what the box round a
 /// `D5.0` LED's back corner does, for a body of radius 1.5. Their difference
 /// stopped where the box's top meets the flange's rim at the front written
-/// twice (Q3126), and since Q3141 it is refused not manifold (Q3164).
+/// twice (Q3126), and after Q3141 where four edges of the dome's rim were
+/// claimed by one face (Q3164). The LED less the box and what the two share
+/// add up to the LED, with the walls inside it that a `D5.0` LED's has.
 #[test]
-fn a_d3_led_6_up_leaves_its_bodys_ellipse_off_its_flat_and_shares_its_back_corner_with_a_box() {
+fn a_d3_led_6_up_leaves_its_bodys_ellipse_off_its_flat_and_less_a_box_round_its_back_corner_adds_up()
+ {
     let back_corner = [-0.23, -4.81, 6.0];
     the_led_and_a_box_share(
         D3,
         back_corner,
         what_a_box_round_the_back_corner_shares(1.5),
     );
-    every_difference_is_refused_not_manifold(D3, &[back_corner]);
+    the_led_less_each_box_and_what_they_share_add_up_to_the_led(
+        D3,
+        &[a_box_round_a_d3_leds_back_corner(back_corner)],
+    );
 }
 
 /// Past where their flats meet the line their front's plane crosses their
 /// disc's in (Q3071), the boxes round either corner and the far boxes of three
 /// more `D3.0` LEDs were refused a piece of a face bounded by two straight
 /// sides (Q2978, Q3115). Since Q3141 the flange's front and the body's front
-/// disc of each are one plane. The box round either corner shares with it what
-/// the boxes round the `D3.0` LED 6 up's do, and the far box shares nothing.
-/// Every difference is refused not manifold (Q3164).
+/// disc of each are one plane, and since Q3164 the body's pipe asks the dome
+/// across its rim whether it leaves out where the flat cuts the pipe too. The
+/// box round either corner shares with it what the boxes round the `D3.0` LED
+/// 6 up's do, and the far box shares nothing. The LED less each box and what
+/// the two share add up to the LED, with the walls inside it that the `D3.0`
+/// LED 6 up's boxes have.
 #[test]
-fn three_more_d3_leds_share_a_box_round_either_corner_and_less_any_box_are_refused_not_manifold() {
+fn three_more_d3_leds_less_a_box_round_either_corner_or_far_off_and_what_the_two_share_add_up_to_the_led()
+ {
     for (file, front, axis) in THREE_MORE_D3 {
         let front_corner = [-0.23, front, axis - BELOW_THE_AXIS];
         let back_corner = [-0.23, front - 1.0, axis];
@@ -551,35 +595,38 @@ fn three_more_d3_leds_share_a_box_round_either_corner_and_less_any_box_are_refus
             what_a_box_round_the_back_corner_shares(1.5),
         );
         the_far_box_shares_nothing_with(file);
-        every_difference_is_refused_not_manifold(file, &[front_corner, back_corner, FAR_OFF]);
+        the_led_less_each_box_and_what_they_share_add_up_to_the_led(
+            file,
+            &[
+                a_box_round_a_d3_leds_front_corner(front_corner),
+                a_box_round_a_d3_leds_back_corner(back_corner),
+                THE_FAR_BOX,
+            ],
+        );
     }
 }
 
-/// The LED in `file` less a box of side `2 * HALF` centred on each of
-/// `centres` is refused `ResultIsNotManifold`, an edge with one face along it:
-/// where four edges of the dome's rim are claimed by one face (Q3164).
-fn every_difference_is_refused_not_manifold(file: &str, centres: &[[f64; 3]]) {
-    let (led, solid) = the_led(file);
-    for &centre in centres {
-        let mut model = led.clone();
-        let knife = a_box_round(&mut model, centre);
-        match model.fuse(
-            &[solid],
-            &[knife],
-            Rule::Difference,
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        ) {
-            Err(Error::ResultIsNotManifold { count: 1 }) => {}
-            Err(error) => panic!(
-                "{file}: less a box round {centre:?} refused {error:?}, which is not the refusal \
-                 this pins"
-            ),
-            Ok(_) => panic!(
-                "{file}: less a box round {centre:?} answers: check its volume and faces as \
-                 the_led_less_each_box_and_what_they_share_add_up_to_the_led does"
-            ),
-        }
+/// The box round a `D3.0` LED's front corner, which shares with it what the
+/// box round a `D5.0` LED's does, and four of whose walls are inside it, as
+/// they are for the `Z3.0` LED: all but the low wall square to `x` and the
+/// high wall square to `y`.
+fn a_box_round_a_d3_leds_front_corner(centre: [f64; 3]) -> CutOut {
+    CutOut {
+        centre,
+        shared: WHAT_A_BOX_ROUND_THE_FRONT_CORNER_SHARES,
+        walls_inside: 4,
+    }
+}
+
+/// The box round a `D3.0` LED's back corner, which shares with it what the
+/// box round a `D5.0` LED's does for a body of radius 1.5, and five of whose
+/// walls are inside it, as they are for the `Z3.0` LED: all but the low wall
+/// square to `x`.
+fn a_box_round_a_d3_leds_back_corner(centre: [f64; 3]) -> CutOut {
+    CutOut {
+        centre,
+        shared: what_a_box_round_the_back_corner_shares(1.5),
+        walls_inside: 5,
     }
 }
 
@@ -644,6 +691,13 @@ struct CutOut {
     shared: f64,
     walls_inside: usize,
 }
+
+/// The far box, which shares nothing with the LED and has no wall inside it.
+const THE_FAR_BOX: CutOut = CutOut {
+    centre: FAR_OFF,
+    shared: 0.0,
+    walls_inside: 0,
+};
 
 /// The LED in `file` less each box of `cut_outs` answers with one solid in a
 /// model `validate` accepts, and what is left and what the two share add up
