@@ -48,6 +48,8 @@
 //! own solids have no such edge. A builder and a fuse sweep what they will
 //! write in a model of their own first, and write nothing when it refuses.
 
+use std::f64::consts::PI;
+
 use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane,
     Point, Scale, Sphere, Surface, Torus, Vector,
@@ -177,14 +179,15 @@ fn the_sweep_refuses_the_tilted_half_disc_read_back_from_bytes() {
 /// the top 4. Whatever the fuse answers, the model is left holding the two
 /// solids it held, or every solid it made passes the sweep.
 ///
-/// Today none of them reaches that sweep. The fuse draws the edge round each
-/// piece along the pipe its run names, each face against the pipe on its own
-/// plane (Q2966): it refuses either disc as a face trimmed by a curve this
-/// cannot follow, the half disc above as a face that meets its neighbour
-/// nowhere, as two planes apart do, and the leaning half disc as an answer
-/// with an edge only one face runs along, as
-/// `a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it` pins for the
-/// two leaning pieces. Q2125 is where it goes next.
+/// The fuse draws the edge round each piece along the pipe its run names, each
+/// face against the pipe on its own plane (Q2966). It refuses either disc and
+/// the half disc above as a face trimmed by a curve this cannot follow, the
+/// refusal Q2970 is filed for on the same bar with its lid's two faces on the
+/// lid's own plane. The leaning half disc reaches the sweep and passes it: the
+/// lid and the half disc are one plane written twice round the pipe, and bake
+/// reads them as one (Q3141), as
+/// `a_half_disc_leaning_off_the_lid_answers_and_a_disc_is_refused_for_the_edge_round_it`
+/// pins for the two leaning pieces.
 #[test]
 fn a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model() {
     let above =
@@ -261,43 +264,128 @@ fn a_fuse_writes_no_piece_of_a_lid_off_the_lid_into_the_callers_model() {
 /// then refused each as an edge not drawn along its own curve.
 ///
 /// It draws that edge along the pipe its run names now, each face against the
-/// pipe on its own plane (Q2966), and still refuses both: the disc as a face
-/// trimmed by a curve this cannot follow, and the half disc as an answer with
-/// an edge only one face runs along. Each bar builds and passes the sweep, so
-/// each answer exists and each refusal is a gap; Q2125 is where it goes next.
+/// pipe on its own plane (Q2966), and refuses the disc as a face trimmed by a
+/// curve this cannot follow. It refused the half disc as an answer with an
+/// edge only one face runs along until Q3141. The half disc's arc runs along
+/// the pipe, so the lid and the half disc are one plane written twice, no
+/// further apart anywhere round the two than the sweep lets a corner sit off
+/// its plane, and bake reads them as one. The half disc's bar cut down to
+/// `z = 0` is the bar of radius 3 from 0 up to the lid, `36π`, and the fuse
+/// answers it in three faces, the wall, the floor and the one lid, in a model
+/// the sweep accepts. The disc's bar builds and passes the sweep too, so its
+/// answer exists and its refusal is a gap, the one Q2970 is filed for on the
+/// same bar with its lid's two faces on the lid's own plane.
 #[test]
-fn a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it() {
-    let mut not_refused = Vec::new();
+fn a_half_disc_leaning_off_the_lid_answers_and_a_disc_is_refused_for_the_edge_round_it() {
     for inner_first in [false, true] {
-        for (which, (mut model, built)) in ["disc", "half disc"]
-            .into_iter()
-            .zip(the_tall_bars_leaning_off_the_lid(inner_first))
-        {
-            let bar = built.unwrap_or_else(|why| panic!("{which}: the tall bar gave {why:?}"));
-            let block = a_block_whose_floor_is_at(0.0, &mut model);
+        let [disc, half_disc] =
+            the_tall_bars_leaning_off_the_lid(inner_first).map(|(mut model, built)| {
+                let bar = built.unwrap_or_else(|why| panic!("the tall bar gave {why:?}"));
+                let block = a_block_whose_floor_is_at(0.0, &mut model);
+                let fused = model.fuse(
+                    &[bar],
+                    &[block],
+                    Rule::Intersection,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                );
+                (model, fused)
+            });
 
-            let fused = model.fuse(
-                &[bar],
-                &[block],
-                Rule::Intersection,
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            );
+        let (_, fused) = disc;
+        assert!(
+            matches!(
+                fused,
+                Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
+            ),
+            "disc, inner piece first {inner_first}: {fused:?}"
+        );
 
-            if !matches!(
-                (which, &fused),
-                (
-                    "disc",
-                    Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
-                ) | ("half disc", Err(Error::ResultIsNotManifold { count: 1 }))
-            ) {
-                not_refused.push(format!(
-                    "{which}, inner piece first {inner_first}: {fused:?}"
-                ));
+        let (model, fused) = half_disc;
+        let fused = fused.unwrap_or_else(|why| {
+            panic!("half disc, inner piece first {inner_first}: refused {why:?}")
+        });
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .unwrap_or_else(|why| {
+                panic!("half disc, inner piece first {inner_first}: the sweep gave {why:?}")
+            });
+        let [made] = fused.solids()[..] else {
+            panic!(
+                "half disc, inner piece first {inner_first}: {} solids, not one",
+                fused.solids().len()
+            )
+        };
+        let faces = model
+            .solid(made)
+            .expect("a solid of this model")
+            .faces()
+            .count();
+        assert_eq!(
+            faces, 3,
+            "half disc, inner piece first {inner_first}: not the wall, the floor and one lid"
+        );
+        let (volume, error) = volume_of(&model, &[made]);
+        assert!(
+            (volume - 36.0 * PI).abs() <= error,
+            "half disc, inner piece first {inner_first}: {volume} ± {error}, and 36π is right"
+        );
+    }
+}
+
+/// The bars from `z = 0` whose lid's piece is a hair off the lid: a disc
+/// leaning `1e-14` through its corner, a half disc leaning `1e-14` along its
+/// chord, and a disc and a half disc one ulp above the lid. Each builds and
+/// passes the sweep. Each answers a union with a cube of side 2 clear of it
+/// with the bar and the cube, and an intersection with the block from
+/// `z = −1` with the bar, in a model the sweep accepts. Q2117 found the disc
+/// leaning panicking, the half disc leaning refused `Undecidable`, and the two
+/// above refused as a face that meets its neighbour nowhere (Q2125).
+#[test]
+fn a_piece_a_hair_off_the_lid_of_a_short_bar_answers_a_union_and_an_intersection() {
+    let the_bar = 36.0 * PI;
+    let knives: [(Rule, fn(&mut Model) -> SolidKey, usize, f64); 2] = [
+        (Rule::Union, a_cube_clear_of_the_bar, 2, the_bar + 8.0),
+        (
+            Rule::Intersection,
+            |model| a_block_whose_floor_is_at(-1.0, model),
+            1,
+            the_bar,
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for inner_first in [false, true] {
+        for (which, (model, built)) in the_short_bars_a_hair_off_the_lid(inner_first) {
+            let bar = built.unwrap_or_else(|why| panic!("{which}: the bar gave {why:?}"));
+            for (rule, knife, solids, right) in knives {
+                let mut model = model.clone();
+                let knife = knife(&mut model);
+
+                let answered = model
+                    .fuse(
+                        &[bar],
+                        &[knife],
+                        rule,
+                        &Policy::certified(),
+                        &mut ProvenanceLog::new(),
+                    )
+                    .and_then(|fused| {
+                        model.validate(&Policy::certified(), &mut ProvenanceLog::new())?;
+                        Ok((fused.solids().len(), volume_of(&model, fused.solids())))
+                    });
+
+                if !matches!(answered, Ok((made, (volume, error)))
+                    if made == solids && (volume - right).abs() <= error)
+                {
+                    wrong.push(format!(
+                        "{which}, inner piece first {inner_first}, {rule:?}: {answered:?}, and \
+                         {solids} solids of {right} are right"
+                    ));
+                }
             }
         }
     }
-    assert!(not_refused.is_empty(), "{not_refused:#?}");
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// The bar from `z = 0` whose disc leans a tenth through its corner, read back
@@ -320,7 +408,7 @@ fn a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it() {
 /// names now, each face against the pipe on its own plane (Q2966). Through the
 /// floor it refuses the disc as a face trimmed by a curve this cannot follow.
 /// Clear of the bar it refuses the union and the difference as an answer with
-/// an edge only one face runs along. Q2125 is where it goes next.
+/// an edge only one face runs along.
 ///
 /// Until Q2947 all of them were refused by name, by the check that the bar does
 /// not cross itself, which asked where the disc's plane crosses the bar's pipe.
@@ -1171,6 +1259,51 @@ fn the_tall_bars_leaning_off_the_lid(inner_first: bool) -> [(Model, Result<Solid
     ]
 }
 
+/// The bar from `z = 0` with the piece of its lid a hair off the lid, each
+/// named: the disc leaning `1e-14` through the circle's corner `(1, 0, 4)`,
+/// the half disc leaning `1e-14` along its chord, and the disc and the half
+/// disc one ulp above the lid.
+fn the_short_bars_a_hair_off_the_lid(
+    inner_first: bool,
+) -> [(&'static str, (Model, Result<SolidKey>)); 4] {
+    let through_the_corner = leaning_off_the_lid_through(Point::new(1.0, 0.0, 4.0), 1e-14);
+    let along_the_chord = leaning_off_the_lid_through(Point::new(0.0, 0.0, 4.0), 1e-14);
+    let above = the_lid_one_ulp_higher();
+    [
+        (
+            "disc leaning",
+            a_bar_whose_lid_is_split(
+                0.0,
+                through_the_corner,
+                inner_first,
+                a_circle_naming(pipe(1.0)),
+            ),
+        ),
+        (
+            "half disc leaning",
+            a_bar_whose_lid_is_split(
+                0.0,
+                along_the_chord,
+                inner_first,
+                a_half_circle_and_its_chord(pipe(1.0)),
+            ),
+        ),
+        (
+            "disc above",
+            a_bar_whose_lid_is_split(0.0, above, inner_first, a_circle_naming(pipe(1.0))),
+        ),
+        (
+            "half disc above",
+            a_bar_whose_lid_is_split(
+                0.0,
+                above,
+                inner_first,
+                a_half_circle_and_its_chord(pipe(1.0)),
+            ),
+        ),
+    ]
+}
+
 /// A cube of side 10 whose floor is at `z = floor`, wide enough to hold the
 /// bar's wall and tall enough to hold its lid.
 fn a_block_whose_floor_is_at(floor: f64, model: &mut Model) -> SolidKey {
@@ -1182,6 +1315,32 @@ fn a_block_whose_floor_is_at(floor: f64, model: &mut Model) -> SolidKey {
         .place_solid(block, &under_the_bar)
         .expect("the cube moves");
     block
+}
+
+/// A cube of side 2 at `(10, 10, 0)`, clear of the bar.
+fn a_cube_clear_of_the_bar(model: &mut Model) -> SolidKey {
+    let cube = model
+        .add_cube(2.0, &Policy::certified(), &mut ProvenanceLog::new())
+        .expect("a cube");
+    let away = Isometry::translation(Vector::new(10.0, 10.0, 0.0)).expect("a movement");
+    model.place_solid(cube, &away).expect("the cube moves");
+    cube
+}
+
+/// The volume of `solids` together, and how far measuring it may be off.
+fn volume_of(model: &Model, solids: &[SolidKey]) -> (f64, f64) {
+    solids.iter().fold((0.0, 0.0), |(volume, error), &solid| {
+        let measured = model
+            .solid(solid)
+            .expect("a solid of this model")
+            .measure(
+                Deflection::of(0.001).expect("a length"),
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("it measures");
+        (volume + measured.volume(), error + measured.volume_error())
+    })
 }
 
 /// The bar with its lid split by a half disc on the lid's own plane, which
