@@ -886,6 +886,10 @@ impl Assembly {
     /// [`Error::AWireWillNotLieFlatOnItsFace`] from meshing the answer, names
     /// the caller's face that face of the answer was cut from: the throwaway is
     /// dropped when this returns, so a key into it would name nothing (Q2288).
+    /// One that names an edge names the caller's edge that edge of the answer
+    /// is a piece of, and [`Error::ACrossingAlongThisEdgeCouldNotBeFollowed`]
+    /// along an edge the fuse invented is the [`Error::Geometry`] it wraps
+    /// (Q2889, [`Assembly::naming_the_callers_face_or_edge`]).
     ///
     /// # Panics
     ///
@@ -6114,7 +6118,13 @@ impl Assembly {
     /// mesh signs whose closest sum is not above zero, and none of whose
     /// corners tells which way its faces point. Whatever else meshing a shell
     /// refuses, such as [`Error::CannotMeshAFace`], naming the input face the
-    /// face it could not mesh was cut from where it names a face.
+    /// face it could not mesh was cut from where it names a face, and the input
+    /// edge an edge is a piece of where it names an edge.
+    /// [`Error::Geometry`], the marcher's own refusal, when the mesh could not
+    /// follow a crossing along an edge the fuse invented.
+    /// [`Error::TheFuseWroteABrokenAnswer`] when the mesh refuses an edge for
+    /// the faces along it, as the sweep in [`Assembly::commit`] would
+    /// ([`Assembly::naming_the_callers_face_or_edge`]).
     /// [`Error::AFaceTrimmedByACurveThisCannotFollow`]
     /// naming the input face, when no point on a shell could be placed and one
     /// met a face of another shell that nobody can follow.
@@ -6620,7 +6630,8 @@ impl Assembly {
     /// and nothing in this crate asks a length of either model of the fuse's
     /// own: the only caller of `EdgeView::length` in this crate is
     /// [`WireView::length`](crate::WireView::length), and nothing in this
-    /// crate calls that.
+    /// crate calls that. With both renamed, `cargo check -p rcad-topo --lib`
+    /// fails at that one call and nowhere else (Q2889, 2026-11-04).
     fn naming_the_callers_face_or_edge(
         &self,
         apart: &Model,
