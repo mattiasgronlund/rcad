@@ -7370,6 +7370,121 @@ impl<'f> Arrangement<'f> {
         }
     }
 
+    /// Which of two nodes on a branch two cones cross in comes first along it,
+    /// where each is the branch's meet with a plane of its own and a third
+    /// node of the face is the meet of the face's cone with both planes:
+    /// `None` everywhere else.
+    ///
+    /// **The sign of the partner cone at the third node says which way the
+    /// branch steps from the first node to the second.** Write `S` for the
+    /// face's cone, `P` for the partner, `Q₁` and `Q₂` for the first and the
+    /// second node's planes, with normals `n₁` and `n₂`, `X`, `Y` and `Z` for
+    /// the first node, the second and the third, and `R` for the box round
+    /// the three. `R` holds the straight step between each two of them, so
+    /// along a step each surface changes by its gradient at some point of `R`
+    /// dotted with the step. `X − Z` keeps `S` and `Q₁`, so it is
+    /// `τ (g_S × n₁)`, and `Y − X` keeps `S` and `P`, so it is
+    /// `σ (g_S × g_P)`, each gradient taken somewhere in `R`. Then
+    /// `−P(Z) = τ det(g_P, g_S, n₁)`, `Q₂(X) = τ det(n₂, g_S, n₁)` and
+    /// `−Q₂(X) = σ det(n₂, g_S, g_P)`. Where each determinant keeps one sign
+    /// over `R`, `σ` has the sign of `P(Z)` times the three determinants', and
+    /// `P(Z)`'s is worked out exactly from `Q₁`, `Q₂` and the two cones, never
+    /// from `Z`'s box
+    /// ([`MeetOfThree::how_one_quadric_leans_where_the_line_meets_another`]).
+    /// Where `P(Z)` is nothing, so are `τ` and then `σ`, and the three nodes are
+    /// one point. `σ (g_S × g_P)` over `R` is the step `rcad-geom` puts the two
+    /// in order by ([`Cone::which_comes_first_along_a_branch_a_step_apart`]).
+    ///
+    /// **What it is for.** The funnel file's two pointed cones of one slope,
+    /// the second turned `0.3` about `x` through `(0, 0, 4)`, meet `z = 8` and
+    /// the leaning cap's plane in four points a rounding apart near
+    /// `(−3.9541, −0.6045, 8)`. On each cone's wall the branch the two cones
+    /// cross in there meets `z = 8` and the leaning cap's plane `4e-16` apart,
+    /// in boxes that share a point, so no box put the two in order along the
+    /// branch and every fuse of the two was refused (Q3133,
+    /// `tests/a_funnel_with_a_leaning_spout.rs`). The meet of that wall with
+    /// both planes is a node of the same face, on its rim or on the line the
+    /// leaning cap crosses it in.
+    fn as_two_cuts_across_a_branch_say(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let HowItRuns::AlongABranchOfTwoCones { cones } = &self.crossings[crossing].order else {
+            return None;
+        };
+        let [own, partner] = [Surface::Cone(cones[0]), Surface::Cone(cones[1])];
+        let cut_of = |node: usize| {
+            let (surfaces, _) = self.the_one_meet_it_stands_for(node)?;
+            let mut theirs = surfaces
+                .iter()
+                .filter(|surface| **surface != own && **surface != partner);
+            let (Some(Surface::Plane(cut)), None) = (theirs.next(), theirs.next()) else {
+                return None;
+            };
+            (surfaces.contains(&own) && surfaces.contains(&partner)).then_some(*cut)
+        };
+        let cuts = [cut_of(first)?, cut_of(second)?];
+        if cuts[0] == cuts[1] {
+            return None;
+        }
+        let the_corner = [own, Surface::Plane(cuts[0]), Surface::Plane(cuts[1])];
+        let [one, other] = [first, second].map(|node| self.nodes[node].point);
+        let below = |value: Interval| {
+            let sign = value.sign();
+            matches!(sign, Decision::Pos | Decision::Neg).then_some(sign == Decision::Neg)
+        };
+        let normals = cuts.map(|cut| cut.normal().components().map(Interval::exactly));
+        (0..self.nodes.len())
+            .filter(|&corner| {
+                self.the_one_meet_it_stands_for(corner)
+                    .is_some_and(|(surfaces, _)| the_corner.iter().all(|s| surfaces.contains(s)))
+            })
+            .find_map(|corner| {
+                let room =
+                    the_box_round_both(the_box_round_both(one, other), self.nodes[corner].point);
+                let [own_way, partner_way] =
+                    [&own, &partner].map(|surface| gradient_at(surface, room).enclosure());
+                let det = |a, b, c| below(dot_of(a, cross_of_intervals(b, c)));
+                let dets = [
+                    det(partner_way, own_way, normals[0])?,
+                    det(normals[1], own_way, normals[0])?,
+                    det(normals[1], own_way, partner_way)?,
+                ];
+                let leans = [self.nodes[corner].point, self.narrowed_box_of(corner)]
+                    .into_iter()
+                    .find_map(|near| {
+                        MeetOfThree::how_one_quadric_leans_where_the_line_meets_another(
+                            [&cuts[0], &cuts[1]],
+                            &own,
+                            &partner,
+                            near,
+                        )
+                    })?;
+                if leans == Decision::Zero {
+                    return Some(Decision::Zero);
+                }
+                let leans_below = matches!(leans, Decision::Pos | Decision::Neg)
+                    .then_some(leans == Decision::Neg)?;
+                let way = cross_of_intervals(own_way, partner_way);
+                let backwards = dets
+                    .into_iter()
+                    .fold(leans_below, |so_far, det| so_far != det);
+                let step = if backwards {
+                    way.map(|side| -side)
+                } else {
+                    way
+                };
+                cones[0]
+                    .which_comes_first_along_a_branch_a_step_apart(&cones[1], one, other, step)
+                    .ok()
+                    .filter(|decided| {
+                        matches!(decided, Decision::Pos | Decision::Neg | Decision::Zero)
+                    })
+            })
+    }
+
     /// Which of two nodes on a line a plane cuts a pipe in comes first along
     /// it, where each is that line's meet with one more plane and the two
     /// more planes cross the first in parallel lines: `None` everywhere else.

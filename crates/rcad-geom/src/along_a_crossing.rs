@@ -137,7 +137,11 @@
 //! ruled cone's axis, one way round all along it, and points on it are
 //! ordered by how far round that axis each is from a place neither branch
 //! reaches (Q3124). `Cone::which_comes_first_along_a_branch_it_crosses_a_cone_in`
-//! has the argument, and a `from` on a branch has nothing to go round.
+//! has the argument, and a `from` on a branch has nothing to go round. Two
+//! points whose boxes share a point are ordered too where the caller knows a
+//! vector the step from one to the other is a multiple above nothing of, by
+//! how that step turns round the axis
+//! (`Cone::which_comes_first_along_a_branch_a_step_apart`, Q3133).
 //!
 //! # Two pipes are not a conic and still order
 //!
@@ -317,7 +321,7 @@ impl Surface {
             | WhichWayItWinds::AboutAStep(_)
             | WhichWayItWinds::CannotTell => NOTHING_IS_KNOWN,
             WhichWayItWinds::RoundALine(line) => {
-                which_comes_first_round_a_line(line, from, one, other)
+                which_comes_first_round_a_line(line, from, one, other, None)
             }
         };
         Ok((decided, measures))
@@ -1620,6 +1624,49 @@ impl Cone {
         one: PredicatePoint,
         other: PredicatePoint,
     ) -> Result<Decision> {
+        self.which_comes_first_along_a_branch(partner, one, other, None)
+    }
+
+    /// The same, where `other − one` is known to be a multiple above nothing
+    /// of some vector in `step`, so their boxes can share a point and still
+    /// be put in order.
+    ///
+    /// **Two points a step apart turn round the axis as the step turns from
+    /// the first.** The order reads a point `p` round the ruled cone's axis as
+    /// `x = (p − b)·B` and `y = (p − b)·A`, and two in one half turn from the
+    /// start by the sign of `x₁ y₂ − y₁ x₂`. With `other = one + λ s` that is
+    /// `λ (x₁ s_y − y₁ s_x)` exactly, for `s_x = s·B` and `s_y = s·A`, so for
+    /// `λ` above nothing it has the sign of `x₁ s_y − y₁ s_x`, read over
+    /// `one`'s box and `step`. Where that does not settle it the two boxes
+    /// are asked, as by the order without a step.
+    ///
+    /// **What it is for.** Two pointed cones of one slope, one leaning off the
+    /// other, meet both caps' planes near one place, and on the branch there
+    /// the meet with one cap and the meet with the other are a rounding apart,
+    /// in boxes that share a point. The arrangement in `rcad-topo` works out
+    /// which way the branch steps from one to the other from an exact sign
+    /// and hands that step here (Q3133).
+    ///
+    /// # Errors
+    ///
+    /// As [`Cone::which_comes_first_along_a_branch_it_crosses_a_cone_in`].
+    pub fn which_comes_first_along_a_branch_a_step_apart(
+        &self,
+        partner: &Self,
+        one: PredicatePoint,
+        other: PredicatePoint,
+        step: [Interval; 3],
+    ) -> Result<Decision> {
+        self.which_comes_first_along_a_branch(partner, one, other, Some(step))
+    }
+
+    fn which_comes_first_along_a_branch(
+        &self,
+        partner: &Self,
+        one: PredicatePoint,
+        other: PredicatePoint,
+        step: Option<[Interval; 3]>,
+    ) -> Result<Decision> {
         let read = match how_two_cones_off_one_axis_are_read(self, partner) {
             Ok(read) => read,
             Err(Error::Undecidable { .. }) => return Ok(NOTHING_IS_KNOWN),
@@ -1642,7 +1689,9 @@ impl Cone {
             },
             backwards: branches.the_loop_is_where_the_axis_points(&read.ruled) == ruled_first,
         };
-        Ok(which_comes_first_round_a_line(line, start, one, other))
+        Ok(which_comes_first_round_a_line(
+            line, start, one, other, step,
+        ))
     }
 
     /// Where this cone and `other` are of one slope, mirror images of each
@@ -2487,11 +2536,17 @@ impl Predicate for HowThreeOnACurveWind {
 /// the loop. A point the two readings cannot place gets the answer a box
 /// straddling it gets: how far either of the two is from the other is not
 /// what was measured, so the enclosure is not handed on.
+///
+/// Where `step` holds a vector that `other − one` is a multiple above nothing
+/// of, two in one half are first ordered by how that step turns from `one`
+/// ([`RoundALine::turns_by_a_step`]), and by how they turn from each other
+/// only where that cannot say.
 fn which_comes_first_round_a_line(
     line: RoundALine,
     from: PredicatePoint,
     one: PredicatePoint,
     other: PredicatePoint,
+    step: Option<[Interval; 3]>,
 ) -> Decision {
     match [one, other].map(|place| how_far_round(line, from, place)) {
         [HowFarRound::AtTheStart, HowFarRound::AtTheStart] => Decision::Zero,
@@ -2505,7 +2560,12 @@ fn which_comes_first_round_a_line(
             // Plain variants and no `name @ (...)`: `just check-wildcards` does
             // not see a variant named inside one, and counts the `other` arm
             // after it as a wildcard over it (§40).
-            let turned = line.turns(one, other);
+            let by_the_step = step.map_or(NOTHING_IS_KNOWN, |step| line.turns_by_a_step(one, step));
+            let turned = match by_the_step {
+                Decision::Pos | Decision::Neg => by_the_step,
+                Decision::Zero | Decision::Undecidable { .. } => line.turns(one, other),
+                unhandled => unreachable!("unhandled decision: {unhandled:?}"),
+            };
             match turned {
                 Decision::Zero => {
                     let faced = line.faces(one, other);
@@ -2581,6 +2641,28 @@ impl RoundALine {
             asks: WhatIsAsked::HowTheyTurn,
         })
         .0
+    }
+
+    /// [`turns`](Self::turns) for `place` and a point a multiple above nothing
+    /// of `step` past it, read off `place`'s box and `step` alone:
+    /// `x₁ s_y − y₁ s_x`, for `place`'s two readings and the step's along the
+    /// same two ways ([`HowTwoPointsSitRoundALine`]), is the turn between the
+    /// two over that multiple.
+    ///
+    /// No exact level: `step` is an enclosure, worked out by the caller.
+    fn turns_by_a_step(self, place: PredicatePoint, step: [Interval; 3]) -> Decision {
+        let readings = self.line.readings_on_intervals();
+        let at = place.enclosure();
+        let [x, y] = readings.map(|(from, way)| {
+            dot_enclosing(
+                core::array::from_fn(|axis| at[axis] - Interval::exactly(from[axis])),
+                way,
+            )
+        });
+        let [x_step, y_step] = readings.map(|(_, way)| dot_enclosing(step, way));
+        let turned = x * y_step - y * x_step;
+        let ahead = if self.backwards { -turned } else { turned };
+        ahead.sign()
     }
 
     /// [`Decision::Pos`] where two points that [`turns`](Self::turns) put at
