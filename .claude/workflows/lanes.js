@@ -1322,13 +1322,13 @@ The verifier's check (JSON): ${JSON.stringify(prior.check)}`
 // must start with the exact text `.claude/settings.json` allows. The steps are
 // the one argument a shell would have to quote: a row's text holds quotes,
 // backticks and `§`. So they travel as a file the lander writes with the Write
-// tool, one word to a line, which no shell ever reads (§384.2).
+// tool, as JSON, which no shell ever reads (§384.2, Q3157).
 function LAND(lane, prior) {
   const r = prior.report
   const write = r.rows.length
-    ? `First run git rev-parse --show-toplevel. Then, with the Write tool, write the lines between the two dashed lines below to target/land-steps.txt under the path it printed, exactly as they stand: one word to a line, a + line between steps, nothing added and nothing left out.
+    ? `First run git rev-parse --show-toplevel. Then, with the Write tool, write the text between the two dashed lines below to target/land-steps.txt under the path it printed, exactly as it stands: it is JSON, an array with one array of words for each step. Nothing added and nothing left out.
 ----------
-${r.rows.map((step) => step.join('\n')).join('\n+\n')}
+${stepsJson(r.rows)}
 ----------
 `
     : 'The lane left no rows to add, so there is no steps file to write.\n'
@@ -1345,16 +1345,20 @@ function landCommand(lane, prior) {
   const answers = answeredBy(lane, prior)
   const undone = leftUndoneBy(lane, r)
   const steps = r.rows.length
-    ? `--steps target/land-steps.txt --steps-sha256 ${sha256Hex(r.rows.map((step) => step.join('\n')).join('\n+\n'))} `
+    ? `--steps target/land-steps.txt --steps-sha256 ${sha256Hex(JSON.stringify(r.rows))} `
     : ''
   return `mise exec -- just land ${steps}${answers.length ? `--answers ${answers.join(',')} ` : ''}${undone.length ? `--left-undone ${undone.join(',')} ` : ''}${lane.queueId} ${branchOf(lane)} ${r.landed_sha} ${mergeBranchOf(lane)} ${treesOf(prior).join(' ')}`
 }
 
+// `land.py` hashes the parsed JSON written compactly, which is the bytes
+// JSON.stringify writes, so the layout here costs nothing (Q3157).
+function stepsJson(rows) {
+  return `[\n${rows.map((step) => `  ${JSON.stringify(step)}`).join(',\n')}\n]`
+}
+
 // Pure JS: the script has no Node API access, so this cannot reach for
-// `crypto`. `land.py` hashes the file after the same trim -- trailing blank
-// lines and trailing lone `+` lines dropped, joined back with `\n` -- so a
-// trailing newline the Write tool adds, or a `+` with no step after it,
-// costs nothing; only a changed word or line does (Q1409, Q3068).
+// `crypto`. For the older line form `land.py` still hashes after trimming
+// trailing blank lines and lone `+` lines (Q1409, Q3068).
 function sha256Hex(text) {
   const bytes = utf8Bytes(text)
   const k = [

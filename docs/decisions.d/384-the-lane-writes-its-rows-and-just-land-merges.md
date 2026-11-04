@@ -81,6 +81,17 @@ the shape of each step before it sends a lander (`stepsProblem`). Rows it
 cannot send go to the Opus merger. `land.py` checks them again and stops at
 `steps`.
 
+**Since Q3157 the file is JSON, not lines with a `+` between steps.** The
+line form had a grammar the lander had to know, and three landers broke it
+(Q2923 put a `+` inside a step, Q3059 after the last, and the Q3007 lander put
+one between every line of a one-step block, which showed no `+` to copy). The
+brief now holds `[["add", "2.2", ...], ["after", ...]]` and says only to copy
+it. `land.py` parses it and hashes the array written compactly
+(`json.dumps(..., separators=(",", ":"), ensure_ascii=False)`), the same bytes
+as `JSON.stringify` in `lanes.js`, so spacing and a trailing newline cost
+nothing. A file that does not start with `[` is still read in the line form,
+with Q3068's trim, so a file written the old way still lands.
+
 ### 384.3 A lander that throws goes to the Opus merger
 
 A new agent type reaches only a `claude` process started after its file

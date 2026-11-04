@@ -18,10 +18,10 @@ for the result.
 
 1. When your brief gives steps, run `git rev-parse --show-toplevel`, then write
    the steps with the Write tool to `target/land-steps.txt` under the path it
-   printed. Copy them exactly as your brief has them: one word to a line, a `+`
-   line between steps, no line added, dropped or changed. A `+` line goes only
-   between two steps, never after the last: a lone `+` at the end is not a step
-   (`just land` drops it before it checks the hash, but do not rely on that).
+   printed. Copy them exactly as your brief has them:
+   it is JSON, an array with one array of words for each step. Add, drop and
+   change nothing. Spacing and line breaks do not matter to `just land`; a
+   changed word does.
 2. Run the `mise exec -- just land ...` line your brief gives, exactly as it
    stands, once: one plain Bash call in the foreground, `timeout` 600000, no
    pipe and no redirect. That form is what `.claude/settings.json` allows, so

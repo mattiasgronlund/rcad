@@ -23725,6 +23725,21 @@ check-land-selftest:
     grep -qF 'Q1405' <<<"$(field not_merged_because)" || fail "the steps-sha stop does not print the file it read, so an id swapped for another of the same length is invisible in the stop"
     ! git -C "$at/hub" rev-parse -q --verify merge-x >/dev/null || fail "it branched before it checked the steps file's hash"
 
+    fixture steps-json
+    json_sha=$(python3 -c 'import hashlib, json; print(hashlib.sha256(json.dumps([["add", "2.2", "sonnet", "justfile", "small a row the lane left, ending in §384"]], separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest())')
+    printf '[\n  ["add", "2.2", "sonnet",\n   "justfile", "small a row the lane left, ending in §384"]\n]\n\n' >"$at/lander/target/land-steps.txt"
+    run --steps target/land-steps.txt --steps-sha256 "$json_sha" Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "a one-step JSON steps file, laid out as a lander might, did not land: $(field stop) (Q3157)"
+    [ "$(field rows_added)" = '["Q900 tier 2.2 sonnet: small from/Q1 a row the lane left, ending in §384"]' ] \
+        || fail "a one-step JSON steps file changed the rows added: $(field rows_added)"
+
+    fixture steps-json-word-changed
+    printf '[["add", "2.2", "sonnet", "justfile", "small a row the lane left, ending in §385"]]\n' >"$at/lander/target/land-steps.txt"
+    run --steps target/land-steps.txt --steps-sha256 "$json_sha" Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    stopped steps-sha
+    grep -qF '§385' <<<"$(field not_merged_because)" || fail "the steps-sha stop does not print the JSON file it read"
+    ! git -C "$at/hub" rev-parse -q --verify merge-x >/dev/null || fail "it branched before it checked the JSON steps file's hash"
+
     fixture shared
     second_lane
     hold_lock

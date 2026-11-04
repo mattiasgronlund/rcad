@@ -198,7 +198,8 @@ def parsed(argv):
 
 
 def read_steps(path, expected_sha256):
-    """The lane's steps, one word to a line and a `+` line between steps, as the lander wrote them.
+    """The lane's steps as the lander wrote them: a JSON array (`json_steps`, what `lanes.js`
+    sends since Q3157) or one word to a line with a `+` line between steps (`line_steps`).
 
     One word to a line is so that no word is ever quoted: a row's text holds
     quotes, backticks and `§`, and the lander copies it into a file rather than
@@ -219,6 +220,52 @@ def read_steps(path, expected_sha256):
             text = f.read()
     except OSError as error:
         raise Stop("steps", f"cannot read the steps file {path}: {error}")
+    if text.lstrip().startswith("["):
+        steps = json_steps(path, text, expected_sha256)
+    else:
+        steps = line_steps(path, text, expected_sha256)
+    if not steps:
+        return []
+    for number, step in enumerate(steps, start=1):
+        text = " ".join(step)
+        if not step or "" in step:
+            raise Stop("steps", f"step {number} of {path} is empty or holds a blank line: '{text}'")
+        verb = step[0]
+        if verb not in STEP_ARGS:
+            raise Stop("steps", f"step {number} of {path} is '{text}': a lane's steps are add, after "
+                                f"and tag, and just land writes the done steps itself, the answered rows' too")
+        if len(step) - 1 != STEP_ARGS[verb]:
+            raise Stop("steps", f"step {number} of {path} is '{text}': {verb} takes "
+                                f"{STEP_ARGS[verb]} words after it, one to a line, and it has {len(step) - 1}")
+    return steps
+
+
+def json_steps(path, text, expected_sha256):
+    """Steps written as a JSON array of arrays of words: `[["add", "2.2", ...], ["after", ...]]`.
+
+    The lander copies this with no grammar to know (Q3157): no `+` line, so a
+    one-step block cannot mislead it into adding one. The hash is of the
+    parsed value written compactly, so spacing, line breaks and a trailing
+    newline in the copy change nothing; `lanes.js` hashes `JSON.stringify`
+    of the same rows, which writes the same bytes.
+    """
+    try:
+        steps = json.loads(text)
+    except ValueError as error:
+        raise Stop("steps", f"{path} starts with [ but is not JSON: {error}; what it read: {text!r}")
+    compact = json.dumps(steps, separators=(",", ":"), ensure_ascii=False)
+    actual_sha256 = hashlib.sha256(compact.encode("utf-8")).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise Stop("steps-sha", f"{path} hashes to {actual_sha256}, not the {expected_sha256} lanes.js "
+                                f"computed; what it read: {text!r}")
+    if not isinstance(steps, list) or not all(
+        isinstance(step, list) and all(isinstance(word, str) for word in step) for step in steps
+    ):
+        raise Stop("steps", f"{path} is JSON but not an array of steps, each an array of words: {text!r}")
+    return steps
+
+
+def line_steps(path, text, expected_sha256):
     lines = [line.rstrip() for line in text.split("\n")]
     while lines and lines[-1] in ("", "+"):
         lines.pop()
@@ -234,17 +281,6 @@ def read_steps(path, expected_sha256):
             steps.append([])
         else:
             steps[-1].append(line)
-    for number, step in enumerate(steps, start=1):
-        text = " ".join(step)
-        if not step or "" in step:
-            raise Stop("steps", f"step {number} of {path} is empty or holds a blank line: '{text}'")
-        verb = step[0]
-        if verb not in STEP_ARGS:
-            raise Stop("steps", f"step {number} of {path} is '{text}': a lane's steps are add, after "
-                                f"and tag, and just land writes the done steps itself, the answered rows' too")
-        if len(step) - 1 != STEP_ARGS[verb]:
-            raise Stop("steps", f"step {number} of {path} is '{text}': {verb} takes "
-                                f"{STEP_ARGS[verb]} words after it, one to a line, and it has {len(step) - 1}")
     return steps
 
 
