@@ -3101,7 +3101,17 @@ impl Assembly {
     /// off along `(−0.87, 0.5, −8.7)`, and that dotted with its chord is
     /// `12.9`.
     ///
-    /// `None` for a side whose other surface is not a plane, which may cross the
+    /// **A side is counted where any plane carries it**, whatever else does. It
+    /// lies on the face's own skin, so it is an arc of that plane's crossing
+    /// with the skin, or a ruling of it. The rim of the `D5.0` LED's body is
+    /// carried by its dome's ball and the rim's plane, since one name serves
+    /// the ball's arcs and the pipe's (Q3104). Read off the first surface
+    /// other than the skin, the ball, the pipe's ring along the rim was not
+    /// counted, and the pipe stayed in the pieces the cuts made it, with the
+    /// thin loop the ball and the pipe cross in left among its edges
+    /// (`an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`, Q3120).
+    ///
+    /// `None` for a side no plane carries, whose other surface may cross the
     /// skin in a curve that turns back on itself; for an end on the axis, which
     /// has no angle; and for an arc a rounding long that sets off square to its
     /// chord.

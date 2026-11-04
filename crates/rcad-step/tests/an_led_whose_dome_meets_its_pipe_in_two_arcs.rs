@@ -111,19 +111,28 @@
 //!   whose sides run along one input edge are now one conic, and where one
 //!   line meets that conic the ball's and the pipe's names are one corner
 //!   (Q3104), so every edge of the rim has two faces on it. Every difference
-//!   still stops refused `DynamicRangeTooWide`, at a ratio of `1.8e16`, now
-//!   on thin strips of the body's pipe. The lead's sides `y = 0.2` and
+//!   then stopped refused `DynamicRangeTooWide`, at a ratio of `1.8e16`, on
+//!   thin strips of the body's pipe. The lead's sides `y = 0.2` and
 //!   `y = -0.2` are each stored twice, a rounding apart, and each copy cuts
 //!   the pipe along its own line, `6.7e-16` from the other's. The rings,
-//!   slopes, loop and rim across the pipe cut each strip in edges that short,
-//!   and pieces of one input face are joined back only where they are flat.
+//!   slopes, loop and rim across the pipe cut each strip in edges that short.
 //!   Under a tolerant policy, which lets that range through, every difference
-//!   stops where the ball and the pipe are too nearly tangent to follow the
+//!   stopped where the ball and the pipe are too nearly tangent to follow the
 //!   thin loop they cross in. That loop is an edge the fuse invented, so there
 //!   is no edge of the LED to name. The refusal used to be
 //!   `ACrossingAlongThisEdgeCouldNotBeFollowed`, naming a key of the model
 //!   the fuse meshes its answer in, which the caller's model did not hold.
-//!   It is now the walk's own `Error::Geometry` (Q2889).
+//!   It was then the walk's own `Error::Geometry` (Q2889). Both refusals came
+//!   from the pipe staying in the 139 pieces the cuts made it, which kept the
+//!   strips' short edges and the loop's bottom branch as edges of the answer.
+//!   Pieces of a pipe are joined back across a band only where each ring of
+//!   the band can be counted round the axis, and a side was counted by the
+//!   first surface carrying it other than the pipe. Every side of the ring
+//!   along the rim is carried by the ball and the rim's plane, so it was read
+//!   off the ball, and the ring was not counted. A side is now counted by any
+//!   plane that carries it, the pipe is joined into one face with a seam, and
+//!   every difference answers under either policy, keeps the LED's faces and
+//!   the box's walls inside it, and adds up to the LED (Q3120).
 //! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
 //!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
 //!   rounding apart in direction. Q2938's road answers that triple, and the
