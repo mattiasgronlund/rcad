@@ -298,3 +298,45 @@ to `8.2e-11`. The sixth face's middle came out exactly on an `f64` and owes
 move a bit. `how_far_the_volume_rounded` reads the same expansion as before,
 now handed in, and the face's exact vector area is the same sum, split out as
 `twice_its_vector_area_exactly`.
+
+**What the exact centroid sums cost.** *2026-11-04, Q550.* Nobody timed the
+change. A probe (an example of `rcad-topo`, not kept) built `a738fa55` (before
+the sums) and `c21f6088` (after) in release mode, each in a worktree of its
+own, and ran in turns, the two commits alternating twelve times, with `uptime`
+written before and after each run. It times `measure` on the whole solid and
+`measure_one_face` on every face in turn, at a deflection of `0.1`, each the
+fastest of seven batches. Shapes: the cube of side two, the turned cube of side
+three, the plate with a hole plain and turned, the notched extrusion, the cube
+a million out, the cube of side two turned and put a million out (the far
+turned cube), and a prism on a 200-sided polygon (202 faces) plain and
+turned. The load was 21 to 45 on 24 cores through the run, with two Opus
+lanes building, so a single run swings by two times either way. The figure
+below is each commit's fastest of the twelve, which load only raises. The
+medians of the twelve are noisier: for `measure` they put the ratio from
+`0.80` to `1.57`, so the gap there is within the noise of one median, while
+for `measure_one_face` every median ratio is above `1.5`. The logs were kept
+in the scratchpad (`log_before.txt` and `log_after.txt`) and die with it;
+what is kept is this table. Microseconds, before then after, and the ratio:
+
+| Shape | `measure` | `measure_one_face`, all faces |
+|---|---|---|
+| cube of side two | 38.7, 43.9, x1.13 | 18.6, 40.0, x2.15 |
+| turned cube of side three | 41.4, 49.1, x1.19 | 20.2, 49.9, x2.47 |
+| plate with a hole | 85.7, 98.1, x1.14 | 40.1, 87.4, x2.18 |
+| turned plate with a hole | 94.5, 115.1, x1.22 | 43.5, 114.7, x2.64 |
+| notched extrusion | 62.3, 71.4, x1.15 | 29.3, 63.9, x2.18 |
+| cube a million out | 38.4, 43.9, x1.14 | 18.2, 39.9, x2.19 |
+| far turned cube | 38.2, 43.9, x1.15 | 18.2, 40.0, x2.20 |
+| prism, 202 faces | 2553.9, 3176.1, x1.24 | 1852.1, 3447.3, x1.86 |
+| turned prism, 202 faces | 2714.0, 3310.8, x1.22 | 1929.2, 3857.0, x2.00 |
+
+So the exact centroid sums cost the whole-solid `measure` 13 to 24 percent,
+and cost `measure_one_face` about double, 1.9 to 2.6 times, and the face is
+where the exact weights (a cross product and a dot with `N` per triangle, then
+a second pass over the fan) are summed. Neither depends much on how far out
+the solid is or whether it is turned. The ratio does not grow with the number
+of faces: the 202-face prism is no worse than the cube, and for `measure_one_face`
+it is better. Between the two commits `measure.rs` changed by the exact sums
+and the wobble built on them, so the ratio is theirs. An absolute figure from
+a machine under this load is not one to quote; the ratio is the finding, and a
+quiet machine would tighten it.
