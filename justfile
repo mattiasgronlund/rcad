@@ -15136,7 +15136,9 @@ fmt:
 # **Never kache's store**, which sits beside `targets/` on the same disk. A
 # `root` or `artifacts` that holds the store or sits inside it is refused, and
 # nothing is touched but the directories two levels under `root`, the
-# directories beside a `.cargo-lock` under `artifacts`, a tree's real
+# directories beside a `.cargo-lock` under `artifacts` (also those whose build
+# directory is gone, under the same idle rules, and one with no `.cargo-lock`
+# under it is kept; Q3118), a tree's real
 # `target/debug` and `target/release`, and this recipe's own `.clearing-*` and
 # `.*-replaced-by-a-link` leftovers.
 #
@@ -15442,6 +15444,37 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
     done
     echo "$(numfmt --to=iec "$cleared") cleared; $kept build directories kept"
 
+    # Link destinations whose build directory is gone: a tree pruned before
+    # 476.6, or one that has not built since the boot. Their files go under the
+    # rules of a build directory, with the destination itself as the directory
+    # asked about, and the directories and lock files stay (476.5). One with no
+    # `.cargo-lock` under it is kept, as any directory is that says nothing
+    # about whether a cargo is building.
+    cleared=0
+    kept=0
+    for copies in "$artifacts"/*/*/; do
+        copies=${copies%/}
+        [ ! -e "$root/${copies#"$artifacts"/}" ] || continue
+        in_use "$copies" .cargo-lock
+        if [ -n "$busy" ]; then
+            keep "$busy" "$copies"
+            continue
+        fi
+        mapfile -t dirs < <(find "$copies" -mindepth 2 -name .cargo-lock -printf '%h\n')
+        if [ "${#dirs[@]}" -eq 0 ] || [ -z "$(find "${dirs[@]}" ! -type d ! -name '.cargo-*lock' -print -quit)" ]; then
+            release
+            keep "only its lock files are left, so there is nothing to clear" "$copies"
+            continue
+        fi
+        size=$(du -scb -- "${dirs[@]}" | tail -n 1 | cut -f1)
+        find "${dirs[@]}" ! -type d ! -name '.cargo-*lock' -delete
+        find "${dirs[@]}" -mindepth 1 -type d -empty -delete
+        release
+        echo "cleared $(numfmt --to=iec "$size"): $copies, a link destination with no build directory"
+        cleared=$((cleared + size))
+    done
+    echo "$(numfmt --to=iec "$cleared") cleared from link destinations with no build directory; $kept kept"
+
 # Pins which build directories `clean-targets` clears, which it keeps, and that
 # it never touches kache's store (§474.11).
 #
@@ -15581,6 +15614,30 @@ check-clean-targets-selftest:
     copy_running=${pids[-1]}
     old "$art/16/running"
 
+    # Link destinations whose build directory is gone (Q3118): an idle one,
+    # one with a fresh file, one a cargo holds the lock of, one a program runs
+    # from, one with no lock file at all, and one with only lock files left.
+    copies 21/gone debug
+    printf '{}\n' >"$art/21/gone/.rustc_info.json"
+    old "$art/21/gone"
+    gone_lock="$art/21/gone/debug/.cargo-lock"
+    gone_inode=$(stat -c %i "$gone_lock")
+    copies 22/gonefresh debug
+    printf 'copied a moment ago\n' >"$art/22/gonefresh/debug/fresh"
+    copies 23/gonelock debug
+    exec {gonelock}<"$art/23/gonelock/debug/.cargo-lock"
+    flock -n "$gonelock"
+    copies 24/gonerunning debug
+    run_from "$art/24/gonerunning/debug/examples/probe-run"
+    gone_running=${pids[-1]}
+    old "$art/24/gonerunning"
+    mkdir -p "$art/25/gonenolock/doc"
+    printf 'docs\n' >"$art/25/gonenolock/doc/index.html"
+    old "$art/25/gonenolock"
+    copies 26/gonecleared debug
+    find "$art/26/gonecleared" ! -type d ! -name '.cargo-*lock' -delete
+    old "$art/26/gonecleared"
+
     # The trees, each made before the hook and so with real directories where
     # its links belong. `swap` is idle and goes; every other tree with a real
     # directory keeps it for one reason; `linked` has its links and what a run
@@ -15705,6 +15762,8 @@ check-clean-targets-selftest:
         || fail "the build directory kept for a running nextest was not reported as kept"
     [ -f "$art/13/linked/debug/tool" ] \
         || fail "a link destination was cleared while a nextest was running"
+    [ -f "$art/21/gone/debug/tool" ] \
+        || fail "a link destination with no build directory was cleared while a nextest was running whose tree is unknown"
     [ -d "$trees/swap/target/debug" ] && [ ! -L "$trees/swap/target/debug" ] \
         || fail "an idle tree's target/debug was replaced while a nextest was running, which may be about to run a binary from it"
     grep -qxF "kept (a cargo-nextest runs from $(realpath -e .), which is in none of the worktrees, so which build directory it uses is unknown): $trees/swap/target/debug" <<<"$got" \
@@ -15720,7 +15779,7 @@ check-clean-targets-selftest:
     git -C "$repo2" config user.email t@t
     git -C "$repo2" config user.name t
     git -C "$repo2" commit -q --allow-empty -m root
-    for name in nx-a nx-b; do
+    for name in nx-a nx-b nx-c; do
         git -C "$repo2" worktree add -q --detach "$dir/trees2/$name"
         mkdir -p "$dir/trees2/$name/target/debug/deps" "$dir/trees2/$name/sub"
         : >"$dir/trees2/$name/target/debug/.cargo-lock"
@@ -15734,21 +15793,40 @@ check-clean-targets-selftest:
         old "$root2/$key"
     done
     mkdir -p "$dir/zram2/kache" "$art2"
+    for key in 27/nx-c 28/nobody; do
+        mkdir -p "$art2/$key/debug"
+        : >"$art2/$key/debug/.cargo-lock"
+        head -c 4096 /dev/zero >"$art2/$key/debug/tool"
+        old "$art2/$key"
+    done
     {
         printf '%s\t%s\t%s\n' "$dir/trees2/nx-a" "$root2/1e/nx-a" "$dir/trees2/nx-a/target"
         printf '%s\t%s\t%s\n' "$dir/trees2/nx-b" "$root2/1f/nx-b" "$dir/trees2/nx-b/target"
+        printf '%s\t%s\t%s\n' "$dir/trees2/nx-c" "$root2/27/nx-c" "$dir/trees2/nx-c/target"
     } >>"$dir/stub-keys"
     ( cd "$dir/trees2/nx-a/sub" && exec "$dir/bin/fx-nextest" 300 ) &
     nextest=$!
     pids+=("$nextest")
+    ( cd "$dir/trees2/nx-c/sub" && exec "$dir/bin/fx-nextest" 300 ) &
+    nextest_c=$!
+    pids+=("$nextest_c")
     for _ in $(seq 100); do
         [ "$(readlink "/proc/$nextest/cwd" 2>/dev/null || true)" = "$dir/trees2/nx-a/sub" ] \
-            && [ "$(cat "/proc/$nextest/comm" 2>/dev/null || true)" = fx-nextest ] && break
+            && [ "$(readlink "/proc/$nextest_c/cwd" 2>/dev/null || true)" = "$dir/trees2/nx-c/sub" ] \
+            && [ "$(cat "/proc/$nextest/comm" 2>/dev/null || true)" = fx-nextest ] \
+            && [ "$(cat "/proc/$nextest_c/comm" 2>/dev/null || true)" = fx-nextest ] && break
         sleep 0.05
     done
     got=$(just clean-targets "$root2" "$dir/zram2/kache" fx-nextest "$art2" "$repo2" 2>&1) || fail "a run with a nextest in one tree exited non-zero"
-    kill "$nextest"
+    kill "$nextest" "$nextest_c"
     wait "$nextest" 2>/dev/null || true
+    wait "$nextest_c" 2>/dev/null || true
+    [ -f "$art2/27/nx-c/debug/tool" ] \
+        || fail "a link destination with no build directory was cleared while a nextest ran in its tree"
+    grep -qxF "kept (a cargo-nextest is running in the tree that uses it, and between two of its tests no program runs from it): $art2/27/nx-c" <<<"$got" \
+        || fail "the link destination with no build directory of the tree a nextest runs in was not reported as kept for it"
+    [ ! -e "$art2/28/nobody/debug/tool" ] \
+        || fail "a link destination no tree uses was kept because a nextest runs in a tree"
     [ -f "$root2/1e/nx-a/debug/deps/artifact" ] \
         || fail "the build directory of the tree a nextest runs in was cleared"
     grep -qxF "kept (a cargo-nextest is running in the tree that uses it, and between two of its tests no program runs from it): $root2/1e/nx-a" <<<"$got" \
@@ -15830,6 +15908,35 @@ check-clean-targets-selftest:
         || fail "the build directory whose link destination a program runs from was not reported as kept"
     grep -qE "^[0-9.]+K cleared; 9 build directories kept$" <<<"$got" \
         || fail "the tally is wrong, so a run that found nothing would read like a tidy machine"
+
+    [ ! -e "$art/21/gone/debug/tool" ] && [ ! -e "$art/21/gone/debug/examples" ] \
+        || fail "an idle link destination with no build directory was kept"
+    [ -d "$art/21/gone/debug" ] && [ "$(stat -c %i "$gone_lock")" = "$gone_inode" ] \
+        || fail "a link destination with no build directory was removed or lost its lock file (476.5)"
+    [ -f "$art/21/gone/.rustc_info.json" ] \
+        || fail "a file beside the profiles of a link destination with no build directory was deleted"
+    grep -qE "^cleared [0-9.]+K: $art/21/gone, a link destination with no build directory$" <<<"$got" \
+        || fail "the link destination with no build directory was not reported as cleared"
+    [ -f "$art/22/gonefresh/debug/tool" ] \
+        || fail "a link destination with no build directory was cleared with a file in it written a moment ago"
+    grep -qxF "kept (something in it changed in the last 30 minutes): $art/22/gonefresh" <<<"$got" \
+        || fail "the link destination with a fresh file was not reported as kept"
+    [ -f "$art/23/gonelock/debug/tool" ] \
+        || fail "a link destination with no build directory was cleared while a cargo held its .cargo-lock"
+    grep -qxF "kept (a cargo is building in it, holding $art/23/gonelock/debug/.cargo-lock): $art/23/gonelock" <<<"$got" \
+        || fail "the link destination a cargo holds the lock of was not reported as kept"
+    [ -f "$art/24/gonerunning/debug/examples/probe-run" ] \
+        || fail "a link destination with no build directory was cleared while a program was running from it"
+    grep -qxF "kept (process $gone_running is running a program from it): $art/24/gonerunning" <<<"$got" \
+        || fail "the link destination a program runs from was not reported as kept"
+    [ -f "$art/25/gonenolock/doc/index.html" ] \
+        || fail "a link destination with no .cargo-lock anywhere in it was cleared"
+    grep -qxF "kept (no .cargo-lock in it, so whether a cargo is building in it cannot be read): $art/25/gonenolock" <<<"$got" \
+        || fail "the link destination with no .cargo-lock was not reported as kept"
+    grep -qxF "kept (only its lock files are left, so there is nothing to clear): $art/26/gonecleared" <<<"$got" \
+        || fail "the link destination with only lock files left was not reported as kept"
+    grep -qE "^[0-9.]+K cleared from link destinations with no build directory; [0-9]+ kept$" <<<"$got" \
+        || fail "the tally of link destinations with no build directory is missing"
 
     for name in debug release; do
         [ "$(readlink "$trees/swap/target/$name")" = "$art/17/swap/$name" ] && [ -d "$art/17/swap/$name" ] \
