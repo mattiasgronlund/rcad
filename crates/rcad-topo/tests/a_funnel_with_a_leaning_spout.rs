@@ -28,8 +28,10 @@
 //! it orders two of the four points along a branch that reaches each cone's
 //! wall there by an exact sign too, but every fuse of the pair is still
 //! refused, now finding a point inside a piece of a face a rounding across.
-//! With the leaning one ten high the caps' rims are apart, and every fuse is
-//! refused marching along that branch.
+//! With the leaning one ten high the caps' rims are apart. Every fuse of that
+//! pair was refused marching along that branch until row Q3134, which walks a
+//! run between two corners on a branch one straight line of a cone at a time,
+//! and every fuse is still refused, now meshing the answer.
 //!
 //! A third shape came with row Q2818: two pointed cones of different slopes,
 //! the narrower leaning off the wider, which cross in a loop and two branches
@@ -182,26 +184,50 @@ const NO_POINT_INSIDE_A_PIECE_A_ROUNDING_ACROSS: &str =
 /// the fuse ordered neither the loop, which was refused as not a conic, nor
 /// either branch. Since Q3124 it orders both round the ruled cone's axis.
 ///
+/// The upright cone's wall puts two corners on the branch beyond the flat
+/// surface that holds it apart from the loop, its meets with `z = 8` at
+/// `(±3.9541, −0.6045, 8)`, and the leaning cone's wall those two and its
+/// meets with the leaning cap's plane at `(±4.9171, −0.9068, 10)`. The run
+/// between the two at `z = 8` passes about `3e-8` from the loop near
+/// `(±1.5954, 0.1209, 3.2)` and turns a right angle there. Until row Q3134
+/// that run was marched, and every fuse was refused as no step getting on
+/// towards its other corner: past the turn a trial settled onto the loop, and
+/// a shorter one landed anywhere in the `6e-8` a point on both cones to a
+/// rounding can sit off the crossing there. Since Q3134 `walk` places each
+/// point of the run on a straight line of a cone instead, where that line
+/// meets the branch.
+///
 /// **Every fuse is still refused**, under every rule both ways round, now
-/// marching from one corner to the other of a run on the branch beyond the flat
-/// surface that holds it apart from the loop: no step from the first gets on
-/// towards the second. The upright cone's wall puts two corners on that
-/// branch, its meets with `z = 8` at `(±3.9541, −0.6045, 8)`, and the leaning
-/// cone's wall those two and its meets with the leaning cap's plane at
-/// `(±4.9171, −0.9068, 10)`.
+/// meshing the answer: the union with the upright cone first and the upright
+/// cone less the leaning one because a curved face is bounded by one curve
+/// right round it, the union the other way round because a face's boundary
+/// crosses itself, and the intersection both ways round and the leaning cone
+/// less the upright one because a curved face with a hole goes too far round.
 #[test]
-fn two_pointed_cones_eight_and_ten_high_one_leaning_off_the_other_are_refused_marching_along_a_branch()
- {
+fn two_pointed_cones_eight_and_ten_high_one_leaning_off_the_other_are_refused_meshing_the_answer() {
     assert_eq!(
         every_fuse_of(two_pointed_cones_eight_and_ten_high).refusals(),
-        [[Some(NO_STEP_GOES_ON_ALONG_A_BRANCH); 2]; 3]
+        [
+            [Some(NO_SEAM_TO_OPEN_AT), Some(THE_BOUNDARY_CROSSES_ITSELF)],
+            [Some(TOO_FAR_ROUND); 2],
+            [Some(NO_SEAM_TO_OPEN_AT), Some(TOO_FAR_ROUND)],
+        ]
     );
 }
 
-/// What a fuse is refused with where a march along a branch between two
-/// corners on it gets no nearer the second.
-const NO_STEP_GOES_ON_ALONG_A_BRANCH: &str =
-    "geometry: no step along this crossing goes on towards the other end of its run";
+/// What a fuse is refused with where a curved face of the answer is bounded
+/// by one curve right round its surface.
+const NO_SEAM_TO_OPEN_AT: &str =
+    "a curved face is bounded by one curve right round it and has no seam to open at";
+
+/// What a fuse is refused with where a face of the answer, drawn, crosses
+/// itself.
+const THE_BOUNDARY_CROSSES_ITSELF: &str = "a face of this solid could not be cut into triangles: the boundary crosses itself, at the side leaving corner 30";
+
+/// What a fuse is refused with where a curved face of the answer with a hole
+/// in it goes too far round its surface.
+const TOO_FAR_ROUND: &str =
+    "a curved face with a hole in it goes too far round its surface to be meshed";
 
 /// **Two pointed cones, one a quarter turn off the other.** Both have slope a
 /// half and height eight, and the second turns a quarter about the `x` axis
