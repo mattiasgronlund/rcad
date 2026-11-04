@@ -249,10 +249,20 @@
 //! as the `Z3.0` LED does (Q3071), and stops in two places now, both
 //! untraced:
 //!
-//! - Its box round the front corner and the far box are refused
+//! - Its box round the front corner and the far box were refused
 //!   `TwoCurvesTouchWithoutCrossing` on face slot 18, the side `x = -0.3` of a
-//!   lead with one wire: what the far boxes of two LEDs in
-//!   `a_led_whose_front_is_two_planes_a_rounding_apart.rs` are refused.
+//!   lead with one wire, whose edge along the line `x = -0.3, y = -0.3` is
+//!   written twice, below the lead's bend on the plane `y = -0.3` and above it
+//!   on the plane of the bend's slanted leg. Two crossings of a face's own
+//!   edges that are one straight line are now folded into one, each side
+//!   keeping the name of the face across it (Q3112). The far box then answers
+//!   under intersection, with nothing, and its difference is refused
+//!   `DynamicRangeTooWide`, at a ratio of `2.0e16`. The box round the front
+//!   corner is refused under either rule `Undecidable` with the one record `a
+//!   point inside a piece of a face`, for a sliver of the box's top
+//!   `z = 6.1 - 4.35e-8` between the flat `x = -0.23` and the body's pipe at
+//!   `x = -0.22666`, and between the flange's front and the body's front disc,
+//!   the one plane `y = -3.81` written twice a rounding apart. Untraced, both.
 //! - Its box round the back corner `(-0.23, -4.81, 6)` stops `Undecidable`
 //!   with the one record `two ways out of a node along one line`, at that
 //!   corner. One way out runs along `z`, `(0, 1.16e-15, 1)`, and the other is
@@ -412,16 +422,24 @@ fn a_z15_led_gets_past_the_end_of_its_flats_ellipse_and_stops_on_the_flat_where_
 /// cannot tell its side of the disc is read off another node. Since Q3054 it
 /// puts in order the two points where `x = 2.24` crosses the body's pipe on
 /// the front. Since Q3071 it gets past where its flat meets the line its
-/// front's plane crosses its disc's in. Its box round the front corner and its
-/// far box stop where two curves touch on the side `x = -0.3` of a lead.
+/// front's plane crosses its disc's in. Since Q3112 the two writings of the
+/// edge along each lead's side are one line. Its far box shares nothing with
+/// it, and the difference is refused for its range. Its box round the front
+/// corner stops on a sliver of the box's top between the front's two writings.
 #[test]
-fn a_d3_led_6_up_gets_past_where_its_flat_meets_its_front_written_twice_and_stops_where_two_curves_touch_on_the_side_of_a_lead()
+fn a_d3_led_6_up_gets_past_the_sides_of_its_leads_and_stops_on_a_sliver_of_its_box_or_for_its_range()
  {
-    every_fuse_refuses(
-        D3,
-        &a_box_round_each_of(&[[-0.23, -3.81, 6.0 - BELOW_THE_AXIS], FAR_OFF]),
-        two_curves_touch_on_the_side_of_a_lead,
-    );
+    let front_corner = [-0.23, -3.81, 6.0 - BELOW_THE_AXIS];
+    every_fuse_refuses(D3, &a_box_round_each_of(&[front_corner]), |_, error| {
+        a_point_inside_a_sliver_of_the_box_top_is_not_placed(front_corner[2] + HALF, error)
+    });
+    the_far_box_shares_nothing_with(D3);
+    every_fuse_refuses(D3, &[(FAR_OFF, Rule::Difference)], |_, error| {
+        matches!(
+            error,
+            Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (2.0e16..2.1e16).contains(ratio)
+        )
+    });
 }
 
 /// Past where their flats meet the line their front's plane crosses their
@@ -505,10 +523,48 @@ fn where_three_surfaces_meet_needs_two_of_them_flat(error: &Error) -> bool {
     )
 }
 
-/// Refused `TwoCurvesTouchWithoutCrossing` on a lead's side, the plane
-/// `x = -0.3` with one wire.
-fn two_curves_touch_on_the_side_of_a_lead(model: &Model, error: &Error) -> bool {
-    two_curves_touch_on_the_plane_x_at(-0.3, model, error)
+/// The LED in `file` and the far box, fused under intersection, answer with
+/// nothing, and leave a model `validate` accepts.
+fn the_far_box_shares_nothing_with(file: &str) {
+    let (mut model, solid) = the_led(file);
+    let knife = a_box_round(&mut model, FAR_OFF);
+    let fused = model
+        .fuse(
+            &[solid],
+            &[knife],
+            Rule::Intersection,
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{file}: the far box refused: {why:?}"));
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| {
+            panic!("{file}: the far box left a model that is not valid: {why:?}")
+        });
+    assert!(
+        fused.solids().is_empty(),
+        "{file}: the far box shares {} solids with the LED, and it shares none",
+        fused.solids().len()
+    );
+}
+
+/// Refused `Undecidable` with the one record `a point inside a piece of a
+/// face`, handed the four corners of a sliver on the box's top `z = top`: the
+/// `D3.0` LED's flat `x = -0.23` and its body's pipe at `x = -0.22666` across
+/// it, and its front `y = -3.81`, written twice a rounding apart, along it.
+fn a_point_inside_a_sliver_of_the_box_top_is_not_placed(top: f64, error: &Error) -> bool {
+    let corners = the_points_of_the_one_record("a point inside a piece of a face", error);
+    corners.len() == 4
+        && corners.iter().all(|corner| {
+            let [x, y, z] = corner.enclosure();
+            (-0.2300000001..-0.2266).contains(&x.lo())
+                && (-0.2300000001..-0.2266).contains(&x.hi())
+                && (y.lo() + 3.81).abs() < 1e-9
+                && (y.hi() + 3.81).abs() < 1e-9
+                && (z.lo() - top).abs() < 1e-9
+                && (z.hi() - top).abs() < 1e-9
+        })
 }
 
 /// Refused `TwoCurvesTouchWithoutCrossing` on the plane `x = at` with one

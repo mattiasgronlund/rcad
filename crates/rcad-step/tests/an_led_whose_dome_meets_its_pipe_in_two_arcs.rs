@@ -197,11 +197,26 @@
 //!   surfaces round each. The line zigzagged across the face, and the
 //!   windings of its cells could not be counted. The face's own plane written
 //!   a second time is now always asked whether it passes through a corner
-//!   (Q3071), and every fuse of all three boxes stops refused
+//!   (Q3071), and every fuse of all three boxes stopped refused
 //!   `TwoCurvesTouchWithoutCrossing` on face slot 18, the side `x = 0.3` of a
-//!   lead. The body's pipe and the flange's rim run about an axis a rounding
-//!   off that plane's, and cross it in ellipses whose meets reach `4e16` out
-//!   along `y`. Untraced.
+//!   lead. That side is two faces joined, and its edge along the line
+//!   `x = 0.3, y = -0.3` is written twice: below the bend corner
+//!   `(0.3, -0.3, 1.7)` on the plane `y = -0.3`, and above it on the plane of
+//!   the bend's slanted leg, which crosses `x = 0.3` a rounding off that line.
+//!   Each writing ran on past the corner beside the other. Two crossings of a
+//!   face's own edges that are one straight line are now folded into one, each
+//!   side keeping the name of the face across it, and where a third surface
+//!   meets the two writings is one place (Q3112). The box round the back corner
+//!   and the far box now answer under intersection, and share with the LED what
+//!   they should. The box round the front corner is refused under intersection
+//!   `DynamicRangeTooWide`, at a ratio of `7.3e15`, untraced. Every difference
+//!   stops refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` on the
+//!   flange's rim, face slot 4, the pipe of radius 1.9, at the front
+//!   `y = -6.35`. A plane `z = c` along the rim, `z = 2.3` for the far box and
+//!   the box's own side `z = 1.9` for the boxes round the corners, meets the
+//!   flange's front and the body's front disc, the one plane written twice, at
+//!   one `f64` triple, and the straight side between the two is refused as
+//!   though it were an arc. Untraced.
 //!
 //! What answers is checked as commit `f179ca02a` checks it: what the box and
 //! the LED share is the box's part inside the LED. When a box's difference
@@ -277,13 +292,31 @@ fn a_d5_led_less_a_box_gets_past_its_rim_under_a_tolerant_policy_and_stops_where
     );
 }
 
+/// Since Q3112 the two writings of the edge along each lead's side are one
+/// line. The box round the back corner holds the flange behind the flat
+/// `x = -0.23` and the body's pipe behind the flange's back, as the `D5.0`
+/// LED's box does, and the far box holds nothing.
 #[test]
-fn a_d3_led_gets_past_the_cells_of_its_flange_front_and_stops_where_two_curves_touch_on_the_side_of_a_lead()
- {
+fn a_d3_led_gets_past_the_sides_of_its_leads_and_stops_where_its_rim_meets_its_front_written_twice()
+{
+    let radius = 1.5_f64;
+    let flange_in_the_box = HALF * HALF * (2.0 * HALF);
+    let body_in_the_box = HALF
+        * (HALF * (radius * radius - HALF * HALF).sqrt()
+            + radius * radius * (HALF / radius).asin()
+            - 2.0 * HALF * (radius - HALF));
+    the_led_and_a_box_share(D3, THE_BACK_CORNER, flange_in_the_box + body_in_the_box);
+    the_led_and_a_box_share(D3, FAR_OFF, 0.0);
     every_fuse_refuses(
         D3,
-        &both_rules_with_a_box_round_each_of(&[THE_FRONT_CORNER, THE_BACK_CORNER, FAR_OFF]),
-        two_curves_touch_on_the_side_of_a_lead,
+        &[(THE_FRONT_CORNER, Rule::Intersection)],
+        |_, error| a_range_too_wide_between(7.2e15, 7.3e15, error),
+        &Policy::certified(),
+    );
+    every_fuse_refuses(
+        D3,
+        &[THE_FRONT_CORNER, THE_BACK_CORNER, FAR_OFF].map(|centre| (centre, Rule::Difference)),
+        two_ends_round_to_one_point_on_the_front_of_the_rim,
         &Policy::certified(),
     );
 }
@@ -301,21 +334,27 @@ fn the_ball_and_the_pipe_are_too_nearly_tangent_to_follow(_: &Model, error: &Err
     matches!(**surfaces, [Surface::Cylinder(_), Surface::Sphere(_)])
 }
 
-/// Refused `TwoCurvesTouchWithoutCrossing` on the `D3.0` LED's lead's side,
-/// the plane `x = 0.3` with one wire.
-fn two_curves_touch_on_the_side_of_a_lead(model: &Model, error: &Error) -> bool {
-    let Error::TwoCurvesTouchWithoutCrossing { face } = error else {
+/// Refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` on the `D3.0`
+/// LED's flange's rim, the pipe of radius 1.9, at a point of its front
+/// `y = -6.35`.
+fn two_ends_round_to_one_point_on_the_front_of_the_rim(model: &Model, error: &Error) -> bool {
+    let Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face, at } = error else {
         return false;
     };
     let face = model.face(*face).expect("the face is the LED's own");
-    let Surface::Plane(plane) = face.surface() else {
+    let Surface::Cylinder(rim) = face.surface() else {
         return false;
     };
-    let [x, y, z, d] = plane.coefficients();
-    face.wire_count() == 1
-        && [x - 1.0, y, z, d + 0.3]
-            .iter()
-            .all(|part| part.abs() < 1e-9)
+    (rim.radius() - 1.9).abs() < 1e-9 && (at.y() + 6.35).abs() < 1e-9
+}
+
+/// Refused `DynamicRangeTooWide`, the ratio of the largest coordinate to the
+/// shortest edge between `low` and `high`.
+fn a_range_too_wide_between(low: f64, high: f64, error: &Error) -> bool {
+    matches!(
+        error,
+        Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (low..high).contains(ratio)
+    )
 }
 
 /// The LED in `file` and a box of side `2 * HALF` centred on `centre`, fused
@@ -374,22 +413,10 @@ fn every_fuse_refuses(
     }
 }
 
-/// A box round each centre, to be fused with the LED under intersection and
-/// under difference.
-fn both_rules_with_a_box_round_each_of(centres: &[[f64; 3]]) -> Vec<([f64; 3], Rule)> {
-    centres
-        .iter()
-        .flat_map(|&centre| [Rule::Intersection, Rule::Difference].map(|rule| (centre, rule)))
-        .collect()
-}
-
 /// Refused `DynamicRangeTooWide` on the `D5.0` LED, the ratio of its largest
 /// coordinate to its shortest edge about `1.8e16`.
 fn too_wide_a_range(_: &Model, error: &Error) -> bool {
-    matches!(
-        error,
-        Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (1.8e16..1.9e16).contains(ratio)
-    )
+    a_range_too_wide_between(1.8e16, 1.9e16, error)
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
