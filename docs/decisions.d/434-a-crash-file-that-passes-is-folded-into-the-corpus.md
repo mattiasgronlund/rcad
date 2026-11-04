@@ -254,7 +254,16 @@ morning triage that runs this recipe (434.6).
   15``, and `where_a_cone_or_a_torus_crosses-fold-tmp.GklTdT` was left in the
   corpus root, with the fold's scratch: the recipe's `EXIT` trap did not
   remove them. A bare `bash` with the same trap, sent the same signal, did run
-  it, so what differs under `just` is not traced. A row is filed for it.
+  it. **Traced (Q1776):** the recipe had a trap for `EXIT` and none for
+  `TERM`, and ran the merge as a foreground child. Reproduced in
+  `check-fuzz-triage-selftest` with a stand-in merge that blocks, sent `SIGTERM`
+  at `just`, the recipe's shell and the merge: the copy stayed beside the
+  corpus, and `cleanup` was seen not to run in one traced run. The fix is a
+  trap for `TERM`, `INT` and `HUP` that stops the merge and exits, which runs
+  the `EXIT` trap, and the merge now runs in the background and is waited for,
+  since bash holds a trap back until a foreground child ends. The selftest's
+  seventeen-and-a-half arm pins it. Not traced: why a bare `bash` ran the trap
+  where this one did not.
 
 **The first real fold, read from journalctl, ran on 2026-10-13.** `journalctl
 --user -u rcad-fuzz-triage` holds a morning for every day from 10-07 to

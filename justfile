@@ -13040,6 +13040,13 @@ fuzz-triage night="" against="main":
     # and taken away on the way out however this ends — a worktree left behind
     # would show up in `just lanes` as a lane nobody dispatched.
     trap cleanup EXIT
+    merge_pid=""
+    stop() {
+        trap - TERM INT HUP
+        [ -z "$merge_pid" ] || kill -TERM "$merge_pid" 2>/dev/null || true
+        exit 143
+    }
+    trap stop TERM INT HUP
     if [ "$at" != "$(git rev-parse HEAD)" ]; then
         borrowed=$(mktemp -d)
         if ! git worktree add --quiet --detach "$borrowed/tree" "$at"; then
@@ -13248,10 +13255,16 @@ fuzz-triage night="" against="main":
         # In a scratch directory, with libFuzzer's own files sent there too: a
         # crash or a timeout it writes into `fuzz/artifacts/` would be carried
         # as if a night had found it (§434.3, fifth rule).
-        (cd "$here/libfuzzer" && env -u RCAD_FUZZ_TIMINGS "$binary" -merge=1 -timeout=10 \
+        # In the background and waited for, so a SIGTERM is answered at once:
+        # bash holds a trap back while a foreground child runs, and with no
+        # trap at all it dies on the signal without running `cleanup` (§434).
+        (cd "$here/libfuzzer" && exec env -u RCAD_FUZZ_TIMINGS "$binary" -merge=1 -timeout=10 \
             -merge_control_file="$here/control" -artifact_prefix="$here/libfuzzer/" \
-            "$fold_copy" "$here/in") >"$here/merge.log" 2>&1
+            "$fold_copy" "$here/in") >"$here/merge.log" 2>&1 &
+        merge_pid=$!
+        wait "$merge_pid"
         merged=$?
+        merge_pid=""
         if [ "$merged" -ne 0 ]; then
             rm -rf "$fold_copy"
             fold_copy=""
@@ -13690,6 +13703,10 @@ check-fuzz-triage-selftest:
     i=${#first[@]}
     for f in "${inputs[@]}"; do
         echo "STARTED $i $(wc -c <"$f")" >>"$control"
+        if grep -q 'blocks until it is stopped' "$f"; then
+            echo $$ >"$0.blocked"
+            exec sleep 300
+        fi
         hash=$(sha1sum "$f" | cut -d' ' -f1)
         if grep -q 'crashes the night' "$f"; then
             cp "$f" "${prefix}crash-$hash"
@@ -13875,6 +13892,44 @@ check-fuzz-triage-selftest:
         || fail "a morning handed the merge more passing files than RCAD_FUZZ_FOLD_AT_MOST, so the first fold would never end inside the service's four hours"
     [ "$(find "$tree/fuzz/artifacts/$reader" -type f | grep -c .)" = 1 ] \
         || fail "the file past the cap did not stay in fuzz/artifacts/ for the next morning"
+
+    # Seventeen and a half: a fold stopped with SIGTERM, sent to `just`, the
+    # recipe's shell and the merge as systemd sends it at TimeoutStartSec,
+    # takes its copy of the corpus and its scratch with it (§434).
+    put "$reader" 'this one blocks until it is stopped' >/dev/null
+    a_night 2026-10-21 "$(git -C "$tree" rev-parse --short HEAD)"
+    PATH="$no_mise:$cargo_here:$PATH" RCAD_FUZZ_LOGS="$fold_logs" RCAD_FUZZ_CORPUS="$fold_corpus" TMPDIR="$dir/tmp" \
+        {{ just_executable() }} --justfile "{{ justfile() }}" --working-directory "$tree" \
+        fuzz-triage >"$dir/stopped.out" 2>&1 &
+    just_pid=$!
+    waited=0
+    while [ ! -e "$bin/$reader.blocked" ] && [ "$waited" -lt 300 ]; do
+        sleep 0.2
+        waited=$((waited + 1))
+    done
+    [ -e "$bin/$reader.blocked" ] || { kill -KILL "$just_pid" 2>/dev/null || true; fail "the fold never reached its merge: $(cat "$dir/stopped.out")"; }
+    shell_pid=$(ps -o pid= --ppid "$just_pid" | tr -d ' ')
+    merge_pid=$(cat "$bin/$reader.blocked")
+    kill -TERM "$just_pid" "$shell_pid" "$merge_pid"
+    waited=0
+    while kill -0 "$just_pid" 2>/dev/null && [ "$waited" -lt 150 ]; do
+        sleep 0.2
+        waited=$((waited + 1))
+    done
+    if kill -0 "$just_pid" 2>/dev/null; then
+        kill -KILL "$just_pid" "$shell_pid" "$merge_pid" 2>/dev/null || true
+        fail "a stopped fold did not end"
+    fi
+    waited=0
+    while kill -0 "$shell_pid" 2>/dev/null && [ "$waited" -lt 150 ]; do
+        sleep 0.2
+        waited=$((waited + 1))
+    done
+    ! kill -0 "$shell_pid" 2>/dev/null || { kill -KILL "$shell_pid" 2>/dev/null || true; fail "the recipe's shell outlived the SIGTERM"; }
+    [ "$(ls -A "$fold_corpus")" = "$reader" ] || fail "a fold stopped by SIGTERM left its copy of the corpus beside the corpus: $(ls -A "$fold_corpus")"
+    [ -z "$(ls -A "$dir/tmp")" ] || fail "a fold stopped by SIGTERM left its scratch behind: $(ls -A "$dir/tmp")"
+    rm -f "$bin/$reader.blocked"
+    find "$tree/fuzz/artifacts/$reader" -type f -delete
 
     # Eighteen: the fuse fuzzer's corpus is replayed for its refusals on a night
     # with no crash file too (§437.5), every file of it in one call, into a file
