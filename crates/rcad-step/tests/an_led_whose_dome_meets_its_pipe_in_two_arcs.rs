@@ -118,9 +118,12 @@
 //!   slopes, loop and rim across the pipe cut each strip in edges that short,
 //!   and pieces of one input face are joined back only where they are flat.
 //!   Under a tolerant policy, which lets that range through, every difference
-//!   stops refused `ACrossingAlongThisEdgeCouldNotBeFollowed`, where the ball
-//!   and the pipe are too nearly tangent to follow the thin loop they cross
-//!   in.
+//!   stops where the ball and the pipe are too nearly tangent to follow the
+//!   thin loop they cross in. That loop is an edge the fuse invented, so there
+//!   is no edge of the LED to name. The refusal used to be
+//!   `ACrossingAlongThisEdgeCouldNotBeFollowed`, naming a key of the model
+//!   the fuse meshes its answer in, which the caller's model did not hold.
+//!   It is now the walk's own `Error::Geometry` (Q2889).
 //! - The `D3.0` LED stopped there too, where its flange's flat meets the body's
 //!   pipe and the flange's rim, a pipe of radius 1.9 about the same axis a
 //!   rounding apart in direction. Q2938's road answers that triple, and the
@@ -256,7 +259,10 @@ fn a_d5_led_gets_its_dome_rim_on_two_faces_and_stops_cutting_a_box_out_on_strips
 /// corner `(0.04, 0, 4)` and the box that misses the LED are each refused
 /// where the ball and the pipe, too nearly tangent to follow, cross in the
 /// thin loop below the rim. Before the rim's arcs were joined by their input
-/// edge, both were refused `ResultIsNotManifold` here.
+/// edge, both were refused `ResultIsNotManifold` here. The loop is no edge of
+/// the LED, so the refusal is the walk's own `Error::Geometry`. Before Q2889 it
+/// was `ACrossingAlongThisEdgeCouldNotBeFollowed`, naming an edge the
+/// caller's model did not hold.
 #[test]
 fn a_d5_led_less_a_box_gets_past_its_rim_under_a_tolerant_policy_and_stops_where_its_ball_and_pipe_cross_in_a_thin_loop()
  {
@@ -282,15 +288,13 @@ fn a_d3_led_gets_past_the_cells_of_its_flange_front_and_stops_where_two_curves_t
     );
 }
 
-/// Refused `ACrossingAlongThisEdgeCouldNotBeFollowed` on the `D5.0` LED,
-/// because the body's pipe and its dome's ball are too nearly tangent where
-/// they cross. The edge it names is not looked up: it is a key of the model
-/// the fuse builds its answer in, not of `model`.
+/// Refused on the `D5.0` LED because the body's pipe and its dome's ball are
+/// too nearly tangent where they cross.
 fn the_ball_and_the_pipe_are_too_nearly_tangent_to_follow(_: &Model, error: &Error) -> bool {
-    let Error::ACrossingAlongThisEdgeCouldNotBeFollowed { why, .. } = error else {
-        return false;
-    };
-    let rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent { surfaces, .. } = &**why
+    let Error::Geometry(rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
+        surfaces,
+        ..
+    }) = error
     else {
         return false;
     };

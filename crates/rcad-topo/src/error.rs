@@ -853,6 +853,8 @@ pub enum Error {
     /// two coedges, but [`SolidView::mesh`](crate::SolidView::mesh) is public in
     /// its own right and [`Model`](crate::Model) is `Deserialize`, so a solid
     /// that never went through the sweep reaches the mesher first (§16.11).
+    /// A fuse meshes one model of its own before the sweep, and answers this
+    /// there as [`Error::TheFuseWroteABrokenAnswer`] (Q2889).
     #[error("this edge does not have two faces along it to say where it runs")]
     AnEdgeWithoutTwoFacesAlongItCannotBeWalked {
         /// Which edge.
@@ -873,6 +875,10 @@ pub enum Error {
     /// whole radius: `docs/decisions.md` §176.2. An `ELLIPSE` imprinted on a flat
     /// face arrives here, and so does a whole circle, which a file names by its
     /// one corner and no surface.
+    ///
+    /// A fuse that meets this meshing one model of its own answers it as
+    /// [`Error::TheFuseWroteABrokenAnswer`]: the faces along the edge are the
+    /// answer's (Q2889).
     #[error("an edge bends but every face along it is flat and nothing names its curve")]
     AnEdgeBendsButEveryFaceAlongItIsFlat {
         /// Which edge.
@@ -1302,6 +1308,10 @@ pub enum Error {
     /// that was could only match those surfaces back by value, which
     /// `docs/decisions.md` §110.4 measured at zero matches out of forty-four
     /// files. The key is the address, and the sweep has it in hand.
+    ///
+    /// **A fuse names the caller's edge**, the one the edge of its answer is a
+    /// piece of, and hands back the bare [`Error::Geometry`] for an edge it
+    /// invented, which the caller's model has no key for (Q2889).
     #[error("geometry: {why}")]
     ACrossingAlongThisEdgeCouldNotBeFollowed {
         /// The edge whose crossing could not be followed.
@@ -1596,6 +1606,88 @@ impl Error {
             | Self::CannotTellWhichWayASolidsFacesPoint { .. }
             | Self::AnEdgeWithoutTwoFacesAlongItCannotBeWalked { .. }
             | Self::AnEdgeBendsButEveryFaceAlongItIsFlat { .. }
+            | Self::MoreMeshPointsThanASolidWillHold { .. }
+            | Self::ACrossingThisCannotBeOrderedAlong
+            | Self::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed
+            | Self::ADraftFaceCouldNotBeMeshed { .. }
+            | Self::ASolidBuiltFaceByFaceHasOneShell
+            | Self::TwoSolidsShareSpace { .. }
+            | Self::CannotTellWhetherTwoSolidsShareSpace { .. }
+            | Self::CannotTellWhichWayAClosedEdgeRuns { .. }
+            | Self::Undecidable { .. } => None,
+        }
+    }
+
+    /// The edge this refusal names, where it names one, for the same reason
+    /// as [`Error::the_face_it_names`] (Q2889).
+    ///
+    /// [`Error::ADraftEdgeHasACrossingThatCannotBeFollowed`] is not one: it
+    /// names an edge of a description by its place in it, which is no key.
+    pub(crate) fn the_edge_it_names(&mut self) -> Option<&mut EdgeKey> {
+        match self {
+            Self::CannotYetMeasureHowLongThisCurveIs { edge }
+            | Self::AnEdgeWithoutTwoFacesAlongItCannotBeWalked { edge }
+            | Self::AnEdgeBendsButEveryFaceAlongItIsFlat { edge }
+            | Self::ACrossingAlongThisEdgeCouldNotBeFollowed { edge, .. } => Some(edge),
+            Self::Geometry(_)
+            | Self::CannotMeshAFace { .. }
+            | Self::AWireDoesNotFanIntoALoopToMesh { .. }
+            | Self::AWireWillNotLieFlatOnItsFace { .. }
+            | Self::CannotTellWhichWayRoundTheRingAFaceGoes { .. }
+            | Self::AMeshCoveredTheWrongSideOfALoop { .. }
+            | Self::AClosedEdgeOfTheAnswerWouldStartAtAPole { .. }
+            | Self::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { .. }
+            | Self::ACurvedFaceGoesRightRoundWithNoSeam { .. }
+            | Self::ACurvedFaceCannotBeCutSmallEnoughToMesh { .. }
+            | Self::CurvedFaceWithAHoleGoesTooFarRound { .. }
+            | Self::NoSuchFaceInThisSolid { .. }
+            | Self::AFaceTrimmedByACurveThisCannotFollow { .. }
+            | Self::AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve { .. }
+            | Self::CannotFireARayAtAFacesSurface { .. }
+            | Self::AFaceMissesPartOfWhereItsSurfacesCross { .. }
+            | Self::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { .. }
+            | Self::AFaceMeetsItsNeighbourNowhere { .. }
+            | Self::AFaceMeetsItsNeighbourOnItsOwnSurface { .. }
+            | Self::CannotTellWhichCurveOfACrossingAFaceRunsAlong { .. }
+            | Self::TwoCurvesTouchWithoutCrossing { .. }
+            | Self::CannotTellTheCellsOfAFaceApart { .. }
+            | Self::CannotPlaceTheRingsOfAJoinedFlatFace { .. }
+            | Self::ADraftEdgeHasACrossingThatCannotBeFollowed { .. }
+            | Self::Invalid(_)
+            | Self::KeyFromAnotherModel { .. }
+            | Self::TooFewPoints { .. }
+            | Self::PointNotFinite { .. }
+            | Self::RepeatedPoint { .. }
+            | Self::HeightNotPositive { .. }
+            | Self::ACapOfABarFacesIntoIt { .. }
+            | Self::ADraftHandleCameFromAnotherBuilder { .. }
+            | Self::ADraftPointIsNotFinite { .. }
+            | Self::ADraftEdgeHasNoLength { .. }
+            | Self::ADraftWireIsTooShort { .. }
+            | Self::ADraftWireDoesNotClose { .. }
+            | Self::ADraftFaceHasNoWires
+            | Self::ADraftShellHasNoFaces
+            | Self::ADraftEntityIsUsedTwice { .. }
+            | Self::ADraftEntityIsUsedByNothing { .. }
+            | Self::ADraftEdgeIsNotWalkedByTwoCoedges { .. }
+            | Self::ADraftEdgeIsWalkedTheSameWayTwice { .. }
+            | Self::ADraftSolidHasNoShell
+            | Self::ProfileCrossesItself
+            | Self::HoleNotInsideOutline { .. }
+            | Self::HoleInsideAnotherHole { .. }
+            | Self::ACapDoesNotCutRightRoundABar { .. }
+            | Self::TheCapsOfABarMeetInsideIt
+            | Self::VolumeTooLargeToMeasure
+            | Self::SurfaceAreaTooLargeToMeasure
+            | Self::LengthTooLargeToMeasure
+            | Self::TheFuseWroteABrokenAnswer { .. }
+            | Self::WrongFormatVersion { .. }
+            | Self::ArgumentIntersectsItself
+            | Self::ResultIsNotManifold { .. }
+            | Self::DeflectionBelowWhatAMeshCanReach { .. }
+            | Self::TwoPatchesOfTheMeshDrewTheSameSide { .. }
+            | Self::PlacingItTookAwayTheSpaceItsMeshEncloses { .. }
+            | Self::CannotTellWhichWayASolidsFacesPoint { .. }
             | Self::MoreMeshPointsThanASolidWillHold { .. }
             | Self::ACrossingThisCannotBeOrderedAlong
             | Self::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed
