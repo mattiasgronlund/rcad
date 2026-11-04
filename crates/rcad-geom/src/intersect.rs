@@ -7043,13 +7043,9 @@ fn the_rulings_two_cones_on_one_apex_share(one: &Cone, other: &Cone) -> Result<S
                 halves.extend([(along, false), (along.map(|component| -component), false)]);
             }
             Decision::Pos => {
-                let under_the_root = if spread.lo() > 0.0 {
-                    spread
-                } else {
-                    how_far_apart_the_rulings_where_two_cones_cross_spread(first, second, side)
-                        .filter(|tighter| tighter.lo() > 0.0)
-                        .ok_or(Error::CannotNameWhichPieceOfACrossingThisIs)?
-                };
+                let under_the_root =
+                    what_parts_the_rulings_where_two_cones_cross(spread, first, second, side)
+                        .ok_or(Error::CannotNameWhichPieceOfACrossingThisIs)?;
                 let Some(ways) =
                     the_four_ways_two_rulings_leave_a_cones_apex(normal, under_the_root, first)
                 else {
@@ -7143,10 +7139,21 @@ fn the_rulings_two_cones_on_one_apex_share(one: &Cone, other: &Cone) -> Result<S
 /// turns `a₁·w₁ − a₂·w₂` into its opposite, square to the same flat surface;
 /// the pair is sorted as `intersect` sorts it all the same, so that the
 /// arithmetic is the same too.
+///
+/// **With each sign comes an enclosure of `−E·‖w₁‖²`** for the true `n±`, `w₁`
+/// being the axis of the cone `intersect` sorts first. Where the surface cuts
+/// two rulings it is the one `intersect` takes the root of to part them,
+/// built on the exact numbers the sign is read off where the two cones are a
+/// rounding or so off touching. Elsewhere, and where `intersect` refuses the
+/// pair for want of one above nothing, it is the one worked out on `n±`'s own
+/// enclosure. For the pitch cones of a pair of mitre gears turned into place
+/// by a rotation, `−E·‖w₁‖²` is a few roundings and that one reaches down past
+/// nothing, so the way a ruling `intersect` named leaves the apex is to be
+/// read off this one (Q3144).
 pub fn how_the_flat_surfaces_where_two_cones_cross_meet_them(
     one: &Cone,
     other: &Cone,
-) -> [Decision; 2] {
+) -> [(Decision, Interval); 2] {
     let (first, second) = match Surface::Cone(*one).how_it_sorts_against(&Surface::Cone(*other)) {
         Ordering::Greater => (other, one),
         Ordering::Less | Ordering::Equal => (one, other),
@@ -7154,7 +7161,15 @@ pub fn how_the_flat_surfaces_where_two_cones_cross_meet_them(
     [1.0, -1.0].map(|side| {
         let normal = square_to_where_two_cones_on_one_apex_cross(first, second, side);
         let spread = how_far_apart_two_rulings_through_a_cones_apex_spread(normal, first);
-        how_a_flat_surface_where_two_cones_cross_meets_them(spread, first, second, side)
+        let meets =
+            how_a_flat_surface_where_two_cones_cross_meets_them(spread, first, second, side);
+        if meets == Decision::Pos {
+            let parted_by =
+                what_parts_the_rulings_where_two_cones_cross(spread, first, second, side);
+            (meets, parted_by.unwrap_or(spread))
+        } else {
+            (meets, spread)
+        }
     })
 }
 
@@ -7234,6 +7249,25 @@ fn how_a_flat_surface_where_two_cones_cross_meets_them(
     worked_out_exactly().unwrap_or(Decision::Undecidable {
         enclosure: spread.hi() - spread.lo(),
     })
+}
+
+/// The enclosure of `−E·‖w₁‖²` whose root parts the two rulings the flat
+/// surface square to `n±` cuts, `side` choosing the sign, for a surface
+/// [`how_a_flat_surface_where_two_cones_cross_meets_them`] says cuts two:
+/// `spread`, worked out on `n±`'s own enclosure, where it is above nothing,
+/// and otherwise [`how_far_apart_the_rulings_where_two_cones_cross_spread`]
+/// where that one is. `None` where neither is.
+fn what_parts_the_rulings_where_two_cones_cross(
+    spread: Interval,
+    first: &Cone,
+    second: &Cone,
+    side: f64,
+) -> Option<Interval> {
+    if spread.lo() > 0.0 {
+        return Some(spread);
+    }
+    how_far_apart_the_rulings_where_two_cones_cross_spread(first, second, side)
+        .filter(|tighter| tighter.lo() > 0.0)
 }
 
 /// `−E·‖w₁‖² = W₁²·(R − L)` of
