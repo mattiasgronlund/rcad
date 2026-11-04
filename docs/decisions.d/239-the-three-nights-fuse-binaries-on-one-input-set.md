@@ -245,8 +245,8 @@ progress commit with three red tests. Q60 timed all 20 630 corpus files on the
 Every commit the bisect timed fell clearly on one side, 45 166 to 47 387 ms or
 62 to 119 ms (`bisect.log`). Its message says the pointed cone at 1e-4 now runs
 out of room. So the fast binary may be refusing where the slow one answered,
-and the three levels may be rounds of a finer mesh. That was not checked; Q3148
-asks it.
+and the three levels may be rounds of a finer mesh. Q3148 checked the first, in
+239.12: the fast binary refuses none of the ten.
 
 **On stand-ins for set C, the slowdown comes in with `b53344c9e`**, "fix(validate):
 mesh finer when the sweep's own coarse chords cross a hole", 18:37 the same day.
@@ -354,3 +354,21 @@ an answer is meshed twice inside one fuse, once in `nest_the_shells` and again
 in `Assembly::commit`'s sweep; Q3154 asks whether once will do. Five files
 that the 09-23 binary ran in 3 to 25 ms take 3.6 s to over 30 s on `main`, and
 Q3155 traces them. A sixth, `90e97046`, ran past ten minutes; that is Q2484.
+
+### 239.12 The ten slow inputs answer on both sides of `b782b51cd`, 2026-11-04
+
+*Q3148, a read-only lane, on `49de48d3`. Its probe test ran in scratch worktrees
+that it removed, so nothing of it is kept.*
+
+**None of the ten is refused, at either commit.** The fuzz binaries throw the
+answer away, so the lane ran the ten inputs of `~/rcad-probes/q60/slow10.txt`
+through the fuzz target's own harness from a probe test, built in the test
+profile at `f0829431d` and at `b782b51cd`, printing what each fuse returned.
+All ten come back Ok at both commits, and no `RanOutOfRoom` or other refusal
+appears. Each takes 338 to 359 ms at `f0829431d` and 0 to 1 ms at `b782b51cd`.
+So `b782b51cd` did not get fast by refusing, and 239.9's guess is wrong for
+these ten.
+
+Not run: whether the two commits give the same solid for each input, and what
+239.7's three levels are. No row is filed for either: set B is gone, and what
+`main` costs today is 239.11's question, not the 09-21 binary's.
