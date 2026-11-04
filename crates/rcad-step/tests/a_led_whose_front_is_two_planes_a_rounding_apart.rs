@@ -208,11 +208,25 @@
 //! whose axis is 10 up are, and so is the box on this LED's flat. That box's
 //! intersection is refused `DynamicRangeTooWide`, at a ratio of `7.3e15`.
 //! Untraced, both.
+//!
+//! A box round `(1.27, -6.35, 0.6)`, whose floor `z = 0.5` rests on the body's
+//! pipe, was refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat` under union,
+//! intersection and difference, handed its floor, the flange's rim and the
+//! body's pipe: two pipes about one axis a rounding apart in direction, and a
+//! plane along the body pipe's axis that touches it along a line. Where that
+//! line meets the rim is where a quadratic is zero, and a product in the
+//! quadratic's discriminant was too small for `f64`. The quadratic is now
+//! scaled up by a power of two first, which moves none of its zeros (Q3114).
+//! Each fuse then stops `Undecidable` on the order along the crossing the
+//! box's side `x = 1.17` cuts in the body's pipe, between where the floor
+//! touches that crossing, `1.8e15` out along `-y`, where the pipe's axis,
+//! leaning `5.55e-17` off `y`, has drifted to `x = 1.17`, and a point below
+//! the axis at `(1.17, -32.395, 0.5020008)`. Untraced.
 
 use std::{env, fs, path::PathBuf};
 
 use rcad_geom::Surface;
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Interval, Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -224,6 +238,9 @@ const THIS_ONE: &str = "LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step";
 
 /// Where the box on this LED's flat goes, round its front corner.
 const ON_THE_FLAT: [f64; 3] = [-1.23, -6.35, 3.0];
+
+/// Where the box whose floor `z = 0.5` rests on this LED's body pipe goes.
+const ON_THE_PIPE: [f64; 3] = [1.27, -6.35, 0.6];
 
 /// The three LED files whose flange's flat, dome and body's pipe meet nowhere,
 /// each with the radius of its flange's rim.
@@ -311,6 +328,20 @@ fn a_d3_led_2_up_gets_past_where_its_flat_meets_its_front_written_twice_and_is_r
     );
 }
 
+/// Since Q3114 the box whose floor rests on the body's pipe gets past where
+/// its floor, the flange's rim and the body's pipe meet, and every fuse of it
+/// stops on the order along the crossing its side `x = 1.17` cuts in the
+/// body's pipe.
+#[test]
+fn a_box_whose_floor_rests_on_the_body_gets_past_its_floor_rim_and_pipe_and_stops_on_the_order_along_its_side()
+ {
+    every_fuse_refuses(
+        THIS_ONE,
+        &[Rule::Union, Rule::Intersection, Rule::Difference].map(|rule| (ON_THE_PIPE, rule)),
+        |_, error| ordering_where_the_floor_touches_the_side_far_out(error),
+    );
+}
+
 /// The LED in `file` and the far box, fused under intersection, answer with
 /// nothing, and leave a model `validate` accepts.
 fn the_far_box_shares_nothing_with(file: &str) {
@@ -393,6 +424,38 @@ fn two_ends_round_to_one_point_on_the_front_of_a_rim(
         return false;
     };
     (rim.radius() - radius).abs() < 1e-9 && (at.y() + 6.35).abs() < 1e-9
+}
+
+/// Refused `Undecidable` with the one record order along a crossing, between
+/// where the box's floor `z = 0.5` touches the crossing its side `x = 1.17`
+/// cuts in the body's pipe, more than `1e15` out along `-y`, and a point on
+/// that crossing below the axis, about `(1.17, -32.395, 0.5020008)`.
+fn ordering_where_the_floor_touches_the_side_far_out(error: &Error) -> bool {
+    let Error::Undecidable { records } = error else {
+        return false;
+    };
+    let [record] = records.records() else {
+        return false;
+    };
+    let [one, other] = record.inputs() else {
+        return false;
+    };
+    let far_out = |point: &Point| {
+        let [x, y, z] = point.enclosure();
+        is_within_1e_6_of(x, 1.17) && y.hi() < -1e15 && is_within_1e_6_of(z, 0.5)
+    };
+    let below_the_axis = |point: &Point| {
+        let [x, y, z] = point.enclosure();
+        is_within_1e_6_of(x, 1.17)
+            && is_within_1e_6_of(y, -32.395)
+            && is_within_1e_6_of(z, 0.502_000_8)
+    };
+    record.predicate() == "order along a crossing"
+        && ((far_out(one) && below_the_axis(other)) || (far_out(other) && below_the_axis(one)))
+}
+
+fn is_within_1e_6_of(side: Interval, at: f64) -> bool {
+    (side.lo() - at).abs() < 1e-6 && (side.hi() - at).abs() < 1e-6
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
