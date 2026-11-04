@@ -340,3 +340,74 @@ it is better. Between the two commits `measure.rs` changed by the exact sums
 and the wobble built on them, so the ratio is theirs. An absolute figure from
 a machine under this load is not one to quote; the ratio is the finding, and a
 quiet machine would tighten it.
+
+**What the exact pass costs a curved measure.** *2026-11-04, Q1986.* Q550's
+table is the flat solid. Q1845 (`ac8dc4d14`) put the same exact pass,
+`volume_and_moment_as_expansions` over a fan of every triangle packed as
+`[[f64; 2]; 9]`, into `SolidView::measured_over`, which sums over a mesh, and
+that pass is per triangle, so it was timed on a mesh. A probe (a `#[ignore]`d
+test inside `measure.rs` of `rcad-topo`, not kept, since the functions are
+private) built a ball of radius 10 at the origin, meshed it once, and timed
+`measured_over` on that mesh, then `skin_of`, `volume_and_moment_over` (the
+rounded sums, which also build the fan) and, after Q1845 only, the exact pass
+alone, each rep on its own. Two release builds in worktrees of their own: the
+before is `424d8858` (`measured_over` has no exact pass at all there, so
+"exact pass alone" is nothing at that commit and its row below says so) and the
+after is `e634725bc`, which holds Q1845. They ran in turns, before then after,
+with `uptime` written before and after each run, over a ball meshed at
+deflection `1e-2`, `1e-3` and `1e-4` (27050, about 317 thousand and 3680738
+triangles, the before's meshes within six triangles of the after's). Runs and
+reps per figure: twelve runs of three reps at `1e-2`, five runs of two at
+`1e-3`, two runs at `1e-4` (two reps, then three). The load average was 11 to
+14 at `1e-2`, 5 to 11 at `1e-3`, and swung between 2.6 and 19 over the `1e-4`
+runs, with Q3141 and Q3162 on the machine. Seconds; each figure is the fastest
+rep, the median of the reps and the slowest beside it:
+
+| Deflection | `measured_over` before | `measured_over` after | Ratio, fastest | Ratio, median | Exact pass alone, after |
+|---|---|---|---|---|---|
+| `1e-2` | 0.0086, 0.0089, 0.0138 | 0.1183, 0.1227, 0.1543 | x13.8 | x13.8 | 0.1092, 0.1118, 0.1401 |
+| `1e-3` | 0.1595, 0.1640, 0.1797 | 1.6128, 1.6316, 1.6489 | x10.1 | x9.9 | 1.4555, 1.4705, 1.4958 |
+| `1e-4` | 2.7052, 2.7827, 7.4585 | 17.7823, 18.6506, 29.4546 | x6.6 | x6.7 | 14.7162, 15.3105, 24.8323 |
+
+The other two parts did not move: the fastest `skin_of` is 0.0054 before and
+0.0052 after at `1e-2`, 0.0952 and 0.0889 at `1e-3`, 1.8692 and 1.8527 at
+`1e-4`, and the fastest rounded sums are 0.0031 and 0.0031, 0.0642 and 0.0589,
+0.8109 and 0.7510. So the exact pass is 92 percent of the measure after Q1845
+at `1e-2`, 90 at `1e-3` and 83 at `1e-4`, and it costs about 4.0 to 4.6
+microseconds a triangle at every deflection (`1e-2`: 0.1092 over 27050;
+`1e-3`: 1.4555 over 317282; `1e-4`: 14.7162 over 3680738), so it grows in
+step with the mesh. The ratio falls from 13.8 to 6.6 as the mesh grows only
+because the rest of the measure grows faster per triangle (0.32, 0.50 and
+0.73 microseconds before, a cause not looked into), while the exact pass does
+not. Against
+Q550's x1.13 to x1.24 for the flat `measure`, a curved measure costs about
+seven to fourteen times what it did, because a flat solid has a few dozen
+triangles and a ball has thousands. The figure the row quoted, a ball of
+radius 10 at `1e-4` measured in 316 s, was not seen again: the slowest rep
+here was 29.5 s on a machine at load 19, and the three reps on a machine at
+load 3 were 17.8 to 18.7 s. What that 316 s timed is not known; the
+exact pass alone does not account for it. The meshing, which this
+row did not set out to time, was also slower after than before, 2.25 s against
+1.75 s at `1e-3` and 163 to 190 s against 113 to 125 s at `1e-4`, and
+the probe did not look into why (the two commits mesh through different
+entry points, `mesh` and `a_mesh_to_sum_over`), but the exact pass runs after
+the mesh is made, so it is not the exact pass.
+
+The logs were kept in the scratchpad (`logs2/before_<deflection>.log` and
+`logs2/after_<deflection>.log`) and die with it. What survives is these
+figures, and the whole `measured_over` reps of the first two rows, which are
+the logs' own numbers. `1e-2` before: 0.0122 0.0093 0.0097 0.0138 0.0108
+0.0104 0.0115 0.0087 0.0086 0.0112 0.0087 0.0087 0.0116 0.0087 0.0087 0.0138
+0.0099 0.0096 0.0115 0.0087 0.0088 0.0120 0.0088 0.0087 0.0118 0.0088 0.0088
+0.0118 0.0088 0.0088 0.0115 0.0089 0.0088 0.0117 0.0087 0.0087. `1e-2` after:
+0.1317 0.1506 0.1471 0.1227 0.1191 0.1183 0.1218 0.1201 0.1194 0.1329 0.1420
+0.1203 0.1232 0.1222 0.1498 0.1543 0.1212 0.1201 0.1242 0.1230 0.1199 0.1240
+0.1222 0.1216 0.1270 0.1228 0.1209 0.1243 0.1262 0.1218 0.1237 0.1231 0.1202
+0.1264 0.1201 0.1195. `1e-3` before: 0.1797 0.1607 0.1763 0.1640 0.1753
+0.1595 0.1788 0.1598 0.1778 0.1598. `1e-3` after: 1.6489 1.6164 1.6340
+1.6128 1.6488 1.6316 1.6426 1.6436 1.6276 1.6294. `1e-4` before, run one then
+run two: 7.4585 6.4985, then 2.7827 2.7052 2.7082. `1e-4` after, run one then
+run two: 29.4546 21.3050, then 17.9374 17.7823 18.6506. The `1e-4` exact pass
+after is 24.8323 15.3105 then 14.7162 15.3007 15.4034. A kept probe would
+need the three private functions made visible, which is a source change the
+row did not own.
