@@ -9413,6 +9413,63 @@ mod tests {
         }
     }
 
+    /// **The floor `z = 0.5` of a box under
+    /// `LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step`'s body, which rests on the
+    /// body's pipe of radius 2.5 about `z = 3`, and the flange's rim of radius
+    /// 2.9 about the same line**, as the LED stores them (Q3114). The pipe's
+    /// axis runs along the floor and the rim's leans `1.1·10⁻¹⁵` to it, so the
+    /// line the floor touches the pipe in meets the rim twice, `−4.9·10¹⁵` and
+    /// `3.6·10¹⁴` along it. The road along a pipe could not multiply the rim
+    /// out along that line within range, and the road for two conics was
+    /// handed the pipe's conic, a line written twice, so the three were refused
+    /// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`.
+    #[test]
+    fn a_floor_an_leds_body_rests_on_meets_its_pipe_and_its_rim_twice_far_along_them() {
+        let floor = Surface::Plane(
+            Plane::from_point_and_normal_as_written(
+                Point::new(0.0, 0.0, 0.5),
+                Vector::new(0.0, 0.0, -1.0),
+            )
+            .expect("a plane"),
+        );
+        let pipe = |direction: [f64; 3], radius: f64| {
+            Surface::Cylinder(
+                Cylinder::new(
+                    Axis::as_written(
+                        Point::new(1.27, -6.35, 3.0),
+                        Vector::new(direction[0], direction[1], direction[2]),
+                    )
+                    .expect("an axis"),
+                    radius,
+                )
+                .expect("a radius"),
+            )
+        };
+        let (a, b) = (5.551115123126e-17, 1.110223024625e-15);
+        let body = pipe([-a, -1.0, 0.0], 2.5);
+        let rim = pipe([0.0, 1.0, -b], 2.9);
+        // Along the line the floor touches the body's pipe in,
+        // `(1.27 − aγ, −6.35 − γ, 0.5)`, the rim is `Aγ² + 5bγ − 2.16 − 8.41b²`
+        // times `1 + b²`, for `A = a² + b² + a²b²`.
+        let bend = a * a + b * b;
+        let root = (25.0 * b * b + 4.0 * bend * (2.16 + 8.41 * b * b)).sqrt();
+        let far = (-5.0 * b - root) / (2.0 * bend);
+        let near = -(2.16 + 8.41 * b * b) / (bend * far);
+        for order in [[&floor, &body, &rim], [&rim, &floor, &body]] {
+            let places = middles(&meet(order).expect("the three are answered"));
+            assert_eq!(places.len(), 2, "{places:?}");
+            for (place, step) in places.iter().zip([far, near]) {
+                let wanted = [1.27 - a * step, -6.35 - step, 0.5];
+                for axis in 0..3 {
+                    assert!(
+                        (place[axis] - wanted[axis]).abs() <= 1e-9 * wanted[axis].abs(),
+                        "a place {place:?} where {wanted:?} is: {places:?}"
+                    );
+                }
+            }
+        }
+    }
+
     /// **The floor of a bar of 2 up `z` from `−2`, its wall, and the wall of a
     /// bar of 1 from `(1, 0, −3)` up `z` turned `10⁻⁸` about `x`**, as
     /// `two_curves_of_one_pair_that_meet.rs` in `rcad-topo` places them. The
