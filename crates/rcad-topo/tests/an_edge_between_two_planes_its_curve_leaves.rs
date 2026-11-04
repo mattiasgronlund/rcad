@@ -347,7 +347,7 @@ fn a_half_disc_leaning_off_the_lid_answers_and_a_disc_is_refused_for_the_edge_ro
 #[test]
 fn a_piece_a_hair_off_the_lid_of_a_short_bar_answers_a_union_and_an_intersection() {
     let the_bar = 36.0 * PI;
-    let knives: [(Rule, fn(&mut Model) -> SolidKey, usize, f64); 2] = [
+    let knives: [(Rule, AddAKnife, usize, f64); 2] = [
         (Rule::Union, a_cube_clear_of_the_bar, 2, the_bar + 8.0),
         (
             Rule::Intersection,
@@ -1319,6 +1319,9 @@ fn a_block_whose_floor_is_at(floor: f64, model: &mut Model) -> SolidKey {
         .expect("the cube moves");
     block
 }
+
+/// Adds the solid a bar is fused with to the model, and returns its key.
+type AddAKnife = fn(&mut Model) -> SolidKey;
 
 /// A cube of side 2 at `(10, 10, 0)`, clear of the bar.
 fn a_cube_clear_of_the_bar(model: &mut Model) -> SolidKey {
