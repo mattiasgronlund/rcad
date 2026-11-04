@@ -33375,3 +33375,136 @@ mod a_ball_cut_by_two_planes_that_cross_where_its_circle_starts {
         );
     }
 }
+
+#[cfg(test)]
+mod a_ball_whose_centre_a_side_of_a_block_runs_through {
+    //! The same dome as
+    //! `a_ball_cut_by_two_planes_that_cross_where_its_circle_starts`, with its
+    //! rim's plane `y = −7.37` written flat, as the side of a block (Q3007).
+
+    use core::f64::consts::PI;
+
+    use rcad_geom::{Deflection, Isometry, Scale, Vector};
+    use rcad_predicates::{Policy, ProvenanceLog};
+
+    use crate::{Model, ProfileBuilder, Rule, SolidKey};
+
+    const RADIUS: f64 = 2.5;
+    const CENTRE: [f64; 3] = [1.27, -7.37, 15.0];
+    const BALL: f64 = 4.0 * PI * RADIUS * RADIUS * RADIUS / 3.0;
+    /// `[−0.3, 3] × [−7.37, −3] × [14.7, 20]`.
+    const BLOCK: f64 = 3.3 * 4.37 * 5.3;
+
+    /// The ball of radius `2.5` about `(1.27, −7.37, 15)` and the block `[−0.3,
+    /// 3] × [−7.37, −3] × [14.7, 20]`, a square in `z = 0` extruded `5.3` and
+    /// moved up `14.7`, whose side `y = −7.37` runs through the ball's centre.
+    /// The circle the side `x = −0.3` cuts the ball in is walked from
+    /// `(−0.30000000000000004, −7.37, 13.054466654102274)`, a rounding off its
+    /// lowest point, and `y = −7.37` crosses it there, in the box `[−0.3, −0.3] ×
+    /// [−7.37, −7.37] × [13.054466654102272, 13.054466654102274]`, which misses
+    /// the start, and at its top. That node reads exactly nought along the way
+    /// the circle runs at the start, and every fuse was refused on its order
+    /// against the node at the top. Each rule, either solid first, answers with
+    /// one solid of the volume worked out from the ball's sections.
+    #[test]
+    fn a_ball_and_a_block_whose_side_runs_through_its_centre_answer_every_fuse() {
+        let both = the_ball_inside_the_block();
+        for (rule, ball_first, truth) in [
+            (Rule::Union, true, BALL + BLOCK - both),
+            (Rule::Union, false, BALL + BLOCK - both),
+            (Rule::Intersection, true, both),
+            (Rule::Intersection, false, both),
+            (Rule::Difference, true, BALL - both),
+            (Rule::Difference, false, BLOCK - both),
+        ] {
+            let what = format!("{rule:?}, ball first {ball_first}");
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let [ball, block] = a_ball_and_a_block(&mut model);
+            let (arguments, tools) = if ball_first {
+                ([ball], [block])
+            } else {
+                ([block], [ball])
+            };
+            let solids = model
+                .fuse(
+                    &arguments,
+                    &tools,
+                    rule,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what}: refused {why:?}"))
+                .solids()
+                .to_vec();
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{what}: {why:?}"));
+            let [solid] = solids[..] else {
+                panic!("{what}: one solid, got {solids:?}");
+            };
+            let measured = model
+                .solid(solid)
+                .expect("this model made the key")
+                .measure(
+                    Deflection::of(0.001).expect("a positive length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("{what}: the solid measures: {why:?}"));
+            assert!(
+                (measured.volume() - truth).abs() <= measured.volume_error(),
+                "{what}: {} measured, {} off, against {truth}",
+                measured.volume(),
+                measured.volume_error()
+            );
+        }
+    }
+
+    fn a_ball_and_a_block(model: &mut Model) -> [SolidKey; 2] {
+        let [x, y, z] = CENTRE;
+        let ball = model
+            .add_ball(
+                RADIUS,
+                &Isometry::translation(Vector::new(x, y, z)).expect("a shift"),
+            )
+            .expect("a ball");
+        let square =
+            ProfileBuilder::new(vec![[-0.3, -7.37], [3.0, -7.37], [3.0, -3.0], [-0.3, -3.0]])
+                .build(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a square");
+        let block = model
+            .add_extrusion(
+                &square,
+                5.3,
+                &Isometry::translation(Vector::new(0.0, 0.0, 14.7)).expect("a shift"),
+            )
+            .expect("a block");
+        [ball, block]
+    }
+
+    /// The part of the ball inside the block: the half `y ≥ −7.37`, between
+    /// `x = −0.3` and `x = 3`, above `z = 14.7`, since the ball reaches neither
+    /// `y = −3` nor `z = 20`. At each `x` the ball's section square to `x` is a
+    /// disc of radius `a = √(r² − (x − 1.27)²)`, at least `1.8` there, and the
+    /// half above `z = 14.7`, a `0.3` below its centre, has area `πa²/4 +
+    /// (0.3 √(a² − 0.09) + a² asin(0.3/a))/2`. Simpson's rule over `x` adds
+    /// those up; the area is smooth in `x`, so 2000 steps leave the sum far
+    /// closer than any measurement reads.
+    fn the_ball_inside_the_block() -> f64 {
+        let area = |x: f64| {
+            let a_squared = RADIUS * RADIUS - (x - CENTRE[0]) * (x - CENTRE[0]);
+            let a = a_squared.sqrt();
+            PI * a_squared / 4.0
+                + (0.3 * (a_squared - 0.09).sqrt() + a_squared * (0.3 / a).asin()) / 2.0
+        };
+        let (from, to, steps) = (-0.3_f64, 3.0_f64, 2000_u32);
+        let step = (to - from) / f64::from(steps);
+        let inner: f64 = (1..steps)
+            .map(|at| {
+                let weight = if at % 2 == 0 { 2.0 } else { 4.0 };
+                weight * area(from + step * f64::from(at))
+            })
+            .sum();
+        (area(from) + inner + area(to)) * step / 3.0
+    }
+}
