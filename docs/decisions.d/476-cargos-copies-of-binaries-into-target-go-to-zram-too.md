@@ -355,15 +355,25 @@ none of the new arguments.
 
 **What this leaves.**
 
-- **Destinations whose build directory is gone** are never cleared by
+- **Destinations whose build directory is gone** were never cleared by
   `clean-targets`, because its build loop walks the build directories. In
   `529-4`, 13 keys under `/var/cache/zram/artifacts` had no build directory and
   held 344M between them, inari's `5a/fc54fb831019f4` among them. Most are from
   trees removed before this section. They cannot be removed whole, since a tree
   with its links that has not built since the boot has no build directory
-  either, and removing its destinations breaks its next build. Clearing their
-  files under the idle rules, keeping their directories and lock files, would be
-  safe. That is a row.
+  either, and removing its destinations breaks its next build. Q3118 clears
+  their files, in a second loop after the build loop, under the idle rules of a
+  build directory with the destination itself as the directory asked about: idle
+  30 minutes, no `.cargo-lock` taken, no program running from it, and not the
+  destination of a running nextest's tree. Directories and lock files stay, as
+  in the build loop. It prints `cleared <size>: <destination>, a link
+  destination with no build directory` for each and a tally line, `<size>
+  cleared from link destinations with no build directory; <n> kept`. A
+  destination with no `.cargo-lock` under it is kept, the same rule as any
+  directory that cannot say whether a cargo is building. That keeps inari's
+  `5a/fc54fb831019f4`, whose profiles are not cargo's copies, and anything else
+  without a lock file. Clearing those would need a rule that tells a tree's
+  link destination from a stray directory, and that is not decided here.
 - **`tooling/systemd/rcad-clean-targets.service`** says the recipe needs neither
   git nor anything from `~/.cargo`. Both are false now. That is a row too, since
   the unit is outside Q3070's write set.
