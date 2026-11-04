@@ -18098,7 +18098,9 @@ fn round_a_closed_crossing_and_what_it_measures(
 /// misses the walked start `(0, 4.447213595499958, 0.8944271909999166)` along
 /// `z`. Every fuse of the two was refused on the order along that circle, and
 /// each now answers one solid whose volume is within the measure's error of
-/// the closed form's. A box that holds the start is left to the arms of
+/// the closed form's
+/// (`a_bend_and_a_cone_on_its_axis_answer_every_rule_with_their_volumes`).
+/// A box that holds the start is left to the arms of
 /// [`round_a_closed_crossing_and_what_it_measures`] that read a box round the
 /// start, and a place that reads [`Decision::Zero`], on the line along the
 /// run, to the sweep.
