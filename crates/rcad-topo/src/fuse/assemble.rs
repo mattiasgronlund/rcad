@@ -3120,11 +3120,7 @@ impl Assembly {
         for &dart in ring {
             let side = self.side_of(dart);
             let edge = &self.edges[side.edge];
-            let partner = edge
-                .carried_by
-                .iter()
-                .find(|other| !one_surface(other, surface))?;
-            partner.as_plane()?;
+            edge.carried_by.iter().find_map(Surface::as_plane)?;
             let [from, to] = [self.starts_at(dart), self.stops_at(side)];
             if from == to {
                 closed += 1;
