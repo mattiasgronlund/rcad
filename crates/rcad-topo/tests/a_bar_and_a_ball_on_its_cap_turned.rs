@@ -215,3 +215,59 @@ impl Shape {
         below + middle + above
     }
 }
+
+#[test]
+fn probe_q3165_rod_turned_tolerant() {
+    let mut tally: std::collections::BTreeMap<String, usize> = Default::default();
+    for radius in [1.0, 2.5] {
+        for degrees in [7.0_f64, 13.0, 30.0, 45.0, 61.0, 89.0] {
+            for about in [Vector::new(1.0, 0.0, 0.0), Vector::new(1.0, 1.0, 0.0)] {
+                let length = radius + 1.0;
+                let turn = Isometry::rotation(
+                    &Axis::new(Point::new(0.0, 0.0, 0.0), about).expect("an axis"),
+                    degrees.to_radians(),
+                )
+                .expect("a turn");
+                let mut model = Model::new(Scale::millimetres(100.0).expect("a size"));
+                let rod = model.add_round_bar(radius, length, &turn).expect("a bar");
+                let lifted = turn.compose(
+                    &Isometry::translation(Vector::new(0.0, 0.0, length)).expect("a shift"),
+                );
+                let ball = model.add_ball(radius, &lifted).expect("a ball");
+                for s in [rod, ball] {
+                    for f in model.solid(s).expect("a solid").faces() {
+                        println!("GEOM r={radius} deg={degrees} {about:?} {:?}", f.surface());
+                    }
+                }
+                let policy = Policy::tolerant(100.0);
+                for (one, other, rule) in [
+                    (rod, ball, Rule::Union),
+                    (rod, ball, Rule::Intersection),
+                    (rod, ball, Rule::Difference),
+                    (ball, rod, Rule::Difference),
+                ] {
+                    let mut fused = model.clone();
+                    let got =
+                        fused.fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new());
+                    let said = match &got {
+                        Ok(answer) => format!(
+                            "ok {} valid {}",
+                            answer.solids().len(),
+                            fused.validate(&policy, &mut ProvenanceLog::new()).is_ok()
+                        ),
+                        Err(rcad_topo::Error::Undecidable { records }) => format!(
+                            "U:{}",
+                            records.records().first().map_or("?", |r| r.predicate())
+                        ),
+                        Err(why) => format!("{why:?}").chars().take(50).collect(),
+                    };
+                    println!("PROBE r={radius} deg={degrees} {about:?} {rule:?}: {said}");
+                    *tally.entry(said).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    for (what, count) in &tally {
+        println!("PROBE tally {count} {what}");
+    }
+}
