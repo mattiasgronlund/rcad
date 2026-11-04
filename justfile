@@ -10164,6 +10164,7 @@ check-fuzz-overnight-selftest:
     while [ -n "${STUB_CHECK_UNTIL_MS:-}" ] && [ "$(date +%s%3N)" -lt "$STUB_CHECK_UNTIL_MS" ]; do
         sleep 0.05
     done
+    [ -z "${STUB_CHECK_RELEASED_FILE:-}" ] || date +%s%3N >"$STUB_CHECK_RELEASED_FILE"
     if [ -n "${STUB_TIMING_HOOKED:-}" ]; then
         echo "stub-binary: 1 call from rcad_fuzz_timing reaches a memcmp-family hook outside SlowRun::is"
         exit 1
@@ -11615,29 +11616,51 @@ check-fuzz-overnight-selftest:
         || fail "a night with half a second before its pause ran into it; launches and stops, against it: $(tr '\n' ',' <<<"$got")"
     }
 
-    # Forty-five (Q3101): the stretch after a pause is given whole seconds
-    # counted from the clock in milliseconds too. The pause is over before the
-    # build's check lets the night go on, and that happens half a second into
-    # a second, where a clock rounded down reads a second more than is left and
-    # the targets run past the end of the window. The stub's millisecond log
-    # says when each launched; none may be given time that ends after it.
+    # Forty-five (Q3101, Q3177): the stretch after a pause is given whole
+    # seconds counted from the clock in milliseconds too. The pause is over
+    # before the build's check lets the night go on, and the check lets it go
+    # a tenth of a second into a second, where a clock rounded down reads a
+    # second more than is left and the targets run past the end of the window.
+    #
+    # What a target may be given is judged from when the check let the night
+    # go (`released`, written by the stub), never from a clock the arm keeps
+    # itself or from the launch: the night reads its clock after that moment
+    # and launches after reading it, and on a loaded machine both are late, so
+    # a bound taken from `t0` or the launch calls a right answer wrong. A late
+    # read only lowers what is left, so a right answer is never given more than
+    # the whole seconds left at `released`. A wrong answer shows while the read
+    # stays inside that second, which the tenth of a second makes likely; a
+    # read past it is not called wrong.
+    #
+    # Only a night that started inside the pause takes the stretch after it. One
+    # that started later takes the stretch without a pause, which may run the
+    # whole window (`one_and_two`), so the bound is not asked of it.
     forty_five() {
     : >"$dir/log"
     : >"$dir/log.ms"
     t0=$(date +%s)
     pause_from=$(( t0 + 1 ))
-    pause_until=$(( t0 + 2 ))
-    STUB_CHECK_UNTIL_MS=$(( (t0 + 3) * 1000 + 500 )) run 8 "@$pause_from" "@$pause_until" \
+    pause_until=$(( t0 + 4 ))
+    STUB_CHECK_RELEASED_FILE="$dir/released" \
+        STUB_CHECK_UNTIL_MS=$(( (t0 + 5) * 1000 + 100 )) run 12 "@$pause_from" "@$pause_until" \
         || fail "a night whose pause ended during its build failed: $(cat "$dir/out")"
-    late=$(awk -v floor="$(( (t0 + 3) * 1000 ))" -v end_ms="$(( (t0 + 8) * 1000 ))" '
-        /max_total_time=/ && $1 >= floor {
-            match($0, /max_total_time=[0-9]+/)
-            if ($1 + substr($0, RSTART + 15, RLENGTH - 15) * 1000 > end_ms) print
-        }' "$dir/log.ms")
-    [ -z "$late" ] \
-        || fail "a night given a pause that ended in its build ran targets past the window: $(tr '\n' ',' <<<"$late")"
     [ "$(grep -c 'max_total_time' "$dir/log.ms")" -ge 1 ] \
         || fail "the night after a pause that ended in its build fuzzed nothing: $(cat "$dir/out")"
+    grep -q 'started inside the pause' "$dir/out" || return 0
+    end_clock=$(sed -n 's/^fuzzing .* until \([0-9:]*\).*/\1/p' "$dir/out" | head -n1)
+    [ -n "$end_clock" ] \
+        || fail "a night whose pause ended during its build did not say when its window ends: $(cat "$dir/out")"
+    window_end=$(date -d "$end_clock" +%s)
+    [ "$window_end" -ge "$t0" ] || window_end=$(( window_end + 86400 ))
+    released=$(cat "$dir/released")
+    late=$(awk -v released="$released" -v end_ms="$(( window_end * 1000 ))" '
+        /max_total_time=/ {
+            match($0, /max_total_time=[0-9]+/)
+            given = substr($0, RSTART + 15, RLENGTH - 15) + 0
+            if (given > int((end_ms - released) / 1000)) print
+        }' "$dir/log.ms")
+    [ -z "$late" ] \
+        || fail "a night given a pause that ended in its build gave targets more than the whole seconds left when its check let it go (window ends $window_end, released $released): $(tr '\n' ',' <<<"$late")"
     }
 
     # Forty-three (Q3050): a night's artifacts land in this run's own tree
