@@ -686,11 +686,13 @@ impl Bounds {
 /// runs straight through, so that each corner left has three planes round it.
 ///
 /// **Any other solid is joined here, at the bake** ([`faces_baked_as_one`]),
-/// on a ball, a pipe, a cone or a ring, and on a plane written one way. A
+/// on a ball, a pipe, a cone or a ring, on a plane written one way, and on a
+/// plane written twice a rounding apart round a curve. A
 /// curved solid can carry two faces on one ball, pipe or cone: a caller builds
 /// one, and a union whose pieces the joiner leaves apart writes one (rows Q575
 /// and Q898, `docs/decisions.md` §231.5, §325.5). A file can carry two on one
-/// plane (row Q2962). Those faces are baked as one face, and
+/// plane (row Q2962), and two on one plane written twice, across a circle
+/// they share (row Q3141). Those faces are baked as one face, and
 /// an edge between two of them is left out the way a seam is. Nothing has to be
 /// re-derived, because a corner with fewer than three surfaces round it is read
 /// out of the model rather than solved (§31.3), and every corner left keeps the
@@ -750,8 +752,10 @@ fn bake_one_solid(
 ///
 /// Two faces are in one group when an edge runs between them and they are one
 /// ball, pipe, cone or ring used one way round
-/// ([`one_curved_surface_used_one_way`]), or one plane written and used one way
-/// ([`one_plane_written_and_used_one_way`]).
+/// ([`one_curved_surface_used_one_way`]), one plane written and used one way
+/// ([`one_plane_written_and_used_one_way`]), or one plane written twice a
+/// rounding apart round a curve the edge runs along
+/// ([`one_plane_written_twice_round_a_curve`]).
 /// Then the edge is not where the solid's skin stops but only where two faces
 /// of it were written apart, which is what a seam is too. Every other face is a
 /// group of one.
@@ -773,7 +777,12 @@ fn faces_baked_as_one<'model>(
             for coedge in wire.coedges() {
                 if let Some(across) = face_across(model, mine, coedge.edge().key())
                     && (one_curved_surface_used_one_way(surfaces[&mine], surfaces[&across])
-                        || one_plane_written_and_used_one_way(surfaces[&mine], surfaces[&across]))
+                        || one_plane_written_and_used_one_way(surfaces[&mine], surfaces[&across])
+                        || one_plane_written_twice_round_a_curve(
+                            coedge.edge().stored_run(),
+                            surfaces[&mine],
+                            surfaces[&across],
+                        ))
                 {
                     one_face.join(at, position[&across]);
                 }
@@ -842,6 +851,45 @@ fn one_plane_written_and_used_one_way(one: PlacedSurface, other: PlacedSurface) 
     one.placed.as_plane().is_some() && one.placed == other.placed && one.used == other.used
 }
 
+/// Whether two flat faces are one plane written twice, as the edge between
+/// them says when it runs along a curved surface, and both face the same way
+/// out of the solid.
+///
+/// **Two distinct planes share only a straight line**, so an edge between two
+/// flat faces that is where a ball, a pipe, a cone or a ring crosses them can
+/// only be on one plane, written down twice: the reading
+/// [`which_two_surfaces_a_run_is_between`] already gives such a run
+/// (`docs/decisions.md` §176.2). A KiCad LED's flange front and its body's
+/// front disc are two such faces, across the circle the body's pipe crosses
+/// the front in, `(5.55e-17, 1, 0)` at `-6.35` and `(1.558e-16, 1, -1.158e-15)`
+/// at `-6.350000000000001` in `LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step`. Left
+/// apart, each was a crossing of every face the fuse cut, a rounding from the
+/// other's, and the two met where nothing could put them in order (row Q3141).
+///
+/// **Written nearly the same way and used the same way round**, for the reason
+/// [`one_plane_written_and_used_one_way`] gives for two spellings bit for bit:
+/// the group is baked on one of the two with the use of its first face. Two
+/// spellings a rounding apart have normals within a rounding of each other or
+/// of each other's opposite, so the sign of their dot product says which.
+fn one_plane_written_twice_round_a_curve(
+    run: &EdgeRun,
+    one: PlacedSurface,
+    other: PlacedSurface,
+) -> bool {
+    let (EdgeRun::PartOfWhereItCrosses { and, .. } | EdgeRun::RightRoundWhereItCrosses { and }) =
+        run
+    else {
+        return false;
+    };
+    let (Some(one_plane), Some(other_plane)) = (one.placed.as_plane(), other.placed.as_plane())
+    else {
+        return false;
+    };
+    and.as_plane().is_none()
+        && one.used == other.used
+        && one_plane.normal().dot(other_plane.normal()) > 0.0
+}
+
 /// Write the one spelling each group is baked on into every face of it, as
 /// [`PlacedSurface::baked_as`]: the lowest of its faces' spellings by
 /// [`name_of_surface_bits`], which depends on the faces and not on the order
@@ -897,11 +945,13 @@ fn spell_each_group_one_way(
 ///
 /// An edge whose run names no third surface, [`EdgeRun::Straight`] or
 /// [`EdgeRun::RightRoundWhereItsFacesCross`], has none to add.
-fn what_each_edge_left_out_ran_along(
-    model: &Model,
-    groups: &[Vec<FaceView<'_>>],
-) -> BTreeMap<VertexSlot, Vec<Surface>> {
+///
+/// Each such edge keeps its surface too ([`EdgesLeftOut::along_each_edge`]),
+/// because the fans round a corner count it with the faces either side of it
+/// ([`each_fan_round_it_has_fewer_than_three_surfaces`]).
+fn what_each_edge_left_out_ran_along(model: &Model, groups: &[Vec<FaceView<'_>>]) -> EdgesLeftOut {
     let mut ran_along: BTreeMap<VertexSlot, Vec<Surface>> = BTreeMap::new();
+    let mut along_each_edge: BTreeMap<EdgeSlot, Surface> = BTreeMap::new();
     for members in groups {
         let in_the_group: BTreeSet<FaceSlot> = members
             .iter()
@@ -923,6 +973,7 @@ fn what_each_edge_left_out_ran_along(
                         continue;
                     };
                     let and = and.transformed(&face.location());
+                    along_each_edge.insert(edge.key().slot_in(model.id()), and);
                     for end in [coedge.start().key(), coedge.end().key()] {
                         let surfaces = ran_along.entry(end.slot_in(model.id())).or_default();
                         if !surfaces.contains(&and) {
@@ -933,7 +984,21 @@ fn what_each_edge_left_out_ran_along(
             }
         }
     }
-    ran_along
+    EdgesLeftOut {
+        at_each_corner: ran_along,
+        along_each_edge,
+    }
+}
+
+/// What the edges left out of each group ran along
+/// ([`what_each_edge_left_out_ran_along`]).
+struct EdgesLeftOut {
+    /// Each corner such an edge ends at, with every surface those edges ran
+    /// along, in the order they were met.
+    at_each_corner: BTreeMap<VertexSlot, Vec<Surface>>,
+    /// Each such edge whose run names a surface, with that surface moved into
+    /// place.
+    along_each_edge: BTreeMap<EdgeSlot, Surface>,
 }
 
 /// The same, for a solid whose coplanar faces have just been joined.
@@ -1186,7 +1251,7 @@ fn corner_of_every_vertex(
     model: &Model,
     solid: SolidView<'_>,
     surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
-    left_out: &BTreeMap<VertexSlot, Vec<Surface>>,
+    left_out: &EdgesLeftOut,
     validate_allows: CornerRoom,
     planes_in_the_fuse: &[Plane],
     policy: &Policy,
@@ -1201,7 +1266,6 @@ fn corner_of_every_vertex(
                     if corners.contains_key(&slot) {
                         continue;
                     }
-                    let also_on = left_out.get(&slot).map_or(&[][..], Vec::as_slice);
                     corners.insert(
                         slot,
                         place_a_corner(
@@ -1209,7 +1273,7 @@ fn corner_of_every_vertex(
                             vertex,
                             slot,
                             surfaces,
-                            also_on,
+                            left_out,
                             validate_allows,
                             planes_in_the_fuse,
                             policy,
@@ -1252,27 +1316,33 @@ fn faces_around_a_vertex(
 /// module's header says why (§286).
 ///
 /// **A corner where two fans touch is read out of the model too, and never
-/// solved** (§471.3). Each of these is needed for that:
+/// solved** (§471.3), when its faces fall into two fans or more and no fan has
+/// three surfaces ([`each_fan_round_it_has_fewer_than_three_surfaces`]). Then
+/// each fan alone would be read out of the model, and the three surfaces round
+/// the corner come together only because both fans are counted. A KiCad LED has
+/// two such corners where its flat flange touches its round body. At the back
+/// one, the flange's flat and back meet the body's pipe, which touches the flat
+/// there. At the front one, the flange's flat and front meet the body's front
+/// disc, whose plane is the flange's front written down a second time a
+/// rounding apart. Those three planes share a line in the file, the flat's
+/// front edge, and solving them gives a box somewhere on it: from `0.016` to
+/// `0.21` past the stored corner in one LED, which misses it (Q2928), and `z`
+/// from `0.834` to `4.170` round the corner `(-1.23, -6.35, 3)` in another,
+/// which no surface proves off it, so it was kept and a pipe across it could
+/// not be sided (Q2939). Either way no three of them place the corner. A
+/// corner of one fan, as §70.3's grazing one is, never meets this, so it stays
+/// refused.
 ///
-/// - Every surface round it is a face's. An edge left out that adds one ran
-///   along a curve through the corner that its faces alone do not name, and
-///   the corner is solved with it or refused.
-/// - Its faces fall into two fans or more, and no fan has three surfaces
-///   ([`each_fan_round_it_has_fewer_than_three_surfaces`]). Then each fan alone
-///   would be read out of the model, and the three surfaces round the corner
-///   come together only because both fans are counted. A KiCad LED has two
-///   such corners where its flat flange touches its round body. At the back
-///   one, the flange's flat and back meet the body's pipe, which touches the
-///   flat there. At the front one, the flange's flat and front meet the
-///   body's front disc, whose plane is the flange's front written down a
-///   second time a rounding apart. Those three planes share a line in the
-///   file, the flat's front edge, and solving them gives a box somewhere on
-///   it: from `0.016` to `0.21` past the stored corner in one LED, which
-///   misses it (Q2928), and `z` from `0.834` to `4.170` round the corner
-///   `(-1.23, -6.35, 3)` in another, which no surface proves off it, so it was
-///   kept and a pipe across it could not be sided (Q2939). Either way no three
-///   of them place the corner. A corner of one fan, as §70.3's grazing one is,
-///   never meets this, so it stays refused.
+/// **A fan counts what each edge left out in it ran along**, as well as its
+/// faces' surfaces. Such an edge runs along the curve where its group's
+/// surface crosses that one, through the corner. Since the front and the disc
+/// are baked as one plane (row Q3141), the LED's front corner is the flat and
+/// that plane in one fan, and that plane and the body's pipe, which the circle
+/// round the disc ran along, in the other. Solved from the three, the flat
+/// touching the pipe there, it was refused `Undecidable` on where three
+/// surfaces meet, enclosure `inf`. A cut a fuse ran down a cone to its rim
+/// (row Q898) is one fan of the cone, the rim's plane and the cut's plane, and
+/// is solved.
 ///
 /// **A corner read out this way is still asked about**, by every surface round
 /// it and with the room a solved corner is asked with ([`asked_at`]), and the
@@ -1288,9 +1358,9 @@ fn faces_around_a_vertex(
 /// front corners it put in a box from `0.19` to `4.17` long along the flat's
 /// front edge, so a solve that answered placed none of them well.
 ///
-/// The surfaces round it are its faces', and then `also_on`: what an edge left
-/// out at it ran along, unless that is one of its faces' surfaces however
-/// written ([`what_each_edge_left_out_ran_along`]).
+/// The surfaces round it are its faces', and then what an edge left out at it
+/// ran along, unless that is one of its faces' surfaces however written
+/// ([`what_each_edge_left_out_ran_along`]).
 ///
 /// # Panics
 ///
@@ -1305,7 +1375,7 @@ fn place_a_corner(
     vertex: VertexKey,
     slot: VertexSlot,
     surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
-    also_on: &[Surface],
+    left_out: &EdgesLeftOut,
     validate_allows: CornerRoom,
     planes_in_the_fuse: &[Plane],
     policy: &Policy,
@@ -1314,6 +1384,10 @@ fn place_a_corner(
     let around = faces_around_a_vertex(model, slot, surfaces);
     let where_the_model_puts_it = where_the_model_puts_a_corner(model, slot, &around)?;
 
+    let also_on = left_out
+        .at_each_corner
+        .get(&slot)
+        .map_or(&[][..], Vec::as_slice);
     let mut distinct: Vec<Surface> = Vec::with_capacity(around.len() + also_on.len());
     for face in &around {
         if !distinct.contains(&face.baked_as) {
@@ -1327,9 +1401,12 @@ fn place_a_corner(
         }
     }
     if distinct.len() >= 3 {
-        if distinct.len() == of_its_faces
-            && each_fan_round_it_has_fewer_than_three_surfaces(model, slot, surfaces)
-        {
+        if each_fan_round_it_has_fewer_than_three_surfaces(
+            model,
+            slot,
+            surfaces,
+            &left_out.along_each_edge,
+        ) {
             return Ok(BakedCorner {
                 seam_plane: the_seam_plane_a_corner_is_on(model, slot, &around),
                 ..asked_at(
@@ -1374,11 +1451,14 @@ fn place_a_corner(
 ///
 /// A fan is §469.6's: the corners of faces at the vertex, one where each
 /// coedge of a wire ends there and the next begins, joined wherever two of
-/// them share an edge. Its surfaces are what its faces are baked on.
+/// them share an edge. Its surfaces are what its faces are baked on, and what
+/// each edge left out in it ran along, in `left_out`, unless that is one of
+/// those however written.
 fn each_fan_round_it_has_fewer_than_three_surfaces(
     model: &Model,
     vertex: VertexSlot,
     surfaces: &BTreeMap<FaceSlot, PlacedSurface>,
+    left_out: &BTreeMap<EdgeSlot, Surface>,
 ) -> bool {
     let mut number_of: BTreeMap<EdgeSlot, usize> = BTreeMap::new();
     let mut corners: Vec<([usize; 2], Surface)> = Vec::new();
@@ -1408,6 +1488,17 @@ fn each_fan_round_it_has_fewer_than_three_surfaces(
         let fan = fans.entry(one_fan.leader(into)).or_default();
         if !fan.contains(&surface) {
             fan.push(surface);
+        }
+    }
+    for (edge, number) in &number_of {
+        let Some(ran_along) = left_out.get(edge) else {
+            continue;
+        };
+        let fan = fans
+            .get_mut(&one_fan.leader(*number))
+            .expect("every edge at the corner is in the fan of a face's corner there");
+        if !fan.iter().any(|known| one_surface(known, ran_along)) {
+            fan.push(*ran_along);
         }
     }
     fans.len() >= 2 && fans.values().all(|fan| fan.len() < 3)
