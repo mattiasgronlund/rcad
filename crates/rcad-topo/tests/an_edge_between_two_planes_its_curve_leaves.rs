@@ -52,7 +52,7 @@ use rcad_geom::{
     Axis, Cone, Cylinder, Deflection, EdgeRun, HalfSpace, Isometry, Orientation, Picker, Plane,
     Point, Scale, Sphere, Surface, Torus, Vector,
 };
-use rcad_predicates::{Interval, Policy, ProvenanceLog};
+use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
     DraftEdge, DraftFace, DraftStep, DraftWire, Error, Fused, Invalid, Model, ProfileBuilder,
     Result, Rule, SolidBuilder, SolidKey,
@@ -307,9 +307,11 @@ fn a_piece_leaning_off_the_lid_is_refused_for_the_edge_round_it() {
 /// which is nothing whatever the bar is.
 ///
 /// With the cube at `(−1, −1, −1)` its side on `x = 1` holds the straight line
-/// the lid's plane and the disc's cross in, `x = 1, z = 4`, and the fuse
-/// refuses `Undecidable`: it cannot order two meets at `(1, 2√2, 4)`, where the
-/// line meets the bar's pipe of radius 3.
+/// the lid's plane and the disc's cross in, `x = 1, z = 4`. Since the fuse
+/// joins the two meets, one on that side and one on the line the lid and the
+/// disc cross in, into one node, it refuses the disc as a face trimmed by a
+/// curve this cannot follow, as through the floor; before, it refused
+/// `Undecidable` for the order of two meets at `(1, 2√2, 4)`.
 ///
 /// With the cube moved `(−1.5, −1, −1)` through the bar's floor, or
 /// `(10, 10, 0)` clear of it, the fuse drew the disc's circle on that line too,
@@ -332,7 +334,10 @@ fn a_fuse_with_the_tilted_disc_read_back_from_bytes_is_refused_for_the_edge_roun
     let mut not_refused = Vec::new();
     let places: [(Vector, WhatItGivesNow); 3] = [
         (Vector::new(-1.0, -1.0, -1.0), |_, fused| {
-            could_not_order_two_meets_where_the_line_meets_the_pipe(fused)
+            matches!(
+                fused,
+                Err(Error::AFaceTrimmedByACurveThisCannotFollow { .. })
+            )
         }),
         (Vector::new(-1.5, -1.0, -1.0), |_, fused| {
             matches!(
@@ -384,28 +389,6 @@ fn a_fuse_with_the_tilted_disc_read_back_from_bytes_is_refused_for_the_edge_roun
 
 /// Whether a fuse under a rule gave what it gives now.
 type WhatItGivesNow = fn(Rule, &Result<Fused>) -> bool;
-
-/// Whether `fused` is refused `Undecidable` for one thing alone: the order
-/// along a crossing of two meets that are both at `(1, 2√2, 4)`, to `1e-12`.
-fn could_not_order_two_meets_where_the_line_meets_the_pipe<T>(fused: &Result<T>) -> bool {
-    let Err(Error::Undecidable { records }) = fused else {
-        return false;
-    };
-    let [record] = records.records() else {
-        return false;
-    };
-    let near = |side: Interval, to: f64| {
-        (side.lo() - to).abs() <= 1e-12 && (side.hi() - to).abs() <= 1e-12
-    };
-    record.predicate() == "order along a crossing"
-        && record.inputs().len() == 2
-        && record.inputs().iter().all(|meet| {
-            meet.enclosure()
-                .into_iter()
-                .zip([1.0, 8.0_f64.sqrt(), 4.0])
-                .all(|(side, to)| near(side, to))
-        })
-}
 
 /// Moving a solid and copying one are the two mutations
 /// `Model::check_touched_edge` runs after that write no plane, no corner and
