@@ -3893,7 +3893,7 @@ mod tests {
         };
         let starts = [0.0, most(-1.0), most(1.0)];
         core::array::from_fn(|which| {
-            let mut piece: Vec<(f64, ([f64; 3], [f64; 3]))> = turns
+            let mut piece: Vec<_> = turns
                 .iter()
                 .filter_map(|turned| {
                     let at = pieces_at(*turned)[which]?;
