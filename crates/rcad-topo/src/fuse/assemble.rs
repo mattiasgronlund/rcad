@@ -6589,6 +6589,18 @@ impl Assembly {
     /// `crates/rcad-step/tests/an_led_whose_dome_meets_its_pipe_in_two_arcs.rs`
     /// less a box, under a tolerant policy).
     ///
+    /// **A refusal for the faces along an edge is the fuse's broken answer**,
+    /// whether or not the edge is a piece of the caller's:
+    /// [`Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked`] and
+    /// [`Error::AnEdgeBendsButEveryFaceAlongItIsFlat`] come back as the
+    /// [`Error::TheFuseWroteABrokenAnswer`] the sweep in
+    /// [`Assembly::commit`] says of that edge. The faces along it are the
+    /// answer's, which the fuse put there, so the refusal says nothing of the
+    /// caller's edge, which may be straight, or have two faces along it in
+    /// the caller's model. The sweep asks the same two rules of every edge
+    /// before it meshes anything, so it refuses the answer the same way when
+    /// it meets such an edge first.
+    ///
     /// The two solid keys of [`Error::TwoSolidsShareSpace`] and
     /// [`Error::CannotTellWhetherTwoSolidsShareSpace`] need nothing: only
     /// [`Model::check_no_two_solids_share_space`] raises them, and neither
@@ -6600,11 +6612,15 @@ impl Assembly {
     /// [`Assembly::the_input_edge_it_is_a_piece_of`] do: `apart` holds what
     /// [`Assembly::write_into`] wrote and nothing else.
     ///
-    /// If any refusal but that one names an edge the fuse invented. Such an
-    /// edge runs where two input faces cross and is carried by both, so it
-    /// is not refused for having no curved face beside it where it bends, or
-    /// for having other than two faces along it in its one shell. And
-    /// neither model is asked how long an edge is.
+    /// As [`Assembly::the_broken_answer_the_sweep_finds_along`] does, where
+    /// the sweep passes an edge the mesher refused for its faces.
+    ///
+    /// If [`Error::CannotYetMeasureHowLongThisCurveIs`] names an edge the fuse
+    /// invented. Only [`EdgeView::length`] raises it,
+    /// and nothing in this crate asks a length of either model of the fuse's
+    /// own: the only caller of `EdgeView::length` in this crate is
+    /// [`WireView::length`](crate::WireView::length), and nothing in this
+    /// crate calls that.
     fn naming_the_callers_face_or_edge(
         &self,
         apart: &Model,
@@ -6614,6 +6630,11 @@ impl Assembly {
         if let Some(face) = refused.the_face_it_names() {
             *face = self.the_input_face_it_was_cut_from(apart, written, *face);
         }
+        if let Error::AnEdgeWithoutTwoFacesAlongItCannotBeWalked { edge }
+        | Error::AnEdgeBendsButEveryFaceAlongItIsFlat { edge } = refused
+        {
+            return Self::the_broken_answer_the_sweep_finds_along(apart, edge, &refused);
+        }
         let Some(edge) = refused.the_edge_it_names() else {
             return refused;
         };
@@ -6622,11 +6643,40 @@ impl Assembly {
             return refused;
         }
         let Error::ACrossingAlongThisEdgeCouldNotBeFollowed { why, .. } = refused else {
-            panic!(
-                "only a crossing that cannot be followed is refused on an edge the fuse invents: {refused:?}"
-            );
+            panic!("neither model of the fuse's own is asked how long an edge is: {refused:?}");
         };
         Error::Geometry(*why)
+    }
+
+    /// What the sweep in [`Assembly::commit`] says of `edge` of `apart`, which
+    /// the mesher `refused` for the faces along it: the first of
+    /// `check_edge`'s two rules about those faces that refuses it, as
+    /// [`Error::TheFuseWroteABrokenAnswer`].
+    ///
+    /// # Panics
+    ///
+    /// If the sweep passes `edge`. The mesher refuses an edge three or more
+    /// faces of one solid walk, and the sweep one not walked by exactly two
+    /// coedges. The mesher refuses a bent edge with only flat faces along it
+    /// by [`nothing_curved_says_where_it_bends`](crate::validate::nothing_curved_says_where_it_bends),
+    /// and the sweep asks that same
+    /// rule, of the faces either side, which are the faces of one shell.
+    fn the_broken_answer_the_sweep_finds_along(
+        apart: &Model,
+        edge: EdgeKey,
+        refused: &Error,
+    ) -> Error {
+        let slot = edge.slot_in(apart.id());
+        let checked = apart
+            .check_edge_is_walked_by_two_opposite_coedges(slot)
+            .and_then(|()| apart.check_something_curved_says_where_this_edge_bends(slot));
+        let Err(Error::Invalid(broken)) = checked else {
+            panic!(
+                "the sweep refuses every edge the mesher refuses for the faces along it, and \
+                 passed the one {refused:?} names: {checked:?}"
+            );
+        };
+        Error::TheFuseWroteABrokenAnswer { broken }
     }
 
     /// The caller's face that `face`, written into `apart`, was cut out of.
