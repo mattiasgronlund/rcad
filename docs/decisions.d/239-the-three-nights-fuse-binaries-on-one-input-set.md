@@ -327,3 +327,30 @@ list was `setC_names.txt` in Q244's `target/q244/`, and the two corpora were in
 longer dates its files (239.9). Q62's stand-ins could take C's place, but they
 would answer a different question, and the night that question came from is
 answered above.
+
+### 239.11 Main no longer takes the 09-23 cost, 2026-11-04
+
+*Q3151, a read-only lane, on `b61c7a1f`. Its scripts, timings and probe patch
+are in `~/rcad-probes/q3151`, outside git.*
+
+**The 65 slow files of 239.10 are fast on `main`.** They were run one at a time,
+the fuzz builds of `main` and `bin055` interleaved, both built for x86-64-v3,
+with the load written beside each timing (load1 4.8 to 11.3). On `main` they
+take 49 to 138 ms each, 4.2 s in all, and `bin055` takes 766 to 3 273 ms,
+121.4 s in all (`run1.txt`). On `7b57e5e4`, the file the bisect used, `main`
+takes 97 ms and `bin055` 2 374 ms. So the second question 239.10 left to Q3151
+is answered, and no row is filed for it. The first, where the 3.5 s went in
+`05206e64f`'s answer, is left unasked: the cost is gone, and nobody looked for
+the commit that took it out.
+
+**`main` is slower than the 09-23 binary on everything else.** Over the 4 000
+files, `main`'s median is 20 ms and its total 272.6 s with three files past a
+30 s cap; `bin055`, run straight after, has a median of 3 ms and a total of
+156.9 s, about 110 s of it on the 65 (`main4000.txt`, `b055now.txt`). The 11-04
+fuse night ran 2.08 M times, against the 36.7 M of the 09-22 night in 239.10.
+A probe build that times each step found 39.2% of the sample's time spent
+meshing curved solids for their volume, at load 30 to 40. Each curved shell of
+an answer is meshed twice inside one fuse, once in `nest_the_shells` and again
+in `Assembly::commit`'s sweep; Q3154 asks whether once will do. Five files
+that the 09-23 binary ran in 3 to 25 ms take 3.6 s to over 30 s on `main`, and
+Q3155 traces them. A sixth, `90e97046`, ran past ten minutes; that is Q2484.
