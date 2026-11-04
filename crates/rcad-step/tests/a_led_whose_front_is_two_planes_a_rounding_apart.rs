@@ -232,8 +232,11 @@
 //! intersection and under difference with the LED, and the box on this LED's
 //! flat answers both. The one is the far box of
 //! `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step`, which shares nothing with it,
-//! and the LED less it is refused `ResultIsNotManifold` on the dome's rim
-//! (Q3164).
+//! and the LED less it was refused `ResultIsNotManifold` on the dome's rim.
+//! The body's pipe asked the rim's plane, which no face carries, whether the
+//! face across its rim leaves out where the flange's flat cuts the pipe, and
+//! not the dome across it. It now asks the dome, and the LED less the far box
+//! is the LED (Q3164).
 
 use std::{env, fs, path::PathBuf};
 
@@ -311,16 +314,16 @@ fn a_d5_led_15_up_reads_its_front_written_twice_as_one_plane_and_less_the_far_bo
 }
 
 /// Since Q3141 the flange's front and the body's front disc are one plane, and
-/// the far box shares nothing with the LED. The LED less the far box is
-/// refused not manifold, where four edges of the dome's rim are claimed by one
-/// face (Q3164).
+/// the far box shares nothing with the LED. The LED less the far box was
+/// refused not manifold, where four edges of the dome's rim were claimed by
+/// one face, until the body's pipe asked the dome across its rim, and not the
+/// rim's plane, whether it leaves out where the flange's flat cuts the pipe
+/// too (Q3164). The LED less the far box is the LED.
 #[test]
-fn a_d3_led_2_up_shares_nothing_with_the_far_box_and_its_difference_is_refused_not_manifold() {
+fn a_d3_led_2_up_shares_nothing_with_the_far_box_and_less_it_is_the_led() {
     let file = "LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step";
     the_far_box_shares_nothing_with(file);
-    every_fuse_refuses(file, &[(FAR_OFF, Rule::Difference)], |_, error| {
-        matches!(error, Error::ResultIsNotManifold { count: 1 })
-    });
+    the_led_less_the_far_box_is_the_led(file);
 }
 
 /// Since Q3114 the box whose floor rests on the body's pipe gets past where
