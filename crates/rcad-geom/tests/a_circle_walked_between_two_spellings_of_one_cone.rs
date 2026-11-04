@@ -139,21 +139,19 @@ fn the_two_spellings_alone_walk_one_circle_the_opposite_way_round() {
     }
 }
 
-/// The test is exact: a cone one ulp steeper, about `−z`, is another cone, and
-/// the pair is refused by name as it always was.
+/// The test is exact: a cone one ulp steeper, about `−z`, is another cone with
+/// the same apex, which `intersect` answers as touching there, so the run is
+/// refused as two surfaces that do not cross in a conic.
 #[test]
-fn a_reversed_spelling_one_ulp_steeper_is_another_cone_and_is_still_refused() {
+fn a_reversed_spelling_one_ulp_steeper_is_another_cone_touching_at_the_apex() {
     let up = about(Axis::z());
     let steeper =
         Surface::Cone(Cone::new(Axis::z().reversed(), SLOPE.next_up()).expect("a positive slope"));
     for along in [[&up, &steeper], [&steeper, &up]] {
         let walked = walked(along);
         assert!(
-            matches!(
-                walked,
-                Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface)
-            ),
-            "two cones a hair apart cross in a curve nothing here can draw, got {walked:?}"
+            matches!(walked, Err(Error::TheseTwoSurfacesDoNotCrossInAConic)),
+            "two cones a hair apart touch at their apex and cross nowhere else, got {walked:?}"
         );
     }
 }
