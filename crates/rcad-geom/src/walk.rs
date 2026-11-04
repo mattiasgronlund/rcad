@@ -9294,4 +9294,90 @@ mod tests {
             Err(Error::CannotNameWhichPieceOfACrossingThisIs)
         ));
     }
+
+    /// **A run on the branch beyond the loop is marched round the right angle
+    /// it turns to pass the loop.** Two pointed cones of slope a half, the
+    /// second turned `0.3` about the line along `x` through `(0, 0, 4)`, as
+    /// `rcad-topo`'s `a_funnel_with_a_leaning_spout.rs` places it, and the run
+    /// between the two corners `z = 8` puts on the branch beyond the loop,
+    /// `(±3.9541, −0.6045, 8)`. On its way it passes about `3e-8` from the loop
+    /// near `(±1.5954, 0.1209, 3.2)`, and turns a right angle within about
+    /// `1e-7` there. A point on both cones to `3e-16` can be `6e-8` off the
+    /// branch, so a trial of `6.0e-8` settled `5.2e-8` from where it set out
+    /// but behind it round the turned cone, and the march was refused as going
+    /// back along its run (Q3134). Now that trial is shortened, and every point
+    /// the march keeps is on both cones and in front of the branch's own flat
+    /// surface, so none of them is on the loop.
+    #[test]
+    fn a_run_on_a_branch_is_marched_round_where_it_turns_a_right_angle_to_pass_the_loop() {
+        let upright = Cone::new(crate::Axis::z(), 0.5).expect("a slope");
+        let through = crate::Axis::new(Point::new(0.0, 0.0, 4.0), Vector::new(1.0, 0.0, 0.0))
+            .expect("a direction");
+        let turn = crate::Isometry::rotation(&through, 0.3).expect("a turn");
+        let pair = [
+            Surface::Cone(upright),
+            Surface::Cone(upright.transformed(&turn)),
+        ];
+        let met = crate::intersect::intersect(
+            &pair[0],
+            &pair[1],
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(runs)) = met else {
+            panic!("a loop and two branches, and not {met:?}");
+        };
+        let corners = [3.954_052_393_911_788_4, -3.954_052_393_911_788_4]
+            .map(|x| PredicatePoint::from([x, -0.604_540_872_233_181_6, 8.0]));
+        let beyond: Vec<&NamedRun> = runs
+            .iter()
+            .filter(|run| {
+                let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run() else {
+                    panic!("a piece picked out, and not {run:?}");
+                };
+                picked_by.len() == 1
+                    && corners
+                        .iter()
+                        .all(|corner| picked_by[0].side_of_point(*corner) == Decision::Pos)
+            })
+            .collect();
+        let [beyond] = beyond.as_slice() else {
+            panic!("one branch holds both corners: {runs:?}");
+        };
+        let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = beyond.run() else {
+            unreachable!("picked out above");
+        };
+
+        for ends in [corners, [corners[1], corners[0]]] {
+            let between = NamedRun::new(beyond.run().clone(), ends).expect("two ends");
+            for along in [[&pair[0], &pair[1]], [&pair[1], &pair[0]]] {
+                let walked = walk(
+                    &between,
+                    along,
+                    Deflection::of(0.01).expect("a length above zero"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|refused| panic!("{ends:?} is marched, not refused {refused:?}"));
+                let room = walked.deviation().magnitude();
+                let mut lowest = f64::INFINITY;
+                for point in walked.points() {
+                    for surface in along {
+                        let off = how_far_off(surface, *point);
+                        assert!(off <= room, "{point:?} is {off:e} off {surface:?}");
+                    }
+                    assert_eq!(
+                        picked_by[0].side_of_point(PredicatePoint::from(point.coordinates())),
+                        Decision::Pos,
+                        "{point:?} is on the branch and not on the loop"
+                    );
+                    lowest = lowest.min(point.z());
+                }
+                assert!(
+                    lowest < 3.21,
+                    "the run goes down past where it nearly meets the loop: {lowest}"
+                );
+            }
+        }
+    }
 }
