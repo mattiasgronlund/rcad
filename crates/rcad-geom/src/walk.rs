@@ -1003,8 +1003,9 @@ impl TwoLoopsHeldApartBy {
 ///
 /// **One pair is refused here under that name and answered there**: two cones
 /// on one axis with one apex and two slopes, which `intersect` answers as
-/// touching at the apex. A closed run stated on them names nothing, and the
-/// refusal keeps an older name — `where_two_coaxial_cones_cut` says why.
+/// touching at the apex. A closed run stated on them names nothing, and is
+/// refused [`Error::TheseTwoSurfacesDoNotCrossInAConic`], as a run on a plane
+/// touching a ball is.
 ///
 /// **One cone twice is not one of those pairs**, and that is the one place the
 /// evaluator says more than the namer's table does: the namer answers it as one
@@ -6157,16 +6158,14 @@ fn where_a_coaxial_cone_and_pipe_cut(
 /// **proved** to share an axis, asked here for the reason
 /// [`where_a_coaxial_cone_and_pipe_cut`] gives.
 ///
-/// **The same name where they share an apex, and there it is the wrong name.**
-/// Two cones on one axis with one apex and two slopes meet at the apex and
-/// nowhere else — `intersect` answers them
+/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where they share an apex. Two
+/// cones on one axis with one apex and two slopes meet at the apex and nowhere
+/// else — `intersect` answers them
 /// [`SurfaceMeet::TouchAtOnePoint`](crate::SurfaceMeet::TouchAtOnePoint) — so a
-/// closed run stated on them names a curve that is not there, and
-/// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] is what a plane touching a
-/// ball gets for the same thing. `a_circle_walked_between_two_spellings_of_one_cone.rs`
-/// pins the old name on one such pair and is outside the change that named
-/// these cones, so the two move together or not at all. One cone twice under
-/// any run but a whole circle is refused here too, as it always was.
+/// closed run stated on them names a curve that is not there, as a run on a
+/// plane touching a ball does. One cone twice (one apex, one slope) under any
+/// run but a whole circle is refused the first name, as it always was: there
+/// is no second surface to touch.
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] and
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] as
@@ -6178,8 +6177,12 @@ fn where_two_coaxial_cones_cut(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Conic> {
-    if whether_two_cones_share_an_axis(one, other) != Decision::Zero || one.apex() == other.apex() {
+    let one_cone_twice = one.apex() == other.apex() && one.slope() == other.slope();
+    if whether_two_cones_share_an_axis(one, other) != Decision::Zero || one_cone_twice {
         return Err(Error::ACrossingBetweenAConeAndAnotherCurvedSurface);
+    }
+    if one.apex() == other.apex() {
+        return Err(Error::TheseTwoSurfacesDoNotCrossInAConic);
     }
     which_of_these_circles_this_run_is(
         the_circles_two_coaxial_cones_cut(one, other),
