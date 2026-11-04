@@ -9167,4 +9167,50 @@ mod tests {
     /// so the row above this one is the row that runs out first if the degree
     /// ever goes up again.
     const MOST_F64_A_DISCRIMINANT_HAS_BEEN_SEEN_TO_NEED: usize = 512;
+
+    /// The body's front disc of `LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step`,
+    /// face slot 7, and its body's pipe written twice, of radius 2.5 about
+    /// `(1.27, -1.27, 3)`: as the face, along `(-5.55e-17, -1, 0)`, and as the
+    /// pipe the disc's edge runs along, `(0, -1, 1.1e-15)`. The four places the
+    /// three share lie on the disc's plane, `y = -1.27` but for `1e-16`, so
+    /// each box round one is no wider across that plane than a few roundings.
+    ///
+    /// `what_a_plane_one_wall_mirrors_with_both_leaves` answers them, and handed
+    /// each back `0.16` long along `y`. One, at `x = -1.22688`, `z = 3.124844`,
+    /// could then not be put in order round the disc's edge against the edge's
+    /// meet with the flange's front `0.0143` from it (Q3111).
+    #[test]
+    fn a_disc_and_its_pipe_written_twice_meet_in_boxes_that_lie_on_the_disc() {
+        let disc = Surface::Plane(
+            Plane::from_point_and_normal_as_written(
+                Point::new(0.0, -1.27, 0.0),
+                Vector::new(5.551115123126e-17, 1.0, 0.0),
+            )
+            .expect("a plane"),
+        );
+        let pipe_along = |direction: Vector| {
+            Surface::Cylinder(
+                Cylinder::new(
+                    Axis::as_written(Point::new(1.27, -1.27, 3.0), direction).expect("an axis"),
+                    2.5,
+                )
+                .expect("a radius"),
+            )
+        };
+        let the_face = pipe_along(Vector::new(-5.551115123126e-17, -1.0, 0.0));
+        let the_edge = pipe_along(Vector::new(0.0, -1.0, 1.110223024625e-15));
+        let MeetOfThree::At(places) =
+            meet([&disc, &the_face, &the_edge]).expect("the three are answered")
+        else {
+            panic!("the disc's edge and the face's pipe meet on the disc");
+        };
+        assert_eq!(places.len(), 4, "{places:?}");
+        for place in &places {
+            let across = place.enclosure()[1];
+            assert!(
+                across.hi() - across.lo() < 1e-14,
+                "a place on the disc in a box {across:?} across it: {places:?}"
+            );
+        }
+    }
 }
