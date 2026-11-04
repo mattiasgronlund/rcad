@@ -47,8 +47,8 @@ time. `CORES_ENTRY` in `queue.py` is `^cores:([1-9][0-9]*|all)$`, so
 all, the same as a write set that names no file); `_queue-check`'s `entry()`
 accepts the same pattern before it falls through to `path#item`.
 
-`just queue cores <id> <n>|all` sets, replaces or removes the one `cores:`
-entry of an open row's write set (`cores_step`); it never conflicts with any
+`just queue cores <id> <n>|all|-` sets, replaces or (with a dash for the
+count) removes the one `cores:` entry of an open row's write set (`cores_step`); it never conflicts with any
 other entry, and a row keeps at most one.
 
 A `cores:` entry **never meets a path**, a directory or another `cores:`
