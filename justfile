@@ -19894,6 +19894,16 @@ check-queue-selftest:
     [ "$got" = "$summer" ] || fail "a night row five minutes before the window of the change day was not skipped naming that window"
     driveclock corenight 4 2027-03-27T22:30:00Z blocked
     [ "$got" = "$winter" ] || fail "a night row the evening before the spring change was not skipped naming that night's window, rather than the night after"
+    # `meets`, which take, narrow and writes ask, reads paths alone, so by day
+    # a night entry neither skips the row nor meets another hold's night.
+    nightheld=$(printf 'R\037elsewhere\037\0376\037Q8\037-\037lane:lane-q8\037-\037night,docs/a.md\037(held in /a/tree)\037-\037Q8')
+    got=$("$j" --set queue_now 2026-10-19T12:00:00Z queue meets Q9 night <<<"$nightheld" 2>&1) \
+        || fail "queue meets failed on a night write set by day"
+    [ -z "$got" ] || fail "meets by day passed a night write set over for the clock, or met another hold's night"
+    got=$("$j" --set queue_now 2026-10-19T12:00:00Z queue meets Q9 night,docs/a.md <<<"$nightheld" 2>&1) \
+        || fail "queue meets failed on a night write set with a path by day"
+    [ "$got" = "skip Q9 (tier -): its docs/a.md meets Q8's docs/a.md, held elsewhere by lane:lane-q8" ] \
+        || fail "meets by day did not meet on the path a night write set shares with another hold"
 
     fence blocked <<'MD'
     Q1  1  lane:lane-q1  opus  docs/a.md  running §230
@@ -20505,7 +20515,11 @@ check-queue-merge-driver:
 # after: row inside one apply once every row it still waits on is
 # lane:<that same branch>, set by an earlier take step of the same apply,
 # and still refusing it when that earlier take landed on a different
-# branch. The
+# branch. Q3150's: `night` setting and taking off a row's night entry,
+# refusing it twice, a switch that is neither on nor off, a closed row and a
+# `cores:` entry beside it, as `cores`, `add` and `writes` refuse the same
+# pair; and `blocked` skipping the row by day, naming the next window, and
+# not by night (§308.8). The
 # hook's cases are `check-hooks`'s. Without `tooling/queue/` the
 # first take already fails, and with the text merge in place of the driver the
 # clean merge conflicts: Q1 and Q2 sit on neighbouring lines, and both sides
@@ -21726,6 +21740,54 @@ check-queue-api-selftest:
     got=$(q "$header_wt" apply header "$heading_header" 2>&1) && fail "header accepted a replacement with its own '## ' heading"
     grep -qF "the new header may hold no fenced block and no '## ' heading of its own" <<<"$got" \
         || fail "header did not refuse a heading in the new text"
+
+    # Q3150 (§308.8): `night` sets and takes off a row's night entry, refused
+    # beside a cores: entry in the verb, in `add` and in `writes`; the fill
+    # skips the row by day, naming the next window in UTC, and not by night.
+    night_wt="$root/rcad-worktrees/night"
+    g "$hub" worktree add -q -b night "$night_wt" main
+    night_row=$(q "$night_wt" add 2 opus - "from/- a row that runs only beside the night fuzz §230") \
+        || fail "add for the night row failed"
+    got=$(q "$night_wt" night "$night_row" on 2>&1) || fail "night on refused an open row"
+    grep -qxF "$night_row: write set - -> night" <<<"$got" || fail "night on did not report the write set it set"
+    got=$(awk -v id="$night_row" '$1 == id { print $5 }' "$night_wt/docs/queue.md")
+    [ "$got" = night ] || fail "night on did not write night into the row's write set"
+    got=$(check "$night_wt") || fail "the file night on wrote fails check-queue"
+    got=$(q "$night_wt" night "$night_row" on 2>&1) && fail "night on accepted a row that runs only by night already"
+    grep -qF "$night_row runs only by night already" <<<"$got" \
+        || fail "a second night on did not say the row runs only by night already"
+    got=$(q "$night_wt" cores "$night_row" 2 2>&1) && fail "cores set a count beside a night entry"
+    grep -qF "night and cores:2 cannot share a write set" <<<"$got" \
+        || fail "cores beside a night entry did not say why it was refused"
+    blocked_at() { "$j" --justfile '{{ justfile() }}' --working-directory "$night_wt" --set queue_slots 6 --set queue_now "$1" queue blocked 2>&1; }
+    got=$(blocked_at 2026-10-19T12:00:00Z) || fail "blocked failed by day on the night row's copy"
+    grep -qxF "skip $night_row (tier 2): its night entry fits only inside the night fuzz's window, 22:10Z to 06:10Z" <<<"$got" \
+        || fail "blocked by day did not skip the night row naming the next window"
+    got=$(blocked_at 2026-10-19T02:00:00Z) || fail "blocked failed by night on the night row's copy"
+    grep -qF "skip $night_row " <<<"$got" && fail "blocked by night skipped the night row"
+    got=$(q "$night_wt" night "$night_row" off 2>&1) || fail "night off refused a row with a night entry"
+    grep -qxF "$night_row: write set night -> -" <<<"$got" || fail "night off did not report the write set it left"
+    got=$(q "$night_wt" night "$night_row" off 2>&1) && fail "night off accepted a row with no night entry"
+    grep -qF "$night_row has no night entry" <<<"$got" || fail "a second night off did not say the row has no night entry"
+    got=$(q "$night_wt" night "$night_row" maybe 2>&1) && fail "night accepted maybe"
+    grep -qF "'maybe' is not on or off" <<<"$got" || fail "night did not refuse a switch that is neither on nor off"
+    got=$(q "$night_wt" cores "$night_row" 2 2>&1) || fail "cores refused a row once its night entry was off"
+    got=$(q "$night_wt" night "$night_row" on 2>&1) && fail "night on set the entry beside a cores: entry"
+    grep -qF "night and cores:2 cannot share a write set" <<<"$got" \
+        || fail "night on beside cores: did not say why it was refused"
+    got=$(q "$night_wt" night T1 on 2>&1) && fail "night on changed a closed row"
+    grep -qF "T1 is closed" <<<"$got" || fail "night on did not refuse T1 by name"
+    got=$(q "$night_wt" add 2 opus 'docs/a.md,night' "from/- a row on a file that runs only by night §230" 2>&1) \
+        || fail "add refused a write set with a night entry beside a path"
+    got=$(q "$night_wt" add 2 opus 'night,cores:2' "from/- a night row that pins threads §230" 2>&1) \
+        && fail "add accepted night beside cores:2"
+    grep -qF "night and cores:2 cannot share a write set" <<<"$got" \
+        || fail "add did not say why night beside cores:2 was refused"
+    got=$(q "$night_wt" writes "$night_row" 'docs/a.md,night,cores:1' 2>&1) && fail "writes accepted night beside cores:1"
+    grep -qF "night and cores:1 cannot share a write set" <<<"$got" \
+        || fail "writes did not say why night beside cores:1 was refused"
+    got=$(q "$night_wt" writes "$night_row" night 2>&1) || fail "writes refused a night entry"
+    got=$(check "$night_wt") || fail "the file the night cases wrote fails check-queue"
 
     # §309.3: the lock must stay held for the whole batch, not only within
     # each step. The §309.3.2 case above shows a batch's own claims events
