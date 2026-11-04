@@ -1634,8 +1634,10 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_
             panic!("{what}");
         };
         let surface = model
-            .face(face)
-            .expect("the refusal names a face of the model")
+            .solids()
+            .flat_map(|solid| solid.faces())
+            .find(|placed| placed.key() == face)
+            .expect("the refusal names a face of one of the two frustums")
             .surface();
         if first_first {
             let Surface::Cone(side) = surface else {
