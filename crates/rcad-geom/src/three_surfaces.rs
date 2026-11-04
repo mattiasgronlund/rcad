@@ -5941,6 +5941,11 @@ fn the_plane_reaches_the_pipe_only_off_the_other(
 /// between each two near roots, and the one for `y = 0.2` turns at the same two
 /// places without reaching zero, and Horner's rule in intervals over a box one
 /// rounding wide cannot tell any of those four turning points from nothing.
+/// Where neither quartic answers so, both are asked again with
+/// [`it_keeps_one_sign_past`] to clear what that leaves, which answers an
+/// LED's flange flat leaning a rounding against its dome and its body's pipe
+/// (Q3113); it is asked second so that every triple the first two answer
+/// keeps its answer.
 ///
 /// **Both conics are stretched and lifted first.** The unknown kept is
 /// written `2ˢ·t`, `s` half the binades between what the two conics square
@@ -5968,7 +5973,8 @@ fn the_plane_reaches_the_pipe_only_off_the_other(
 /// `t` and the one in `s` both hand on: two conics both linear in the unknown
 /// taken out, an `R` that is nothing everywhere — two conics that share a
 /// curve — a turning point [`where_a_polynomial_is_zero`] cannot tell from
-/// nothing and [`it_keeps_one_sign_over`] cannot clear, and a root whose `Y`
+/// nothing and neither [`it_keeps_one_sign_over`] nor
+/// [`it_keeps_one_sign_past`] can clear, and a root whose `Y`
 /// it cannot tell from nothing. It is asked last, so every triple a road above
 /// answers keeps its answer.
 fn what_a_plane_that_cuts_both_in_conics_leaves(
@@ -6012,7 +6018,7 @@ fn what_a_plane_that_cuts_both_in_conics_leaves(
         the_conic_stretched_and_lifted(&mine, kept, stretch)?,
         the_conic_stretched_and_lifted(&theirs, kept, stretch)?,
     ];
-    let shared_in = |unknown: TheUnknownKept| {
+    let shared_in = |unknown: TheUnknownKept, clearing: ATurningPointIsCleared| {
         the_points_two_conics_share(
             flat,
             [&written[0], &written[1]],
@@ -6020,10 +6026,18 @@ fn what_a_plane_that_cuts_both_in_conics_leaves(
             [off, first, second],
             [kept, gone],
             widened,
-            unknown,
+            (unknown, clearing),
         )
     };
-    shared_in(TheUnknownKept::AsItIs).or_else(|| shared_in(TheUnknownKept::Sheared))
+    [
+        ATurningPointIsCleared::ByItsSlope,
+        ATurningPointIsCleared::ByItsSlopeOrThePolynomialMoved,
+    ]
+    .into_iter()
+    .find_map(|clearing| {
+        shared_in(TheUnknownKept::AsItIs, clearing)
+            .or_else(|| shared_in(TheUnknownKept::Sheared, clearing))
+    })
 }
 
 /// Which unknown [`the_points_two_conics_share`] keeps in the quartic.
@@ -6035,8 +6049,19 @@ enum TheUnknownKept {
     Sheared,
 }
 
+/// How [`the_points_two_conics_share`] clears a turning point of the quartic
+/// that [`where_a_polynomial_is_zero`] cannot tell from nothing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ATurningPointIsCleared {
+    /// By [`it_keeps_one_sign_over`] alone.
+    ByItsSlope,
+    /// By [`it_keeps_one_sign_over`] or else [`it_keeps_one_sign_past`].
+    ByItsSlopeOrThePolynomialMoved,
+}
+
 /// The points two conics `forms`, stretched and lifted, share on `flat`, from
-/// the quartic in `unknown`, or `None` where that quartic cannot say.
+/// the quartic in `unknown` with its turning points cleared as `clearing`
+/// says, or `None` where that quartic cannot say.
 fn the_points_two_conics_share(
     flat: &Plane,
     written: [&HowASurfaceIsWritten; 2],
@@ -6044,7 +6069,7 @@ fn the_points_two_conics_share(
     [off, first, second]: [usize; 3],
     [kept, gone]: [usize; 2],
     widened: f64,
-    unknown: TheUnknownKept,
+    (unknown, clearing): (TheUnknownKept, ATurningPointIsCleared),
 ) -> Option<MeetOfThree> {
     let normal = flat.normal().components();
     let on_the_plane = [first, second];
@@ -6087,11 +6112,13 @@ fn the_points_two_conics_share(
     }
     let highest_first: Vec<Exact> = shared.iter().rev().cloned().collect();
     let found = where_a_polynomial_is_zero(&highest_first)?;
-    if !found
-        .or_maybe_at
-        .iter()
-        .all(|maybe| it_keeps_one_sign_over(&shared, maybe.inside))
-    {
+    let cleared = |inside: Interval| match clearing {
+        ATurningPointIsCleared::ByItsSlope => it_keeps_one_sign_over(&shared, inside),
+        ATurningPointIsCleared::ByItsSlopeOrThePolynomialMoved => {
+            it_keeps_one_sign_over(&shared, inside) || it_keeps_one_sign_past(&shared, inside)
+        }
+    };
+    if !found.or_maybe_at.iter().all(|maybe| cleared(maybe.inside)) {
         return None;
     }
 
@@ -6293,30 +6320,42 @@ fn it_keeps_one_sign_over(coefficients: &[Exact], inside: Interval) -> bool {
     let wide = (Interval::exactly(inside.hi()) - Interval::exactly(inside.lo())).hi();
     let from_the_end = Interval::new(0.0, wide).expect("a box runs upwards");
     let reach = at_the_end.enclosure() + the_value_over(&slope, inside) * from_the_end;
-    !reach.contains_zero() || it_keeps_one_sign_past(coefficients, inside.lo(), from_the_end)
+    !reach.contains_zero()
 }
 
 /// Whether the polynomial `coefficients`, lowest power first, keeps one sign
-/// at every `start + h` for `h` inside `past`.
+/// all over `inside`, by another road than [`it_keeps_one_sign_over`]'s.
 ///
-/// **By the polynomial moved to `start`, worked out exactly.** Its numbers are
-/// what `p` and its slopes come to at `start`, so over `past` it is `p(start)`
-/// plus terms that each carry a power of `h`, and Horner's rule in intervals
-/// over `past` spreads by little where `past` is narrow. Where the turning
-/// point is far from nothing, [`it_keeps_one_sign_over`]'s slope over the box
-/// is what spreads: each of its terms is the size of the leading coefficient
-/// times a power of where the box is, and they cancel to a slope near
-/// nothing, so a rounding of one of them is far larger than the slope itself.
+/// **By the polynomial moved to the box's low end, worked out exactly.** Its
+/// numbers are what `p` and its slopes come to at `lo`, so at `lo + h` it is
+/// `p(lo)` plus terms that each carry a power of `h`, and Horner's rule in
+/// intervals over `h` in `[0, hi − lo]` spreads by little where the box is
+/// narrow. Where the turning point is far from nothing,
+/// [`it_keeps_one_sign_over`]'s slope over the box is what spreads: each of
+/// its terms is the size of the leading coefficient times a power of where
+/// the box is, and they cancel to a slope near nothing, so a rounding of one
+/// of them is far larger than the slope itself.
 ///
 /// **Measured on an LED's flange flat leaning a rounding**, which cuts its
 /// dome in a circle `5.6·10⁻⁸` across inside its body's pipe
 /// (`LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step`, Q3113): the quartic in `y`
 /// turns once near the dome's centre without reaching nothing, and its slope
 /// over that box one rounding wide by Horner's rule did not clear it.
-fn it_keeps_one_sign_past(coefficients: &[Exact], start: f64, past: Interval) -> bool {
-    let Some(moved) = the_polynomial_moved_to(coefficients, start) else {
+///
+/// **It is asked only once both quartics have failed without it**
+/// ([`ATurningPointIsCleared`]), since a turning point it clears can let the
+/// quartic in `t` answer where the sheared one answered before, and its
+/// boxes can be far wider. On the floor `z = −2` of a bar of 2 up `z` from
+/// `−2`, against a bar of 1 from `(1, 0, −3)` up `z` turned `10⁻⁸` about `x`,
+/// it cleared the quartic in `x`'s turning point between the two points
+/// `1.1·10⁻¹⁵` apart in `x`, and their boxes in `y` came out `6.7·10⁻⁸` wide
+/// and overlapping, where the sheared quartic's are `4·10⁻²³` wide at most.
+fn it_keeps_one_sign_past(coefficients: &[Exact], inside: Interval) -> bool {
+    let Some(moved) = the_polynomial_moved_to(coefficients, inside.lo()) else {
         return false;
     };
+    let wide = (Interval::exactly(inside.hi()) - Interval::exactly(inside.lo())).hi();
+    let past = Interval::new(0.0, wide).expect("a box runs upwards");
     let reach = moved
         .iter()
         .rev()
