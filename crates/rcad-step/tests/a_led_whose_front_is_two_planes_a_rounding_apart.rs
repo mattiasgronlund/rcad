@@ -144,11 +144,19 @@
 //! through every corner on both planes without asking whether it runs
 //! through it, because the disc is one of the surfaces round the corner. The
 //! face's own plane written a second time is now always asked (Q3071), and
-//! every fuse here gets past both stops. None answers:
+//! every fuse here gets past both stops. None answered:
 //!
 //! - This LED's far box and the box on its flat, and the far boxes of the D5
 //!   whose front is `y = -6.35` and whose axis is 15 up and of the D3 whose
-//!   axis is 6 up, are refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`.
+//!   axis is 6 up, were refused `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`,
+//!   handed the flange's flat, the dome and the body's pipe. The flat leans a
+//!   rounding off `x = -1.23` (`x = -0.23` in the D3) and cuts the dome in a
+//!   circle of radius about `5.5e-8` (`3.5e-8` in the D3), round where the
+//!   dome meets the pipe and inside the pipe all the way round, so the three
+//!   meet nowhere. The quartic that says so turns once near the dome's centre
+//!   without reaching zero, and the check that it keeps one sign there spread
+//!   too wide to say so. That check is now also run on the quartic moved to
+//!   the low end of the box round the turn, and it says so (Q3113).
 //! - The far boxes of the D5 whose axis is 9 up and of the D3 whose axis is
 //!   10 up were refused `TwoCurvesTouchWithoutCrossing` on face slot 18, the
 //!   side `x = -0.3` of a lead: what the D3 whose axis is 2 up, in
@@ -158,7 +166,7 @@
 //!   `Invalid(WireTooShort { count: 2 })`: a piece of a face bounded by two
 //!   straight sides.
 //!
-//! Untraced, every one. These tests pin each.
+//! Untraced, the other two. These tests pin each.
 //!
 //! The far box of the D5 whose front is `y = -3.81` and whose axis is 15 up
 //! was refused `Undecidable` on the order along a crossing of two places on
@@ -191,6 +199,15 @@
 //!   `DynamicRangeTooWide`, at a ratio of `4.0e16`.
 //!
 //! Untraced, both.
+//!
+//! Past where their flat, dome and pipe meet (Q3113), the far boxes of this
+//! LED, of the D5 whose front is `y = -6.35` and whose axis is 15 up and of
+//! the D3 whose axis is 6 up answer under intersection, with nothing. Under
+//! difference each is refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint`
+//! on the flange's rim at the front, as the D5 whose axis is 9 up and the D3
+//! whose axis is 10 up are, and so is the box on this LED's flat. That box's
+//! intersection is refused `DynamicRangeTooWide`, at a ratio of `7.3e15`.
+//! Untraced, both.
 
 use std::{env, fs, path::PathBuf};
 
@@ -208,11 +225,12 @@ const THIS_ONE: &str = "LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step";
 /// Where the box on this LED's flat goes, round its front corner.
 const ON_THE_FLAT: [f64; 3] = [-1.23, -6.35, 3.0];
 
-/// The two other LED files whose far box stops where three surfaces meet, as
-/// this one's does.
-const TWO_MORE_WHERE_THREE_SURFACES_MEET: [&str; 2] = [
-    "LED_D5.0mm_Horizontal_O6.35mm_Z15.0mm.step",
-    "LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step",
+/// The three LED files whose flange's flat, dome and body's pipe meet nowhere,
+/// each with the radius of its flange's rim.
+const PAST_WHERE_THEIR_FLAT_DOME_AND_PIPE_MEET: [(&str, f64); 3] = [
+    (THIS_ONE, 2.9),
+    ("LED_D5.0mm_Horizontal_O6.35mm_Z15.0mm.step", 2.9),
+    ("LED_D3.0mm_Horizontal_O6.35mm_Z6.0mm.step", 1.9),
 ];
 
 /// The two LED files whose far box's difference stops on the flange's rim at
@@ -222,18 +240,35 @@ const ON_THE_RIM: [(&str, f64); 2] = [
     ("LED_D3.0mm_Horizontal_O6.35mm_Z10.0mm.step", 1.9),
 ];
 
+/// Since Q3113 the flange's flat, the dome and the body's pipe of each of
+/// three LEDs meet nowhere. Each far box shares nothing with its LED, and its
+/// difference stops where the flange's rim meets the front written twice, as
+/// the two of `ON_THE_RIM` do. So does the difference with the box on this
+/// LED's flat, and its intersection is refused for its range.
 #[test]
-fn three_leds_get_past_their_front_written_twice_and_stop_where_three_surfaces_meet() {
-    every_fuse_refuses(
-        THIS_ONE,
-        &both_rules_round(&[FAR_OFF, ON_THE_FLAT]),
-        |_, error| where_three_surfaces_meet_needs_two_of_them_flat(error),
-    );
-    for file in TWO_MORE_WHERE_THREE_SURFACES_MEET {
-        every_fuse_refuses(file, &both_rules_round(&[FAR_OFF]), |_, error| {
-            where_three_surfaces_meet_needs_two_of_them_flat(error)
+fn three_leds_get_past_where_their_flat_dome_and_pipe_meet_and_stop_where_their_rim_meets_their_front_written_twice()
+ {
+    for (file, radius) in PAST_WHERE_THEIR_FLAT_DOME_AND_PIPE_MEET {
+        the_far_box_shares_nothing_with(file);
+        every_fuse_refuses(file, &[(FAR_OFF, Rule::Difference)], |model, error| {
+            two_ends_round_to_one_point_on_the_front_of_a_rim(radius, model, error)
         });
     }
+    every_fuse_refuses(
+        THIS_ONE,
+        &[(ON_THE_FLAT, Rule::Difference)],
+        |model, error| two_ends_round_to_one_point_on_the_front_of_a_rim(2.9, model, error),
+    );
+    every_fuse_refuses(
+        THIS_ONE,
+        &[(ON_THE_FLAT, Rule::Intersection)],
+        |_, error| {
+            matches!(
+                error,
+                Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (7.2e15..7.3e15).contains(ratio)
+            )
+        },
+    );
 }
 
 /// Since Q3112 the two writings of the edge along each lead's side are one
@@ -341,13 +376,6 @@ fn every_fuse_refuses(
             ),
         }
     }
-}
-
-fn where_three_surfaces_meet_needs_two_of_them_flat(error: &Error) -> bool {
-    matches!(
-        error,
-        Error::Geometry(rcad_geom::Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
-    )
 }
 
 /// Refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` on a flange's
