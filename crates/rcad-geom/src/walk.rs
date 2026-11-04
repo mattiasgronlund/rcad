@@ -421,14 +421,12 @@ impl PointsAlongACrossing {
 ///
 /// [`Error::CannotFollowACrossingBecauseNoStepStaysOnIt`] where two cones off
 /// one axis cross in a loop and two branches, and no shortening of a step
-/// along the loop, or along a run between two corners on a branch, lands a
-/// trial the march keeps, which has to be decided in front of the flat
-/// surfaces that hold that piece apart from the others.
-///
-/// [`Error::CannotFollowACrossingTowardsTheOtherEndOfItsRun`] when a run
-/// between two corners on a branch that runs off for ever, which is marched
-/// from one corner to the other, cannot be walked on towards the second
-/// corner: neither way from the first gets any nearer it, or a step went back.
+/// along the loop lands a trial the march keeps, which has to be decided in
+/// front of the flat surfaces that hold that piece apart from the others; or
+/// no shortening of a step along a run between two corners on a branch, which
+/// is walked one straight line of a cone at a time, lands on a line whose
+/// meeting with the branch is decided in front of the flat surface that holds
+/// the branch apart from the loop, and close enough to the straight piece.
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the half-spaces on the
 /// run pick both of the two arcs between its ends, or neither, and on a
@@ -1519,7 +1517,8 @@ fn follow_the_quartic(
 }
 
 /// A run between two corners on one of the two branches two cones off one
-/// axis cross in beside their loop, marched from one corner to the other.
+/// axis cross in beside their loop, walked from one corner to the other one
+/// straight line of `pieces.ruled` at a time ([`TheRulingsAcrossABranch`]).
 ///
 /// # How far along the branch a point is
 ///
@@ -1535,13 +1534,14 @@ fn follow_the_quartic(
 /// short of a whole turn, since the lines leaning the other way are not on it:
 /// the angle grows, or falls, the whole way along the branch, and never jumps
 /// a turn. Which of the two it does from the run's first corner to its second
-/// is read off the corners.
+/// is read off the corners, and the walk goes from the line through the first
+/// to the line through the second.
 ///
 /// # What is checked
 ///
-/// Both corners and the march's own bound against half the deflection, as
+/// Both corners and the walk's own bound against half the deflection, as
 /// [`follow_the_quartic`] checks them. Every point against the run's
-/// half-spaces and `beyond`, so that a step onto the loop, whose points lean
+/// half-spaces and `beyond`, so that a point on the loop, whose points lean
 /// as the branch's do, is refused and not drawn. A point whose box shares a
 /// point with a corner's is left out, since nothing tells the two apart.
 ///
@@ -1549,7 +1549,7 @@ fn follow_the_quartic(
 ///
 /// [`Error::CannotPlaceAPointThatCloseToACrossing`] and
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a corner, as
-/// [`follow_the_quartic`] has them, and the first also for the march's bound.
+/// [`follow_the_quartic`] has them, and the first also for the walk's bound.
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the two corners lean
 /// as one straight line does, or a point is decided behind one of the
@@ -1557,7 +1557,7 @@ fn follow_the_quartic(
 ///
 /// [`Error::CannotWorkOutHowBigACrossingIs`] when a point has no box round it.
 ///
-/// What [`march_to`] refuses.
+/// What [`TheRulingsAcrossABranch::walk`] and [`settled_with_a_bound`] refuse.
 #[expect(
     clippy::too_many_arguments,
     reason = "the run, its two surfaces, the three things that say which branch it is on, the deflection, the policy and the log are each their own input"
@@ -9519,7 +9519,7 @@ mod tests {
         ));
     }
 
-    /// **A run on the branch beyond the loop is marched round the right angle
+    /// **A run on the branch beyond the loop is walked round the right angle
     /// it turns to pass the loop.** Two pointed cones of slope a half, the
     /// second turned `0.3` about the line along `x` through `(0, 0, 4)`, as
     /// `rcad-topo`'s `a_funnel_with_a_leaning_spout.rs` places it, and the run
@@ -9527,13 +9527,14 @@ mod tests {
     /// `(±3.9541, −0.6045, 8)`. On its way it passes about `3e-8` from the loop
     /// near `(±1.5954, 0.1209, 3.2)`, and turns a right angle within about
     /// `1e-7` there. A point on both cones to `3e-16` can be `6e-8` off the
-    /// branch, so a trial of `6.0e-8` settled `5.2e-8` from where it set out
-    /// but behind it round the turned cone, and the march was refused as going
-    /// back along its run (Q3134). Now that trial is shortened, and every point
-    /// the march keeps is on both cones and in front of the branch's own flat
-    /// surface, so none of them is on the loop.
+    /// branch, so a march's trial of `6.0e-8` settled `5.2e-8` from where it
+    /// set out but behind it round the turned cone, and the march was refused
+    /// as going back along its run (Q3134). Walked one straight line of a cone
+    /// at a time instead, every point is on both cones and in front of the
+    /// branch's own flat surface, so none of them is on the loop, and the walk
+    /// goes down past the turn.
     #[test]
-    fn a_run_on_a_branch_is_marched_round_where_it_turns_a_right_angle_to_pass_the_loop() {
+    fn a_run_on_a_branch_is_walked_round_where_it_turns_a_right_angle_to_pass_the_loop() {
         let upright = Cone::new(crate::Axis::z(), 0.5).expect("a slope");
         let through = crate::Axis::new(Point::new(0.0, 0.0, 4.0), Vector::new(1.0, 0.0, 0.0))
             .expect("a direction");
@@ -9582,7 +9583,7 @@ mod tests {
                     &Policy::certified(),
                     &mut ProvenanceLog::new(),
                 )
-                .unwrap_or_else(|refused| panic!("{ends:?} is marched, not refused {refused:?}"));
+                .unwrap_or_else(|refused| panic!("{ends:?} is walked, not refused {refused:?}"));
                 let room = walked.deviation().magnitude();
                 let mut lowest = f64::INFINITY;
                 for point in walked.points() {
