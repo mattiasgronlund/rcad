@@ -61,7 +61,9 @@
 //! - **A plane along a pipe.** A plane parallel to a pipe's axis cuts it in
 //!   two lines along it, touches it along one or misses it, and each line meets
 //!   the other surface where a quadratic is zero — a wall through a bar's axis
-//!   and a ball off it, or through the axes of two bars that cross.
+//!   and a ball off it, or through the axes of two bars that cross, or the
+//!   floor a box under an LED rests on its body's pipe with, against the
+//!   flange's rim that leans a rounding to that pipe.
 //!   [`what_a_plane_along_a_pipe_leaves`].
 //! - **A ring and a ball, a pipe or a cone on its axis, and a plane that holds
 //!   it or is square to it.** The two share circles square to the axis, at the heights
@@ -4410,19 +4412,21 @@ fn the_sign_of_two_products_apart(one: [&Exact; 2], other: [&Exact; 2]) -> Optio
     if let Some(sign) = apart(one, other) {
         return Some(sign);
     }
-    let first = the_slide_that_lifts_the_larger_to_the_top(one[0], other[0])?;
-    let second = the_slide_that_lifts_the_larger_to_the_top(one[1], other[1])?;
+    let first = the_slide_that_lifts_the_largest_to_the_top([one[0], other[0]])?;
+    let second = the_slide_that_lifts_the_largest_to_the_top([one[1], other[1]])?;
     let slid = |pair: [&Exact; 2]| Some([pair[0].slid_by(first)?, pair[1].slid_by(second)?]);
     let (one, other) = (slid(one)?, slid(other)?);
     apart([&one[0], &one[1]], [&other[0], &other[1]])
 }
 
-/// How far to slide `one` and `other` together so the larger of the two sits
-/// at [`HIGHEST_BINADE_A_SLIDE_LIFTS_TO`] — nowhere where both are zero, and
+/// How far to slide `values` together so the largest of them sits at
+/// [`HIGHEST_BINADE_A_SLIDE_LIFTS_TO`] — nowhere where all are zero, and
 /// `None` where one has no sign to read its size from.
-fn the_slide_that_lifts_the_larger_to_the_top(one: &Exact, other: &Exact) -> Option<i32> {
+fn the_slide_that_lifts_the_largest_to_the_top<'a>(
+    values: impl IntoIterator<Item = &'a Exact>,
+) -> Option<i32> {
     let mut highest: Option<i32> = None;
-    for value in [one, other] {
+    for value in values {
         match value.sign() {
             Decision::Zero => {}
             Decision::Pos | Decision::Neg => {
@@ -4468,7 +4472,7 @@ fn the_sign_with_a_root_in_it(plain: &Exact, rooted: &Exact, under: &Exact) -> O
         if let Some(sign) = where_they_stand() {
             return Some(sign);
         }
-        let up = the_slide_that_lifts_the_larger_to_the_top(plain, rooted)?;
+        let up = the_slide_that_lifts_the_largest_to_the_top([plain, rooted])?;
         let (plain, rooted) = (plain.slid_by(up)?, rooted.slid_by(up)?);
         the_sign_of_two_products_apart([&plain, &plain], [&rooted.times(&rooted)?, under])
     })
@@ -4859,17 +4863,32 @@ fn the_line_two_circles_differ_by(mine: &ACircle, theirs: &ACircle) -> Option<([
 /// placed by a turn — is taken by the leaning call of
 /// [`what_a_plane_beside_their_one_axis_leaves`].
 ///
-/// A product that falls out of range while the lines or their discriminant
-/// are written hands the triple on as well. An LED's front flat stored as
-/// exactly `x = −1.23`, along its rim's stored axis, beside its body's pipe a
-/// rounding off that axis, is one, and
-/// [`what_a_plane_that_cuts_both_in_conics_leaves`] answers it.
+/// **A discriminant out of range is worked out again slid.** Where a product
+/// falls out of range while the discriminant is written, the quadratic along
+/// the lines is multiplied by the power of two that puts its largest number at
+/// [`HIGHEST_BINADE_A_SLIDE_LIFTS_TO`], which moves no point it is zero at, and
+/// the road runs on that ([`TheLinesAlongAPipe::slid_by`]). The floor `z = 0.5`
+/// of a box under an LED's body touches the body's pipe along a line, and the
+/// flange's rim about the same stored point leans `1.1·10⁻¹⁵` to that pipe.
+/// Along the line `A` is `1.2·10⁻³⁰` and `γ₀` is `−2.16`, and their product
+/// fell off the bottom of the range where the two stood, though the line meets
+/// the rim `−4.9·10¹⁵` and `3.6·10¹⁴` along it (Q3114).
+///
+/// What the slid lines cannot finish is handed on, as all of it was before
+/// there was a slide. The three LED front flats stored as exactly `x = −1.23`
+/// or `x = −0.23`, along the rim's stored axis, beside the body's pipe a
+/// rounding off that axis, are that: slid, a step past the discriminant still
+/// runs out of range, and
+/// [`what_a_plane_that_cuts_both_in_conics_leaves`] answers them. A product
+/// that falls out of range while the lines themselves are written hands the
+/// triple on as well.
 ///
 /// It is asked after every road but those three, the one for bands that
 /// cross, the one for a plane one wall mirrors with both and the one for two
 /// conics, so every triple an earlier road answers keeps its answer.
-/// Arithmetic that runs out once the lines and their discriminant are written
-/// is [`an_exact_step_could_not_be_taken`], a **gap**: the points are there.
+/// Arithmetic that runs out past a discriminant worked out where the numbers
+/// stand is [`an_exact_step_could_not_be_taken`], a **gap**: the points are
+/// there.
 fn what_a_plane_along_a_pipe_leaves(
     flat: &Plane,
     one: &Surface,
@@ -4907,49 +4926,23 @@ fn what_a_plane_along_a_pipe_leaves(
         return Ok(None);
     }
 
-    // The road for two conics slides its numbers by powers of two before it
-    // multiplies them, so a product out of range here is handed to it. Past
-    // the discriminant, arithmetic that runs out is a refusal about *this*
-    // triple.
-    let refused = || an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at);
     let Some(lines) = the_lines_a_plane_along_a_pipe_cuts(flat, pipe, &written, bend) else {
         return Ok(None);
     };
-    let Some((plain, lean)) = lines.the_discriminant() else {
-        return Ok(None);
-    };
-    let sides: SmallVec<[f64; 2]> = match lines.reach.sign() {
-        Decision::Neg => return Ok(Some(MeetOfThree::Nowhere)),
-        Decision::Zero => smallvec![0.0],
-        Decision::Pos => smallvec![-1.0, 1.0],
-        Decision::Undecidable { .. } => return Err(refused()),
-        other => unreachable!("an exact sign is a sign or a refusal: {other:?}"),
-    };
-    let mut places: SmallVec<[PredicatePoint; 2]> = SmallVec::new();
-    for side in sides {
-        let rooted = if side < 0.0 {
-            Exact::of(0.0).minus(&lean)
-        } else {
-            lean.clone()
-        };
-        let Some(crossing) = the_sign_with_a_root_in_it(&plain, &rooted, &lines.reach) else {
-            return Err(refused());
-        };
-        match crossing {
-            Decision::Neg => {}
-            Decision::Zero => places.extend(lines.where_one_meets_it(side, &plain, &lean, true)),
-            Decision::Pos => places.extend(lines.where_one_meets_it(side, &plain, &lean, false)),
-            Decision::Undecidable { .. } => return Err(refused()),
-            other => unreachable!("an exact sign is a sign or a refusal: {other:?}"),
-        }
+    // Past the discriminant, where the numbers stand, arithmetic that runs out
+    // is a refusal about *this* triple.
+    if let Some(discriminant) = lines.the_discriminant() {
+        return lines
+            .what_they_leave(&discriminant)
+            .map(Some)
+            .ok_or_else(|| an_exact_step_could_not_be_taken(WHERE_THREE_SURFACES_MEET, at));
     }
-    if places.iter().any(|place| !place.uncertainty().is_finite()) {
-        return Err(refused());
-    }
-    if places.is_empty() {
-        return Ok(Some(MeetOfThree::Nowhere));
-    }
-    Ok(Some(MeetOfThree::At(places)))
+    // Slid, the lines are a second try at what this road handed on before
+    // there was a slide, and the road for two conics answers some of that, so
+    // what the slid lines cannot finish is handed on still.
+    Ok(lines
+        .slid_into_range()
+        .and_then(|slid| slid.what_they_leave(&slid.the_discriminant()?)))
 }
 
 /// `M v` for a square of exact numbers and an exact triple, exactly.
@@ -5044,6 +5037,79 @@ fn the_lines_a_plane_along_a_pipe_cuts(
 }
 
 impl TheLinesAlongAPipe {
+    /// What the three leave, for `(plain, lean)` the lines' discriminant:
+    /// nothing where the plane misses the pipe or no line reaches the other
+    /// surface, and otherwise the points each line meets it at, the line
+    /// `u = −√K` first — or `None` where a sign cannot be worked out within
+    /// range or a point's box is not finite.
+    fn what_they_leave(&self, (plain, lean): &(Exact, Exact)) -> Option<MeetOfThree> {
+        let sides: SmallVec<[f64; 2]> = match self.reach.sign() {
+            Decision::Neg => return Some(MeetOfThree::Nowhere),
+            Decision::Zero => smallvec![0.0],
+            Decision::Pos => smallvec![-1.0, 1.0],
+            Decision::Undecidable { .. } => return None,
+            other => unreachable!("an exact sign is a sign or a refusal: {other:?}"),
+        };
+        let mut places: SmallVec<[PredicatePoint; 2]> = SmallVec::new();
+        for side in sides {
+            let rooted = if side < 0.0 {
+                Exact::of(0.0).minus(lean)
+            } else {
+                lean.clone()
+            };
+            match the_sign_with_a_root_in_it(plain, &rooted, &self.reach)? {
+                Decision::Neg => {}
+                Decision::Zero => places.extend(self.where_one_meets_it(side, plain, lean, true)),
+                Decision::Pos => places.extend(self.where_one_meets_it(side, plain, lean, false)),
+                Decision::Undecidable { .. } => return None,
+                other => unreachable!("an exact sign is a sign or a refusal: {other:?}"),
+            }
+        }
+        if places.iter().any(|place| !place.uncertainty().is_finite()) {
+            return None;
+        }
+        if places.is_empty() {
+            return Some(MeetOfThree::Nowhere);
+        }
+        Some(MeetOfThree::At(places))
+    }
+
+    /// The same lines with the quadratic along them slid so its largest number
+    /// sits at [`HIGHEST_BINADE_A_SLIDE_LIFTS_TO`], which lifts its smallest
+    /// entries as far from the bottom of the range as a product of two allows,
+    /// or `None` where a number has no sign or would leave the range.
+    fn slid_into_range(self) -> Option<TheLinesAlongAPipe> {
+        let up = the_slide_that_lifts_the_largest_to_the_top(
+            [&self.bend]
+                .into_iter()
+                .chain(&self.half_linear)
+                .chain(&self.constant),
+        )?;
+        self.slid_by(up)
+    }
+
+    /// The same lines with the quadratic along them, `E²A·γ² + 2Eβ·γ + Γ`,
+    /// multiplied by `2^up`, or `None` where an entry would leave the range.
+    ///
+    /// `A`, `β₀`, `β₁`, `γ₀`, `γ₁` and `γ₂` are each multiplied by it, so
+    /// `plain` and `lean` come out times `2^(2·up)` and keep the sign of
+    /// `plain + lean·u`, and `β`, `√(β² − AΓ)` and `EA` come out times
+    /// `2^up` and keep every `γ` the line meets the other surface at.
+    fn slid_by(self, up: i32) -> Option<TheLinesAlongAPipe> {
+        let [plain_half, leaning_half] = &self.half_linear;
+        let [plain_constant, leaning_constant, squared_constant] = &self.constant;
+        Some(TheLinesAlongAPipe {
+            bend: self.bend.slid_by(up)?,
+            half_linear: [plain_half.slid_by(up)?, leaning_half.slid_by(up)?],
+            constant: [
+                plain_constant.slid_by(up)?,
+                leaning_constant.slid_by(up)?,
+                squared_constant.slid_by(up)?,
+            ],
+            ..self
+        })
+    }
+
     /// `β² − AΓ` with `u²` put back as `K`, as `(plain, lean)` for
     /// `plain + lean·u`, or `None` where a product falls out of range.
     fn the_discriminant(&self) -> Option<(Exact, Exact)> {
@@ -5967,7 +6033,8 @@ fn the_plane_reaches_the_pipe_only_off_the_other(
 /// `2·10⁻³²` where the others lean `10⁻¹⁶`. Three LEDs store the flat as
 /// exactly `x = −1.23` or `x = −0.23`, which runs along the rim's stored axis,
 /// and [`what_a_plane_along_a_pipe_leaves`] hands those on here, since it
-/// cannot multiply them out within range. No road above reaches these points.
+/// cannot multiply them out within range, with its quadratic slid or not. No
+/// road above reaches these points.
 ///
 /// **It hands on** a torus, a product out of range, and what the quartic in
 /// `t` and the one in `s` both hand on: two conics both linear in the unknown
@@ -9409,6 +9476,64 @@ mod tests {
                 [&dome, &body, &flat],
             ] {
                 assert_eq!(meet(order), Ok(MeetOfThree::Nowhere), "{order:?}");
+            }
+        }
+    }
+
+    /// **The floor `z = 0.5` of a box under
+    /// `LED_D5.0mm_Horizontal_O6.35mm_Z3.0mm.step`'s body, which rests on the
+    /// body's pipe of radius 2.5 about `z = 3`, and the flange's rim of radius
+    /// 2.9 about the same line**, as the LED stores them (Q3114). The pipe's
+    /// axis runs along the floor and the rim's leans `1.1·10⁻¹⁵` to it, so the
+    /// line the floor touches the pipe in meets the rim twice, `−4.9·10¹⁵` and
+    /// `3.6·10¹⁴` along it. The road along a pipe could not multiply the rim
+    /// out along that line within range, and the road for two conics was
+    /// handed the pipe's conic, a line written twice, so the three were refused
+    /// `WhereThreeSurfacesMeetNeedsTwoOfThemFlat`. With the quadratic along the
+    /// line slid into range, the road along a pipe answers them.
+    #[test]
+    fn a_floor_an_leds_body_rests_on_meets_its_pipe_and_its_rim_twice_far_along_them() {
+        let floor = Surface::Plane(
+            Plane::from_point_and_normal_as_written(
+                Point::new(0.0, 0.0, 0.5),
+                Vector::new(0.0, 0.0, -1.0),
+            )
+            .expect("a plane"),
+        );
+        let pipe = |direction: [f64; 3], radius: f64| {
+            Surface::Cylinder(
+                Cylinder::new(
+                    Axis::as_written(
+                        Point::new(1.27, -6.35, 3.0),
+                        Vector::new(direction[0], direction[1], direction[2]),
+                    )
+                    .expect("an axis"),
+                    radius,
+                )
+                .expect("a radius"),
+            )
+        };
+        let (a, b) = (5.551115123126e-17, 1.110223024625e-15);
+        let body = pipe([-a, -1.0, 0.0], 2.5);
+        let rim = pipe([0.0, 1.0, -b], 2.9);
+        // Along the line the floor touches the body's pipe in,
+        // `(1.27 − aγ, −6.35 − γ, 0.5)`, the rim is `Aγ² + 5bγ − 2.16 − 8.41b²`
+        // times `1 + b²`, for `A = a² + b² + a²b²`.
+        let bend = a * a + b * b;
+        let root = (25.0 * b * b + 4.0 * bend * (2.16 + 8.41 * b * b)).sqrt();
+        let far = (-5.0 * b - root) / (2.0 * bend);
+        let near = -(2.16 + 8.41 * b * b) / (bend * far);
+        for order in [[&floor, &body, &rim], [&rim, &floor, &body]] {
+            let places = middles(&meet(order).expect("the three are answered"));
+            assert_eq!(places.len(), 2, "{places:?}");
+            for (place, step) in places.iter().zip([far, near]) {
+                let wanted = [1.27 - a * step, -6.35 - step, 0.5];
+                for axis in 0..3 {
+                    assert!(
+                        (place[axis] - wanted[axis]).abs() <= 1e-9 * wanted[axis].abs(),
+                        "a place {place:?} where {wanted:?} is: {places:?}"
+                    );
+                }
             }
         }
     }
