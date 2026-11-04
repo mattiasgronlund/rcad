@@ -222,6 +222,18 @@
 //! touches that crossing, `1.8e15` out along `-y`, where the pipe's axis,
 //! leaning `5.55e-17` off `y`, has drifted to `x = 1.17`, and a point below
 //! the axis at `(1.17, -32.395, 0.5020008)`. Untraced.
+//!
+//! The flange's front and the body's front disc are two flat faces along one
+//! closed edge, the circle of the hole, so they are one plane, and each face
+//! cut by both cut its own line a rounding from the other's. Bake now reads
+//! the two as one plane where a closed edge between them says so (Q3141). The
+//! stops above on the rim at the front, on `DynamicRangeTooWide` and on
+//! `WireTooShort` are gone with it: every far box here but one answers under
+//! intersection and under difference with the LED, and the box on this LED's
+//! flat answers both. The one is the far box of
+//! `LED_D3.0mm_Horizontal_O3.81mm_Z2.0mm.step`, which shares nothing with it,
+//! and the LED less it is refused `ResultIsNotManifold` on the dome's rim
+//! (Q3164).
 
 use std::{env, fs, path::PathBuf};
 
