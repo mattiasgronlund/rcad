@@ -1111,18 +1111,19 @@ def cores_step(queue, claims, here, args, batch):
     row = require_row(queue, here, row_id)
     if row.is_closed():
         raise Refused(f"{row_id} is closed: {row.state}")
-    old = entries_of(row.write_set)
+    current = write_set_the_fill_reads(claims, row)
+    old = entries_of(current)
     entries = [entry for entry in old if not entry.startswith("cores:")]
     if n == "-":
         if entries == old:
-            raise Refused(f"{row_id} has no cores entry: {row.write_set}")
+            raise Refused(f"{row_id} has no cores entry: {current}")
     else:
         entries.append(f"cores:{n}")
     refuse_night_beside_cores(entries)
     write_set = ",".join(entries) or "-"
     queue.replace(row, row.with_write_set(write_set))
-    message = f"{row_id}: write set {row.write_set} -> {write_set}"
-    return queue, message, None
+    message = f"{row_id}: write set {current} -> {write_set}"
+    return queue, message, writes_event_to_match(claims, here, row, write_set)
 
 
 def night_step(queue, claims, here, args, batch):
@@ -1142,20 +1143,46 @@ def night_step(queue, claims, here, args, batch):
     row = require_row(queue, here, row_id)
     if row.is_closed():
         raise Refused(f"{row_id} is closed: {row.state}")
-    entries = entries_of(row.write_set)
+    current = write_set_the_fill_reads(claims, row)
+    entries = entries_of(current)
     if switch == "on":
         if NIGHT_ENTRY in entries:
-            raise Refused(f"{row_id} runs only by night already: {row.write_set}")
+            raise Refused(f"{row_id} runs only by night already: {current}")
         entries.append(NIGHT_ENTRY)
         refuse_night_beside_cores(entries)
     else:
         if NIGHT_ENTRY not in entries:
-            raise Refused(f"{row_id} has no night entry: {row.write_set}")
+            raise Refused(f"{row_id} has no night entry: {current}")
         entries.remove(NIGHT_ENTRY)
     write_set = ",".join(entries) or "-"
     queue.replace(row, row.with_write_set(write_set))
-    message = f"{row_id}: write set {row.write_set} -> {write_set}"
-    return queue, message, None
+    message = f"{row_id}: write set {current} -> {write_set}"
+    return queue, message, writes_event_to_match(claims, here, row, write_set)
+
+
+def write_set_the_fill_reads(claims, row):
+    """The write set of a row as the fill reads it: a todo row's latest `writes` over its column (Q3161).
+
+    `writes` touches the claims file alone, so the column can lag it. A row
+    with a hold reads the hold's set, which `night` and `cores` never change,
+    so the column stays theirs to start from there.
+    """
+    if row.state.startswith("lane:") or row.id in claims.holds():
+        return row.write_set
+    return latest_writes(claims.path).get(row.id, row.write_set)
+
+
+def writes_event_to_match(claims, here, row, write_set):
+    """A `writes` event that makes the claims file say the column's new set, or None when it has no word on the row (Q3161).
+
+    Without it, an earlier `writes` on the row would go on overriding the
+    column in `narrowed`, and the fill would never see the change.
+    """
+    if row.state.startswith("lane:") or row.id in claims.holds():
+        return None
+    if row.id not in latest_writes(claims.path):
+        return None
+    return ("writes", row.id, now(), here.top, write_set)
 
 
 def rank_step(queue, claims, here, args, batch):
