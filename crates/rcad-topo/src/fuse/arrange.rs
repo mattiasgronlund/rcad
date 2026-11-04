@@ -1189,6 +1189,15 @@ enum HowItRuns {
     /// ([`ArcOfTwoCones`]), from one touch to the other. The order is how far
     /// round a point on its chord a point is ([`round_a_point_on_its_chord`]).
     RoundAPointOnItsChord { arc: Box<ArcOfTwoCones> },
+    /// It runs on for ever and bends: one of the two branches two cones off
+    /// one axis cross in beside a loop
+    /// ([`Cone::is_a_branch_it_crosses_a_cone_off_its_axis_in`]). Going along
+    /// it goes part of the way round the axis of the cone whose straight lines
+    /// each cross it once, so the order is how far round that axis a point is
+    /// from a place neither branch reaches
+    /// ([`Cone::which_comes_first_along_a_branch_it_crosses_a_cone_in`]).
+    /// `cones` is the face's surface and then the partner.
+    AlongABranchOfTwoCones { cones: Box<[Cone; 2]> },
 }
 
 impl HowItRuns {
@@ -5619,7 +5628,7 @@ impl<'f> Arrangement<'f> {
                     self.order_along(crossing, one, other, policy, log)
                 })?;
             }
-            HowItRuns::RoundAPointOnItsChord { .. } => {
+            HowItRuns::RoundAPointOnItsChord { .. } | HowItRuns::AlongABranchOfTwoCones { .. } => {
                 prove_the_hinted_order(&mut order, |one, other| {
                     self.order_along(crossing, one, other, policy, log)
                 })?;
@@ -6321,6 +6330,10 @@ impl<'f> Arrangement<'f> {
                 self.how_far_apart_along(crossing, one, other)?,
                 Measures::Length,
             ),
+            HowItRuns::AlongABranchOfTwoCones { .. } => (
+                self.how_far_apart_along(crossing, one, other)?,
+                Measures::Area,
+            ),
         };
         if !matches!(decided, Decision::Undecidable { .. }) {
             return Ok((decided, measures));
@@ -6418,6 +6431,8 @@ impl<'f> Arrangement<'f> {
             HowItRuns::RoundAPointOnItsChord { ref arc } => {
                 round_a_point_on_its_chord(arc, one, other)
             }
+            HowItRuns::AlongABranchOfTwoCones { ref cones } => cones[0]
+                .which_comes_first_along_a_branch_it_crosses_a_cone_in(&cones[1], one, other)?,
         })
     }
 
@@ -6963,7 +6978,9 @@ impl<'f> Arrangement<'f> {
                     },
                 )?
             }
-            HowItRuns::AlongABend { .. } | HowItRuns::RoundAPointOnItsChord { .. } => return None,
+            HowItRuns::AlongABend { .. }
+            | HowItRuns::RoundAPointOnItsChord { .. }
+            | HowItRuns::AlongABranchOfTwoCones { .. } => return None,
         };
         Some(if (mine == 0) == lower_first {
             Decision::Pos
@@ -7207,7 +7224,9 @@ impl<'f> Arrangement<'f> {
                 }
                 planes
             }
-            HowItRuns::AlongABend { .. } | HowItRuns::RoundAPointOnItsChord { .. } => return None,
+            HowItRuns::AlongABend { .. }
+            | HowItRuns::RoundAPointOnItsChord { .. }
+            | HowItRuns::AlongABranchOfTwoCones { .. } => return None,
         };
         if the_curve[0] == the_curve[1]
             || the_curve
@@ -7342,7 +7361,9 @@ impl<'f> Arrangement<'f> {
                 }
                 climbs(way, room)
             }
-            HowItRuns::AlongABend { .. } | HowItRuns::RoundAPointOnItsChord { .. } => None,
+            HowItRuns::AlongABend { .. }
+            | HowItRuns::RoundAPointOnItsChord { .. }
+            | HowItRuns::AlongABranchOfTwoCones { .. } => None,
         }
     }
 
@@ -18261,7 +18282,7 @@ fn every_point_between_lies_within(surface: &Surface, ends: [[Interval; 3]; 2], 
 ///
 /// **Round a cone it parts two meets of a cap's rim a rounding apart.** The
 /// upright cone of
-/// `two_pointed_cones_one_leaning_off_the_other_are_refused_ordering_along_a_branch`
+/// `two_pointed_cones_one_leaning_off_the_other_are_refused_ordering_two_meets_along_a_branch`
 /// in `tests/a_funnel_with_a_leaning_spout.rs`, of slope a half up `z`, has its
 /// cap's rim, where `z = 8` cuts it, walked from `(0, 4, 8)`. Near `(−3.9541,
 /// −0.6045, 8)` the leaning cone crosses that rim, and the leaning cone's cap
@@ -19652,8 +19673,9 @@ fn round_the_axis(cone: &Cone, way: [Interval; 3]) -> [Interval; 3] {
 /// [`Error::ACrossingThisCannotBeOrderedAlong`] for a pair whose crossing is
 /// none of an endless straight line, one closed curve lying in a plane, a
 /// plane's endless bend across a cone, a branch of the hyperbola two cones of
-/// one slope side by side cross in, one of the two loops a fat pipe crosses
-/// a thin one in or a ball crosses a pipe in, or the one loop a ball off a
+/// one slope side by side cross in, one of the two branches two cones off one
+/// axis cross in beside a loop, one of the two loops a fat pipe crosses a
+/// thin one in or a ball crosses a pipe in, or the one loop a ball off a
 /// pipe's axis or two pipes cross in. That is a **gap**: the curve is there and
 /// ordering points along it takes the marcher rather than a determinant
 /// (§34.10). Both kinds of one loop pass here, and `rcad-geom` puts places on
@@ -19669,7 +19691,9 @@ fn round_the_axis(cone: &Cone, way: [Interval; 3]) -> [Interval; 3] {
 /// centre cannot be shown on a pipe's axis or off it, which is
 /// [`a_pair_that_crosses_in_a_conic`]'s, and two cones off one axis that
 /// cannot be shown side by side or not, which is
-/// [`Cone::the_flat_surface_halfway_to_a_cone_beside_it`]'s — or when the
+/// [`Cone::the_flat_surface_halfway_to_a_cone_beside_it`]'s, or whose run
+/// cannot be shown on a branch beside a loop or not, which is
+/// [`Cone::is_a_branch_it_crosses_a_cone_off_its_axis_in`]'s — or when the
 /// direction of a run that *is* straight comes out as a box straddling every
 /// axis, or when nothing can say which way round a bend's own direction runs.
 fn how_a_crossing_runs(
@@ -19772,6 +19796,18 @@ fn how_a_crossing_runs(
                 ));
             }
         }
+    }
+    // Two cones off one axis crossing in a loop and two branches: each straight
+    // line of one of them crosses a branch at most once, so going along a
+    // branch goes part of the way round that cone's axis, and `rcad-geom`
+    // orders it so. There is no place on it to start from and no end to it.
+    if let (Surface::Cone(one), Surface::Cone(other)) = (surface, partner)
+        && let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = run.run()
+        && one.is_a_branch_it_crosses_a_cone_off_its_axis_in(other, picked_by)?
+    {
+        return Ok(HowItRuns::AlongABranchOfTwoCones {
+            cones: Box::new([*one, *other]),
+        });
     }
     // Everything left is either a conic or a quartic. A conic is ordered by one
     // determinant: three points on a convex curve run round it in the order
@@ -32806,7 +32842,7 @@ mod two_loops_of_two_leaning_pipes {
 #[cfg(test)]
 mod two_points_a_rounding_apart_on_a_cone_caps_rim {
     //! The rim of the upright cone's cap in
-    //! `two_pointed_cones_one_leaning_off_the_other_are_refused_ordering_along_a_branch`
+    //! `two_pointed_cones_one_leaning_off_the_other_are_refused_ordering_two_meets_along_a_branch`
     //! in `tests/a_funnel_with_a_leaning_spout.rs`: the cone of slope a half
     //! up `z` from the origin, cut by `z = 8` in a circle of radius 4, walked
     //! from `(0, 4, 8)`. Two of its nodes are a rounding apart near
