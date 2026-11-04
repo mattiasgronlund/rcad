@@ -6046,8 +6046,9 @@ pub(crate) enum TheCutHalfway {
 /// each other where the exact pair would touch. `intersect` names those
 /// as one loop and two branches where
 /// [`a_loop_and_two_branches_that_nearly_meet`] proves it. `walk.rs` marches
-/// the loop and the run between two corners on a branch; only
-/// `along_a_crossing.rs`, which asks here, still refuses them.
+/// the loop and the run between two corners on a branch, and
+/// `along_a_crossing.rs` orders points along the loop and each branch round
+/// the ruled cone's axis (Q3124).
 ///
 /// [`Error::NotFinite`] where the gap between two apexes side by side, or how
 /// far the flat surface halfway between them is from the origin, leaves

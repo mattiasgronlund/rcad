@@ -50,6 +50,8 @@
 //! | two pipes neither of which swallows the other, the one loop | the step from the first axis to the second, going round the line along that step |
 //! | two cones off one axis crossing in two loops, the cone the other's straight lines cross first, the loop where those lines, running along their cone's axis, come out of it | that other cone's stored axis direction, going round its axis |
 //! | the same, the loop where those lines go into it | the same direction negated |
+//! | two cones off one axis crossing in a loop and two branches, the loop | as for two loops, read the same way off `from` |
+//! | the same, either branch, ordered from a place neither reaches | the ruled cone's axis direction, the opposite way round to the loop |
 //!
 //! The pipe row takes a line of work to see and is worth having written down.
 //! Its crossing lies in the cutting plane, its tangent is `n × ρ` for the
@@ -128,6 +130,15 @@
 //! `the_way_a_loop_two_cones_cross_in_off_one_axis_winds` has the argument.
 //! Whether the two share an axis is asked exactly.
 //!
+//! Where `intersect` proves the two cross in a loop and two branches instead,
+//! under a certified policy or as two that nearly meet, the loop is read the
+//! same way: each line of the ruled cone crosses it once. Each line crosses
+//! each branch at most once too, so a branch runs part of the way round the
+//! ruled cone's axis, one way round all along it, and points on it are
+//! ordered by how far round that axis each is from a place neither branch
+//! reaches (Q3124). `Cone::which_comes_first_along_a_branch_it_crosses_a_cone_in`
+//! has the argument, and a `from` on a branch has nothing to go round.
+//!
 //! # Two pipes are not a conic and still order
 //!
 //! A fat pipe crosses a thin one whose whole cross-section it swallows in two
@@ -186,8 +197,9 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 /// *different* points on one are never in a line.
 ///
 /// On the one loop a ball off a pipe's axis crosses it in, the one loop two
-/// pipes cross in, and the two loops two cones off one axis cross in, each
-/// ordered round a line, a point at `from`'s own angle
+/// pipes cross in, and the two loops, or the loop beside two branches, two
+/// cones off one axis cross in, each ordered round a line, a point at `from`'s
+/// own angle
 /// round the line comes first, and [`Decision::Zero`] means `one` and `other`
 /// are the same place on the loop.
 ///
@@ -206,14 +218,16 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 /// reaches into its side, nor the one loop two pipes cross in where neither
 /// swallows the other, nor one of the two loops a pipe steeper than a cone's
 /// skin crosses it in off its axis, nor one of the two loops two cones off one
-/// axis are proved to cross in: two planes, a plane along a pipe's axis,
+/// axis are proved to cross in, nor the loop they are proved to cross in beside
+/// two branches: two planes, a plane along a pipe's axis,
 /// two pipes of one radius whose axes meet, two running the same way, two that
 /// miss each other or touch at one point from outside, a ball off a pipe's
 /// axis that misses it, touches it at one point, or touches it from inside in
 /// a figure of eight, a plane cutting a torus in a quartic, every pair with a
 /// torus on it but a plane, a cone against a pipe no steeper than its skin or
-/// a ball off its axis, two cones off one axis whose crossing is not proved two
-/// loops, bar the two side by side below, among them two mirror images that
+/// a ball off its axis, two cones off one axis whose crossing is proved neither
+/// two loops nor a loop and two branches, bar the two side by side below, among
+/// them two mirror images that
 /// touch, which cross in two ellipses that meet, two cones of one apex, and a ball on
 /// a cone's axis that misses it or
 /// runs through its apex.
@@ -222,7 +236,9 @@ pub const ROUND_A_CROSSING: &str = "round a crossing";
 /// slope side by side, their axes one direction and the line between their
 /// apexes square to it, which cross in the one hyperbola the flat surface
 /// halfway between their apexes cuts out of either: a curve that runs off for
-/// ever, with nothing to go round.
+/// ever, with nothing to go round. Also for a `from` on either branch of two
+/// cones off one axis that cross in a loop and two branches, which runs off
+/// for ever too.
 ///
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a plane
 /// resting on a torus's tube, which touches it all the way round one circle
@@ -324,7 +340,8 @@ enum WhichWayItWinds {
     /// The crossing is the one loop a ball off a pipe's axis crosses it in, or
     /// the one loop two pipes cross in, which runs back and forth round a
     /// pipe's axis, about no normal, and once round this line; or one of the
-    /// two loops two cones off one axis cross in, once round one cone's axis.
+    /// two loops two cones off one axis cross in, or the loop they cross in
+    /// beside two branches, once round one cone's axis.
     RoundALine(RoundALine),
     /// Which of two circles the run is on could not be decided from the point
     /// the ordering starts at — the honest answer is that nothing is known, and
@@ -381,8 +398,10 @@ struct RoundALine {
 #[derive(Clone, Copy, Debug)]
 enum WhichLine {
     /// The axis of the cone each of whose straight lines crosses another cone
-    /// once on each of the two loops the two cross in off one axis. Its
-    /// readings turn anticlockwise about the axis direction `v`.
+    /// once on each of the two loops the two cross in off one axis, or once on
+    /// the loop and at most once on a branch where they cross in a loop and
+    /// two branches. Its readings turn anticlockwise about the axis direction
+    /// `v`.
     RoundAConesAxis {
         apex: [f64; 3],
         /// The axis direction `v`.
@@ -431,7 +450,8 @@ enum WhichLine {
 /// in one closed curve lying in a plane, in one of the two loops round a
 /// pipe's axis that a fat pipe, a ball swallowing it, or a cone it is steeper
 /// than crosses it in, in one of the two loops round one cone's axis that two
-/// cones off one axis are proved to cross in, or in the one loop round a line
+/// cones off one axis are proved to cross in, or the loop they are proved to
+/// cross in beside two branches, or in the one loop round a line
 /// that a ball off a pipe's axis reaching into its side, or two pipes neither
 /// of which swallows the other, cross in, and
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a plane
@@ -1156,17 +1176,20 @@ fn the_way_two_cones_on_one_axis_wind(
 /// # Errors
 ///
 /// [`Error::TheseTwoSurfacesDoNotCrossInAConic`] where the two share an apex,
-/// whose crossing is straight lines through it, where
-/// [`how_two_cones_off_one_axis_cross`] cannot prove the crossing two loops
-/// or a loop and two branches, where it proves it a loop and two branches:
-/// the branches run off for ever, and the loop is not told apart from them
-/// here, and where it proves it two flat cuts that meet where the two cones
-/// touch, two ellipses or a hyperbola and an ellipse, or two flat cuts held
-/// apart, where each apex is inside the other, a hyperbola and an ellipse, a
-/// parabola or a hyperbola, none of which is one closed curve to go round.
+/// whose crossing is straight lines through it, where neither
+/// [`how_two_cones_off_one_axis_cross`] nor
+/// [`a_loop_and_two_branches_that_nearly_meet`] can prove the crossing two
+/// loops or a loop and two branches, and where the first proves it two flat
+/// cuts that meet where the two cones touch, two ellipses or a hyperbola and
+/// an ellipse, or two flat cuts held apart, where each apex is inside the
+/// other, a hyperbola and an ellipse, a parabola or a hyperbola, none of which
+/// is one closed curve to go round. The loop of a loop and two branches is
+/// read as one of two loops is: each line of the ruled cone crosses it once.
 ///
 /// [`Error::TheCrossingOfTheseTwoSurfacesIsNotClosed`] where it proves the
-/// two of one slope side by side, whose crossing is one hyperbola.
+/// two of one slope side by side, whose crossing is one hyperbola, and where
+/// `from` is on either branch of a loop and two branches, which runs off for
+/// ever.
 ///
 /// Whatever else [`how_two_cones_off_one_axis_cross`] refuses but
 /// [`Error::Undecidable`], which is nothing known here instead: it is asked
