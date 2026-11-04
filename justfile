@@ -17211,9 +17211,10 @@ _queue-rows file:
 # `tooling/queue/families.py`.
 #
 # **The verbs change the file, one row at a time** (§263): `take`, `add`,
-# `done`, `drop`, `park`, `after`, `rank`, `tier`, `tag`, `pick`, `pin` and
-# `unpin`, with `show`, `running` and `families` to read, and `narrow`, which changes a hold
-# and no row. `tier` moves an open row to another tier and, like
+# `done`, `drop`, `park`, `after`, `cores`, `night`, `rank`, `tier`, `tag`,
+# `pick`, `pin` and `unpin`, with `show`, `running` and `families` to read, and
+# `narrow`, which changes a hold and no row. `cores` and `night` set an entry
+# of the write set that names no path (§308, §308.8). `tier` moves an open row to another tier and, like
 # `add`, writes that tier's heading when the file has none (§307). `tag` sets,
 # replaces or removes a row's class or `small` (§352.2), and a class moves the
 # row to the tier it names (§403.4). `pin` and `unpin` are Mattias's alone
@@ -17265,7 +17266,8 @@ _queue-rows file:
 # running one's.
 #
 # **Every verb that writes — `take`, `add`, `done`, `drop`, `park`, `after`,
-# `rank`, `tier`, `tag`, `pick`, `pin`, `unpin`, `apply`, `narrow`, `writes`, `give`, `sweep`, `reword` — also runs `queue-page` after it**, so the page
+# `cores`, `night`, `rank`, `tier`, `tag`, `pick`, `pin`, `unpin`, `apply`,
+# `narrow`, `writes`, `give`, `sweep`, `reword` — also runs `queue-page` after it**, so the page
 # stays current as a side effect instead of needing its own trigger (Q254). Its
 # own exit code is what this returns; a render that fails says so on stderr and
 # fails nothing, since a bad page is not a reason to lose a queue write that
@@ -17276,7 +17278,7 @@ queue mode="" *args:
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|cores|rank|tier|tag|pick|pin|unpin|apply|narrow|writes|give|sweep|reword)
+        take|add|done|drop|park|after|cores|night|rank|tier|tag|pick|pin|unpin|apply|narrow|writes|give|sweep|reword)
             now_iso='{{ queue_now }}'
             [ -n "$now_iso" ] || now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
@@ -17312,6 +17314,7 @@ queue mode="" *args:
                 'just queue after <id> -                      a row that waits goes back to todo, for a row whose wait was dropped (§451)' \
                 'just queue give <id>                         give a take back: release the hold and restore the state take replaced; refuses while the branch has a tree or commits main lacks (§263.3, §263.4)' \
                 'just queue cores <id> <n>|all                set, in the write set, how many hardware threads the row pins while it runs (§308)' \
+                'just queue night <id> on|off                 set or take off the night entry: the fill offers the row only inside the night fuzz'"'"'s window, never beside cores: (§308.8)' \
                 'just queue rank <id> before <id>             move a row to sit just before another, in their shared tier' \
                 'just queue tier <id> <tier>                  move an open row to the foot of another tier' \
                 'just queue tag <id> <class>|small|-          set, replace or remove a row class or small mark' \
@@ -17384,9 +17387,19 @@ queue mode="" *args:
     night=0
     if [ "$now_epoch" -ge "$start_today" ] && [ "$now_epoch" -lt "$((start_today + 28800))" ]; then night=1; fi
     if [ "$now_epoch" -ge "$start_yesterday" ] && [ "$now_epoch" -lt "$((start_yesterday + 28800))" ]; then night=1; fi
+    # §308.8: the next window, in UTC, for a night row's skip line. Tomorrow's
+    # local date is read from today's noon plus a day, since now plus a day
+    # lands two dates on when the spring change makes a day 23 hours long.
+    noon_today=$(TZ=Europe/Stockholm date -d "$today_local 12:00:00" +%s)
+    tomorrow_local=$(TZ=Europe/Stockholm date -d "@$((noon_today + 86400))" +%Y-%m-%d)
+    start_tomorrow=$(TZ=Europe/Stockholm date -d "$tomorrow_local 00:10:00" +%s)
+    next_start=$start_today
+    [ "$now_epoch" -lt "$start_today" ] || next_start=$start_tomorrow
+    night_window="$(date -u -d "@$next_start" +%H:%MZ) to $(date -u -d "@$((next_start + 28800))" +%H:%MZ)"
     { printf '%s\n' "$rows"; [ -z "$elsewhere" ] || printf '%s\n' "$elsewhere"; [ -z "$narrowed" ] || printf '%s\n' "$narrowed"; } \
         | LC_ALL=C awk -v mode="$mode" -v n="$n" -v machine="$machine" -v cand_id="${2:-}" -v cand_ws="${3:-}" \
         -v families="$families" -v now_date="$now_date" -v threads="$threads" -v night="$night" \
+        -v night_window="$night_window" \
         -v slots='{{ queue_slots }}' -v bundle='{{ queue_bundle }}' -v file='{{ queue_file }}' \
         -v shared_files='{{ queue_shared_files }}' '
         BEGIN {
@@ -17670,6 +17683,7 @@ queue mode="" *args:
         # kept per shared path in `sharedcount`/`h1`/`h2`, not summed across
         # every path a pair meets on.
         function blocked(i, say,    j, k, p, sharedcount, h1, h2) {
+            if (night_skip(i, say)) return 1
             if (cores_fit_skip(i, say)) return 1
             for (j = 1; j <= r; j++)
                 if (kind[j] == "running" && sets_meet(ws[i], ws[j])) {
@@ -17743,6 +17757,20 @@ queue mode="" *args:
                 }
             return 0
         }
+        # §308.8: a `night` entry names no path either; it says the row runs
+        # only beside the night fuzz, so the fill passes it over by day. `meets`
+        # asks for the paths alone, so that take, narrow and writes by day are
+        # not refused for the clock.
+        function night_skip(i, say,    n, part, k) {
+            if (night || mode == "meets") return 0
+            n = split(ws[i], part, ",")
+            for (k = 1; k <= n; k++)
+                if (part[k] == "night") {
+                    if (say) printf "skip %s (tier %s): its night entry fits only inside the night fuzz\047s window, %s\n", id[i], tier[i], night_window
+                    return 1
+                }
+            return 0
+        }
         function take_bundle(m,    y, ids, allsonnet) {
             ids = ""
             allsonnet = 1
@@ -17775,7 +17803,7 @@ queue mode="" *args:
         function entries_meet(x, y,    px, py, ix, iy, h, m) {
             shared_match = 0
             if (x == "-" || y == "-") return 0
-            if (x ~ /^cores:/ || y ~ /^cores:/) return 0
+            if (x ~ /^cores:/ || y ~ /^cores:/ || x == "night" || y == "night") return 0
             px = x; ix = ""; h = index(x, "#")
             if (h) { px = substr(x, 1, h - 1); ix = substr(x, h + 1) }
             py = y; iy = ""; h = index(y, "#")
@@ -18852,7 +18880,13 @@ _queue-check file decisions:
             } else if (model != "opus" && model != "sonnet") err(line, id ": model \"" model "\" is not opus or sonnet")
             if (ws != "-") {
                 m = split(ws, e, ",")
-                for (i = 1; i <= m; i++) entry(line, id, e[i], closed)
+                hasnight = 0; hascores = ""
+                for (i = 1; i <= m; i++) {
+                    entry(line, id, e[i], closed)
+                    if (e[i] == "night") hasnight = 1
+                    if (e[i] ~ /^cores:/) hascores = e[i]
+                }
+                if (hasnight && hascores != "") err(line, id ": night and " hascores " cannot share a write set: a night row runs beside the night fuzz, which holds every thread then (§308.8)")
             }
             n = split(what, w, " ")
             if (n == 0 || w[n] !~ /^§[0-9]+(\.[0-9]+)?$/) err(line, id ": the description does not end in a §N or §N.M")
@@ -18952,6 +18986,7 @@ _queue-check file decisions:
         function entry(line, id, x, closed,    p, h) {
             if (x == "-") { err(line, id ": \"-\" stands alone in a write set, and here it has company"); return }
             if (x ~ /^cores:([1-9][0-9]*|all)$/) return
+            if (x == "night") return
             if (x !~ /^[A-Za-z0-9._\/-]+(#[A-Za-z0-9_-]+)?$/ || x ~ /^\// || x ~ /\/\//) {
                 err(line, id ": \"" x "\" is not a path, a directory ending in /, or path#item")
                 return
@@ -19037,7 +19072,11 @@ _queue-check file decisions:
 # clock and thread count: a `cores:` row that fits the machine's free threads
 # and one that does not, `cores:all` beside a row that holds some threads and
 # beside none, and the night-fuzz window holding every thread, moved an hour
-# later in UTC once Stockholm leaves summer time.
+# later in UTC once Stockholm leaves summer time. §308.8 adds a `night` entry,
+# accepted alone and refused beside `cores:`; and a night row taken inside the
+# window and skipped outside it, naming the next window in UTC, on both sides
+# of the window before and after the change of 2026-10-25 and on the evening
+# before the spring change of 2027-03-28, a running night row never meeting it.
 [private]
 [doc("check-queue and queue agree with their fixtures: every defect refused, every fill in §230.3's order.")]
 check-queue-selftest:
@@ -19815,8 +19854,19 @@ check-queue-selftest:
     # 2026-10-26 sits in the second only if the code reads the zone rather
     # than keeping summer time's offset, since 06:30Z was outside the window
     # before the clocks changed.
+    #
+    # §308.8 (Q3150): Q2 runs only by night, and Q3, running, has the same
+    # entry, which never meets Q2's. By night Q1 is skipped and Q2 fits; by day
+    # Q2 is skipped with the next window named in UTC. 22:30Z on 2026-10-25 is
+    # day, though summer time's offset would put it inside the window, and
+    # 22:05Z on 2026-10-24, local 00:05 on the change day, names the window that
+    # starts five minutes later rather than the one after it. 22:30Z on
+    # 2027-03-27, the evening before the spring change, names that night's
+    # window, which a day of 86400 seconds would step past.
     fence corenight <<'MD'
     Q1  1  todo  opus  cores:2  a row that pins 2 of the machine's threads §230
+    Q2  1  todo  opus  night  a row that runs only beside the night fuzz §230
+    Q3  1  lane:lane-q3  opus  night  a running row beside the night fuzz too, whose night Q2 never meets §230
     MD
     driveclock corenight 4 2026-10-19T02:00:00Z blocked
     [ "$got" = "skip Q1 (tier 1): its cores:2 does not fit the 4 threads of the machine: the night fuzz holds them" ] \
@@ -19826,6 +19876,24 @@ check-queue-selftest:
     driveclock corenight 4 2026-10-26T06:30:00Z blocked
     [ "$got" = "skip Q1 (tier 1): its cores:2 does not fit the 4 threads of the machine: the night fuzz holds them" ] \
         || fail "the night window did not move an hour later in UTC once Stockholm left summer time on 2026-10-25"
+    summer="skip Q2 (tier 1): its night entry fits only inside the night fuzz's window, 22:10Z to 06:10Z"
+    winter="skip Q2 (tier 1): its night entry fits only inside the night fuzz's window, 23:10Z to 07:10Z"
+    driveclock corenight 4 2026-10-19T02:00:00Z next 1
+    [ "$(takes)" = "Q2 " ] || fail "a night row inside the night-fuzz window, in summer time, was not taken"
+    driveclock corenight 4 2026-10-19T12:00:00Z blocked
+    [ "$got" = "$summer" ] || fail "a night row by day, in summer time, was not skipped naming the next window"
+    driveclock corenight 4 2026-10-26T06:30:00Z next 1
+    [ "$(takes)" = "Q2 " ] || fail "a night row inside only the window moved an hour later on 2026-10-25 was not taken"
+    driveclock corenight 4 2026-10-26T07:30:00Z blocked
+    [ "$got" = "$winter" ] || fail "a night row just after the moved window ends was not skipped naming the moved window"
+    driveclock corenight 4 2026-10-25T22:30:00Z blocked
+    [ "$got" = "$winter" ] || fail "a night row at 22:30Z after the clocks changed was not skipped, as if summer time still held"
+    driveclock corenight 4 2026-10-25T23:20:00Z next 1
+    [ "$(takes)" = "Q2 " ] || fail "a night row inside the first window after the clocks changed was not taken"
+    driveclock corenight 4 2026-10-24T22:05:00Z blocked
+    [ "$got" = "$summer" ] || fail "a night row five minutes before the window of the change day was not skipped naming that window"
+    driveclock corenight 4 2027-03-27T22:30:00Z blocked
+    [ "$got" = "$winter" ] || fail "a night row the evening before the spring change was not skipped naming that night's window, rather than the night after"
 
     fence blocked <<'MD'
     Q1  1  lane:lane-q1  opus  docs/a.md  running §230
