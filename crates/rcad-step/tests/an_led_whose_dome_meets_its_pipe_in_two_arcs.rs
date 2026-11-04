@@ -247,49 +247,57 @@ const HALF: f64 = 0.1;
 const FAR_OFF: [f64; 3] = [10.0, 10.0, 10.0];
 
 /// The box round the corner `(0.04, 0, 4)` holds the flange below `z = 4`
-/// from the flat `x = 0.04` on, and the body's pipe above it.
+/// from the flat `x = 0.04` on, and the body's pipe above it. Before the
+/// body's pipe was joined back across its rim, each difference was refused
+/// `DynamicRangeTooWide`, at a ratio of `1.8e16`, on the strips two copies of
+/// each lead's side cut it in.
 #[test]
-fn a_d5_led_gets_its_dome_rim_on_two_faces_and_stops_cutting_a_box_out_on_strips_two_copies_of_a_lead_side_cut_from_its_pipe()
- {
+fn a_d5_led_less_a_box_round_its_flats_corner_or_far_off_and_what_the_two_share_add_up_to_the_led()
+{
+    the_led_and_a_box_share(
+        D5,
+        [0.04, 0.0, 4.0],
+        what_the_d5_led_shares_with_the_box_round_its_flats_corner(),
+    );
+    the_led_and_a_box_share(D5, FAR_OFF, 0.0);
+    each_d5_difference_adds_up_to_the_led(&Policy::certified());
+}
+
+/// Before the body's pipe was joined back across its rim, a tolerant policy
+/// let the strips' range through, and each difference was refused where the
+/// ball and the pipe, too nearly tangent to follow, cross in the thin loop
+/// below the rim.
+#[test]
+fn a_d5_led_less_a_box_adds_up_to_the_led_under_a_tolerant_policy_too() {
+    each_d5_difference_adds_up_to_the_led(&Policy::tolerant(10.0));
+}
+
+/// The `D5.0` LED less the box round the corner `(0.04, 0, 4)`, and less the
+/// box that misses it, each answer under `policy` as
+/// [`the_led_less_a_box_and_what_they_share_add_up_to_the_led`] takes. Five
+/// walls of the box round the corner are inside the LED, all but `x = -0.06`.
+fn each_d5_difference_adds_up_to_the_led(policy: &Policy) {
+    the_led_less_a_box_and_what_they_share_add_up_to_the_led(
+        D5,
+        [0.04, 0.0, 4.0],
+        what_the_d5_led_shares_with_the_box_round_its_flats_corner(),
+        5,
+        policy,
+    );
+    the_led_less_a_box_and_what_they_share_add_up_to_the_led(D5, FAR_OFF, 0.0, 0, policy);
+}
+
+/// What the `D5.0` LED shares with the box round the corner `(0.04, 0, 4)`:
+/// the flange below `z = 4` from the flat `x = 0.04` on, and the body's pipe
+/// of radius 2.5 above it.
+fn what_the_d5_led_shares_with_the_box_round_its_flats_corner() -> f64 {
     let radius = 2.5_f64;
     let flange_in_the_box = HALF * HALF * (2.0 * HALF);
     let body_in_the_box = HALF
         * (HALF * (radius * radius - HALF * HALF).sqrt()
             + radius * radius * (HALF / radius).asin()
             - 2.0 * HALF * (radius - HALF));
-    the_led_and_a_box_share(D5, [0.04, 0.0, 4.0], flange_in_the_box + body_in_the_box);
-    the_led_and_a_box_share(D5, FAR_OFF, 0.0);
-    every_fuse_refuses(
-        D5,
-        &[
-            ([0.04, 0.0, 4.0], Rule::Difference),
-            (FAR_OFF, Rule::Difference),
-        ],
-        too_wide_a_range,
-        &Policy::certified(),
-    );
-}
-
-/// A tolerant policy lets the strips' range through, and the box round the
-/// corner `(0.04, 0, 4)` and the box that misses the LED are each refused
-/// where the ball and the pipe, too nearly tangent to follow, cross in the
-/// thin loop below the rim. Before the rim's arcs were joined by their input
-/// edge, both were refused `ResultIsNotManifold` here. The loop is no edge of
-/// the LED, so the refusal is the walk's own `Error::Geometry`. Before Q2889 it
-/// was `ACrossingAlongThisEdgeCouldNotBeFollowed`, naming an edge the
-/// caller's model did not hold.
-#[test]
-fn a_d5_led_less_a_box_gets_past_its_rim_under_a_tolerant_policy_and_stops_where_its_ball_and_pipe_cross_in_a_thin_loop()
- {
-    every_fuse_refuses(
-        D5,
-        &[
-            ([0.04, 0.0, 4.0], Rule::Difference),
-            (FAR_OFF, Rule::Difference),
-        ],
-        the_ball_and_the_pipe_are_too_nearly_tangent_to_follow,
-        &Policy::tolerant(10.0),
-    );
+    flange_in_the_box + body_in_the_box
 }
 
 /// Since Q3112 the two writings of the edge along each lead's side are one
@@ -319,19 +327,6 @@ fn a_d3_led_gets_past_the_sides_of_its_leads_and_stops_where_its_rim_meets_its_f
         two_ends_round_to_one_point_on_the_front_of_the_rim,
         &Policy::certified(),
     );
-}
-
-/// Refused on the `D5.0` LED because the body's pipe and its dome's ball are
-/// too nearly tangent where they cross.
-fn the_ball_and_the_pipe_are_too_nearly_tangent_to_follow(_: &Model, error: &Error) -> bool {
-    let Error::Geometry(rcad_geom::Error::CannotFollowACrossingWhereItsSurfacesAreTangent {
-        surfaces,
-        ..
-    }) = error
-    else {
-        return false;
-    };
-    matches!(**surfaces, [Surface::Cylinder(_), Surface::Sphere(_)])
 }
 
 /// Refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` on the `D3.0`
@@ -385,6 +380,68 @@ fn the_led_and_a_box_share(file: &str, centre: [f64; 3], shared: f64) {
     );
 }
 
+/// The LED in `file` less a box of side `2 * HALF` centred on `centre`, under
+/// `policy`, answers with a model `validate` accepts, and what is left and
+/// `shared`, what the two share, add up to the LED to within what measuring
+/// costs.
+///
+/// What is left has a face for each face of the LED and for each of the
+/// box's `walls_inside` it, so every face of the LED the fuse cut in pieces
+/// is joined back. Measuring is too coarse to see a box this small in the
+/// LED's volume, and the faces are what show it was cut out where it is.
+fn the_led_less_a_box_and_what_they_share_add_up_to_the_led(
+    file: &str,
+    centre: [f64; 3],
+    shared: f64,
+    walls_inside: usize,
+    policy: &Policy,
+) {
+    let (mut model, solid) = the_led(file);
+    let (whole, whole_error) = volume_of(&model, &[solid]);
+    let faces_of_the_led = faces_of(&model, &[solid]);
+    let knife = a_box_round(&mut model, centre);
+    let fused = model
+        .fuse(
+            &[solid],
+            &[knife],
+            Rule::Difference,
+            policy,
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|why| panic!("{file}: less the box round {centre:?} refused: {why:?}"));
+    model
+        .validate(policy, &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| {
+            panic!("{file}: less the box round {centre:?} left a model that is not valid: {why:?}")
+        });
+    let (left, error) = volume_of(&model, fused.solids());
+    assert!(
+        (left + shared - whole).abs() <= error + whole_error + 1e-12,
+        "{file}: less the box round {centre:?} leaves {left} ± {error}, which with {shared} \
+         shared is not the LED's {whole} ± {whole_error}"
+    );
+    assert_eq!(
+        faces_of(&model, fused.solids()),
+        faces_of_the_led + walls_inside,
+        "{file}: less the box round {centre:?} is not the LED's {faces_of_the_led} faces and \
+         the box's {walls_inside} walls inside it"
+    );
+}
+
+/// How many faces `solids` have together.
+fn faces_of(model: &Model, solids: &[SolidKey]) -> usize {
+    solids
+        .iter()
+        .map(|&solid| {
+            model
+                .solid(solid)
+                .expect("a solid of this model")
+                .faces()
+                .count()
+        })
+        .sum()
+}
+
 /// Each box of side `2 * HALF` centred on a corner of `fuses`, fused with the
 /// LED in `file` under its rule and `policy`, is refused as `the_refusal`
 /// takes, handed the model it was refused in, which holds every face of the
@@ -411,12 +468,6 @@ fn every_fuse_refuses(
             ),
         }
     }
-}
-
-/// Refused `DynamicRangeTooWide` on the `D5.0` LED, the ratio of its largest
-/// coordinate to its shortest edge about `1.8e16`.
-fn too_wide_a_range(_: &Model, error: &Error) -> bool {
-    a_range_too_wide_between(1.8e16, 1.9e16, error)
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
