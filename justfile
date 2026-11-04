@@ -11498,15 +11498,16 @@ check-fuzz-overnight-selftest:
 
     # Thirty-five: a pause that ends at or after the deadline ends the night
     # where it starts. Nothing waits for its end, and nothing runs after it.
-    # Seven seconds before the pause, the most a window of eight allows: the
-    # build and two checks come out of it, and took three seconds under load
-    # (Q3062).
+    # Fifteen seconds before the pause, the most a window of sixteen allows:
+    # the build and two checks come out of it, and took three seconds under
+    # load (Q3062) and more than seven at load 26 to 54, when a window of eight
+    # was spent before the first target could launch (Q3177).
     thirty_five() {
     : >"$dir/log"
     t0=$(date +%s)
-    pause_from=$(( t0 + 7 ))
+    pause_from=$(( t0 + 15 ))
     pause_until=$(( t0 + 60 ))
-    run 8 "@$pause_from" "@$pause_until" \
+    run 16"@$pause_from" "@$pause_until" \
         || fail "a night whose pause outlasts it failed: $(cat "$dir/out")"
     ! grep -q 'pausing until' "$dir/out" \
         || fail "a night whose pause outlasts it waited for the pause to end: $(cat "$dir/out")"
