@@ -324,15 +324,32 @@
 //! on the ellipse, so the fold of Q2959 did not look at it; it now stands for
 //! all four (Q3110).
 //!
-//! The `Z15.0` LED stops now on the same flat: the boxes round its corners
+//! The `Z15.0` LED stopped then on the same flat: the boxes round its corners
 //! `TwoCurvesTouchWithoutCrossing`, and the far box `Undecidable` with the one
 //! record `two ways out of a node along one line` at the back corner, one way
 //! out along the back plane and one a box round nothing, as Q3043 was on the
-//! body's pipe. Untraced, both. The tests pin both LEDs' stops.
+//! body's pipe. Both were on the ellipse the flat cuts in the body's pipe,
+//! drawn on the flat as a cut. The flat lies in front of the back plane
+//! `y = -2.27` and the pipe's face behind it, so that ellipse is no edge of
+//! the answer on the flat. The arrangement leaves out a crossing of two faces
+//! that lie in the two closed sides of one plane (Q3048), but bake read the
+//! flat as lying in front of the back plane only if every edge of it stays
+//! there, and two of them run across the flange's rim. The
+//! flat's normal `(-1, 0, 0)` is exactly square to the rim's axis
+//! `(0, 1, -1.1e-15)`, so they are straight, and they were read as arcs,
+//! which proved nothing. An edge across a pipe whose axis the face's plane
+//! holds now stays wherever both its ends do (Q3142).
+//!
+//! The box round the `Z15.0` LED's back corner now shares with it what the box
+//! round the `Z3.0` LED's does, and the far box shares nothing. The box round
+//! its front corner is refused `ResultIsNotManifold` under intersection, and
+//! every difference `DynamicRangeTooWide` at a ratio of `4.0e16`, both where
+//! Q3136 traced the front written twice (Q3141). The tests pin both LEDs'
+//! stops.
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Deflection, Isometry, Surface, Vector};
+use rcad_geom::{Deflection, Isometry, Vector};
 use rcad_predicates::{Point, Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
 use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
@@ -384,15 +401,13 @@ const Z15_BACK_CORNER: [f64; 3] = [-1.23, -2.27, 15.0];
 #[test]
 fn a_d5_led_3_up_gets_past_where_its_flat_dome_and_pipe_meet_and_shares_its_back_corner_with_a_box()
 {
-    let radius = 2.5_f64;
-    let flange_in_the_box = HALF * HALF * (2.0 * HALF);
-    let body_in_the_box = HALF
-        * (HALF * (radius * radius - HALF * HALF).sqrt()
-            + radius * radius * (HALF / radius).asin()
-            - 2.0 * HALF * (radius - HALF));
-    a_box_round_shares(Z3, Z3_BACK_CORNER, flange_in_the_box + body_in_the_box);
+    a_box_round_shares(
+        Z3,
+        Z3_BACK_CORNER,
+        what_a_d5_led_shares_round_its_back_corner(),
+    );
     the_far_box_shares_nothing_with(Z3);
-    every_fuse_refuses(Z3, &[(Z3_FRONT_CORNER, Rule::Intersection)], |_, error| {
+    every_fuse_refuses(Z3, &[(Z3_FRONT_CORNER, Rule::Intersection)], |error| {
         matches!(
             error,
             Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (1.39e16..1.40e16).contains(ratio)
@@ -400,7 +415,7 @@ fn a_d5_led_3_up_gets_past_where_its_flat_dome_and_pipe_meet_and_shares_its_back
     });
     let differences =
         [Z3_FRONT_CORNER, Z3_BACK_CORNER, FAR_OFF].map(|corner| (corner, Rule::Difference));
-    every_fuse_refuses(Z3, &differences, |_, error| {
+    every_fuse_refuses(Z3, &differences, |error| {
         matches!(
             error,
             Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (3.5e17..3.6e17).contains(ratio)
@@ -425,20 +440,30 @@ fn a_d5_led_3_up_gets_past_where_its_flat_dome_and_pipe_meet_and_shares_its_back
 /// places the corner stands for. Since Q3064 the ellipse its flange's flat cuts
 /// in the body's pipe passes that corner twice, once either side of the front
 /// corner. Since Q3110 the front corner stands for the four meets at the
-/// ellipse's end, two with each of the two planes the front is written as. It
-/// stops on that flat: the boxes round its corners where two curves touch
-/// without crossing, and the far box on two ways out of its back corner along
-/// one line, one of them a box round nothing.
+/// ellipse's end, two with each of the two planes the front is written as.
+/// Since Q3142 that ellipse is no edge of its flange's flat, which lies in
+/// front of the back plane by its two straight edges across the flange's rim.
+/// The box round its back corner shares with it what the box round the `Z3.0`
+/// LED's does, and the far box shares nothing. The box round its front corner
+/// is refused as not manifold, and every difference for its range.
 #[test]
-fn a_z15_led_gets_past_the_end_of_its_flats_ellipse_and_stops_on_the_flat_where_two_curves_touch_or_at_its_back_corner()
- {
-    every_fuse_refuses(
+fn a_z15_led_leaves_its_bodys_ellipse_off_its_flat_and_shares_its_back_corner_with_a_box() {
+    a_box_round_shares(
         Z15,
-        &a_box_round_each_of(&[Z15_FRONT_CORNER, Z15_BACK_CORNER]),
-        |model, error| two_curves_touch_on_the_plane_x_at(-1.23, model, error),
+        Z15_BACK_CORNER,
+        what_a_d5_led_shares_round_its_back_corner(),
     );
-    every_fuse_refuses(Z15, &a_box_round_each_of(&[FAR_OFF]), |_, error| {
-        two_ways_out_of_a_corner_are_not_ordered(Z15_BACK_CORNER, error)
+    the_far_box_shares_nothing_with(Z15);
+    every_fuse_refuses(Z15, &[(Z15_FRONT_CORNER, Rule::Intersection)], |error| {
+        matches!(error, Error::ResultIsNotManifold { count: 1 })
+    });
+    let differences =
+        [Z15_FRONT_CORNER, Z15_BACK_CORNER, FAR_OFF].map(|corner| (corner, Rule::Difference));
+    every_fuse_refuses(Z15, &differences, |error| {
+        matches!(
+            error,
+            Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (4.01e16..4.02e16).contains(ratio)
+        )
     });
 }
 
@@ -457,11 +482,11 @@ fn a_z15_led_gets_past_the_end_of_its_flats_ellipse_and_stops_on_the_flat_where_
 fn a_d3_led_6_up_gets_past_the_sides_of_its_leads_and_stops_on_a_sliver_of_its_box_or_for_its_range()
  {
     let front_corner = [-0.23, -3.81, 6.0 - BELOW_THE_AXIS];
-    every_fuse_refuses(D3, &a_box_round_each_of(&[front_corner]), |_, error| {
+    every_fuse_refuses(D3, &a_box_round_each_of(&[front_corner]), |error| {
         a_point_inside_a_sliver_of_the_box_top_is_not_placed(front_corner[2] + HALF, error)
     });
     the_far_box_shares_nothing_with(D3);
-    every_fuse_refuses(D3, &[(FAR_OFF, Rule::Difference)], |_, error| {
+    every_fuse_refuses(D3, &[(FAR_OFF, Rule::Difference)], |error| {
         matches!(
             error,
             Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (2.0e16..2.1e16).contains(ratio)
@@ -479,7 +504,7 @@ fn four_d3_leds_get_past_their_front_written_twice_and_stop_on_two_ways_out_of_t
     let all_four = [(D3, -3.81, 6.0)].into_iter().chain(THREE_MORE_D3);
     for (file, front, axis) in all_four {
         let back_corner = [-0.23, front - 1.0, axis];
-        every_fuse_refuses(file, &a_box_round_each_of(&[back_corner]), |_, error| {
+        every_fuse_refuses(file, &a_box_round_each_of(&[back_corner]), |error| {
             two_ways_out_of_a_corner_are_not_ordered(back_corner, error)
         });
     }
@@ -497,7 +522,7 @@ fn three_more_d3_leds_get_past_their_front_written_twice_and_are_refused_a_piece
         every_fuse_refuses(
             file,
             &a_box_round_each_of(&[front_corner, FAR_OFF]),
-            |_, error| matches!(error, Error::Invalid(Invalid::WireTooShort { count: 2 })),
+            |error| matches!(error, Error::Invalid(Invalid::WireTooShort { count: 2 })),
         );
     }
 }
@@ -512,12 +537,11 @@ fn a_box_round_each_of(corners: &[[f64; 3]]) -> Vec<([f64; 3], Rule)> {
 }
 
 /// The LED in `file` and a box of side `2 * HALF` centred on each corner of
-/// `fuses`, fused under its rule, each refused as `the_refusal` takes, handed
-/// the model it was refused in.
+/// `fuses`, fused under its rule, each refused as `the_refusal` takes.
 fn every_fuse_refuses(
     file: &str,
     fuses: &[([f64; 3], Rule)],
-    the_refusal: impl Fn(&Model, &Error) -> bool,
+    the_refusal: impl Fn(&Error) -> bool,
 ) {
     let (led, solid) = the_led(file);
     for &(corner, rule) in fuses {
@@ -531,7 +555,7 @@ fn every_fuse_refuses(
             &mut ProvenanceLog::new(),
         ) {
             Err(error) => assert!(
-                the_refusal(&model, &error),
+                the_refusal(&error),
                 "{file}: {rule:?} with a box round {corner:?} refused {error:?}, which is not \
                  the refusal this pins"
             ),
@@ -597,6 +621,20 @@ fn a_box_round_shares(file: &str, corner: [f64; 3], shared: f64) {
     );
 }
 
+/// What a box of side `2 * HALF` round the back corner of a `D5.0` LED shares
+/// with it: in front of the back plane, the quarter of the box past the flat,
+/// in the flange; behind it, the part of the box's quarter past the flat that
+/// is inside the body's pipe of radius 2.5, which the flat touches.
+fn what_a_d5_led_shares_round_its_back_corner() -> f64 {
+    let radius = 2.5_f64;
+    let flange_in_the_box = HALF * HALF * (2.0 * HALF);
+    let body_in_the_box = HALF
+        * (HALF * (radius * radius - HALF * HALF).sqrt()
+            + radius * radius * (HALF / radius).asin()
+            - 2.0 * HALF * (radius - HALF));
+    flange_in_the_box + body_in_the_box
+}
+
 /// The volume of `solids` together, and how far measuring it may be off.
 fn volume_of(model: &Model, solids: &[SolidKey]) -> (f64, f64) {
     solids.iter().fold((0.0, 0.0), |(volume, error), &solid| {
@@ -629,20 +667,6 @@ fn a_point_inside_a_sliver_of_the_box_top_is_not_placed(top: f64, error: &Error)
                 && (z.lo() - top).abs() < 1e-9
                 && (z.hi() - top).abs() < 1e-9
         })
-}
-
-/// Refused `TwoCurvesTouchWithoutCrossing` on the plane `x = at` with one
-/// wire, its normal `(-1, 0, 0)`.
-fn two_curves_touch_on_the_plane_x_at(at: f64, model: &Model, error: &Error) -> bool {
-    let Error::TwoCurvesTouchWithoutCrossing { face } = error else {
-        return false;
-    };
-    let face = model.face(*face).expect("the face is the LED's own");
-    let Surface::Plane(plane) = face.surface() else {
-        return false;
-    };
-    let [x, y, z, d] = plane.coefficients();
-    face.wire_count() == 1 && [x + 1.0, y, z, d - at].iter().all(|part| part.abs() < 1e-9)
 }
 
 /// Refused `Undecidable` with the one record `two ways out of a node along one
