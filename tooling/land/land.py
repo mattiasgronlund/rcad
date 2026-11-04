@@ -135,6 +135,7 @@ def start(argv):
             args["steps"] = read_steps(args["steps"], args["steps_sha256"])
             args["start_sha"] = report["start_sha"] = output("git", "rev-parse", "HEAD")
             refuse_unless_a_clean_linked_tree()
+            refuse_trees_git_does_not_name(args["trees"])
         except Stop:
             unlock(top, report)
             raise
@@ -293,6 +294,17 @@ def refuse_unless_a_clean_linked_tree():
     status = output("git", "status", "--porcelain")
     if status:
         raise Stop("tree", f"this tree has uncommitted changes, and just land switches it: {status}")
+
+
+def refuse_trees_git_does_not_name(trees):
+    """A mistyped tree would only fail to unlock after the push, leaving the real one locked (Q3167)."""
+    named = {os.path.normpath(line[len("worktree "):])
+             for line in output("git", "worktree", "list", "--porcelain").split("\n")
+             if line.startswith("worktree ")}
+    unknown = [tree for tree in trees if os.path.normpath(tree) not in named]
+    if unknown:
+        raise Stop("tree", f"git worktree list names no tree at {', '.join(unknown)}: copy the path from the "
+                           f"prompt again; nothing has started, so just land can run again")
 
 
 def start_detached(cmd, cwd, log_path, pid_path):

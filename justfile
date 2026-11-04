@@ -21858,6 +21858,11 @@ check-queue-api-selftest:
     got=$(q "$night_wt" night "$night_row" on 2>&1) && fail "night on set the entry beside a cores: entry"
     grep -qF "night and cores:2 cannot share a write set" <<<"$got" \
         || fail "night on beside cores: did not say why it was refused"
+    got=$(q "$night_wt" cores "$night_row" - 2>&1) || fail "cores with a dash refused a row with a cores entry"
+    grep -qxF "$night_row: write set cores:2 -> -" <<<"$got" || fail "cores with a dash did not report the write set it left"
+    got=$(q "$night_wt" cores "$night_row" - 2>&1) && fail "cores with a dash accepted a row with no cores entry"
+    grep -qF "$night_row has no cores entry" <<<"$got" || fail "a second cores dash did not say the row has no cores entry"
+    got=$(q "$night_wt" cores "$night_row" 2 2>&1) || fail "cores refused a count after its entry was taken off"
     got=$(q "$night_wt" night T1 on 2>&1) && fail "night on changed a closed row"
     grep -qF "T1 is closed" <<<"$got" || fail "night on did not refuse T1 by name"
     got=$(q "$night_wt" add 2 opus 'docs/a.md,night' "from/- a row on a file that runs only by night §230" 2>&1) \
@@ -24104,6 +24109,14 @@ check-land-selftest:
     done
     [ "$(git -C "$at/origin.git" log -1 --format=%s main)" = 'Merge lane-x: Q1 done, and Q3, Q6 answered by it, by just land' ] \
         || fail "the merge commit's subject is '$(git -C "$at/origin.git" log -1 --format=%s main)'"
+
+    fixture unknown-tree
+    run Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify-typo"
+    stopped tree
+    grep -qF 'copy the path from the prompt again' <<<"$got" || fail "a tree git does not name was refused without saying to copy the path again"
+    [ ! -e "$at/lander/target/land" ] || fail "a refused tree argument started the run, so a retry would be refused"
+    run Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
+    [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "the retry with the right trees did not merge"
 
     fixture answers-twice
     run --answers Q1 Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"

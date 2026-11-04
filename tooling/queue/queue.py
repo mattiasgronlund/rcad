@@ -111,7 +111,7 @@ just queue after <id> -                    a row that waits goes back to todo: t
                                             dropped, since only done: ends a wait (§451)
 just queue give <id>                       give a take back: release the hold and restore the state take replaced;
                                             refuses while the branch has a tree or commits main lacks (§263.3, §263.4)
-just queue cores <id> <n>|all              set, replace or remove the write set's cores:<n> or cores:all entry
+just queue cores <id> <n>|all|-            set, replace or (with -) remove the write set's cores:<n> or cores:all entry
                                             (§308); the fill skips a row whose count does not fit the machine's
                                             free threads, and cores:all fits only when nothing else holds any
 just queue night <id> on|off               set or take off the write set's night entry (§308.8); the fill offers the
@@ -1096,23 +1096,30 @@ def exists_elsewhere(here, claims, row_id):
 def cores_step(queue, claims, here, args, batch):
     """Set, replace or remove the `cores:<n>` or `cores:all` entry of an open row's write set (§308).
 
+    A dash in place of the count removes the entry.
+
     A row that pins hardware threads holds them as a write-set entry so the
     fill can skip a row whose count would not fit the machine's free threads,
     beside the ordinary path-meets check; `cores:` entries never meet a path,
     nor each other, as `entry_holds` says.
     """
-    need(args, 2, "cores <id> <n>|all")
+    need(args, 2, "cores <id> <n>|all|-")
     row_id, n = args
-    if not CORES_ENTRY.match(f"cores:{n}"):
-        raise Refused(f"'{n}' is not a core count: a positive integer or 'all'")
+    if n != "-" and not CORES_ENTRY.match(f"cores:{n}"):
+        raise Refused(f"'{n}' is not a core count: a positive integer, 'all' or '-' to remove the entry")
     refuse_conflicted(here, queue)
     row = require_row(queue, here, row_id)
     if row.is_closed():
         raise Refused(f"{row_id} is closed: {row.state}")
-    entries = [entry for entry in entries_of(row.write_set) if not entry.startswith("cores:")]
-    entries.append(f"cores:{n}")
+    old = entries_of(row.write_set)
+    entries = [entry for entry in old if not entry.startswith("cores:")]
+    if n == "-":
+        if entries == old:
+            raise Refused(f"{row_id} has no cores entry: {row.write_set}")
+    else:
+        entries.append(f"cores:{n}")
     refuse_night_beside_cores(entries)
-    write_set = ",".join(entries)
+    write_set = ",".join(entries) or "-"
     queue.replace(row, row.with_write_set(write_set))
     message = f"{row_id}: write set {row.write_set} -> {write_set}"
     return queue, message, None
