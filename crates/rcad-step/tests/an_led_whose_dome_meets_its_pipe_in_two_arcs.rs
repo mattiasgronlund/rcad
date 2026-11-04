@@ -225,7 +225,10 @@
 //!   the box's own side `z = 1.9` for the boxes round the corners, meets the
 //!   flange's front and the body's front disc, the one plane written twice, at
 //!   one `f64` triple, and the straight side between the two is refused as
-//!   though it were an arc. Untraced.
+//!   though it were an arc. The flange's front and the body's front disc are
+//!   two flat faces along one closed edge, the hole's circle, so they are one
+//!   plane, and bake now reads them as one (Q3141). Every box of the `D3.0`
+//!   LED answers, under intersection and difference.
 //!
 //! What answers is checked as commit `f179ca02a` checks it: what the box and
 //! the LED share is the box's part inside the LED. When a box's difference
@@ -233,10 +236,10 @@
 
 use std::{env, fs, path::PathBuf};
 
-use rcad_geom::{Deflection, Isometry, Surface, Vector};
+use rcad_geom::{Deflection, Isometry, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_step::{Import, StepFile};
-use rcad_topo::{Error, Invalid, Model, ProfileBuilder, Rule, SolidKey};
+use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 const D5: &str = "LED_D5.0mm-3.step";
 const D3: &str = "LED_D3.0mm_Horizontal_O6.35mm_Z2.0mm.step";
@@ -290,10 +293,22 @@ fn each_d5_difference_adds_up_to_the_led(policy: &Policy) {
         D5,
         [0.04, 0.0, 4.0],
         what_the_d5_led_shares_with_the_box_round_its_flats_corner(),
-        5,
+        Faces {
+            joined: 0,
+            walls_inside: 5,
+        },
         policy,
     );
-    the_led_less_a_box_and_what_they_share_add_up_to_the_led(D5, FAR_OFF, 0.0, 0, policy);
+    the_led_less_a_box_and_what_they_share_add_up_to_the_led(
+        D5,
+        FAR_OFF,
+        0.0,
+        Faces {
+            joined: 0,
+            walls_inside: 0,
+        },
+        policy,
+    );
 }
 
 /// What the `D5.0` LED shares with the box round the corner `(0.04, 0, 4)`:
@@ -310,55 +325,44 @@ fn what_the_d5_led_shares_with_the_box_round_its_flats_corner() -> f64 {
 }
 
 /// Since Q3112 the two writings of the edge along each lead's side are one
-/// line. The box round the back corner holds the flange behind the flat
-/// `x = -0.23` and the body's pipe behind the flange's back, as the `D5.0`
-/// LED's box does, and the far box holds nothing.
+/// line, and since Q3141 the flange's front and the body's front disc are one
+/// plane. The box round the front corner holds the quarter of it behind the
+/// flat `x = -0.23` and behind the front. The box round the back corner holds
+/// the flange behind the flat and the body's pipe behind the flange's back, as
+/// the `D5.0` LED's box does, and the far box holds nothing.
+///
+/// The file writes nine faces more than the fuse does: the flange's rim, its
+/// flat, and the side of each lead along `x` in two pieces each, the side of
+/// each lead along `y` in two, and the front as the flange's and the disc's.
+/// The four walls inside the LED of the box round the front corner are all but
+/// `x = -0.33` and `y = -6.25`, and of the box round the back corner the five
+/// but `x = -0.33`.
 #[test]
-fn a_d3_led_gets_past_the_sides_of_its_leads_and_stops_where_its_rim_meets_its_front_written_twice()
-{
+fn a_d3_led_less_a_box_round_either_corner_or_far_off_and_what_the_two_share_add_up_to_the_led() {
     let radius = 1.5_f64;
     let flange_in_the_box = HALF * HALF * (2.0 * HALF);
     let body_in_the_box = HALF
         * (HALF * (radius * radius - HALF * HALF).sqrt()
             + radius * radius * (HALF / radius).asin()
             - 2.0 * HALF * (radius - HALF));
-    the_led_and_a_box_share(D3, THE_BACK_CORNER, flange_in_the_box + body_in_the_box);
-    the_led_and_a_box_share(D3, FAR_OFF, 0.0);
-    every_fuse_refuses(
-        D3,
-        &[(THE_FRONT_CORNER, Rule::Intersection)],
-        |_, error| a_range_too_wide_between(7.2e15, 7.3e15, error),
-        &Policy::certified(),
-    );
-    every_fuse_refuses(
-        D3,
-        &[THE_FRONT_CORNER, THE_BACK_CORNER, FAR_OFF].map(|centre| (centre, Rule::Difference)),
-        two_ends_round_to_one_point_on_the_front_of_the_rim,
-        &Policy::certified(),
-    );
-}
-
-/// Refused `TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint` on the `D3.0`
-/// LED's flange's rim, the pipe of radius 1.9, at a point of its front
-/// `y = -6.35`.
-fn two_ends_round_to_one_point_on_the_front_of_the_rim(model: &Model, error: &Error) -> bool {
-    let Error::TwoEndsOfAnEdgeOnACurvedSurfaceRoundToOnePoint { face, at } = error else {
-        return false;
-    };
-    let face = model.face(*face).expect("the face is the LED's own");
-    let Surface::Cylinder(rim) = face.surface() else {
-        return false;
-    };
-    (rim.radius() - 1.9).abs() < 1e-9 && (at.y() + 6.35).abs() < 1e-9
-}
-
-/// Refused `DynamicRangeTooWide`, the ratio of the largest coordinate to the
-/// shortest edge between `low` and `high`.
-fn a_range_too_wide_between(low: f64, high: f64, error: &Error) -> bool {
-    matches!(
-        error,
-        Error::Invalid(Invalid::DynamicRangeTooWide { ratio }) if (low..high).contains(ratio)
-    )
+    let fuses = [
+        (THE_FRONT_CORNER, flange_in_the_box, 4),
+        (THE_BACK_CORNER, flange_in_the_box + body_in_the_box, 5),
+        (FAR_OFF, 0.0, 0),
+    ];
+    for (centre, shared, walls_inside) in fuses {
+        the_led_and_a_box_share(D3, centre, shared);
+        the_led_less_a_box_and_what_they_share_add_up_to_the_led(
+            D3,
+            centre,
+            shared,
+            Faces {
+                joined: 9,
+                walls_inside,
+            },
+            &Policy::certified(),
+        );
+    }
 }
 
 /// The LED in `file` and a box of side `2 * HALF` centred on `centre`, fused
@@ -394,20 +398,25 @@ fn the_led_and_a_box_share(file: &str, centre: [f64; 3], shared: f64) {
 /// `shared`, what the two share, add up to the LED to within what measuring
 /// costs.
 ///
-/// What is left has a face for each face of the LED and for each of the
-/// box's `walls_inside` it, so every face of the LED the fuse cut in pieces
-/// is joined back. Measuring is too coarse to see a box this small in the
-/// LED's volume, and the faces are what show it was cut out where it is.
+/// What is left has a face for each face of the LED, less the `faces` the
+/// fuse joins of those the file writes in pieces, and one for each of the
+/// box's walls inside it, so every face of the LED the fuse cut in pieces is
+/// joined back. Measuring is too coarse to see a box this small in the LED's
+/// volume, and the faces are what show it was cut out where it is.
 fn the_led_less_a_box_and_what_they_share_add_up_to_the_led(
     file: &str,
     centre: [f64; 3],
     shared: f64,
-    walls_inside: usize,
+    faces: Faces,
     policy: &Policy,
 ) {
+    let Faces {
+        joined,
+        walls_inside,
+    } = faces;
     let (mut model, solid) = the_led(file);
     let (whole, whole_error) = volume_of(&model, &[solid]);
-    let faces_of_the_led = faces_of(&model, &[solid]);
+    let faces_of_the_led = faces_of(&model, &[solid]) - joined;
     let knife = a_box_round(&mut model, centre);
     let fused = model
         .fuse(
@@ -437,6 +446,15 @@ fn the_led_less_a_box_and_what_they_share_add_up_to_the_led(
     );
 }
 
+/// What a box cut out of an LED does to the count of its faces.
+struct Faces {
+    /// How many faces fewer the fuse writes the LED in than its file does,
+    /// joining two faces of one surface that share an edge.
+    joined: usize,
+    /// How many of the box's six walls are inside the LED.
+    walls_inside: usize,
+}
+
 /// How many faces `solids` have together.
 fn faces_of(model: &Model, solids: &[SolidKey]) -> usize {
     solids
@@ -449,34 +467,6 @@ fn faces_of(model: &Model, solids: &[SolidKey]) -> usize {
                 .count()
         })
         .sum()
-}
-
-/// Each box of side `2 * HALF` centred on a corner of `fuses`, fused with the
-/// LED in `file` under its rule and `policy`, is refused as `the_refusal`
-/// takes, handed the model it was refused in, which holds every face of the
-/// LED.
-fn every_fuse_refuses(
-    file: &str,
-    fuses: &[([f64; 3], Rule)],
-    the_refusal: impl Fn(&Model, &Error) -> bool,
-    policy: &Policy,
-) {
-    let (led, solid) = the_led(file);
-    for &(centre, rule) in fuses {
-        let mut model = led.clone();
-        let knife = a_box_round(&mut model, centre);
-        match model.fuse(&[solid], &[knife], rule, policy, &mut ProvenanceLog::new()) {
-            Err(error) if the_refusal(&model, &error) => {}
-            Err(error) => panic!(
-                "{file}: {rule:?} with a box round {centre:?} refused {error:?}, which is not the \
-                 refusal this pins"
-            ),
-            Ok(_) => panic!(
-                "{file}: {rule:?} with a box round {centre:?} answers: check its volume as \
-                 f179ca02a did"
-            ),
-        }
-    }
 }
 
 fn the_led(file: &str) -> (Model, SolidKey) {
