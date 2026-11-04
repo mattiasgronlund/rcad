@@ -15113,9 +15113,16 @@ fmt:
 #   binaries from the build directory after cargo has let go of its lock, and a
 #   long run can pass 30 minutes without writing there. Clearing it then fails
 #   every test not yet started.
-# - **A cargo-nextest is running anywhere.** Between two of its tests no
-#   program runs from the directory and no lock is held, and nothing in the
-#   nextest process names the directory (§474.12), so every directory is kept.
+# - **A cargo-nextest is running in the tree that uses it.** Between two of its
+#   tests no program runs from the directory and no lock is held, and nothing
+#   in the nextest process names the directory (§474.12), so it is read off
+#   the process's working directory: the worktree it is in, and that
+#   worktree's real or linked `target/debug`, `target/release` and build
+#   directory. A nextest whose working directory cannot be read, is in no
+#   worktree, or whose worktree has no build directory under `root` keeps every
+#   directory. Over 2026-11-03 and -04 a nextest was up at 58 of the 157 timer
+#   runs (journalctl --user -u rcad-clean-targets), nearly every run from 08:00
+#   to noon, so keeping everything left a working day without a clear (Q3103).
 # - **Only its lock files are left**, which is what a cleared directory is.
 # - **No `.cargo-build-lock` in it**, or for a tree's `target/debug` no
 #   `.cargo-lock`, since then nothing says whether a cargo is building there;
@@ -15182,7 +15189,9 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
         rm -rf -- "$left"
         echo "removed what an earlier run left half-cleared: $left"
     done
-    nextest=$(pgrep -x -- "{{nextest_name}}" | head -n 1 || true)
+    nextest_pids=$(pgrep -x -- "{{nextest_name}}" || true)
+    nextest_unknown=""
+    nextest_uses=()
     held=()
     keep() {
         echo "kept ($1): $2"
@@ -15240,8 +15249,18 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
                 break
             fi
         done <<<"$locks"
-        if [ -z "$busy" ] && [ -n "$nextest" ]; then
-            busy="a cargo-nextest is running, and between two of its tests nothing shows which build directory it uses"
+        if [ -z "$busy" ] && [ -n "$nextest_unknown" ]; then
+            busy="$nextest_unknown"
+        fi
+        if [ -z "$busy" ]; then
+            for d in "${dirs[@]}"; do
+                for used in "${nextest_uses[@]}"; do
+                    if [ "$d" = "$used" ]; then
+                        busy="a cargo-nextest is running in the tree that uses it, and between two of its tests no program runs from it"
+                        break 2
+                    fi
+                done
+            done
         fi
         if [ -z "$busy" ]; then
             for d in "${dirs[@]}"; do
@@ -15319,6 +15338,38 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
             keep "its link to $dest could not be made, so it was put back" "$path"
         fi
     }
+
+    # Each nextest's working directory names its worktree, and the worktree's
+    # build directory is the one it runs from. One whose directory cannot be
+    # read, is in no worktree, or whose worktree has no build directory under
+    # `root` leaves every directory kept, since nothing then says which it uses.
+    nextest_where() {
+        local pid cwd tree best
+        for pid in $nextest_pids; do
+            [ -d "/proc/$pid" ] || continue
+            cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) || {
+                nextest_unknown="a cargo-nextest (process $pid) is running and its working directory cannot be read, so which build directory it uses is unknown"
+                return
+            }
+            best=""
+            while IFS= read -r tree; do
+                if [ -n "$tree" ] && [[ $cwd/ == "$tree"/* ]] && [ "${#tree}" -gt "${#best}" ]; then
+                    best=$tree
+                fi
+            done <<<"$trees"
+            if [ -z "$best" ]; then
+                nextest_unknown="a cargo-nextest runs from $cwd, which is in none of the worktrees, so which build directory it uses is unknown"
+                return
+            fi
+            tree_key "$best"
+            if [ -n "$why" ]; then
+                nextest_unknown="a cargo-nextest runs in $best, and $why"
+                return
+            fi
+            nextest_uses+=("$best/target/debug" "$best/target/release" "$root/$key" "$artifacts/$key")
+        done
+    }
+    nextest_where
 
     replaced=0
     kept=0
@@ -15650,14 +15701,69 @@ check-clean-targets-selftest:
         || fail "a build directory was cleared while a nextest was running, though between two tests nothing in it shows it is in use"
     [ -f "$root/0a/idle/debug/deps/artifact" ] \
         || fail "an idle build directory was cleared while a nextest was running"
-    grep -qxF "kept (a cargo-nextest is running, and between two of its tests nothing shows which build directory it uses): $root/12/between" <<<"$got" \
+    grep -qxF "kept (a cargo-nextest runs from $(realpath -e .), which is in none of the worktrees, so which build directory it uses is unknown): $root/12/between" <<<"$got" \
         || fail "the build directory kept for a running nextest was not reported as kept"
     [ -f "$art/13/linked/debug/tool" ] \
         || fail "a link destination was cleared while a nextest was running"
     [ -d "$trees/swap/target/debug" ] && [ ! -L "$trees/swap/target/debug" ] \
         || fail "an idle tree's target/debug was replaced while a nextest was running, which may be about to run a binary from it"
-    grep -qxF "kept (a cargo-nextest is running, and between two of its tests nothing shows which build directory it uses): $trees/swap/target/debug" <<<"$got" \
+    grep -qxF "kept (a cargo-nextest runs from $(realpath -e .), which is in none of the worktrees, so which build directory it uses is unknown): $trees/swap/target/debug" <<<"$got" \
         || fail "the idle tree's target/debug kept for a running nextest was not reported as kept"
+
+    # A nextest in one worktree keeps that worktree's directories and no
+    # others: a second tree's and a build directory no tree uses are idle, and
+    # go (Q3103).
+    root2="$dir/zram2/targets"
+    art2="$dir/zram2/artifacts"
+    repo2="$dir/repo2"
+    git init -q -b main "$repo2"
+    git -C "$repo2" config user.email t@t
+    git -C "$repo2" config user.name t
+    git -C "$repo2" commit -q --allow-empty -m root
+    for name in nx-a nx-b; do
+        git -C "$repo2" worktree add -q --detach "$dir/trees2/$name"
+        mkdir -p "$dir/trees2/$name/target/debug/deps" "$dir/trees2/$name/sub"
+        : >"$dir/trees2/$name/target/debug/.cargo-lock"
+        head -c 4096 /dev/zero >"$dir/trees2/$name/target/debug/deps/old-build"
+        old "$dir/trees2/$name/target"
+    done
+    for key in 1e/nx-a 1f/nx-b 20/nobody; do
+        mkdir -p "$root2/$key/debug/deps"
+        : >"$root2/$key/debug/.cargo-build-lock"
+        head -c 4096 /dev/zero >"$root2/$key/debug/deps/artifact"
+        old "$root2/$key"
+    done
+    mkdir -p "$dir/zram2/kache" "$art2"
+    {
+        printf '%s\t%s\t%s\n' "$dir/trees2/nx-a" "$root2/1e/nx-a" "$dir/trees2/nx-a/target"
+        printf '%s\t%s\t%s\n' "$dir/trees2/nx-b" "$root2/1f/nx-b" "$dir/trees2/nx-b/target"
+    } >>"$dir/stub-keys"
+    ( cd "$dir/trees2/nx-a/sub" && exec "$dir/bin/fx-nextest" 300 ) &
+    nextest=$!
+    pids+=("$nextest")
+    for _ in $(seq 100); do
+        [ "$(readlink "/proc/$nextest/cwd" 2>/dev/null || true)" = "$dir/trees2/nx-a/sub" ] \
+            && [ "$(cat "/proc/$nextest/comm" 2>/dev/null || true)" = fx-nextest ] && break
+        sleep 0.05
+    done
+    got=$(just clean-targets "$root2" "$dir/zram2/kache" fx-nextest "$art2" "$repo2" 2>&1) || fail "a run with a nextest in one tree exited non-zero"
+    kill "$nextest"
+    wait "$nextest" 2>/dev/null || true
+    [ -f "$root2/1e/nx-a/debug/deps/artifact" ] \
+        || fail "the build directory of the tree a nextest runs in was cleared"
+    grep -qxF "kept (a cargo-nextest is running in the tree that uses it, and between two of its tests no program runs from it): $root2/1e/nx-a" <<<"$got" \
+        || fail "the build directory of the tree a nextest runs in was not reported as kept for it"
+    [ -d "$dir/trees2/nx-a/target/debug" ] && [ ! -L "$dir/trees2/nx-a/target/debug" ] \
+        || fail "the target/debug of the tree a nextest runs in was replaced"
+    grep -qxF "kept (a cargo-nextest is running in the tree that uses it, and between two of its tests no program runs from it): $dir/trees2/nx-a/target/debug" <<<"$got" \
+        || fail "the target/debug of the tree a nextest runs in was not reported as kept for it"
+    [ -L "$dir/trees2/nx-b/target/debug" ] \
+        || fail "the target/debug of a tree no nextest runs in was kept because a nextest runs in another tree (Q3103)"
+    # Its copies were made by the link a moment ago, so it is kept as fresh.
+    ! grep -qF "cargo-nextest is running in the tree that uses it, and between two of its tests no program runs from it): $root2/1f/nx-b" <<<"$got" \
+        || fail "the build directory of a tree no nextest runs in was kept because a nextest runs in another tree (Q3103)"
+    [ ! -e "$root2/20/nobody/debug/deps" ] \
+        || fail "a build directory no tree uses was kept because a nextest runs in a tree (Q3103)"
 
     # What a run killed between its rename and its rm leaves behind, for a build
     # directory and for a tree's real target/debug.
