@@ -606,6 +606,36 @@ fn three_more_d3_leds_less_a_box_round_either_corner_or_far_off_and_what_the_two
     }
 }
 
+/// Q2930's two boxes in each of three more `D3.0` LEDs, both 3 behind the
+/// front: one round a point of the body's axis, and one across the top of the
+/// body's pipe. The box inside the body shares all of itself with the LED, and
+/// all six of its walls are inside it. The box across the top shares with it
+/// the part of the box below the pipe's top, and five of its walls are inside
+/// it: all but the high wall square to `z`. The LED less either box and what
+/// the two share add up to the LED.
+#[test]
+fn three_more_d3_leds_less_a_box_inside_their_body_or_across_its_top_and_what_the_two_share_add_up_to_the_led()
+ {
+    for (file, front, axis) in THREE_MORE_D3 {
+        let inside = CutOut {
+            centre: [1.27, front - 3.0, axis],
+            shared: (2.0 * HALF) * (2.0 * HALF) * (2.0 * HALF),
+            walls_inside: 6,
+        };
+        let across_the_top = CutOut {
+            centre: [1.27, front - 3.0, axis + 1.5],
+            shared: what_a_box_across_the_top_of_a_body_shares(1.5),
+            walls_inside: 5,
+        };
+        the_led_and_a_box_share(file, inside.centre, inside.shared);
+        the_led_and_a_box_share(file, across_the_top.centre, across_the_top.shared);
+        the_led_less_each_box_and_what_they_share_add_up_to_the_led(
+            file,
+            &[inside, across_the_top],
+        );
+    }
+}
+
 /// The box round a `D3.0` LED's front corner, which shares with it what the
 /// box round a `D5.0` LED's does, and four of whose walls are inside it, as
 /// they are for the `Z3.0` LED: all but the low wall square to `x` and the
@@ -797,11 +827,22 @@ fn faces_on_each_wall_of_a_box_round(
 /// touches. Radius 2.5 is a `D5.0` LED's, and 1.5 a `D3.0` LED's.
 fn what_a_box_round_the_back_corner_shares(radius: f64) -> f64 {
     let flange_in_the_box = HALF * HALF * (2.0 * HALF);
-    let body_in_the_box = HALF
-        * (HALF * (radius * radius - HALF * HALF).sqrt()
-            + radius * radius * (HALF / radius).asin()
-            - 2.0 * HALF * (radius - HALF));
+    let body_in_the_box = HALF * a_slice_of_a_box_across_the_side_of_a_body(radius);
     flange_in_the_box + body_in_the_box
+}
+
+/// What a box of side `2 * HALF` across the top of a body's pipe of `radius`
+/// shares with it: the part of the box below the pipe's top, for the whole
+/// length of the box along the pipe.
+fn what_a_box_across_the_top_of_a_body_shares(radius: f64) -> f64 {
+    2.0 * HALF * a_slice_of_a_box_across_the_side_of_a_body(radius)
+}
+
+/// The area of a square of side `2 * HALF`, centred where a circle of `radius`
+/// crosses a line through its centre, that is inside the circle.
+fn a_slice_of_a_box_across_the_side_of_a_body(radius: f64) -> f64 {
+    HALF * (radius * radius - HALF * HALF).sqrt() + radius * radius * (HALF / radius).asin()
+        - 2.0 * HALF * (radius - HALF)
 }
 
 /// The volume of `solids` together, and how far measuring it may be off.
