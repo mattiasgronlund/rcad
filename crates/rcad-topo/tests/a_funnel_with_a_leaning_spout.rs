@@ -30,7 +30,9 @@
 //! the leaning solid a rounding across by a flat surface one of their sides
 //! runs along, but every fuse of the pair is still refused, now after every
 //! piece is placed: five for an answer too fine to compute in beside its
-//! coordinates, and one meshing the answer.
+//! coordinates, and one meshing the answer. Row Q3191 showed the true answer
+//! is that fine too, with two corners `4.15e-16` apart, so the five are a
+//! limit.
 //! With the leaning one ten high the caps' rims are apart. Every fuse of that
 //! pair was refused marching along that branch until row Q3134, which walks a
 //! run between two corners on a branch one straight line of a cone at a time,
@@ -181,13 +183,21 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 /// is below that plane or on it.
 ///
 /// **Every fuse is still refused**, under every rule both ways round, now
-/// after every piece is placed: the union both ways round, the intersection
-/// both ways round and the leaning cone less the upright one because the
-/// answer's coordinates span `2⁵⁵` times its smallest feature, and the upright
-/// cone less the leaning one meshing the answer, because a face's boundary
-/// crosses itself. Placed inside instead, as a probe, the two specks leave
-/// every fuse refused at a span of `2⁵³`, so they are not the answer's only
-/// feature that small.
+/// after every piece is placed. The union both ways round, the intersection
+/// both ways round and the leaning cone less the upright one are refused
+/// because the answer's coordinates span `2⁵⁵` times its smallest feature, and
+/// since row Q3191 **that is a limit** (`docs/decisions.md` §437.6 case 1,
+/// §43.6). Where both caps' rims nearly meet, the upright cap's rim runs
+/// through the leaning solid for about `4.15e-16`, so every answer of the
+/// stored numbers has two corners that close together beside its coordinate
+/// of 8, a spread past `2⁵⁴`, where a feature written into the coordinates is
+/// gone.
+/// [`the_upright_rim_runs_through_the_leaning_cone_for_4e_16_where_both_rims_nearly_meet`]
+/// works that out exactly. The upright cone less the leaning one passes the
+/// range check and is refused meshing the answer, because a face's boundary
+/// crosses itself, though its true answer has both corners too. Placed inside
+/// instead, as a probe, the two specks leave every fuse refused at a span of
+/// `2⁵³`, so they are not the answer's only feature that small.
 #[test]
 fn two_pointed_cones_one_leaning_off_the_other_are_refused_too_wide_a_range_or_meshing_the_answer()
 {
@@ -394,6 +404,10 @@ fn the_upright_rim_runs_through_the_leaning_cone_for_4e_16_where_both_rims_nearl
     assert!(
         8.0 / the_most_ab_can_be > DynamicRange::LARGEST_SUPPORTED_RATIO,
         "every answer holds A, at z = 8, and B, too close to it to resolve"
+    );
+    assert!(
+        8.0 / the_most_ab_can_be > 2.0_f64.powi(54),
+        "past even 2⁵⁴, where a feature written into a coordinate is gone"
     );
 }
 
