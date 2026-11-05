@@ -149,6 +149,20 @@
 //! one axis and a ball, or two bars running the same way and a third.
 //! [`where_three_curved_surfaces_meet`].
 //!
+//! **A tolerant policy takes two circles within its wobble of each other as
+//! one.** Where the roads do not prove that a plane and two curved surfaces
+//! share a curve, and the plane cuts both in circles — a ball under any plane,
+//! a pipe or a cone under one square to its axis — that are within
+//! [`Policy::max_wobble`] of each other, centre and radius together, and each
+//! wider than the wobble, the three are taken to share the one circle, through
+//! [`Policy::take_as_one_point`]. A circle no wider than the wobble is, to the
+//! policy, a point, and two of them are not taken as a curve. A rod with a ball of its radius on its cap, placed by a turn, is it: the
+//! stored numbers part the ball's circle from the rim by `1e−16` or less, and
+//! every exact answer leaves the cap a ring or two lunes `1e16` and more times
+//! smaller than the rod, past the range §3.5 lets a model span. A certified
+//! policy takes nothing, and the roads' answer stands.
+//! [`where_one_plane_and_two_curved_surfaces_meet`].
+//!
 //! What is left over is refused by name (§16.10, §31.2): one plane and two
 //! quadrics that no road above answers and that the thirteenth hands on —
 //! two conics whose numbers it cannot multiply out within `f64`'s range, two
@@ -190,7 +204,7 @@
 
 use rcad_predicates::{
     Decision, Interval, Level, Measures, NOTHING_IS_KNOWN, Point as PredicatePoint, Policy,
-    ProvenanceLog, Record, SideOfSurface,
+    ProvenanceLog, Record, SideOfSurface, Strictness,
 };
 use smallvec::{SmallVec, smallvec};
 
@@ -2084,6 +2098,35 @@ fn where_three_curved_surfaces_meet(
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
 }
 
+/// One plane and two curved surfaces, by the roads the module doc names, or as
+/// sharing one circle where a tolerant policy takes the two circles the plane
+/// cuts them in as one.
+///
+/// The roads are asked first, and the fold only where they do not prove the
+/// three share a curve. A fold answers [`MeetOfThree::MoreThanAPoint`], logs
+/// its own record, and drops what the roads logged on the way to the answer it
+/// replaces; otherwise what the roads logged is kept with their answer.
+fn where_one_plane_and_two_curved_surfaces_meet(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<MeetOfThree> {
+    let mut asked = ProvenanceLog::new();
+    let exact = what_the_roads_for_one_plane_and_two_curved_surfaces_give(
+        flat, one, other, at, policy, &mut asked,
+    );
+    if !matches!(exact, Ok(MeetOfThree::MoreThanAPoint))
+        && the_policy_takes_their_two_circles_as_one(flat, one, other, at, policy, log)
+    {
+        return Ok(MeetOfThree::MoreThanAPoint);
+    }
+    asked.drain_into(log);
+    exact
+}
+
 /// One plane and two curved surfaces, by the roads the module doc names.
 ///
 /// **Nothing here guesses.** Each road either reaches an answer it has earned or
@@ -2121,7 +2164,7 @@ fn where_three_curved_surfaces_meet(
 /// road handed on, so no answer one of them gives moves. The road along a
 /// pipe hands it what it cannot multiply out within range, an LED's front
 /// flat stored as exactly `x = −1.23` among it.
-fn where_one_plane_and_two_curved_surfaces_meet(
+fn what_the_roads_for_one_plane_and_two_curved_surfaces_give(
     flat: &Plane,
     one: &Surface,
     other: &Surface,
@@ -2205,6 +2248,143 @@ fn where_one_plane_and_two_curved_surfaces_meet(
         return Ok(answer);
     }
     Err(Error::WhereThreeSurfacesMeetNeedsTwoOfThemFlat)
+}
+
+/// The name the fold of two circles on one plane goes by in provenance records.
+const TWO_CIRCLES_TAKEN_AS_ONE: &str = "two circles on one plane taken as one";
+
+/// Whether `policy` takes the two circles `flat` cuts `one` and `other` in as
+/// one circle, logging the move when it does.
+///
+/// A ball is cut in a circle by any plane, and a pipe or a cone by a plane
+/// square to its axis, exactly ([`the_circle_a_square_plane_cuts`]). Two such
+/// circles whose centres and radii are within [`Policy::max_wobble`] of each
+/// other are taken as one, through [`Policy::take_as_one_point`], with the
+/// furthest a point of one may be from the other as the record's enclosure
+/// ([`the_furthest_two_circles_on_a_plane_are_apart`]).
+///
+/// **Each circle must be wider than the wobble.** One that is not lies within
+/// the wobble of its centre, so to the policy it is a point, and two such
+/// circles taken as one would be a curve the three share where they may meet
+/// at a point or nowhere. Two cones on one apex, of slopes 1 and 2, under a
+/// plane square to their axis `1e−16` from the apex, are cut in circles
+/// `1e−16` and `2e−16` across, and the exact answer is that the three share
+/// nothing; through the apex, it is the apex. The cones meet nowhere else, so
+/// no curve lies on both, and folding the two circles would have answered
+/// that one.
+///
+/// **A rod with a ball of its radius on its cap, placed by a turn**, is what
+/// this is for. Upright, the cap, the pipe and the ball share the rim exactly.
+/// Turned, the stored numbers part them by roundings: with a radius of 1 the
+/// ball's centre is on the pipe's axis exactly but a few roundings off the
+/// cap, so [`what_a_plane_square_to_their_one_axis_leaves`] proves the ball's
+/// circle about `1e−32` narrower than the rim and answers that the three
+/// share nothing; with a radius of 2.5 the centre is off the axis too, by
+/// `1e−18` to `3e−16`, and a later road proves the two circles cross in two
+/// points. Either way the cap keeps a ring or two lunes far thinner than the
+/// wobble, and the fuse refused it. `rcad-topo`'s
+/// `a_bar_and_a_ball_on_its_cap_turned.rs` fuses 24 such rods four ways.
+///
+/// Nothing is worked out under a certified policy, which takes nothing.
+fn the_policy_takes_their_two_circles_as_one(
+    flat: &Plane,
+    one: &Surface,
+    other: &Surface,
+    at: &[PredicatePoint],
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> bool {
+    if policy.strictness() == Strictness::Certified {
+        return false;
+    }
+    let (Some(mine), Some(theirs)) = (
+        the_circle_a_square_plane_cuts(flat, one),
+        the_circle_a_square_plane_cuts(flat, other),
+    ) else {
+        return false;
+    };
+    let wobble = policy.max_wobble();
+    if !it_is_wider_than(flat, &mine, wobble) || !it_is_wider_than(flat, &theirs, wobble) {
+        return false;
+    }
+    let Some(furthest) = the_furthest_two_circles_on_a_plane_are_apart(flat, &mine, &theirs) else {
+        return false;
+    };
+    policy.take_as_one_point(
+        Record::new(
+            TWO_CIRCLES_TAKEN_AS_ONE,
+            at,
+            Level::Exact,
+            furthest,
+            Measures::Length,
+        ),
+        log,
+    )
+}
+
+/// Whether `circle`'s radius is proved more than `wobble`: its squared radius
+/// is above nothing and the low end of the enclosure of `√S / ‖n‖`, with `S`
+/// as [`ACircleAboutAnAxis::squared_radius`] carries it, is past `wobble`.
+fn it_is_wider_than(flat: &Plane, circle: &ACircleAboutAnAxis, wobble: f64) -> bool {
+    let Some(reach) = &circle.squared_radius else {
+        return false;
+    };
+    if !matches!(reach.sign(), Decision::Pos) {
+        return false;
+    }
+    let normal = flat.normal().components();
+    let Some(squared_normal) = Exact::dot_of(normal, normal) else {
+        return false;
+    };
+    let radius = quotient_or_everything(
+        root_enclosing(reach.enclosure()),
+        root_enclosing(squared_normal.enclosure()),
+    );
+    radius.lo() > wobble
+}
+
+/// How far a point of either circle may be from the other at most, or `None`
+/// where either circle is not one, because its squared radius is not above
+/// nothing or a product it needs falls out of `f64`'s range.
+///
+/// Both centres are on `flat`, each where the axis through its
+/// [`ACircleAboutAnAxis::on_the_axis`] crosses it, square to it. A point of one
+/// circle is `ρ₁` from its centre, so between `ρ₁ − δ` and `ρ₁ + δ` from the
+/// other centre, for `δ` how far apart the centres are; so it is no further
+/// than `δ + |ρ₁ − ρ₂|` from the other circle. With `S` the squared radius
+/// times `n·n`, as [`ACircleAboutAnAxis::squared_radius`] carries it, and
+/// `c = (a₂ − a₁) × n` for the two points on the axes,
+///
+/// `δ + |ρ₁ − ρ₂| = (‖c‖ + |S₁ − S₂| / (√S₁ + √S₂)) / ‖n‖`
+///
+/// and each of `‖c‖²`, `S₁ − S₂` and `n·n` is summed exactly before it is
+/// enclosed, which keeps a gap of a few roundings a few roundings wide.
+fn the_furthest_two_circles_on_a_plane_are_apart(
+    flat: &Plane,
+    mine: &ACircleAboutAnAxis,
+    theirs: &ACircleAboutAnAxis,
+) -> Option<f64> {
+    let (Some(my_reach), Some(their_reach)) = (&mine.squared_radius, &theirs.squared_radius) else {
+        return None;
+    };
+    if !matches!(my_reach.sign(), Decision::Pos) || !matches!(their_reach.sign(), Decision::Pos) {
+        return None;
+    }
+    let normal = flat.normal().components();
+    let across = Exact::cross_of(
+        &Exact::gap_between(mine.on_the_axis, theirs.on_the_axis),
+        normal,
+    )?;
+    let centres = root_enclosing(Exact::squared_length_of(&across)?.enclosure());
+    let radii = quotient_or_everything(
+        my_reach.minus(their_reach).enclosure(),
+        root_enclosing(my_reach.enclosure()) + root_enclosing(their_reach.enclosure()),
+    );
+    let apart = quotient_or_everything(
+        centres + root_enclosing(radii * radii),
+        root_enclosing(Exact::dot_of(normal, normal)?.enclosure()),
+    );
+    Some(apart.hi())
 }
 
 /// A plane and two quadrics that bend the same way, or `None` when they do not
@@ -9587,6 +9767,70 @@ mod tests {
                 y.hi() - y.lo() < 1e-20 && (y.lo() - near).abs() < 1e-20,
                 "a place {y:?} along y near {near}: {places:?}"
             );
+        }
+    }
+
+    /// Two cones on one apex, of slopes 1 and 2, meet at the apex alone. A
+    /// plane square to their axis through the apex meets them there, and one
+    /// `1e−16` to `1e−13` from it cuts them in two circles narrower than the
+    /// wobble of `tolerant(100.0)`, so the three share nothing, under every
+    /// policy. Before the fold of two circles asked each to be wider than the
+    /// wobble, a tolerant policy took the two as one circle the three share.
+    ///
+    /// A pipe of radius 1 and a ball of radius 1 centred `1e−16` above the
+    /// plane are cut in circles of radius 1 and `√(1 − 10⁻³²)`, which the fold
+    /// does take as one: a rod's rim and a ball on its cap, parted by a turn.
+    #[test]
+    fn a_plane_a_rounding_from_two_cones_apex_shares_no_circle_with_them_under_any_policy() {
+        let narrow = Surface::Cone(Cone::new(Axis::z(), 1.0).expect("a slope"));
+        let wide = Surface::Cone(Cone::new(Axis::z(), 2.0).expect("a slope"));
+        let policies = [
+            Policy::certified(),
+            Policy::tolerant(1.0),
+            Policy::tolerant(100.0),
+        ];
+        let meet_under = |surfaces: [&Surface; 3], policy: &Policy| {
+            let mut log = ProvenanceLog::new();
+            let answer = meet_of_three_surfaces(surfaces, policy, &mut log);
+            (answer, log)
+        };
+
+        for policy in &policies {
+            let through = flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
+            let (answer, _) = meet_under([&through, &narrow, &wide], policy);
+            assert_eq!(
+                answer,
+                Ok(MeetOfThree::At(smallvec![PredicatePoint::Exact([
+                    0.0, 0.0, 0.0
+                ])])),
+                "{policy:?}"
+            );
+            for off in [1e-16, -1e-16, 1e-13] {
+                let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, off]);
+                let (answer, log) = meet_under([&cap, &narrow, &wide], policy);
+                assert_eq!(answer, Ok(MeetOfThree::Nowhere), "{off:e} {policy:?}");
+                assert!(log.records().is_empty(), "{off:e} {policy:?}: {log:?}");
+            }
+        }
+
+        let cap = flat([0.0, 0.0, 1.0], [0.0, 0.0, 0.0]);
+        let rod = Surface::Cylinder(Cylinder::new(Axis::z(), 1.0).expect("a radius"));
+        let ball =
+            Surface::Sphere(Sphere::new(Point::new(0.0, 0.0, 1e-16), 1.0).expect("a radius"));
+        for policy in &policies {
+            let (answer, log) = meet_under([&cap, &rod, &ball], policy);
+            if policy.strictness() == Strictness::Certified {
+                assert_eq!(answer, Ok(MeetOfThree::Nowhere));
+                assert!(log.records().is_empty(), "{log:?}");
+            } else {
+                assert_eq!(answer, Ok(MeetOfThree::MoreThanAPoint), "{policy:?}");
+                assert!(
+                    log.records()
+                        .iter()
+                        .any(|record| record.predicate() == TWO_CIRCLES_TAKEN_AS_ONE),
+                    "{policy:?}: {log:?}"
+                );
+            }
         }
     }
 }

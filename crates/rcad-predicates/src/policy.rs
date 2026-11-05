@@ -152,6 +152,18 @@ impl Policy {
     /// sign nothing could decide as zero, and here the two points were proved
     /// apart (`docs/decisions.md` §417.7).
     ///
+    /// **A whole curve can be taken as another the same way**, where the record's
+    /// enclosure is the furthest any point of either may be from the other.
+    /// Every point of the one is then within that distance of some point of the
+    /// other, and the other way round, so taking the curve as the other is
+    /// taking each of its points as one with a point of the other — the move
+    /// above, made once for the whole curve rather than once for each point.
+    /// §417.7 folds points only; `rcad-geom`'s `three_surfaces.rs` takes two
+    /// circles on one plane as one this way, with how far apart their centres
+    /// are plus how far apart their radii are as the enclosure: a rod's rim
+    /// and the circle its cap cuts the ball on it in, where a turn has parted
+    /// the two by a few roundings.
+    ///
     /// # Panics
     ///
     /// If `record` does not measure a length, or its outcome is already

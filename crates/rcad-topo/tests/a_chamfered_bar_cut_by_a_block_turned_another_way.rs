@@ -48,9 +48,11 @@
 //! turn comes out with the top square to the bar's axis to the bit, `2e−15`
 //! above the circle; since row Q2181 the fuse reads which side of the top, the
 //! pipe or the cone a point is on off their stored numbers, and the fifth test
-//! pins every rule. The intersection keeps a band of the pipe that `2e−15`
-//! high, and since row Q2257 it is refused under `certified` as a spread past
-//! `10¹⁶`, and answered under `tolerant` with a warning. With the block placed
+//! pins every rule. Under `certified` the intersection keeps a band of the
+//! pipe that `2e−15` high, and since row Q2257 it is refused as a spread past
+//! `10¹⁶`. Under `tolerant` the top's circles on the pipe and the cone are
+//! within the wobble of each other, and since row Q3165 they are taken as one,
+//! so the intersection keeps no band and is the unturned answer. With the block placed
 //! by two halves of the turn the top is an ulp off square and crosses the
 //! circle, which runs from `4.7e−16` above it to `1.6e−16` under it. The sixth
 //! test pins that every rule is refused, and the seventh that the answer would
@@ -281,15 +283,20 @@ fn a_block_whose_top_holds_the_circle_where_the_cone_meets_the_pipe_cuts_the_bar
 /// a point where the top cuts the pipe. Each side is now read off the stored
 /// numbers of a plane square to the one axis of a pipe and a cone.
 ///
-/// **The intersection keeps a band of the pipe about `2e−15` high**, its two
-/// rings a corner of one `2.2e−15` from the other, beside block corners as far
-/// as `42.9` from the origin: a spread of `1.9e16`, past §3.5's `10¹⁶`. Under
-/// `certified` it is refused `DynamicRangeTooWide`, on how close a corner of
-/// one loop of a face comes to a side of another (`the_narrowest_a_face_is` in
-/// `validate.rs`, queue rows Q2237 and Q2257). Under `tolerant` that spread is
-/// a warning: the answer is the cone, closed below by the bar's bottom and
-/// above by the block's top with the band of pipe between, it carries one
-/// record, of the range check, and it validates under `tolerant` alone (§68).
+/// **Under `certified` the intersection keeps a band of the pipe about `2e−15`
+/// high**, its two rings a corner of one `2.2e−15` from the other, beside block
+/// corners as far as `42.9` from the origin: a spread of `1.9e16`, past §3.5's
+/// `10¹¹`. It is refused `DynamicRangeTooWide`, on how close a corner of one
+/// loop of a face comes to a side of another (`the_narrowest_a_face_is` in
+/// `validate.rs`, queue rows Q2237 and Q2257).
+///
+/// **Under `tolerant` there is no band.** The top cuts the pipe in a circle of
+/// radius two and the cone in one about `2e−15` wider, on one axis, and since
+/// row Q3165 `three_surfaces.rs` takes two circles on one plane within the
+/// wobble of each other as one. So the top holds the circle, as it does
+/// unturned, and the answer is the unturned one: the cone, closed below by the
+/// bar's bottom and above by the block's top. No range check is logged, and the
+/// answer validates under `certified` too.
 #[test]
 fn a_block_whose_top_holds_the_circle_turned_with_the_bar_cuts_the_bar_just_above_it() {
     let both_turned = || {
@@ -333,16 +340,22 @@ fn a_block_whose_top_holds_the_circle_turned_with_the_bar_cuts_the_bar_just_abov
     let [band] = fused.solids()[..] else {
         panic!("one solid is left: {:?}", fused.solids())
     };
-    assert_eq!(what_the_solid_is_made_of(&model, band), (1, 1, 2));
+    assert_eq!(what_the_solid_is_made_of(&model, band), (1, 0, 2));
     assert!(
-        log.records().len() == 1 && log.records()[0].predicate() == "dynamic range check",
+        log.records()
+            .iter()
+            .all(|record| record.predicate() != "dynamic range check"),
         "{:#?}",
         log.records()
     );
     model
         .validate(&tolerant, &mut ProvenanceLog::new())
         .unwrap_or_else(|why| panic!("the tolerant intersection does not validate: {why}"));
-    assert_refused_for_the_band(&model.validate(&Policy::certified(), &mut ProvenanceLog::new()));
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| {
+            panic!("the tolerant intersection does not validate certified: {why}")
+        });
 }
 
 /// Checks that `refused` is `DynamicRangeTooWide`, past the `10¹¹` §3.5
