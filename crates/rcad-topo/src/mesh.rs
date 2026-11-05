@@ -13633,4 +13633,40 @@ mod tests {
         }
         assert!(folded.is_empty(), "{folded:#?}");
     }
+
+    /// Row Q3196. A loop `4.2e−8` wide and `4.4e−16` tall, a quarter turn and
+    /// two units up the chart from its origin, has the face's material inside
+    /// it, and says so.
+    ///
+    /// It is the sliver of the lying cone of
+    /// `the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation` in
+    /// `tests/two_curves_of_one_pair_that_meet.rs` that the union keeps beyond
+    /// the upright frustum's far cap, at `(2, 0, 2)`, walked anticlockwise.
+    /// Read about the chart's origin, each term of the sum was about `π` and
+    /// rounded by `4.4e−16`, and the `9.4e−24` the loop holds came out `0`: a
+    /// hole with the material outside it, on a surface that pinches. So it was
+    /// taken for a ball less a disc, and the cone could not be opened that way
+    /// (`ACurvedFaceGoesRightRoundWithNoSeam`).
+    #[test]
+    fn a_sliver_a_long_way_from_the_charts_origin_still_holds_the_face() {
+        let corners = vec![
+            [1.570796347868321, 2.0],
+            [1.5707963267948963, 2.0],
+            [1.5707963057214724, 2.0],
+            [1.5707963267948966, 1.9999999999999996],
+        ];
+        let width = corners[0][0] - corners[2][0];
+        let height = corners[0][1] - corners[3][1];
+        let sliver = WalkedLoop {
+            corners,
+            points: vec![0, 1, 2, 3],
+            ..WalkedLoop::a_stretch(0)
+        };
+        let enclosed = how_much_of_the_chart_this_loop_encloses(&sliver);
+        let held = width * height / 2.0;
+        assert!(
+            (enclosed - held).abs() <= 1e-12 * held,
+            "the sliver holds {held} and was read as {enclosed}"
+        );
+    }
 }
