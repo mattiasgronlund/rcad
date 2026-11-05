@@ -2728,6 +2728,28 @@ mod plane_round_trip_tests {
     use crate::geometry::plane_through;
     use crate::{Import, StepFile};
 
+    /// A plane 1e304 up meets a pipe that runs almost level, 1e304 times
+    /// further along it than any number holds, so there is no centre to give
+    /// (`crash-9781a4ce`, Q1480).
+    #[test]
+    fn a_plane_that_meets_a_pipe_further_along_than_a_number_holds_gives_no_circle() {
+        let flat = Plane::from_point_and_normal(
+            Point::new(0.0, 0.0, 3.840_286_848_163_440_7e304),
+            Vector::new(0.0, 0.0, 1.0),
+        )
+        .expect("the z axis is a unit normal");
+        let pipe = Cylinder::new(
+            Axis::new(
+                Point::new(-7.0, -4.0, -12.0),
+                Vector::new(0.0, 1.0, 2.180_033_788_163_451_5e-139),
+            )
+            .expect("a direction with a length"),
+            1.0,
+        )
+        .expect("a radius");
+        assert!(where_a_plane_crosses_a_pipe(&flat, &pipe).is_none());
+    }
+
     /// The point `Writing::surface` used to write, the foot of the
     /// perpendicular, read back through the reader's own function, misses the
     /// offset on many of these planes. This is what the planes below are for:
