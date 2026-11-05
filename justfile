@@ -4088,7 +4088,15 @@ check-fuzz-builds:
 # axis are now named: four `other => unreachable!("a sign question answers
 # with a sign: ...")` arms on the non_exhaustive `Decision`, after the arms
 # that name `Pos`, `Neg` and `Zero` — the same shape as that file's older ones.
-wildcard_arms := "103"
+#
+#     Q3145's lane  103 -> 102
+#
+# One fewer, direct, in `degenerate_curved_fuses.rs`: `what_it_gave_up_on` and
+# its `other => panic!` over `Error` went with the wedge pin that was its one
+# caller. Once `arrange.rs` names the node round the start of a loop a plane
+# cuts a cone in, the wedge with its back at `(−5, 0, 8)` answers every fuse,
+# so the pin that read which predicate its refusal named is gone.
+wildcard_arms := "102"
 
 [doc("Count wildcard match arms over our own enums; fails when the count moves.")]
 check-wildcards:
