@@ -1554,6 +1554,31 @@ impl BuildingAMesh {
                 )
             })
             .collect();
+        // PROBE TEMPORARY
+        if std::env::var("PROBE_MESH").is_ok() {
+            eprintln!("PROBE MESH face {:?} surface {:?}", face.key(), surface);
+            for (i, w) in walked.iter().enumerate() {
+                let (lo, hi) = longitudes_of(w);
+                let lat_lo = w.corners.iter().map(|c| c[1]).fold(f64::INFINITY, f64::min);
+                let lat_hi = w
+                    .corners
+                    .iter()
+                    .map(|c| c[1])
+                    .fold(f64::NEG_INFINITY, f64::max);
+                eprintln!(
+                    "PROBE MESH  loop {i}: n={} round={} climbed={} one_curve={} once={} encloses={} lon=[{lo},{hi}] lat=[{lat_lo},{lat_hi}]",
+                    w.corners.len(),
+                    w.goes_right_round,
+                    w.climbed,
+                    w.closes_on_one_curve,
+                    it_passes_each_of_its_points_once(w),
+                    how_much_of_the_chart_this_loop_encloses(w)
+                );
+                for (c, p) in w.corners.iter().zip(&w.points) {
+                    eprintln!("PROBE MESH    {p}: {:?}", c);
+                }
+            }
+        }
         // **A wire that winds is only allowed beside wires that wind too**, or
         // as the rim of a cap on a ball or a cone beside islands, or as one of
         // the two rims of a ring on a pipe or a cone beside islands. The loops
@@ -4197,6 +4222,21 @@ impl BuildingAMesh {
                 Err(why) => {
                     // A refused lobe is refused for what the whole loop it was
                     // cut from is refused for (`what_the_triangulator_can_cut`).
+                    // PROBE TEMPORARY
+                    if std::env::var("PROBE_MESH").is_ok() {
+                        eprintln!(
+                            "PROBE MESH refused {:?} piece of {} loops",
+                            why,
+                            piece.len()
+                        );
+                        let mut k = 0;
+                        for (i, l) in piece.iter().enumerate() {
+                            for (c, p) in l.corners.corners().iter().zip(&l.points) {
+                                eprintln!("PROBE MESH   piece loop {i} #{k} pt {p}: {:?}", c);
+                                k += 1;
+                            }
+                        }
+                    }
                     let Some(whole) = cut_from else {
                         return Err(refusal_for(face, why, &corner_is, &self.points, log));
                     };
