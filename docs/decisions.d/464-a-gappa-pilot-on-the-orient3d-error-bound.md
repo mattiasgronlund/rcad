@@ -23673,9 +23673,45 @@ for what, ring, tube, direction, point in inputs:
 
 ### 464.34 Isometry::POINT_ROUNDOFF in the zero branches
 
-**Draft, unfinished: Q2801's first lane handed over here (§416).** Nothing
-below is a result yet but the trial runs it names. The lane after it runs the
-generator, rewrites this as a finished section, and takes this paragraph out.
+**Draft, unfinished: Q2801's second lane handed over here (§416).** Nothing
+below is a result yet but the runs it names. The lane after it finds why the
+cases with one of `v1`, `v2` zero do not prove, runs the generator again,
+rewrites this as a finished section, and takes this paragraph out.
+
+**The second lane's runs.** The generator below has one change from the
+first lane's committed form: `O = r0 + s0` with `r0` zero is `s0`, which may be
+0, so it is split too, into rounded and zero, and named as if it cancelled
+(`..._x...ro`, `pz_p0_x...o`). The form before let `|O| ≥ 2⁻¹⁰⁷⁴` exclude
+`s0 = 0` there, and no script covered it. That makes 436 cases, 90 more.
+
+- The trial through `runpz.sh`, `P=12`, on the first lane's committed form:
+  `pz_n`, `pz_v1v2`, `pz_w`, `pz_n_xc0` and `pz_wv0p1` each exit 0, `gappa
+  -Bcoq` and `coqc` exit 0 on each, and each control exits 1. So the @FIX
+  form proves what the first form did not; which of its two changes each
+  case needed was not run.
+- `pz_n.g` is 464.19's `point.g` but for layout, comments, the @FIX
+  hypotheses and the queries: `samepz.py` below checks it.
+- The full run, `start.sh` below at `P=14`, ran all 436 and their controls.
+  272 cases exit 0 and 164 exit 1. The 164 are each a case with exactly one
+  of `v1`, `v2` zero; the 20 such cases that prove are the ten zero sets where
+  the `p` zeros leave no live term through `v`, so `D` is `3L`. Each of the
+  164 fails the same way: `(out − Ex) / D` within `u`, but `D / L` unbounded
+  (`pz_v1`: about `1.29·10⁶¹⁸`), so the D / L hint did not bound it. Why was
+  not traced; it has no class (§360.5). One guess, not run: with one of
+  `|v1|`, `|v2|` zero, Gappa no longer reaches `N4` or the four squares'
+  lower bound through the hint as written; `N4 in ?`, `X * X in ?` and
+  `Z * Z in ?` as goals in `pz_v1.g` would show which.
+- 415 controls exit 1 and 21 exit 0. The 21 are each an `_xo` case with `p0`
+  zero whose error is exactly zero: `pz_p0p1p2_xo` prints `(... − Ex) / (3 ·
+  L)` in `[0, 0]`. So a control at `u / 2` cannot show those hypotheses
+  consistent, and they need another control.
+- `tallypz.py` as appended reads a control's best only where Gappa prints
+  `BND((out - Ex) / L)`. Where `out` is unrounded Gappa prints its definition
+  instead, `BND((r0 + s0 - Ex) / L)` in `c_pz_n_xo_half`, and the tally stops
+  with a KeyError. Its `BEST` pattern needs to take any expression there.
+- `samepz.py`, on this text and the run directory, prints every block
+  `same`, `written again: 872 same as ran: 872`, and `pz_n.g is point.g but
+  for layout, comments, @FIX and queries: True`.
 
 Q2801 runs 464.19's `point.g` where a factor is zero or a sum cancels to zero,
 against `isometry.rs` at `c0859e3f`, whose `apply_to_point`, `turned_by` and
@@ -23731,7 +23767,9 @@ seven sums to cancel. Here each of those may be zero:
   either rounded, and then at least 2^-1074 as point.g has it, or it cancels
   to zero, which rounds to itself (464.11's diffzero.g). A sum with one part
   zero is the other part, or its negative, and is not zero; one with both
-  parts zero is zero.
+  parts zero is zero. The one part that can be zero without being a factor
+  or a zero rounding is s0, so O = r0 + s0 with r0 zero is s0, and is split
+  the same way: rounded, s0 not 0, or zero, s0 = 0, named as if it cancelled.
 
 A product with a zero factor, a sum with both parts zero and a sum that
 cancels are each zero and round to themselves (464.11's refl.g), so each is
@@ -23855,7 +23893,7 @@ def branches(zero, i, state):
         choices = ("zero",) if za or zb else ("rounded",)
     elif za and zb:
         choices = ("zero",)
-    elif za or zb or result not in used(zero):
+    elif result not in used(zero) or (za or zb) and b != "s0":
         choices = ("rounded",)
     else:
         choices = ("rounded", "cancels")
@@ -24019,4 +24057,209 @@ while read -r n; do
   echo "./one.sh $n.g coq"
   echo "./one.sh c_${n}_half.g"
 done | xargs -P "$P" -I{} sh -c '{}'
+```
+
+`start.sh`, which the second lane started with `setsid -f nohup ./start.sh`
+and waited on by the pid it writes:
+
+```sh
+#!/bin/bash
+# Run every case in cases.txt through runpz.sh, the 42 with no zero factor
+# first since they take longest, P at once (default 14), writing runpz.txt,
+# which ends "done".
+cd "$(dirname "$0")"
+echo $$ > start.pid
+{ grep '^pz_n' cases.txt; grep -v '^pz_n' cases.txt; } | P=${P:-14} ./runpz.sh > runpz.txt 2>&1
+echo done >> runpz.txt
+```
+
+`tallypz.py`, which counts a finished run:
+
+```python
+"""Count what runpz.txt and the files beside it say of each case in cases.txt
+and its control: each case's exit, Coq's two exits, its proof's size, the
+bound it printed on (out - Ex) / D and on D / L, each control's exit and its
+best on (out - Ex) / L in u, and every line of an .out, .bcoq or .coqc that
+is not a result or a divisor Gappa took to be nonzero.
+Run as: python3 tallypz.py"""
+import collections
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+U = 2.0 ** -53
+cases = open("cases.txt").read().split()
+log = open("runpz.txt").read().splitlines()
+assert log and log[-1] == "done", "runpz.txt does not end done"
+
+EXIT = re.compile(r"^(\S+) exit (\d+) ([\d.]+)s$")
+COQ = re.compile(r"^(\S+) coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$")
+exits, coqs, odd_log = {}, {}, []
+for line in log[:-1]:
+    if m := EXIT.match(line):
+        exits[m[1]] = (int(m[2]), float(m[3]))
+    elif m := COQ.match(line):
+        coqs[m[1]] = (int(m[2]), int(m[3]), float(m[4]), int(m[5]), int(m[6]))
+    else:
+        odd_log.append(line)
+
+WARNING = re.compile(r"^Warning: the expression .* has been assumed to be nonzero when checking a rewriting rule\.$")
+RESULT = re.compile(r"^  (.*) in \[(.*)\]$")
+BEST = re.compile(r"^  BND\(\(out - Ex\) / L\), best: \[(\S+), (\S+)\]$")
+DECIMAL = re.compile(r"\{(-?[\d.e+-]+),")
+
+
+def odd_lines(path, control):
+    allowed = [WARNING, RESULT] + ([BEST] if control else [])
+    fixed = {"Results:"} | ({"Error: some properties were not satisfied:"} if control else set())
+    if not os.path.exists(path):
+        return [f"{path} missing"]
+    return [f"{path}: {line}" for line in open(path).read().splitlines()
+            if line not in fixed and not any(p.match(line) for p in allowed)]
+
+
+def high_end(interval):
+    """The upper end of a Gappa result interval, as a float: the part after
+    the comma that is outside every brace."""
+    depth = 0
+    for i, ch in enumerate(interval):
+        depth += {"{": 1, "}": -1}.get(ch, 0)
+        if ch == "," and depth == 0:
+            hi = interval[i + 1:].strip()
+            break
+    m = DECIMAL.search(hi)
+    return float(m[1]) if m else float(hi)
+
+
+problems, bests, ratios, dls, times, sizes = [], {}, {}, {}, [], []
+for n in cases:
+    c = "c_" + n + "_half"
+    if exits.get(n, (None,))[0] != 0:
+        problems.append(f"{n} exit {exits.get(n)}")
+    if exits.get(c, (None,))[0] != 1:
+        problems.append(f"{c} exit {exits.get(c)}")
+    k = coqs.get(n)
+    if not k or k[0] != 0 or k[1] != 0:
+        problems.append(f"{n} coq {k}")
+    else:
+        sizes.append((k[3], k[4], k[2], n))
+    times.append((exits.get(n, (0, 0.0))[1], n))
+    problems += odd_lines(n + ".out", False) + odd_lines(n + ".bcoq", False)
+    problems += odd_lines(c + ".out", True)
+    if os.path.exists(n + ".coqc") and open(n + ".coqc").read():
+        problems.append(f"{n}.coqc is not empty")
+    for line in open(n + ".out").read().splitlines():
+        if m := RESULT.match(line):
+            if m[1].startswith("(out - Ex) / "):
+                ratios[n] = high_end(m[2]) / U
+            else:
+                dls[n] = high_end(m[2])
+    best = [BEST.match(line) for line in open(c + ".out").read().splitlines()]
+    best = [m for m in best if m]
+    if len(best) != 1:
+        problems.append(f"{c} has {len(best)} best lines")
+    else:
+        bests[n] = float(best[0][2]) / U
+
+print(len(cases), "cases,", len(exits), "exit lines,", len(coqs), "coq lines")
+print("lines of runpz.txt that are neither:", odd_log or "none")
+print("problems:", len(problems))
+for p in problems:
+    print("  " + p)
+proved = sum(exits.get(n, (None,))[0] == 0 for n in cases)
+failed = sum(exits.get("c_" + n + "_half", (None,))[0] == 1 for n in cases)
+print(f"cases that exit 0: {proved} of {len(cases)}; controls that exit 1: {failed} of {len(cases)}")
+print("gappa time per case: %.2f s (%s) to %.2f s (%s)" % (min(times) + max(times)))
+sizes.sort()
+print("coq: %d lines %d hints %.2f s (%s) to %d lines %d hints %.2f s (%s)" % (sizes[0] + sizes[-1]))
+print("(out - Ex) / D or / (3L), upper end in u:",
+      sorted(collections.Counter(round(r, 4) for r in ratios.values()).items()))
+print("D / L upper end:", sorted(collections.Counter(round(d, 4) for d in dls.values()).items()))
+print("control best on (out - Ex) / L, in u, and how many controls:")
+for b, k in sorted(collections.Counter(round(b, 2) for b in bests.values()).items()):
+    print(f"  {b}u: {k}", ", ".join(n for n in cases if round(bests[n], 2) == b) if k <= 12 else "")
+print("largest best: %.4fu (%s), against POINT_ROUNDOFF's 36u" % max((b, n) for n, b in bests.items()))
+```
+
+`samepz.py`, which checks this text against the files that ran:
+
+```python
+"""Check that each script 464.34 appends whole is byte for byte the file that
+ran, in the directory given; that one.sh there is 464.13's block; that
+pointzero.py, run again in a fresh directory from the appended text, writes
+the scripts and the cases.txt that ran; and that pz_n.g is 464.19's point.g
+but for its layout and comments, its @FIX hypotheses and its queries.
+Run as: python3 samepz.py <doc> <run dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, ran = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+def block(n, first):
+    got = [b for _, b in FENCED.findall(section(n)) if b.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+marks = {
+    "pointzero.py": '"""Write 464.19\'s point.g in its zero branches',
+    "runpz.sh": "#!/bin/bash\n# Run each case named on stdin",
+    "start.sh": "#!/bin/bash\n# Run every case in cases.txt through runpz.sh",
+    "tallypz.py": '"""Count what runpz.txt and the files beside it say',
+    "samepz.py": '"""Check that each script 464.34 appends whole',
+}
+print("code blocks in 464.34:", len(FENCED.findall(section(34))))
+found = {name: block(34, mark) for name, mark in marks.items()}
+for name, body in found.items():
+    path = os.path.abspath(__file__) if name == "samepz.py" else os.path.join(ran, name)
+    print(name, "same" if open(path).read() == body else "DIFFERS")
+one = block(13, "#!/bin/bash\n# Run one Gappa script under 464.4's pin")
+print("one.sh is 464.13's block:", open(os.path.join(ran, "one.sh")).read() == one)
+
+fresh = tempfile.mkdtemp()
+open(os.path.join(fresh, "pointzero.py"), "w").write(found["pointzero.py"])
+subprocess.run(["python3", "pointzero.py"], cwd=fresh, check=True)
+written = sorted(f for f in os.listdir(fresh) if f.endswith(".g"))
+same = [f for f in written if os.path.exists(os.path.join(ran, f))
+        and filecmp.cmp(os.path.join(fresh, f), os.path.join(ran, f), shallow=False)]
+print("written again:", len(written), "same as ran:", len(same),
+      "differ:", [f for f in written if f not in same])
+print("cases.txt same as ran:", filecmp.cmp(os.path.join(fresh, "cases.txt"),
+                                            os.path.join(ran, "cases.txt"), shallow=False))
+
+
+def parts(script):
+    """A script's definitions, hypotheses, goals and hints, each sorted, with
+    its comments and layout gone, and its @FIX hypotheses and its queries."""
+    script = re.sub(r"#[^\n]*", "", script)
+    script = " ".join(script.split())
+    defs, rest = script.split("{", 1)
+    prop, hints = rest.split("}", 1)
+    hyps, goals = prop.split(" -> ", 1)
+
+    def some(s, sep):
+        got = (p.strip() for p in re.split(sep, s))
+        return sorted(p for p in got if p and not p.startswith("@FIX") and not p.endswith("in ?"))
+
+    return some(defs, ";"), some(hyps, r"/\\"), some(goals, r"/\\"), some(hints, ";")
+
+
+point = block(19, "# restates: crates/rcad-geom/src/isometry.rs apply_to_point")
+pz_n = open(os.path.join(fresh, "pz_n.g")).read()
+print("pz_n.g is point.g but for layout, comments, @FIX and queries:", parts(point) == parts(pz_n))
+shutil.rmtree(fresh)
 ```
