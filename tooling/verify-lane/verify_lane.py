@@ -290,6 +290,55 @@ def unlock(run, tree, report):
         say(f"the lane's tree, {tree}, was not locked")
     else:
         left(report, f"could not unlock the lane's tree, {tree}: {last_line(said)}")
+    stop_leftovers(tree)
+
+
+def stop_leftovers(tree):
+    """Stops every process whose cwd is in the lane's tree: the lane's run is over once its verifier starts (Q3185).
+
+    SIGTERM first, SIGKILL after two seconds. This process and its
+    ancestors are never touched. A process whose cwd is outside the tree is
+    not seen here.
+    """
+    pids = pids_in_tree(tree)
+    if not pids:
+        return
+    say(f"stopped {len(pids)} process(es) left running in the lane's tree {tree}: {' '.join(map(str, pids))}")
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+        for _ in range(10):
+            time.sleep(0.2)
+            pids = [pid for pid in pids if alive(pid)]
+            if not pids:
+                return
+
+
+def pids_in_tree(tree):
+    tree = os.path.realpath(tree)
+    spared = {os.getpid()}
+    pid = os.getppid()
+    while pid > 1:
+        spared.add(pid)
+        try:
+            with open(f"/proc/{pid}/stat", encoding="utf-8") as f:
+                pid = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            break
+    found = []
+    for name in os.listdir("/proc"):
+        if not name.isdigit() or int(name) in spared:
+            continue
+        try:
+            cwd = os.readlink(f"/proc/{name}/cwd")
+        except OSError:
+            continue
+        if cwd == tree or cwd.startswith(tree + os.sep):
+            found.append(int(name))
+    return found
 
 
 def branch_on_base(run, base, branch, report):

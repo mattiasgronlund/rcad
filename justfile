@@ -24830,6 +24830,25 @@ check-verify-lane-selftest:
     [ "$rc" -eq 2 ] && grep -qF 'both pinsOnly and sameBehaviour' <<<"$got" || fail "an input marking the lane both pinsOnly and sameBehaviour did not refuse"
     [ ! -e "$at/verify/target/verify-lane" ] || fail "it started a run on an input marking the lane both pinsOnly and sameBehaviour"
 
+    fixture leftover-process
+    printf 'fixed\n' >"$at/lane/src/lib.txt"
+    lane_commit
+    (cd "$at/lane" && setsid sleep 300 </dev/null >/dev/null 2>&1 & echo $! >"$at/leftover.pid")
+    leftover=$(cat "$at/leftover.pid")
+    [ "$(readlink "/proc/$leftover/cwd")" = "$at/lane" ] || fail "the probe process did not start in the lane's tree"
+    input base "$base" + branch lane-x + lane-tree "$at/lane" + write-set src/ + source-paths src/
+    run
+    for _ in $(seq 40); do
+        [ -e "/proc/$leftover" ] || break
+        sleep 0.05
+    done
+    if [ -e "/proc/$leftover" ]; then
+        kill -KILL "$leftover" 2>/dev/null || true
+        fail "a process left running in the lane's tree survived the verifier's unlock (Q3185)"
+    fi
+    grep -qF 'process(es) left running in the lane' "$at/verify/target/verify-lane/log" \
+        || fail "the verifier's log does not say it stopped the lane's leftover: $(cat "$at/verify/target/verify-lane/log")"
+
     arm="exit-write-is-atomic"
     cat >"$dir/exit_atomic_probe.py" <<'PY'
     import importlib.util
@@ -24868,7 +24887,7 @@ check-verify-lane-selftest:
     got=$(python3 "$dir/exit_atomic_probe.py" "{{ justfile_directory() }}/tooling/verify-lane/verify_lane.py")
     [ "$got" = "OK" ] \
         || fail "a reader polling os.path.exists while the exit file was written with an artificial 0.3 s delay saw $got instead of a complete line"
-    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 20 arms"
+    echo "verify-lane runs a verifier's fixed steps detached and fills what it can, in 21 arms"
 
 # Nobody works in the main working tree. It owns `.git` and nothing else.
 #

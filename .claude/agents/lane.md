@@ -37,11 +37,10 @@ Q1626's lane killed Q2240's land gate in another tree. The Bash hook refuses
 these forms and names the ones above instead.
 
 **Stop every process you start before you report**, load generators, `yes`
-loops and probes included, by the pid you kept. A process left running is
-orphaned to init and takes a core from the lanes still running; the Bash hook
-refuses another tree's kill by number, so only Mattias could stop Q3062's four
-(Q3102). `prune-worktrees` stops what still runs in a tree a merger marked
-finished, but a lane that relies on that has left its mess for someone else.
+loops and probes included, by the pid you kept. Your verifier stops whatever
+still has its cwd in your tree, but cannot see a process whose cwd is outside
+it, and the Bash hook refuses another tree's kill by number, so only Mattias
+could stop Q3062's four (Q3102, Q3185).
 
 **Your first three commands are the ones your brief names**, `git log
 --oneline -1`, then `git rev-parse --verify '<base>^{commit}'`, and then `git
