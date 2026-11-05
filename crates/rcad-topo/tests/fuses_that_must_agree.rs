@@ -1039,6 +1039,58 @@ fn swapping_the_two_sides_of_a_turned_pair_changes_not_one_bit() {
     );
 }
 
+/// An L-shaped slab and a block under it, turned together, whose union a soak
+/// at `RCAD_SOAK_FACTOR=10` once found broken (Q1278), a coordinate range of
+/// 2.16e16.
+///
+/// All four of the fuses, in both orders, are now refused for an answer with an
+/// edge too short beside its coordinates (Q1288). That is the answer pinned
+/// here: a revert that lets the broken union through again would change the
+/// count, and one that lets the two orders differ fails the comparison.
+#[test]
+fn turning_an_ell_with_a_block_above_it_is_refused_for_an_edge_too_short_whichever_comes_first() {
+    let tally = Tally::default();
+    let configuration = Configuration {
+        solids: vec![
+            Placed {
+                shape: Shape::Ell {
+                    width: 2,
+                    depth: 2,
+                    bite_width: 1,
+                    bite_depth: 1,
+                },
+                skew: Skew::none(),
+                height: 3,
+                at: [0, 0, 0],
+            },
+            Placed {
+                shape: Shape::Block { width: 2, depth: 3 },
+                skew: Skew::none(),
+                height: 1,
+                at: [-2, -2, 3],
+            },
+        ],
+        turn: Some(Turn {
+            direction: [1, 2, 2],
+            steps: 21,
+        }),
+        elsewhere: Elsewhere::here(),
+    };
+
+    both_ways_round(&tally, Coordinates::AreUnderAGeneralRotation, configuration)
+        .expect("the two orders agree");
+
+    assert_eq!(tally.fuses.get(), 4);
+    assert_eq!(tally.refused.get(), 4);
+    assert_eq!(
+        tally
+            .gave_up
+            .borrow()
+            .get(AN_EDGE_TOO_SHORT_BESIDE_ITS_COORDINATES),
+        Some(&4)
+    );
+}
+
 /// §48.2 item 5's defect, at the first configuration that found it, fixed.
 ///
 /// A frame and a comb, turned together by one sixty-fourth of a turn about
