@@ -13324,7 +13324,9 @@ shift, and each `|nᵢ| ≤ 1`. `square.g`'s, in its order:
 
 - `m` of length exactly one, so each `|mᵢ| ≤ 1`;
 - each `|mᵢ| ≥ 2⁻¹⁰¹²`, where `scaled_to_length_one_from_anywhere`
-  (`point.rs:335-398`) promises the nearest `f64`, and so no component zero;
+  (`point.rs:335-398`) promises the nearest `f64`, and so no component zero.
+  464.36 runs `square.g` with one or two components of `m` zero, and its
+  `64ε` holds;
 - the quaternion's components finite, and `|q·q − 1| ≤ 6ε` worked out exactly;
 - each `|dᵢ| ≤ 20u`, what `vector.g`, `vector1.g` and `vector2.g` prove.
 
@@ -14048,7 +14050,9 @@ products below the normals (Q2802) and the route through
 `From<na::Isometry3<f64>>` (Q2803), which `vector.g` shares with `point.g`;
 Q2700, which moves these scripts into `proofs/gappa/` with 464.19's. Q2802 ran
 `point.g` alone, in 464.35, and files `vector.g` in its form as a row (464.35's
-7).
+7). 464.36 runs both rows, the zero branches of the second bullet and
+`vector.g` in 464.35's form (Q2825, Q3211): `vector.g`'s `20u` and
+`square.g`'s `64ε` hold.
 
 ### 464.21 CORNER_AFTER_MOVING_ROUNDOFF
 
@@ -14234,7 +14238,8 @@ Two hypotheses are left unproved:
   like of a normal, and one of the rows 9 files asks it of an axis.
 - `point.g` and `vector.g` are proved away from their zero branches and with
   their products normal, as 464.19's 5 says; Q2801, Q2825 and Q2802 run them
-  there.
+  there. Done: `point.g` in 464.34 and 464.35, whose `36u · L` holds with `L`
+  normal, and `vector.g` in 464.36, whose `20u` holds.
 
 **6. The controls.** Each changes one thing and exits 1. A goal just under
 what the script reaches shows its hypotheses do not contradict each other,
@@ -15245,7 +15250,9 @@ normal (Q2802) and the route through `From<na::Isometry3<f64>>` (Q2803), which
 these scripts share with `point.g` and `vector.g`; and Q2700, which moves these
 scripts into `proofs/gappa/` with the rest of 464's. Q2802 ran `point.g` alone,
 in 464.35, where a product below the normals lets a slip reach `34.73u`, and
-files the pipe with that slip as a row (464.35's 7).
+files the pipe with that slip as a row (464.35's 7). Q2825 and Q3211 ran
+`vector.g` in the zero branches and with its products below the normals, in
+464.36, and its `20u` holds there.
 
 ### 464.22 EVALUATION_ROUNDOFF's one stage
 
@@ -23857,7 +23864,8 @@ answer to look for.
   same 88 zero sets prove the `36u` with each such product free to fall below
   the normals and `L` normal, reaching `34.73u`. Q2825 runs 464.20's
   `vector.g` and `square.g` in the zero branches, and `vector.g` is
-  `point.g` with no shift, so 1 and 2 are its split with `s₀` gone. Q2700
+  `point.g` with no shift, so 1 and 2 are its split with `s₀` gone. Done, in
+  464.36: both hold in every zero branch. Q2700
   moves into `proofs/gappa/` each script a row of 464 appended, these among
   them.
 
@@ -24893,7 +24901,8 @@ each from Q2802:
   Not run, so no class.
 - Run 464.20's `vector.g` in this form, each product on a live path free to
   fall below the normals, and say whether its `20u` holds. 464.20 left it to
-  Q2802, which ran `point.g` alone. Not run, so no class.
+  Q2802, which ran `point.g` alone. Not run, so no class. (Q3211; 464.36 runs
+  it, and its `20u` holds.)
 
 And what is not a row: Q2700, which moves these scripts into `proofs/gappa/`
 with the rest of 464's; and `field` on these hints, which 464.10 leaves for
