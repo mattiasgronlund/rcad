@@ -70,8 +70,13 @@
 //! union and the intersection together hold each solid once, and each solid
 //! less the other is that solid less the intersection.
 
-use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
-use rcad_predicates::{Policy, ProvenanceLog, Record};
+use rcad_geom::{
+    Axis, Cone, Deflection, DynamicRange, Isometry, Plane, Point, Scale, Surface, Vector,
+};
+use rcad_predicates::expansion::{
+    compress, expansion_sign, expansion_sum, product_is_exact, scale_expansion,
+};
+use rcad_predicates::{Decision, Point as PredicatePoint, Policy, ProvenanceLog, Record};
 use rcad_topo::{Error, Model, Rule, SolidKey};
 
 mod cones;
@@ -206,6 +211,191 @@ const TOO_WIDE_A_RANGE: &str = "the model is broken: coordinates span a range of
 /// What the upright cone less the leaning one is refused with where a face of
 /// the answer, drawn, crosses itself.
 const THE_BOUNDARY_CROSSES_ITSELF_AT_CORNER_187: &str = "a face of this solid could not be cut into triangles: the boundary crosses itself, at the side leaving corner 187";
+
+/// **Every answer of the two pointed cones above has two corners about
+/// `4.15e-16` apart**, where both caps' rims nearly meet, so no answer of them
+/// fits in `f64` beside its own coordinate of 8, and the five refusals for too
+/// wide a range are a limit (`docs/decisions.md` §437.6 case 1).
+///
+/// Worked out exactly from the four surfaces as the model stores them, near
+/// `(−3.9541, −0.6045, 8)`. It is the same at `+x`: every axis and normal has
+/// `x` nought, so each surface sees `x` only as `x²`.
+///
+/// - `B`, where the leaning cap's plane crosses the upright cap's rim, is
+///   inside the leaning cone.
+/// - `A`, where the leaning cone crosses that rim, is between `4.10e-16` and
+///   `4.11e-16` further along `y`, on the leaning solid's side of its cap's
+///   plane. So the upright rim runs into the leaning solid at `B` and out of
+///   it at `A`, and `A` and `B` are at least `4.10e-16` and at most
+///   `4.17e-16` apart.
+/// - The leaning cap's rim does not reach the upright solid there: `C`, where
+///   it crosses `z = 8`, is outside the upright cone, and `D`, where it
+///   crosses the upright cone, is `1.2e-16` above `z = 8`. So neither is a
+///   corner of any answer.
+///
+/// `A` and `B` are corners of every answer. The intersection, and the leaning
+/// cone less the upright one, keep the rim between them as an edge. The union
+/// and the upright cone less the leaning one keep both ends, with the leaning
+/// solid between them.
+#[test]
+fn the_upright_rim_runs_through_the_leaning_cone_for_4e_16_where_both_rims_nearly_meet() {
+    let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+    let (upright, leaning) = two_pointed_cones(&mut model);
+
+    let (upright_skin, upright_cap) = the_skin_and_the_cap_of(&model, upright);
+    assert_eq!(
+        (
+            upright_skin.apex(),
+            upright_skin.axis().direction(),
+            upright_skin.slope()
+        ),
+        (Point::origin(), Vector::new(0.0, 0.0, 1.0), 0.5),
+        "the upright cone is x² + y² = z²/4 to the last bit"
+    );
+    assert_eq!(
+        (upright_cap.normal(), upright_cap.offset()),
+        (Vector::new(0.0, 0.0, 1.0), 8.0),
+        "the upright cap is z = 8 to the last bit"
+    );
+
+    let (leaning_skin, leaning_cap) = the_skin_and_the_cap_of(&model, leaning);
+    let [ax, ay, az] = leaning_skin.apex().coordinates();
+    let [wx, wy, wz] = leaning_skin.axis().direction().components();
+    let [nx, ny, nz] = leaning_cap.normal().components();
+    let off = leaning_cap.offset();
+    assert_eq!(leaning_skin.slope(), 0.5);
+    assert_eq!(
+        [ax, wx, nx],
+        [0.0; 3],
+        "a turn about x leaves each x it moves at nought"
+    );
+    assert_eq!(
+        [nx, ny, nz],
+        [wx, wy, wz],
+        "the leaning cap is square to the leaning axis to the last bit"
+    );
+    assert!(ny < 0.0, "the leaning cap faces towards −y: {ny}");
+    assert_eq!(
+        leaning_cap.side_of_point(PredicatePoint::from([ax, ay, az])),
+        Decision::Neg,
+        "the leaning solid is behind its cap's plane"
+    );
+
+    // The leaning cone is `|X|²|w|² − 1.25 (X·w)²`, `X` a point less the apex,
+    // negative inside: `|X × w|² − (X·w)²/4`, since the slope is a half.
+    let number = Exact::of;
+    let squared_axis = number(wy)
+        .times(&number(wy))
+        .plus(&number(wz).times(&number(wz)));
+    let ny_squared = number(ny).times(&number(ny));
+    let eight_above_the_apex = number(8.0).minus(&number(az));
+    // B is at `z = 8` and `ny·y = off − 8·nz` on the upright rim.
+    let ny_times_b_y = number(off).minus(&number(8.0 * nz));
+    // `X·w` is the same all over the leaning cap's plane, its normal being `w`.
+    let along_the_leaning_axis_at_its_cap = number(off)
+        .minus(&number(wy).times(&number(ay)))
+        .minus(&number(wz).times(&number(az)));
+    assert_eq!(
+        along_the_leaning_axis_at_its_cap.sign(),
+        Decision::Pos,
+        "the leaning cap is on the leaning cone's own half"
+    );
+
+    // `ny²` times the leaning cone at the point of the upright rim, `x` below
+    // nought, whose `y` is `past_b` beyond B's. There `x² = 16 − y²`, so
+    // `|X|² = 16 − 2·ay·y + ay² + (8 − az)²`. Concave in `past_b`, with
+    // `−1.25·wy²·ny²` its square's coefficient.
+    let the_leaning_cone_along_the_upright_rim = |past_b: f64| {
+        let ny_times_y = ny_times_b_y.plus(&number(ny).times(&number(past_b)));
+        let reach = number(16.0)
+            .plus(&number(ay).times(&number(ay)))
+            .plus(&eight_above_the_apex.times(&eight_above_the_apex))
+            .times(&ny_squared)
+            .minus(&number(2.0 * ay).times(&number(ny)).times(&ny_times_y));
+        let along = number(wy).times(&ny_times_y).plus(
+            &number(ny).times(
+                &eight_above_the_apex
+                    .times(&number(wz))
+                    .minus(&number(ay).times(&number(wy))),
+            ),
+        );
+        squared_axis
+            .times(&reach)
+            .minus(&number(1.25).times(&along).times(&along))
+    };
+    let at_b = the_leaning_cone_along_the_upright_rim(0.0);
+    assert_eq!(at_b.sign(), Decision::Neg, "B is inside the leaning cone");
+    assert_eq!(
+        [
+            the_leaning_cone_along_the_upright_rim(4.10e-16).sign(),
+            the_leaning_cone_along_the_upright_rim(4.11e-16).sign(),
+        ],
+        [Decision::Neg, Decision::Pos],
+        "A is between 4.10e-16 and 4.11e-16 beyond B along y, the first place \
+         past B where the upright rim leaves the leaning cone; and since \
+         `ny` is below nought, the stretch is behind the leaning cap's plane"
+    );
+
+    // `ny²·|w|²` times the upright cone at the point of the leaning cap's rim,
+    // `x` below nought, at height `8 + above_eight`. There `y = (off − nz·z)/ny`
+    // and `|X|²|w|² = 1.25 (X·w)²`. Concave in `above_eight`, with
+    // `−1.25·|w|²·ny²` its square's coefficient.
+    let the_upright_cone_along_the_leaning_rim = |above_eight: f64| {
+        let z = number(8.0).plus(&number(above_eight));
+        let above_the_apex = z.minus(&number(az));
+        number(1.25)
+            .times(&along_the_leaning_axis_at_its_cap)
+            .times(&along_the_leaning_axis_at_its_cap)
+            .times(&ny_squared)
+            .plus(
+                &number(2.0 * ay)
+                    .times(&squared_axis)
+                    .times(&number(ny))
+                    .times(&number(off).minus(&number(nz).times(&z))),
+            )
+            .minus(
+                &squared_axis.times(&ny_squared).times(
+                    &number(ay)
+                        .times(&number(ay))
+                        .plus(&above_the_apex.times(&above_the_apex))
+                        .plus(&number(0.25).times(&z).times(&z)),
+                ),
+            )
+    };
+    assert_eq!(
+        the_upright_cone_along_the_leaning_rim(0.0)
+            .plus(&at_b)
+            .sign(),
+        Decision::Zero,
+        "C is as far outside the upright cone as B is inside the leaning one, \
+         over |w|²"
+    );
+    assert_eq!(
+        [
+            the_upright_cone_along_the_leaning_rim(-1.0 / 1024.0).sign(),
+            the_upright_cone_along_the_leaning_rim(1.20e-16).sign(),
+            the_upright_cone_along_the_leaning_rim(1.22e-16).sign(),
+        ],
+        [Decision::Pos, Decision::Pos, Decision::Neg],
+        "the leaning rim is outside the upright cone from a 1024th below \
+         z = 8 to D, between 1.20e-16 and 1.22e-16 above it"
+    );
+
+    // A and B are both on the rim `x² + y² = 16`, so A's `x` is off B's by
+    // `(yA − yB)(yA + yB)/(xA + xB)`, with both `x` below −3.9 and both `y`
+    // within 0.66 of nought: `|AB|` is at most `(yA − yB)·√(1 + (1.32/7.8)²)`.
+    let b_y = (off - 8.0 * nz) / ny;
+    assert!(b_y.abs() < 0.65, "B is near y = −0.6045: {b_y}");
+    let the_most_ab_can_be = 4.11e-16 * (1.0 + (1.32_f64 / 7.8).powi(2)).sqrt();
+    assert!(
+        the_most_ab_can_be < 4.2e-16,
+        "A and B are at most {the_most_ab_can_be} apart"
+    );
+    assert!(
+        8.0 / the_most_ab_can_be > DynamicRange::LARGEST_SUPPORTED_RATIO,
+        "every answer holds A, at z = 8, and B, too close to it to resolve"
+    );
+}
 
 /// **The same two, the leaning one ten high**, row Q2917, so the two caps'
 /// rims are apart. `intersect` names the crossing as one loop and two
@@ -810,4 +1000,72 @@ fn what_they_measure(model: &Model, solids: &[SolidKey]) -> (f64, f64) {
             .expect("a cone measures");
         (volume + measured.volume(), error + measured.volume_error())
     })
+}
+
+/// The cone and the plane the two faces of a pointed cone `solid` sit on, as
+/// placed.
+fn the_skin_and_the_cap_of(model: &Model, solid: SolidKey) -> (Cone, Plane) {
+    let surfaces: Vec<Surface> = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .map(|face| face.surface())
+        .collect();
+    let cones: Vec<Cone> = surfaces
+        .iter()
+        .filter_map(|surface| {
+            let Surface::Cone(cone) = surface else {
+                return None;
+            };
+            Some(*cone)
+        })
+        .collect();
+    let planes: Vec<Plane> = surfaces
+        .iter()
+        .filter_map(|surface| surface.as_plane().copied())
+        .collect();
+    let ([skin], [cap]) = (&cones[..], &planes[..]) else {
+        panic!("a pointed cone is a cone face and a cap: {surfaces:?}");
+    };
+    (*skin, *cap)
+}
+
+/// A sum of `f64` held without rounding, so its sign is the sign of the real
+/// number the stored numbers make.
+struct Exact(Vec<f64>);
+
+impl Exact {
+    fn of(value: f64) -> Self {
+        Exact(vec![value])
+    }
+
+    fn plus(&self, other: &Self) -> Self {
+        let mut sum = vec![0.0; self.0.len() + other.0.len()];
+        let used = expansion_sum(&self.0, &other.0, &mut sum);
+        let mut packed = vec![0.0; used];
+        let kept = compress(&sum[..used], &mut packed);
+        packed.truncate(kept);
+        Exact(packed)
+    }
+
+    fn minus(&self, other: &Self) -> Self {
+        self.plus(&Exact(other.0.iter().map(|entry| -entry).collect()))
+    }
+
+    fn times(&self, other: &Self) -> Self {
+        other.0.iter().fold(Exact(Vec::new()), |total, &factor| {
+            assert!(
+                self.0.iter().all(|&entry| product_is_exact(entry, factor)),
+                "numbers this size lose nothing below the subnormals"
+            );
+            let mut product = vec![0.0; 2 * self.0.len()];
+            let used = scale_expansion(&self.0, factor, &mut product);
+            product.truncate(used);
+            total.plus(&Exact(product))
+        })
+    }
+
+    fn sign(&self) -> Decision {
+        expansion_sign(&self.0)
+    }
 }
