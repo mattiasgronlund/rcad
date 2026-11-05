@@ -23673,108 +23673,221 @@ for what, ring, tube, direction, point in inputs:
 
 ### 464.34 Isometry::POINT_ROUNDOFF in the zero branches
 
-**Draft, unfinished: Q2801's third lane handed over here (§416).** Nothing
-below is a result yet but the runs it names. The lane after it reads the third
-lane's run of all 436, rewrites this as a finished section, and takes this
-paragraph and the two after it out.
+Q2801 ran 464.19's `point.g` where a factor is zero or a sum cancels to zero,
+in four lanes on 2026-11-05. The first wrote `pointzero.py` and `runpz.sh` and
+tried them on a few cases. The second split one more sum, wrote `start.sh`,
+`tallypz.py` and `samepz.py`, and ran every case, and 164 did not prove. The
+third found why, changed the generator, and ran every case again. The fourth
+wrote this.
 
-**The third lane's runs.** Why the 164 did not prove: Gappa bounds `|v| * |v|`
-for no `v` that is the double 0. `pz_v1.g` with the goals `|v1| in ?`, `|v1| *
-|v1| in ?`, `|v2| * |v2| in ?` and `|v1| * |v1| + |v2| * |v2| in ?` added
-exits 1 and prints `|v1|` in `[0, 0]`, `|v2| * |v2|` in `[2⁻²¹⁴⁸, 2²⁰⁴⁸]`,
-the sum in `[−1.5411·10⁶²¹, 11881]`, and `BND(|v1| * |v1|)` unproved. So the
-hint's `1/545 * (|v1| * |v1| + |v2| * |v2|)` had no lower bound, and `D / L`
-none above. `12 * |w| * |v1| + 14 * |v1| * |v0| + 14 * |v1| * |v1|` in the same
-run prints `[0, 0]`: Gappa reads `14 * |v1| * |v1|` as `(14 * |v1|) * |v1|`, a
-product and not a square. So `pointzero.py` below takes a zero `v`'s `1/545`
-square out with the gone shares, as `1/545 * |v| * |v|`. `pz_v1.g` written that
-way exits 0 with `D / L` in `[3, 24.8]`, and `gappa -Bcoq` and `coqc` exit 0.
-Writing only `1/545 * (|v2| * |v2|)` exits 0 too, but prints `not trivially
-equal` with the difference `(−L · |v1|²) / (545 · L)`, so it is not taken.
-The 21 controls that proved now ask for `(out − Ex) / L` in `[2⁻⁶⁰, 1]`, which
-leaves out the 0 they hold. A trial through `runpz.sh`, `P=10`: `pz_n`,
-`pz_v1`, `pz_v2`, `pz_v1_xc1ro`, `pz_wv1`, `pz_v0v2_xao`, `pz_v2p1`,
-`pz_v1v2`, `pz_p0p1p2_xo` and `pz_wv0p0_xo` each exit 0, `gappa -Bcoq` and
-`coqc` exit 0 on each, and each control exits 1; the two new controls print
-`Error: no contradiction was found.` and no best. `tallypz.py` below takes
-those, reads a control's best on any `(... − Ex) / L`, and files a result on
-`(... − Ex) / ...` as the error's where the form before filed one with `out`
-written out as `D / L`'s. The run of all 436 with these forms was started at
-14:03 UTC, in a fresh run directory, and had not ended when the lane handed over.
+`POINT_ROUNDOFF`'s `18ε · L` holds in every zero branch. Each of the 436 cases
+proves the moved point's `x` within the code's `36u · L` of where the
+movement's own numbers, worked without rounding, put it, and none goes past
+`24.80u · L`, which is what `point.g` reaches with nothing zero (3). `y` and
+`z` are `x` with the indices turned, and the same cases cover them (2). Coq
+checks each proof, modulo its hints (3), and each of the 436 controls fails
+(4). That is under 464.19's other hypotheses: the turn's `q·q` within `6ε` of
+one, and each product whose factors are not zero a normal number where it
+reaches `out`, which is Q2802's to run. The doc on the constant says these
+branches have not been run, which is a row (6).
 
-**The second lane's runs.** The generator below has one change from the
-first lane's committed form: `O = r0 + s0` with `r0` zero is `s0`, which may be
-0, so it is split too, into rounded and zero, and named as if it cancelled
-(`..._x...ro`, `pz_p0_x...o`). The form before let `|O| ≥ 2⁻¹⁰⁷⁴` exclude
-`s0 = 0` there, and no script covered it. That makes 436 cases, 90 more.
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, unchanged, against `isometry.rs` at `c0859e3f` and
+nalgebra 0.35.0. At `c0859e3f`, `apply_to_point`, `turned_by`,
+`TurnOfACube::named_by` and `TurnOfACube::turned` (`isometry.rs:324-329`,
+`578-583`, `608-629` and `697-704`) have the same bodies as at `ba0a654e`,
+where 464.19 read them, so `point.g`'s arithmetic is still the code's. `u` is
+`2⁻⁵³` and `ε` is `f64::EPSILON = 2u`.
 
-- The trial through `runpz.sh`, `P=12`, on the first lane's committed form:
-  `pz_n`, `pz_v1v2`, `pz_w`, `pz_n_xc0` and `pz_wv0p1` each exit 0, `gappa
-  -Bcoq` and `coqc` exit 0 on each, and each control exits 1. So the @FIX
-  form proves what the first form did not; which of its two changes each
-  case needed was not run.
-- `pz_n.g` is 464.19's `point.g` but for layout, comments, the @FIX
-  hypotheses and the queries: `samepz.py` below checks it.
-- The full run, `start.sh` below at `P=14`, ran all 436 and their controls.
-  272 cases exit 0 and 164 exit 1. The 164 are each a case with exactly one
-  of `v1`, `v2` zero; the 20 such cases that prove are the ten zero sets where
-  the `p` zeros leave no live term through `v`, so `D` is `3L`. Each of the
-  164 fails the same way: `(out − Ex) / D` within `u`, but `D / L` unbounded
-  (`pz_v1`: about `1.29·10⁶¹⁸`), so the D / L hint did not bound it. Why was
-  not traced; it has no class (§360.5). One guess, not run: with one of
-  `|v1|`, `|v2|` zero, Gappa no longer reaches `N4` or the four squares'
-  lower bound through the hint as written; `N4 in ?`, `X * X in ?` and
-  `Z * Z in ?` as goals in `pz_v1.g` would show which.
-- 415 controls exit 1 and 21 exit 0. The 21 are each an `_xo` case with `p0`
-  zero whose error is exactly zero: `pz_p0p1p2_xo` prints `(... − Ex) / (3 ·
-  L)` in `[0, 0]`. So a control at `u / 2` cannot show those hypotheses
-  consistent, and they need another control.
-- `tallypz.py` as appended reads a control's best only where Gappa prints
-  `BND((out - Ex) / L)`. Where `out` is unrounded Gappa prints its definition
-  instead, `BND((r0 + s0 - Ex) / L)` in `c_pz_n_xo_half`, and the tally stops
-  with a KeyError. Its `BEST` pattern needs to take any expression there.
-- `samepz.py`, on this text and the run directory, prints every block
-  `same`, `written again: 872 same as ran: 872`, and `pz_n.g is point.g but
-  for layout, comments, @FIX and queries: True`.
+**1. Which zeros get through.** `apply_to_point` checks none of its numbers,
+and `turned_by` sends every turn to Rodrigues' form but one that `named_by`
+names a turn of a cube (464.19's 2 and 6). So a zero reaches `point.g`'s
+arithmetic in any of these:
 
-Q2801 runs 464.19's `point.g` where a factor is zero or a sum cancels to zero,
-against `isometry.rs` at `c0859e3f`, whose `apply_to_point`, `turned_by` and
-`named_by` have the same bodies as at `ba0a654e`, and nalgebra 0.35.0.
+- A part of the turn, `w`, `v₀`, `v₁` or `v₂`. `Isometry::rotation`
+  (`isometry.rs:174-189`) builds its turn with nalgebra's `from_axis_angle`
+  (`src/geometry/quaternion_construction.rs:265-273`), which stores the axis
+  direction times `sin(θ/2)`, so a turn about a coordinate axis stores two of
+  `v` as 0. `named_by` takes one, two or four nonzero parts, all of one size,
+  as a turn of a cube, which rounds nothing (464.19's 6). So three parts zero
+  never reach Rodrigues' form, and four cannot be zero with `q·q` within `6ε`
+  of one. Two zero reach it when the other two differ in size, as in a turn of
+  30° about `z`.
+- A coordinate of the point, `p₀`, `p₁` or `p₂`, as on a point on a
+  coordinate plane.
+- The shift's `s₀`. It is no factor of a product, and `point.g` already lets
+  it be 0.
+- A sum that cancels: `C0`, `C1` and `C2`, the cross product `c`; `KK`, `k₀`;
+  `A`, `t₀w + k₀`; `R`, that and `p₀`; and `O`, that and `s₀`. Each adds two
+  doubles, which may be equal and opposite. `O` is 0 when the moved point
+  lands on the plane `x = 0`.
 
-**The split, as `pointzero.py` below writes it.** Seven factors may be zero:
-`w`, `v0`, `v1`, `v2`, `p0`, `p1`, `p2`. `s0` is no factor, and `point.g`
-already lets it be 0. `named_by` (`isometry.rs:608-629`) takes a turn with one
-nonzero part, or two or four of one size, as a turn of a cube, which is 464.19's
-6; so a zero set holding three of `w`, `v0`, `v1`, `v2` is left out, and all
-four cannot be zero with `q·q` within `6ε` of one. That leaves 88 zero sets.
-Each of the seven sums `C0`, `C1`, `C2`, `KK`, `A`, `R`, `O` whose two parts are
-not zero is either rounded, as `point.g` has it, or cancels to zero; one with a
-part zero is the other part and not zero, and one with both parts zero is zero.
-A sum on no path of a term without a zero factor is not split, since it is
-multiplied by zero either way. That makes 346 cases, `pz_<zeros>[_x<sums>].g`,
-each with a control `c_pz_<...>_half.g` at `u / 2`. `y` and `z` are `x` with
-the indices turned (464.19's `turn.py`), and the 88 zero sets are closed under
-that turn, so running `x` in each is running `y` and `z` in each.
+A product whose factors are both nonzero can still round to zero, below the
+normals. That is Q2802's: every case here keeps 464.19's hypothesis that such
+a product, where it reaches `out`, is normal.
 
-**The trial, on the first form of the generator.** That form wrote a sum with
-one part zero unrounded, as exact, where the form below keeps it rounded. Run
-through `runpz.sh` with `P=12`:
+**2. The cases.** `pointzero.py` (7) writes one script per case,
+`pz_<zeros>[_x<sums>].g`, `<zeros>` the zero factors or `n` for none and
+`<sums>` the sums that cancel, and a control beside each (4).
 
-- `pz_n`, nothing zero, exits 0 in 47.68 s, and `gappa -Bcoq` and `coqc` exit
-  0, 8129 lines and 34 hints: `point.g` again, as it should be.
-- `pz_v1v2`, a turn about the x axis, exits 1 with `(out − Ex) / (3 · L)` only
-  within `±0.166667`. Its `out` is `rnd(p0 + s0)`, but `R = a0 + p0` was
-  written with `a0` an unrounded zero, and Gappa did not know `R` is a multiple
-  of `2⁻¹⁰⁷⁴`, so it could not bound `rnd(R)`'s relative error below the
-  normals. A probe shows the fix the form below takes: `@FIX(S, -1074)` as a
-  hypothesis lets Gappa bound `rnd(S) −/ S` within `u` for `S = x · y + x`,
-  `|S| ≥ 2⁻¹⁰⁷⁴`, exit 0, and without it fails, exit 1.
-- `pz_w`, a half turn, and `pz_n_xc0`, `C0` cancelling, each exit 1 with
-  `(out − Ex) / D` only within about `±2·10⁶³³`, as 464.19's control without
-  the normal products. Why was not traced, and the form below has not been run
-  on them.
+- The zero sets. Of the 128 sets of the seven factors `w`, `v₀`, `v₁`, `v₂`,
+  `p₀`, `p₁` and `p₂`, the 40 that hold three or four of the turn's parts are
+  left out (1), which leaves 88.
+- The sums. A sum on the path of a term of `Ex` that keeps all its factors is
+  split into rounded and cancelling, where both its parts can be nonzero. A
+  sum with both parts zero is zero. One with one part zero is the other part
+  and not zero, but for `O = r0 + s0` with `r0` zero, which is `s0` and may be
+  0: it is split too, and named as if it cancelled. A sum on no such path is
+  multiplied by zero before it reaches `out`, so is not split.
 
-`pointzero.py`, as it stands for the next lane:
+That makes 436 cases: 42 with nothing zero, `pz_n` and each choice of sums
+cancelling, and 2 to 16 for each of the other 87 zero sets. `y` and `z` are
+`x` with every index turned (464.19's `turn.py`), and the 88 zero sets are
+closed under that turn, so the cases for `x` are the cases for `y` and `z`.
+In 25 zero sets no term through the turn keeps all its factors, so only `p₀`
+and `s₀` are left and `D` is `3L`: 50 cases. In 21 of them `p₀` is zero and
+`O` cancels, so `s₀` is 0, and `out` and `Ex` are both exactly 0. `pz_n.g` is
+464.19's `point.g` but for its layout and comments, its `@FIX` hypotheses and
+its queries, which `samepz.py` (7) checks.
+
+How a zero is written. A zero factor is the double 0. A product with a zero
+factor, a sum with both parts zero and a sum that cancels are each exactly
+zero and round to themselves (464.11's `refl.g`), so each is written
+unrounded, without its ratio, its hypotheses or its hint, and a cancelling
+sum is put in `[0, 0]`. A sum with one part zero stays rounded, as `point.g`
+has it: it rounds nothing, and charging it `u` costs only room. Each rounded
+sum adds two doubles, so is a multiple of `2⁻¹⁰⁷⁴`, and says so with `@FIX`,
+since Gappa does not see that where one part is a zero written unrounded. A
+term of `Ex` with a zero factor is zero and drops out with its share of `D`,
+and the hint on `D / L` is `point.g`'s less those shares. Gappa bounds `|v| ·
+|v|` for no `v` that is the double 0, so a zero `v₁` or `v₂` has its `1/545`
+square taken out with those shares too, written `1/545 * |v| * |v|`, which
+Gappa reads as the product of `1/545 * |v|` and `|v|` and bounds as 0 (7).
+
+**3. What they print.** `start.sh` (7) ran the 436 cases, each with `gappa
+-Bcoq` and `coqc`, and their 436 controls, 14 at once, from 14:03 to 14:20
+UTC by its files' times. `tallypz.py` (7) counts them, and its whole print is
+in 7:
+
+- Each of the 436 exits 0 at the code's `36u`, in 0.21 s (`pz_v1v2p0p1_xo`)
+  to 164.14 s (`pz_n_xc0`).
+- `(out − Ex) / D` is within `u`, and a little more, in 103 cases, as in
+  `point.g`; within `0.16u` to `0.99u` in 312; and in `[0, 0]` in the 21
+  where `out` and `Ex` are both 0.
+- The upper end of `D / L` is 3 in the 50 cases where `D` is `3L`, and 24.8
+  in the other 386. That 24.8 is `point.g`'s own: the hint takes the zeros'
+  shares out and Gappa bounds each below by 0, so it does not find the
+  smaller largest `D / L` of a turn with a part zero.
+- So `(out − Ex) / L` is within `24.80u` in every case, the largest
+  `24.7999u` (`pz_wv2p2_xc2`), against the goal's `36u`. No zero branch goes
+  past `point.g`'s `24.80u`.
+- `gappa -Bcoq` and `coqc` exit 0 on all 436: 657 lines with 7 hints
+  (`pz_v1v2p0p1p2`, 4.20 s) to 8130 lines with 34 hints (`pz_n`, 104.60 s),
+  where `point.v` came to 8257, 8158 and 8205 lines with 34 (464.19's 8).
+- No `.out`, `.bcoq` or `.coqc` of the 436 has a line other than its results
+  and warnings that a divisor has been assumed to be nonzero. So no hint was
+  reported as not an identity, and each `.coqc` is empty.
+
+Gappa does not write the same proof each run (464.4), so the sizes and times
+are this run's. Each proof stands on its hints and on the divisors Gappa took
+to be nonzero, as 464.19's 8 says of its own. `field` has not been run on
+these hints (464.10).
+
+**4. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3), so each case has a control that must fail, and each
+of the 436 exits 1.
+
+- 415 ask for `(out − Ex) / L` within `u / 2`, `1b-54`. Gappa's best for a
+  goal it does not prove can change from one run to the next (464.26), so
+  these are this run's, each a bound Gappa found on the size of `(out − Ex) /
+  L` and not an exact value: `u` in 25 controls; `3u` in 4, `pz_v1v2`,
+  `pz_v1v2p1`, `pz_v1v2p2` and `pz_v1v2p1p2`, a turn about the `x` axis, where
+  `x` is `rnd(p₀ + s₀)`; `24.80u` in 99; and `4.05u` to `24.58u` in the other
+  287. A one-off script, not kept, compared each with its case's upper end of
+  `(out − Ex) / D` times its upper end of `D / L`, and found each within
+  0.007% of it.
+- The 21 where `out` and `Ex` are both 0 hold `(out − Ex) / L` in `[0, 0]`,
+  so a control at `u / 2` proves there, as these 21 did in the second lane's
+  run (7). Their control asks for `(out − Ex) / L` in `[2⁻⁶⁰, 1]`, `1b-60`,
+  which leaves out the 0 they hold, and Gappa prints `Error: no contradiction
+  was found.`
+
+So none of the 436 proofs came from a contradiction in its hypotheses.
+
+**5. The shapes.** None of these cases was run as Rust input. By hand, not
+run: `Isometry::rotation` about the `z` axis through the origin by 30° stores
+the turn `(cos 15°, 0, 0, sin 15°)` and a zero shift, so `v₀` and `v₁` are 0,
+and the point `(3, 4, 0)`, on the plane `z = 0`, has `p₂` zero. Its `x` is
+`pz_v0v1p2`, with no sum cancelling. Its `y` and `z`, in `x`'s names, are
+`pz_v0v2p1` and `pz_v1v2p0_xo`, the second one of the 21: `z` is `0 + 0`
+exactly. A part turned about a coordinate axis and a sketch on a coordinate
+plane are shapes designers make. Every case proves, so there is no wrong
+answer to look for.
+
+**6. What this leaves.**
+
+- A row, filed from this write-up when it merges: the doc on
+  `POINT_ROUNDOFF` (`isometry.rs:77-87` at `c0859e3f`) says Gappa proves the
+  18 while "no factor is zero and no sum cancels to zero", and that "The zero
+  factors, the sums that cancel and the products below the normals have not
+  been run." By 3 the first two are run and prove. It is a comment that
+  claims less than is proved, not a wrong answer, so it has no class.
+- Not a row: Q2802 runs `point.g` with the products below the normals, which
+  every case here keeps normal where they reach `out`. Q2825 runs 464.20's
+  `vector.g` and `square.g` in the zero branches, and `vector.g` is
+  `point.g` with no shift, so 1 and 2 are its split with `s₀` gone. Q2700
+  moves into `proofs/gappa/` each script a row of 464 appended, these among
+  them.
+
+**7. The scripts.** `pointzero.py` writes the cases, their controls and
+`cases.txt`; `runpz.sh` runs each case named on its input through `one.sh`
+with `coq`, and its control without; `start.sh` runs every case in
+`cases.txt` through `runpz.sh`; `tallypz.py` counts the run; and `samepz.py`
+checks this text against the files that ran. To run them again, save the
+five beside 464.13's `one.sh` and run `python3 pointzero.py`, then start
+`./start.sh` with `setsid -f nohup` and wait on the pid it writes to
+`start.pid`. Its `runpz.txt` ends `done`, and `python3 tallypz.py` counts it.
+
+The generator had three forms, and every case was run on the last two:
+
+- The first lane's form wrote a sum with one part zero unrounded, as exact,
+  and had no `@FIX`. In a trial, `pz_v1v2` exited 1 with `(out − Ex) / (3 ·
+  L)` only within `±0.166667`: `R = a0 + p0` had `a0` an unrounded zero, so
+  Gappa did not know `R` is a multiple of `2⁻¹⁰⁷⁴` and could not bound
+  `rnd(R)`'s relative error below the normals. A probe showed `@FIX(S, -1074)`
+  lets Gappa bound `rnd(S) −/ S` within `u` for `S = x · y + x`, `|S| ≥
+  2⁻¹⁰⁷⁴`, and without it Gappa fails. `pz_w` and `pz_n_xc0` exited 1 too,
+  with `(out − Ex) / D` only within about `±2·10⁶³³`. The second form keeps
+  such a sum rounded and states `@FIX` on each rounded sum, and on it `pz_n`,
+  `pz_v1v2`, `pz_w`, `pz_n_xc0` and `pz_wv0p1` each proved, with `gappa
+  -Bcoq` and `coqc`. Which of the two changes each of them needed was not run.
+- The second lane also split `O = r0 + s0` with `r0` zero. The form before let
+  `|O| ≥ 2⁻¹⁰⁷⁴` leave out `s0 = 0` there, and no script covered it. That made
+  436 cases, 90 more. In its run of all 436, 272 proved and 164 did not, each
+  a case with exactly one of `v₁` and `v₂` zero, with `(out − Ex) / D` within
+  `u` but `D / L` unbounded (`pz_v1`: about `1.29·10⁶¹⁸`). The 20 such cases
+  that proved were those with no term through the turn left. 21 controls
+  proved: the 21 of 4.
+- The third lane found why the 164 failed. `pz_v1.g` with more goals prints
+  `|v1|` in `[0, 0]`, but finds no path to a bound on `|v1| * |v1|`, and puts
+  `|v1| * |v1| + |v2| * |v2|` only in `[−1.5411·10⁶²¹, 11881]`, so the hint's
+  `1/545 * (|v1| * |v1| + |v2| * |v2|)` had no lower bound, and `D / L` none
+  above. In the same run `12 * |w| * |v1| + 14 * |v1| * |v0| + 14 * |v1| *
+  |v1|` is in `[0, 0]`: Gappa reads `14 * |v1| * |v1|` as `(14 * |v1|) *
+  |v1|`, a product, which it bounds. So the third form takes a zero `v`'s
+  `1/545` square out with the gone shares, as 2 says, and `pz_v1.g` then
+  proves with `D / L` in `[3, 24.8]`. Writing only `1/545 * (|v2| * |v2|)`
+  proves too, but Gappa prints `not trivially equal` with the difference `(−L
+  · |v1|²) / (545 · L)`, so it was not taken. The third form also gives the
+  21 their control of 4. `tallypz.py` as the second lane wrote it read a
+  control's best only on `(out - Ex) / L`, and stopped at `c_pz_n_xo_half`,
+  which prints `BND((r0 + s0 - Ex) / L)`; the form below reads it on any `(…
+  − Ex) / L`. A trial of the third form on `pz_n`, `pz_v1`, `pz_v2`,
+  `pz_v1_xc1ro`, `pz_wv1`, `pz_v0v2_xao`, `pz_v2p1`, `pz_v1v2`,
+  `pz_p0p1p2_xo` and `pz_wv0p0_xo` found each proved, with Coq, and each
+  control failed, and then 3 ran every case.
+
+`pointzero.py`, whole:
 
 ```python
 """Write 464.19's point.g in its zero branches, one script per case and a
