@@ -5102,11 +5102,12 @@ impl<'f> Arrangement<'f> {
         }
     }
 
-    /// Count each loop a plane cuts a pipe or a ball in from the one node at
-    /// the place it starts, where no other node can lie between the two: the
-    /// `named_the_start` of [`HowItRuns::RoundAClosedCurve`]. That is the one
-    /// node whose box holds the walked start, or, where no node's box holds
-    /// it, the one whose box lies inside `node`, the box the start is held as.
+    /// Count each loop a plane cuts a pipe, a ball or a cone in from the one
+    /// node at the place it starts, where no other node can lie between the
+    /// two: the `named_the_start` of [`HowItRuns::RoundAClosedCurve`]. That is
+    /// the one node whose box holds the walked start, or, where no node's box
+    /// holds it, the one whose box lies inside `node`, the box the start is
+    /// held as.
     ///
     /// **A node whose box misses the walked start can still be at it.** The
     /// walked start is a rounding off the loop, and a node is a box round
@@ -5156,18 +5157,26 @@ impl<'f> Arrangement<'f> {
     /// pipe's axis, so it turns most sharply at the ends of its long axis, on
     /// a radius of `r cos θ`. The loop a plane cuts a ball of radius `R` in is
     /// a circle of radius `√(R² − h²)`, for `h` the plane's distance from the
-    /// ball's centre, and it turns on that radius everywhere. Where that radius
-    /// is proved to be `4d` or more
+    /// ball's centre, and it turns on that radius everywhere. The loop a plane
+    /// cuts a cone of half angle `α` and slope `s = tan α` in is an ellipse
+    /// whose half axes are `h sin α cos α / (cos² γ − sin² α)` and
+    /// `h sin α / √(cos² γ − sin² α)`, for `h` the plane's distance from the
+    /// apex and `γ` the angle between the plane's normal and the cone's axis.
+    /// It turns most sharply at the ends of its long axis, on a radius of `s·h`
+    /// however the plane leans
+    /// (`how_sharply_the_loop_a_plane_cuts_a_cone_in_turns` measures it). Where
+    /// that radius is proved to be `4d` or more
     /// ([`turns_on_four_times_the_diagonal_at_least`]), the stretch leaves the
     /// line by `d/16` at most, which is under the widest side. A node whose box
     /// is clear of the grown box is not on the stretch.
     ///
-    /// **Only a plane and a pipe or a ball**, since that radius is worked out
-    /// for them alone. A plane leaning against a pipe by a rounding cuts an
-    /// ellipse `1e16` long, whose ends turn on a radius near `1e-15`, far under
-    /// a box hundreds wide out there, and there the radius is not proved. A
-    /// plane that grazes a ball cuts a circle as small, and there it is not
-    /// proved either.
+    /// **Only a plane and a pipe, a ball or a cone**, since that radius is
+    /// worked out for them alone. A plane leaning against a pipe by a rounding
+    /// cuts an ellipse `1e16` long, whose ends turn on a radius near `1e-15`,
+    /// far under a box hundreds wide out there, and there the radius is not
+    /// proved. A plane that grazes a ball cuts a circle as small, and there it
+    /// is not proved either, nor where a plane near a cone's apex cuts it in a
+    /// loop as small.
     ///
     /// The dome of `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step`, the ball of
     /// radius `2.5` about `(1.27, −7.37, 15)`, is the shape for a ball (Q2989).
@@ -5180,6 +5189,18 @@ impl<'f> Arrangement<'f> {
     /// cut by those two planes and `z = 14.7` alone was refused on its order
     /// against one where `z = 14.7` crosses the circle
     /// (`a_ball_cut_by_two_planes_that_cross_where_its_circle_starts`).
+    ///
+    /// The pitch cones of a pair of mitre gears turned by `Isometry::rotation`
+    /// are the shape for a cone (Q3145). The lying frustum's near cap,
+    /// `x + ε·z = 1`, cuts the lying cone of slope 1 and apex `(0, 0, 0)` in an
+    /// ellipse that turns on a radius of 1 at the sharpest. It is walked from
+    /// `(1.0000000000000002, 0, −0.9999999999999998)`, inside the box of the
+    /// lying frustum's seam corner on that rim. Under `Policy::tolerant(100.0)`
+    /// the order of that corner against the meets near `(1 − ε, −2.1e−8, 1)`
+    /// was undecided, the policy read it as nought, and the fold left a cell of
+    /// the cap across its own arc: with the lying frustum first every fuse was
+    /// refused `CannotTellTheCellsOfAFaceApart` on the cap
+    /// (`the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_on_each_cap_as_one_point_under_a_tolerant_policy`).
     ///
     /// **Or where both boxes lie on one half of a pipe's loop**, either side of
     /// its long axis. Going along a half moves steadily along that axis, so the
