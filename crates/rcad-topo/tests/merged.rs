@@ -575,6 +575,8 @@ pub mod two_bars_on_one_pipe_and_a_box_united_in_one_call;
 pub mod two_boxes_one_with_a_corner_moved_by_1e_300;
 #[path = "two_cubes_corner_to_corner_turned_a_little.rs"]
 pub mod two_cubes_corner_to_corner_turned_a_little;
+#[path = "two_cubes_one_turned_a_little_about_two_axes.rs"]
+pub mod two_cubes_one_turned_a_little_about_two_axes;
 #[path = "two_curves_of_one_pair_that_meet.rs"]
 pub mod two_curves_of_one_pair_that_meet;
 #[path = "two_equal_bars_leaning_at_each_other.rs"]
