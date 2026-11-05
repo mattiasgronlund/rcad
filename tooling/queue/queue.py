@@ -333,6 +333,7 @@ class Batch:
     def __init__(self):
         self.added_ids = []
         self.takes = {}
+        self.released = set()
         self.notes = []
 
 
@@ -355,6 +356,9 @@ def apply(here, args):
             messages.append(message)
             if event is not None:
                 events.append(event)
+                if event[0] == "release":
+                    batch.released.add(event[1])
+                    batch.takes.pop(event[1], None)
         checked(here, queue)
         for event in events:
             claims.append(*event)
@@ -451,9 +455,13 @@ def take_step(queue, claims, here, args, batch):
     # earlier `take` steps, since `apply` only appends its events to the
     # claims file after every step has run, so a later step in the same
     # batch cannot otherwise see an earlier one's take (§424.10).
+    # `batch.released` does the same for this apply's own `release` events (a
+    # drop, done, give or park): a row let go earlier in the batch no longer
+    # holds its files, though the claims file has not seen the release yet
+    # (Q3212).
     merged = {**claims.holds(), **batch.takes}
     others = {other: theirs for other, theirs in merged.items()
-              if other != row_id and theirs["branch"] != branch
+              if other != row_id and other not in batch.released and theirs["branch"] != branch
               and not (hold and theirs["branch"] == hold["branch"])}
     met = the_hold_it_meets(row_id, entries, others) if entries else ""
     if met:
@@ -462,6 +470,7 @@ def take_step(queue, claims, here, args, batch):
     queue.replace(row, row.with_state(f"lane:{branch}"))
     message = f"{row_id}: {row.state} -> lane:{branch}, held for {branch} until done, drop or park"
     event = ("take", row_id, now(), here.top, branch, written, row.tier)
+    batch.released.discard(row_id)
     batch.takes[row_id] = {"time": event[2], "tree": event[3], "branch": event[4], "write_set": event[5],
                             "taken": event[5], "tier": event[6]}
     return queue, message, event
