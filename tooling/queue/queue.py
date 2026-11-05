@@ -439,8 +439,9 @@ def take_step(queue, claims, here, args, batch):
     # column has not caught up to, since `writes` never touches
     # docs/queue.md: a fresh take (no hold yet) reads that latest set rather
     # than the stale column (Q2670). A re-take of a row this tree already
-    # holds still resets to the column, as before this fix.
-    written = row.write_set if hold else latest_writes(here.claims).get(row_id, row.write_set)
+    # holds reads the hold's set, the one `writes` and `narrow` put in force
+    # (Q3207, §230.3).
+    written = write_set_in_force(here.claims, row_id, row, hold)
     entries = entries_of(written)
     # Holds on the branch being taken onto are left out (Q1840, §424.10), and
     # so are holds on the branch the row is held on *now*: a bundle's rows
