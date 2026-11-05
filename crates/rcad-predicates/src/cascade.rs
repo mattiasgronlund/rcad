@@ -43,10 +43,35 @@ pub struct Filtered {
 /// any two `f64`. For `*` it holds only while the product stays out of the
 /// subnormals: down there products are rounded onto a fixed grid, so what a
 /// product loses is an *absolute* amount, up to half of `2^-1074`, and that can
-/// be the whole of its value. Feed such a product into a relative bound and the
-/// filter certifies a sign it has not earned — sometimes the wrong one. That is
-/// the failure the `robust` crate has, and the reason
-/// [`Predicate::on_floats`] must return `None` when this comes back `false`.
+/// be the whole of its value. What that does to the sign depends on what the
+/// product is used for next.
+///
+/// Multiplied again, its loss is multiplied too, and a factor large enough
+/// carries it past the bound. The filter then certifies a sign it has not
+/// earned, sometimes the wrong one. `orient3d` multiplies each 2×2 minor by a
+/// height. On decisions.md §12.2's tetrahedron, whose determinant is `-2^-76`,
+/// a minor whose two products are below the normals comes out `2^-1075` too
+/// big, and a height of `2^1000` makes the sum `+2^-76`, a 23rd of the
+/// permanent. `orient3d`'s level 1 certified that sign before it had this
+/// check, and the `robust` crate still answers it: that is the failure the
+/// `robust` crate has. The test
+/// `a_minor_below_the_normals_times_a_large_height_certifies_a_wrong_sign_unless_checked`
+/// runs it. Without their checks the cone's slope squared, times `up` squared,
+/// does the same on a cone `Cone::new` builds (§464.31), and so do the
+/// cylinder's and the torus's direction squares, with a direction no
+/// `Cylinder` or `Torus` holds (§464.29, §464.33). So
+/// [`Predicate::on_floats`] returns `None` when this comes back `false` for a
+/// product that is multiplied again.
+///
+/// Added straight into the sum, its loss is at most `2^-53` of any bound
+/// [`decide`] compares against, since [`decide`] takes only a bound that is a
+/// normal number, `2^-1022` or more. Gappa proves the bounds of `orient2d`, of
+/// the side of a flat surface, of the side of a flat surface through a point
+/// and of the side of a sphere at their constants with such products below the
+/// normals, or finds the bound itself not normal (§464.8, §464.14, §464.18,
+/// §464.27). So this check is not what keeps their signs right: `orient2d` has
+/// none, and the others keep theirs so that level 1 answers only where the
+/// relative argument holds.
 ///
 /// A product of exactly zero only counts as accurate when one of the factors is
 /// zero. Two small factors whose product falls off the bottom of the range also
@@ -85,9 +110,11 @@ pub trait Predicate {
     /// - an input is not an exact `f64`, because a forward error bound derived
     ///   for exact inputs says nothing about uncertain ones; and
     /// - one of the multiplications on the way to `value` or to the permanent
-    ///   landed in the subnormals, because the bound is relative and down there
-    ///   rounding stops being relative. Every implementation checks its own
-    ///   products through [`product_is_normal`].
+    ///   landed in the subnormals and is multiplied again, because the bound
+    ///   is relative and down there rounding stops being relative.
+    ///   [`product_is_normal`] is the check, and its doc says which products
+    ///   need it. `orient2d`, whose two products are only subtracted, needs
+    ///   none (decisions.md §464.8).
     fn on_floats(&self) -> Option<Filtered>;
 
     /// Level 2. A range that is guaranteed to contain the true value.
