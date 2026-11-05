@@ -23673,10 +23673,34 @@ for what, ring, tube, direction, point in inputs:
 
 ### 464.34 Isometry::POINT_ROUNDOFF in the zero branches
 
-**Draft, unfinished: Q2801's second lane handed over here (§416).** Nothing
-below is a result yet but the runs it names. The lane after it finds why the
-cases with one of `v1`, `v2` zero do not prove, runs the generator again,
-rewrites this as a finished section, and takes this paragraph out.
+**Draft, unfinished: Q2801's third lane handed over here (§416).** Nothing
+below is a result yet but the runs it names. The lane after it reads the third
+lane's run of all 436, rewrites this as a finished section, and takes this
+paragraph and the two after it out.
+
+**The third lane's runs.** Why the 164 did not prove: Gappa bounds `|v| * |v|`
+for no `v` that is the double 0. `pz_v1.g` with the goals `|v1| in ?`, `|v1| *
+|v1| in ?`, `|v2| * |v2| in ?` and `|v1| * |v1| + |v2| * |v2| in ?` added
+exits 1 and prints `|v1|` in `[0, 0]`, `|v2| * |v2|` in `[2⁻²¹⁴⁸, 2²⁰⁴⁸]`,
+the sum in `[−1.5411·10⁶²¹, 11881]`, and `BND(|v1| * |v1|)` unproved. So the
+hint's `1/545 * (|v1| * |v1| + |v2| * |v2|)` had no lower bound, and `D / L`
+none above. `12 * |w| * |v1| + 14 * |v1| * |v0| + 14 * |v1| * |v1|` in the same
+run prints `[0, 0]`: Gappa reads `14 * |v1| * |v1|` as `(14 * |v1|) * |v1|`, a
+product and not a square. So `pointzero.py` below takes a zero `v`'s `1/545`
+square out with the gone shares, as `1/545 * |v| * |v|`. `pz_v1.g` written that
+way exits 0 with `D / L` in `[3, 24.8]`, and `gappa -Bcoq` and `coqc` exit 0.
+Writing only `1/545 * (|v2| * |v2|)` exits 0 too, but prints `not trivially
+equal` with the difference `(−L · |v1|²) / (545 · L)`, so it is not taken.
+The 21 controls that proved now ask for `(out − Ex) / L` in `[2⁻⁶⁰, 1]`, which
+leaves out the 0 they hold. A trial through `runpz.sh`, `P=10`: `pz_n`,
+`pz_v1`, `pz_v2`, `pz_v1_xc1ro`, `pz_wv1`, `pz_v0v2_xao`, `pz_v2p1`,
+`pz_v1v2`, `pz_p0p1p2_xo` and `pz_wv0p0_xo` each exit 0, `gappa -Bcoq` and
+`coqc` exit 0 on each, and each control exits 1; the two new controls print
+`Error: no contradiction was found.` and no best. `tallypz.py` below takes
+those, reads a control's best on any `(... − Ex) / L`, and files a result on
+`(... − Ex) / ...` as the error's where the form before filed one with `out`
+written out as `D / L`'s. The run of all 436 with these forms was started at
+14:03 UTC, in a fresh run directory, and had not ended when the lane handed over.
 
 **The second lane's runs.** The generator below has one change from the
 first lane's committed form: `O = r0 + s0` with `r0` zero is `s0`, which may be
@@ -23788,6 +23812,15 @@ before it reaches out. It stays rounded, with no hypothesis, and a sum there
 is not split into rounded and cancelling, since the two scripts would be the
 same.
 
+D / L is hinted as point.g's quadratic less the share of each term a zero
+factor took out. Gappa bounds |v| * |v| for no v that is the double 0, so a
+zero v1 or v2 has its 1/545 square taken out with those shares, written
+1/545 * |v| * |v|, which Gappa reads as (1/545 * |v|) * |v| and bounds as 0.
+
+Where no term is live, p0 is zero and s0 is 0, out and Ex are both 0, so a
+control at u / 2 holds. Its control asks for (out - Ex) / L in [2^-60, 1]
+instead, which leaves out 0.
+
 named_by (isometry.rs) takes a turn with one nonzero part, or two or four of
 one size, as a turn of a cube, which is 464.19's 6 and not this arithmetic. So
 a zero set holding three of w, v0, v1, v2 is left out, and all four cannot be
@@ -23809,6 +23842,7 @@ FACTORS = ("w", "v0", "v1", "v2", "p0", "p1", "p2")
 TURN = ("w", "v0", "v1", "v2")
 GOAL = "(out - Ex) / L in [-36b-53, 36b-53]"
 HALF = "(out - Ex) / L in [-1b-54, 1b-54]"
+ZERO = "(out - Ex) / L in [1b-60, 1]"
 LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
 
 # Each rounding of point.g: its result, its argument, the argument's
@@ -24018,26 +24052,35 @@ def make(zero, state, goal=GOAL):
     src += [f"(d{k + 1} + e{k + 1}) - d{k + 1} -> e{k + 1};" for k in live + [6]]
     src += [f"e{k + 1} / d{k + 1} -> {TERMS[k][4]};" for k in live]
     src.append("e7 / d7 -> ((p0 / L) * W7 + (s0 / L) * W8) / 3;" if p0_live else "e7 / d7 -> ((s0 / L) * W8) / 3;")
+    kept = [v for v in ("v1", "v2") if v not in zero]
+    took = [TERMS[k][3] for k in gone] + [f"1/545 * |{v}| * |{v}|" for v in ("v1", "v2") if v in zero]
+    hint = ["D / L -> 109/5 * N4 - (109/5 * (X * X) + 109/5 * (Y * Y) + 425/109 * (Z * Z)"]
+    if kept:
+        hint.append("                       + 1/545 * (" + " + ".join(f"|{v}| * |{v}|" for v in kept) + ")) + 3")
+    else:
+        hint[0] += ") + 3"
+    if took:
+        hint.append("        - (" + " + ".join(took) + ")")
     src += ["", "# D / L is point.g's 3 and quadratic, 109/5 q.q less four squares, less",
-            "# the share of each term a zero factor took out.",
-            "D / L -> 109/5 * N4 - (109/5 * (X * X) + 109/5 * (Y * Y) + 425/109 * (Z * Z)",
-            "                       + 1/545 * (|v1| * |v1| + |v2| * |v2|)) + 3"
-            + ("" if gone else ";")]
-    if gone:
-        src.append("        - (" + " + ".join(f"{TERMS[k][3]}" for k in gone) + ");")
+            "# the share of each term a zero factor took out, and a zero v's square."]
+    src += hint[:-1] + [hint[-1] + ";"]
     return "\n".join(src) + "\n"
 
 
 def main():
-    seen = []
+    seen, exact = [], []
     for zero, state in cases():
         name = name_of(zero, state)
         assert name not in seen, name
         seen.append(name)
         open(name + ".g", "w").write(make(zero, state))
-        open("c_" + name + "_half.g", "w").write(make(zero, state, HALF))
+        if all(set(t[1]) & zero for t in TERMS) and "p0" in zero and state["out"] == "cancels":
+            exact.append(name)
+            open("c_" + name + "_half.g", "w").write(make(zero, state, ZERO))
+        else:
+            open("c_" + name + "_half.g", "w").write(make(zero, state, HALF))
     open("cases.txt", "w").write("\n".join(seen) + "\n")
-    print(len(seen), "cases")
+    print(len(seen), "cases,", len(exact), "with out and Ex both 0")
 
 
 main()
@@ -24080,7 +24123,9 @@ echo done >> runpz.txt
 and its control: each case's exit, Coq's two exits, its proof's size, the
 bound it printed on (out - Ex) / D and on D / L, each control's exit and its
 best on (out - Ex) / L in u, and every line of an .out, .bcoq or .coqc that
-is not a result or a divisor Gappa took to be nonzero.
+is not a result or a divisor Gappa took to be nonzero. A control that asks
+for (out - Ex) / L in [2^-60, 1], where out and Ex are both 0, has no best
+and is to say it found no contradiction instead.
 Run as: python3 tallypz.py"""
 import collections
 import os
@@ -24105,13 +24150,17 @@ for line in log[:-1]:
 
 WARNING = re.compile(r"^Warning: the expression .* has been assumed to be nonzero when checking a rewriting rule\.$")
 RESULT = re.compile(r"^  (.*) in \[(.*)\]$")
-BEST = re.compile(r"^  BND\(\(out - Ex\) / L\), best: \[(\S+), (\S+)\]$")
+BEST = re.compile(r"^  BND\((\(.* - Ex\) / L)\), best: \[(\S+), (\S+)\]$")
 DECIMAL = re.compile(r"\{(-?[\d.e+-]+),")
+ZERO = "(out - Ex) / L in [1b-60, 1]"
+NONE_FOUND = "Error: no contradiction was found."
 
 
-def odd_lines(path, control):
-    allowed = [WARNING, RESULT] + ([BEST] if control else [])
-    fixed = {"Results:"} | ({"Error: some properties were not satisfied:"} if control else set())
+def odd_lines(path, control, zero=False):
+    allowed = [WARNING, RESULT] + ([BEST] if control and not zero else [])
+    fixed = {"Results:"}
+    if control:
+        fixed.add(NONE_FOUND if zero else "Error: some properties were not satisfied:")
     if not os.path.exists(path):
         return [f"{path} missing"]
     return [f"{path}: {line}" for line in open(path).read().splitlines()
@@ -24131,9 +24180,10 @@ def high_end(interval):
     return float(m[1]) if m else float(hi)
 
 
-problems, bests, ratios, dls, times, sizes = [], {}, {}, {}, [], []
+problems, bests, ratios, dls, times, sizes, zeros = [], {}, {}, {}, [], [], []
 for n in cases:
     c = "c_" + n + "_half"
+    zero = ZERO in open(c + ".g").read()
     if exits.get(n, (None,))[0] != 0:
         problems.append(f"{n} exit {exits.get(n)}")
     if exits.get(c, (None,))[0] != 1:
@@ -24145,21 +24195,27 @@ for n in cases:
         sizes.append((k[3], k[4], k[2], n))
     times.append((exits.get(n, (0, 0.0))[1], n))
     problems += odd_lines(n + ".out", False) + odd_lines(n + ".bcoq", False)
-    problems += odd_lines(c + ".out", True)
+    problems += odd_lines(c + ".out", True, zero)
     if os.path.exists(n + ".coqc") and open(n + ".coqc").read():
         problems.append(f"{n}.coqc is not empty")
     for line in open(n + ".out").read().splitlines():
         if m := RESULT.match(line):
-            if m[1].startswith("(out - Ex) / "):
+            if " - Ex) / " in m[1]:
                 ratios[n] = high_end(m[2]) / U
             else:
                 dls[n] = high_end(m[2])
+    if n not in ratios or n not in dls:
+        problems.append(f"{n}.out lacks a result")
     best = [BEST.match(line) for line in open(c + ".out").read().splitlines()]
     best = [m for m in best if m]
-    if len(best) != 1:
+    if zero:
+        zeros.append(n)
+        if best or NONE_FOUND not in open(c + ".out").read().splitlines():
+            problems.append(f"{c} has a best line or no '{NONE_FOUND}'")
+    elif len(best) != 1:
         problems.append(f"{c} has {len(best)} best lines")
     else:
-        bests[n] = float(best[0][2]) / U
+        bests[n] = float(best[0][3]) / U
 
 print(len(cases), "cases,", len(exits), "exit lines,", len(coqs), "coq lines")
 print("lines of runpz.txt that are neither:", odd_log or "none")
@@ -24175,9 +24231,13 @@ print("coq: %d lines %d hints %.2f s (%s) to %d lines %d hints %.2f s (%s)" % (s
 print("(out - Ex) / D or / (3L), upper end in u:",
       sorted(collections.Counter(round(r, 4) for r in ratios.values()).items()))
 print("D / L upper end:", sorted(collections.Counter(round(d, 4) for d in dls.values()).items()))
+print("largest (out - Ex) / D times D / L: %.4fu (%s), against POINT_ROUNDOFF's 36u"
+      % max((ratios[n] * dls[n], n) for n in cases if n in ratios and n in dls))
+print("controls at [2^-60, 1], out and Ex both 0, (out - Ex) / (3L) in [0, 0]:", len(zeros),
+      all(ratios.get(n) == 0 for n in zeros))
 print("control best on (out - Ex) / L, in u, and how many controls:")
 for b, k in sorted(collections.Counter(round(b, 2) for b in bests.values()).items()):
-    print(f"  {b}u: {k}", ", ".join(n for n in cases if round(bests[n], 2) == b) if k <= 12 else "")
+    print(f"  {b}u: {k}", ", ".join(n for n in bests if round(bests[n], 2) == b) if k <= 12 else "")
 print("largest best: %.4fu (%s), against POINT_ROUNDOFF's 36u" % max((b, n) for n, b in bests.items()))
 ```
 
