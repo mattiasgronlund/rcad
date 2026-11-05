@@ -38,7 +38,8 @@ normals. 464.30 is Q2781, on the side of rcad-geom's cone with a zero factor.
 464.31 is Q2782, on that cone with a checked product below the normals, and
 464.32 is Q2786, on the side of rcad-geom's torus with a zero factor. 464.33
 is Q2787, on that torus with a checked product below the normals, and 464.34
-is Q2801, on `Isometry::POINT_ROUNDOFF` in the zero branches.*
+is Q2801, on `Isometry::POINT_ROUNDOFF` in the zero branches. 464.35 is
+Q2802, on it with products below the normals.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -74,6 +75,7 @@ is Q2801, on `Isometry::POINT_ROUNDOFF` in the zero branches.*
   464.32  The side of rcad-geom's torus with a zero factor
   464.33  The side of rcad-geom's torus with a checked product below the normals
   464.34  Isometry::POINT_ROUNDOFF in the zero branches
+  464.35  Isometry::POINT_ROUNDOFF with products below the normals
 
 ### 464.1 The bugs a bound prover is for
 
@@ -12540,7 +12542,8 @@ no factor is zero, no sum cancels to zero, the nine products of the
 arithmetic are normal numbers, and the turn's `q·q` is within `6ε` of one. The
 proof reaches `24.80u · L` where the doc counts `35.78u · L` (3, 4). A turn of
 a cube is one addition per coordinate, which `shiftball.g` already proved
-(6). The products below the normals are not run (10), the zero branches are
+(6). The products below the normals are run in 464.35, which proves the
+`36u` with `L` normal, reaching `34.73u`, the zero branches are
 run in 464.34 and reach the same `24.80u`, and one public route to a movement
 does not hold its turn near length one (5). Coq checks the proof, modulo its
 hints (8).
@@ -12642,7 +12645,9 @@ the constant the count was for.
   branches, which 10 leaves and 464.34 runs;
 - the nine products normal, which `apply_to_point` does not check, and
   464.5's lemma for each. The doc says its count holds only while nothing
-  falls into the subnormals, and so far so does this (10);
+  falls into the subnormals, and so far so does this (10). Done, in 464.35:
+  with the products free to fall below the normals and `L` normal, the `36u`
+  still proves;
 - `L` at least every `|p_i|` and `|s_i|`;
 - `|q·q − 1| ≤ 6ε` worked out exactly, written `N4` in `[1 − 12u, 1 + 12u]`;
 - `x / |x|` in `[−1, 1]` for `w` and each `v_i`, so that the hint on a
@@ -12694,7 +12699,8 @@ thing, and each exits 1:
 - without the nine products normal and the lemma they give: best
   `±1.06019e+633`, with `W1` and `W3` unproved and `(out − Ex) / D` within
   `±3.53398e+632`. The proof needs the products normal, or another argument
-  for them (10).
+  for them (10). 464.35 is that argument: a slip of `u · (|P| + 2⁻¹⁰²²)` for
+  each product, with `L` normal.
 
 **8. Coq checks the proof, modulo its hints.** `gappa -Bcoq` and `coqc`,
 through `one.sh` against gappalib 1.8.0 and Flocq 4.2.2, exit 0 on `point.g`
@@ -13207,7 +13213,9 @@ each from Q2689:
 - Run `point.g` with one or more of the nine products below the normals and
   `L` normal, as 464.8's `planecases.py` split the plane's, and say whether
   `POINT_ROUNDOFF` needs the products normal or only `L`, as `nearest.g` found
-  `L` normal enough (464.9's 1). Not run, so no class.
+  `L` normal enough (464.9's 1). Not run, so no class. Done, in 464.35: only
+  `L`, and each of its 88 cases proves the code's `36u`, reaching `34.73u`.
+  With `L` below the normals the bound's form is a limit.
 - Whether `apply_to_point` keeps within `POINT_ROUNDOFF` on a movement that
   came in through `From<na::Isometry3<f64>>` (5) with a turn whose `q·q` is
   further from one than `6ε`, and if not, hold that route to the length as
@@ -23694,7 +23702,8 @@ movement's own numbers, worked without rounding, put it, and none goes past
 checks each proof, modulo its hints (3), and each of the 436 controls fails
 (4). That is under 464.19's other hypotheses: the turn's `q·q` within `6ε` of
 one, and each product whose factors are not zero a normal number where it
-reaches `out`, which is Q2802's to run. The doc on the constant says these
+reaches `out`, which is Q2802's to run, and which 464.35 drops for `L`
+normal. The doc on the constant says these
 branches have not been run, which is a row (6).
 
 Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
@@ -23730,7 +23739,8 @@ arithmetic in any of these:
 
 A product whose factors are both nonzero can still round to zero, below the
 normals. That is Q2802's: every case here keeps 464.19's hypothesis that such
-a product, where it reaches `out`, is normal.
+a product, where it reaches `out`, is normal. 464.35 runs the same 88 zero
+sets with each such product free to fall below the normals.
 
 **2. The cases.** `pointzero.py` (7) writes one script per case,
 `pz_<zeros>[_x<sums>].g`, `<zeros>` the zero factors or `n` for none and
@@ -24752,59 +24762,191 @@ largest best: 34.7286u (pm_n), against POINT_ROUNDOFF's 36u
 each best within 0.01% of its case's two averages added: True
 ```
 
-- `controls.py`'s two, through `capped.sh` (`peak.sh` under a 12 GB
-  `ulimit -v`): `c_pm_n_34` (goal `34u`) exit 1 in 47.10 s, best
-  `±3.85564e-15`, which is `34.73u`, so the hypotheses do not contradict;
-  `c_pm_n_l` (`L` down to `2⁻¹⁰⁷⁴`) exit 1, `Asum / G` only within `±0.5`,
-  best `±4.96429`: the proof needs `L` normal. `c_pm_n_half` exit 1, best
-  `±3.85565e-15`.
-- The lemmas run again: `mixedn`, `mixeds` and `sum` each exit 0, `-Bcoq`
-  exit 0, `coqc` exit 0 (274, 110 and 151 lines, 2, 0 and 0 hints); each
-  control exits 1. The three files are this block's, byte for byte.
-- **Below the normals no `f64` answer meets the bound.** The probe crate
-  `subl` (below, not in the tree) turns points by `Isometry::rotation(&Axis::z(),
-  PI / 6)`, stored `(w, v₀, v₁, v₂) = (9.659258262890683e-1, 0, 0,
-  2.5881904510252074e-1)`, shift 0, and `subl.py` works the exact answer from
-  the stored numbers. `(3·2⁻¹⁰⁷⁴, 0, 0)`, `L = 3·2⁻¹⁰⁷⁴`: `x` comes out
-  `2·2⁻¹⁰⁷⁴` against exact `2.59808·2⁻¹⁰⁷⁴`, off by `1.796e+15u · L`, and the
-  nearest double is off by `1.207e+15u · L`; `y` `2` against `1.5`, off by
-  `1.501e+15u · L`. `(1000·2⁻¹⁰⁷⁴, 0, 0)`: `x` off by `2.288e+11u · L`.
-  `(3·2⁻¹⁰²², 0, 0)`, `L` normal: `x` off by `0.001442u · L`, `y` by
-  `0.2793u · L`. So it is a limit of the bound's form, `18ε · L`, below the
-  normals: the gap between doubles is wider than the bound.
-- Downstream, not run: 464.21's pipe proves `CORNER_AFTER_MOVING_ROUNDOFF`
-  only with `point.g`'s slips at `25u` (464.21's opening), and with a product
-  below the normals a slip reaches `34.73u`.
+**4. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3), so each case has a control at `u / 2`, `1b-54`, that
+must fail, and each of the 88 exits 1. Gappa's best for a goal it does not
+prove can change from one run to the next (464.26), so these are this run's,
+each a bound Gappa found on the size of `(out − Ex) / L`:
 
-Found by the first lane's three relays, each run on 2026-11-05 under 464.4's
-pin through 464.13's `one.sh`:
+- `u` in 21 controls, the cases where `p₀` is zero and no term is live, whose
+  `out` is `s₀` times a free ratio;
+- `3u` in 4, `pm_v1v2`, `pm_v1v2p1`, `pm_v1v2p2` and `pm_v1v2p1p2`, a turn
+  about the `x` axis;
+- `26.8u` to `34.73u` in the other 63.
 
-- `mixedn.g` and `mixeds.g` (below) prove, with `gappa -Bcoq` and `coqc`,
-  that for every real `P`, `m = (rnd(P) − P) / (|P| + 2⁻¹⁰²²)` is in `[−u,
-  u]`; each control at `u / 2` exits 1. `sum.g` proves the ratio of a
-  rounded sum or difference of two doubles that is not zero within `u` of 1,
-  with `-Bcoq` and `coqc`, and `c_sum_half.g` exits 1.
-- Gappa 1.8.0 aborts, exit 134, `src/parser/ast.cpp:255: dump_real ...
-  Assertion 'false' failed`, on a script with a name defined as another name
-  alone, `gk01 = L;`, while it prints the warning that a divisor was assumed
-  nonzero. `1 * L` in its place exits 1. `pointsub.py` writes such a share as
-  `L` itself.
-- Memory. 464.19's `point.g` proves in 49.18 s at a peak of 4 496 464 KB.
-  The case with nothing zero, with the products' roundings written by the
-  lemma and the sums' by `rnd`: one average over the terms and the amounts,
-  `m` defined by its formula, 24 GB resident when the out-of-memory killer
-  stopped it at 354 s; free `m` and `s`, past a 12 GB `ulimit -v` at 76 s;
-  `E` and `Asum` averaged apart, past 12 GB at 182.64 s; `Asum` alone, past
-  12 GB at 155.55 s. Each ended `GNU MP: Cannot allocate memory`.
-  `/usr/bin/time`'s `%x` prints 0 for a run a signal ends, so `peak.sh`'s
-  `exit 0` there is not a proof: read `Command terminated by signal` in its
-  `.time`.
-- The form below has not been run. It writes each rounded sum on a live path
-  as `C * r`, `r` free within `u` of 1 by `sum.g` (any `r` where `C` is 0),
-  so no script holds a `rnd` on a live path, and a sum that cancels needs no
-  case of its own: 88 cases, one for each zero set of 464.34's 2.
+`tallypm.py` finds each within 0.01% of its case's two averages added (3).
+Unlike 464.34's 4, no case holds `out − Ex` at 0 for every input: a sum that
+cancels is no case of its own, and in the 21 `s₀` may be nonzero, so every
+control asks for `u / 2`. Beside them:
 
-`pointsub.py`, as relay 3 left it:
+- `controls.py` writes two more on `pm_n`, and `capped.sh` ran them, and
+  `c_pm_n_half` again, each under a 12 GB `ulimit -v`:
+  - `c_pm_n_34`, the goal at `34u`, exits 1 in 47.10 s, best `±3.85564e-15`,
+    which is `34.73u`. So the hypotheses do not contradict each other. It
+    does not show that any input reaches `34.73u` (3).
+  - `c_pm_n_l`, `L` free down to `2⁻¹⁰⁷⁴`, exits 1 in 6.27 s: `Asum / G` is
+    only within `±0.5`, which is `2⁵²u`, and the best is `±4.96429`. So the
+    proof needs `L` normal (1).
+  - `c_pm_n_half` exits 1 in 5.81 s, best `±3.85565e-15`.
+- The lemmas ran again in the second lane: `mixedn`, `mixeds` and `sum` each
+  exit 0, and their `gappa -Bcoq` and `coqc` exit 0, at 274, 110 and 151
+  lines with 2, 0 and 0 hints; each control exits 1. Each control is its
+  lemma with its opening comment replaced by the one line `# mixedn.g's
+  control: the same at u / 2, which must fail.` (`mixeds.g's`, `sum.g's`),
+  and each goal at `[-1b-54, 1b-54]`, which `samepm.py` checks (8).
+
+So none of the 88 proofs came from a contradiction in its hypotheses.
+
+**5. Below the normals.** The probe crate `subl` (8), built outside the tree
+against `rcad-geom` in the second lane's tree, turns points by
+`Isometry::rotation(&Axis::z(), PI / 6)`, which stores `(w, v₀, v₁, v₂) =
+(9.659258262890683e-1, 0, 0, 2.5881904510252074e-1)` and a zero shift, and
+`subl.py` (8) works the exact answer from the stored numbers, in rationals:
+
+- `(3·2⁻¹⁰⁷⁴, 0, 0)`, so `L = 3·2⁻¹⁰⁷⁴`: `x` comes out `2·2⁻¹⁰⁷⁴` against
+  an exact `2.59808·2⁻¹⁰⁷⁴`, off by `1.796e+15u · L`, and the nearest
+  double, `3·2⁻¹⁰⁷⁴`, is off by `1.207e+15u · L`. `y` is `2·2⁻¹⁰⁷⁴` against
+  `1.5·2⁻¹⁰⁷⁴`, a tie, so every double is at least `1.501e+15u · L` off. By
+  hand, from `point.g`'s lines: `c1 = rnd(v₂ · 3·2⁻¹⁰⁷⁴)` rounds
+  `0.776·2⁻¹⁰⁷⁴` up to `2⁻¹⁰⁷⁴`, `k02 = rnd(v₂ · 2·2⁻¹⁰⁷⁴)` rounds
+  `0.518·2⁻¹⁰⁷⁴` up to `2⁻¹⁰⁷⁴`, so `k0` is `−2⁻¹⁰⁷⁴` and `x` is `3 − 1`
+  times `2⁻¹⁰⁷⁴`.
+- `(3·2⁻¹⁰⁷⁴, 5·2⁻¹⁰⁷⁴, 0)`: `x` is 0 against `0.0981·2⁻¹⁰⁷⁴`, and `y`
+  `6·2⁻¹⁰⁷⁴` against `6.5·2⁻¹⁰⁷⁴`, a tie again.
+- `(1000·2⁻¹⁰⁷⁴, 0, 0)`: `x` is off by `2.288e+11u · L`, and so is the
+  nearest double, which is the code's.
+- `(3·2⁻¹⁰²², 0, 0)`, `L` normal: `x` is off by `0.001442u · L` and `y` by
+  `0.2793u · L`, inside the bound.
+
+Doubles below `2⁻¹⁰²¹` are `2⁻¹⁰⁷⁴` apart, so an exact answer half way
+between two is `2⁻¹⁰⁷⁵` from each, which is more than `36u · L` for `L` below
+`2⁻¹⁰²² / 36`, about `2⁻¹⁰²⁷`. The ties above are such answers. So there
+`18ε · L` asks for more than any `f64` answer can give: a limit of the bound's
+form, not a gap the arithmetic could close (§16.10). Between `2⁻¹⁰²⁷` and
+`2⁻¹⁰²²` nothing was run, and the proof, which takes `L` at least `2⁻¹⁰²²`,
+says nothing there.
+
+`apply_to_point`'s doc (`isometry.rs:314-315` at `8dae715a`) promises
+`POINT_ROUNDOFF` times the largest number involved, with no condition on it.
+`POINT_ROUNDOFF`'s own doc says its count holds "only while nothing overflows
+and nothing falls into the subnormals" (`102-103`), and the method's doc does
+not say so. So the method's promise is wrong for `L` below about `2⁻¹⁰²⁷`, of
+class C: only a probe builds it, and no designer writes a coordinate of
+`1e-323`. It is not D: a block of side 100 with a corner at `(3·2⁻¹⁰⁷⁴, 0, 0)`
+has its largest coordinate over its smallest feature near one, §3.5's
+measure, so no number puts it outside §3.5's envelope. A row (7).
+
+**6. The forms tried.** The generator had four forms, and every case ran on
+the fourth. Each of the first three was tried on the case with nothing zero
+alone, and ran out of memory. For scale, 464.19's `point.g` proves in 49.18 s
+at a peak of 4 496 464 KB.
+
+- The first wrote each product's rounding by the lemma, with `m` defined by
+  its formula, and each sum's by `rnd`, with one average over the terms and
+  the amounts. It was 24 GB resident when the out-of-memory killer stopped it
+  at 354 s.
+- The second set `m` and `s` free, and went past a 12 GB `ulimit -v` at 76 s.
+- The third averaged `E` and `Asum` apart, and went past 12 GB at 182.64 s;
+  `Asum` alone went past 12 GB at 155.55 s.
+- Each run that went past the cap ended `GNU MP: Cannot allocate memory`.
+- The fourth, 1's, writes each rounded sum on a live path as `C * r`, which
+  drops 464.34's split by which sums cancel, its `@FIX` and the `|C| ≥
+  2⁻¹⁰⁷⁴` each rounded sum carried. `pm_n` proves on it in 5.46 s at 89 188
+  KB (3).
+
+By relay 3's handoff the third and the fourth differ in the sums alone. The
+third's files were written over, so that was not diffed, and which of the
+sums' changes the memory needed was not run.
+
+Gappa 1.8.0 aborts, exit 134, `src/parser/ast.cpp:255: dump_real ...
+Assertion 'false' failed`, on a script with a name defined as another name
+alone, `gk01 = L;`, while it prints the warning that a divisor was assumed
+nonzero. `1 * L` in its place exits 1. `pointsub.py` writes such a share as
+`L` itself.
+
+`/usr/bin/time`'s `%x` prints 0 for a run a signal ends, so `peak.sh`'s `exit
+0` there is not a proof: read `Command terminated by signal` in its `.time`.
+No `.time` in the second lane's run directory has that line (`grep -l`), and
+`one.sh`, which ran the 88, takes its exit from the shell.
+
+**7. What this leaves.** Four rows, filed from this write-up when it merges,
+each from Q2802:
+
+- `POINT_ROUNDOFF`'s doc (`isometry.rs:78-90` at `8dae715a`) says Gappa
+  proves the 18 while "the products on a live path are normal numbers", that
+  this leaves `11.2·u·L` of room, and "Only the products below the normals
+  have not been run." By 3 they prove with `L` normal, reaching `34.73u` and
+  leaving `1.27u`, and `L` normal is the condition, not the products. A
+  comment that claims less than is proved, so no class.
+- `apply_to_point`'s doc promises `POINT_ROUNDOFF` times `L` with no
+  condition on `L` (5): state `L` at least `2⁻¹⁰²²` and pin 5's first point
+  in a test. Class C, after the first, since both edit `isometry.rs`.
+- Run 464.21's pipe with the point's slips at `34.73u`, not `point.g`'s
+  `25u`, and say whether `CORNER_AFTER_MOVING_ROUNDOFF`'s `128ε` still holds.
+  464.21's pipe proves it only with those slips at `25u` (464.21's opening).
+  Not run, so no class.
+- Run 464.20's `vector.g` in this form, each product on a live path free to
+  fall below the normals, and say whether its `20u` holds. 464.20 left it to
+  Q2802, which ran `point.g` alone. Not run, so no class.
+
+And what is not a row: Q2700, which moves these scripts into `proofs/gappa/`
+with the rest of 464's; and `field` on these hints, which 464.10 leaves for
+every script of 464.
+
+**8. The scripts.** `pointsub.py` writes the 88 cases, their controls and
+`casesm.txt`; `controls.py` writes 4's two further controls on `pm_n`;
+`mixedn.g`, `mixeds.g` and `sum.g` are 1's lemmas; `startpm.sh` runs every
+case in `casesm.txt` through 464.34's `runpz.sh`, each process under a 12 GB
+cap, writing `runpm.txt`; `capped.sh` runs the scripts it names through
+`peak.sh` under the same cap; `peak.sh` runs one script as `one.sh` does,
+without Coq, and prints its exit, its time and its peak memory; `tallypm.py`
+counts the run; `subl`'s `src/main.rs` and `subl.py` are 5's probe; and
+`samepm.py` checks this text against the files that ran.
+
+To run them again, save the scripts beside 464.13's `one.sh` and 464.34's
+`runpz.sh`, run `python3 pointsub.py` and `python3 controls.py`, then start
+`./startpm.sh` with `setsid -f nohup` and wait on the pid it writes to
+`startpm.pid`. Its `runpm.txt` ends `done`, and `python3 tallypm.py` counts
+it. `./capped.sh c_pm_n_half.g c_pm_n_l.g c_pm_n_34.g` runs 4's three, and
+`./one.sh mixedn.g coq` and `./one.sh c_mixedn_half.g` a lemma and its
+control. The probe crate's `Cargo.toml` names `rcad-geom` by path, at the
+second lane's tree, with an empty `[workspace]` and edition 2024, and
+`RUSTUP_TOOLCHAIN=1.96.0 cargo build --release` built it against nalgebra
+0.35.0. `./target/release/subl | python3 subl.py`, in the crate's directory,
+reads it.
+
+The second lane ran `samepm.py` on this text from its tree's `target/`, with
+the run's directory and the probe's directory, `python3 samepm.py <464 file>
+<run directory> <probe directory>`.
+
+`samepm.py`'s whole print:
+
+```
+pointsub.py in the text is the file that ran: True
+controls.py in the text is the file that ran: True
+mixedn.g in the text is the file that ran: True
+mixeds.g in the text is the file that ran: True
+sum.g in the text is the file that ran: True
+startpm.sh in the text is the file that ran: True
+capped.sh in the text is the file that ran: True
+peak.sh in the text is the file that ran: True
+tallypm.py in the text is the file that ran: True
+src/main.rs in the text is the file that ran: True
+subl.py in the text is the file that ran: True
+samepm.py in the text is the file that ran: True
+pointsub.py and controls.py run from the text write 179 files; differing from the ones that ran: none
+c_mixedn_half.g written by the text's rule is the one that ran: True
+c_mixeds_half.g written by the text's rule is the one that ran: True
+c_sum_half.g written by the text's rule is the one that ran: True
+tallypm.py prints what the text says: True
+subl prints what the text says: True
+subl.py prints what the text says: True
+```
+
+The 179 are the 88 cases, their 88 controls, `controls.py`'s two and
+`casesm.txt`.
+
+`pointsub.py`, whole, as it ran:
 
 ```python
 """Write 464.34's zero sets of 464.19's point.g again with each product on a
@@ -25207,7 +25349,7 @@ if __name__ == "__main__":
     main()
 ```
 
-`controls.py`, beside it:
+`controls.py`, whole, as it ran:
 
 ```python
 """Write pm_n's further controls, which must each fail: c_pm_n_l.g, pm_n.g
@@ -25226,7 +25368,7 @@ open("c_pm_n_34.g", "w").write(
 print("wrote c_pm_n_l.g and c_pm_n_34.g")
 ```
 
-`mixedn.g`:
+`mixedn.g`, whole, as it ran:
 
 ```
 # Rounding a real P to an f64 is off by at most u (|P| + 2^-1022): here for
@@ -25246,7 +25388,7 @@ q = rnd(P);
 (q - P) / |P| -> ((q - P) / P) * (P / |P|);
 ```
 
-`mixeds.g`:
+`mixeds.g`, whole, as it ran:
 
 ```
 # Rounding a real P to an f64 is off by at most u (|P| + 2^-1022): here for
@@ -25263,11 +25405,7 @@ q = rnd(P);
 }
 ```
 
-Each control, `c_mixedn_half.g` and `c_mixeds_half.g`, is its lemma with the
-goal at `[-1b-54, 1b-54]` and the first comment line `# mixedn.g's control:
-the same at u / 2, which must fail.` (or `mixeds.g's`).
-
-`sum.g`:
+`sum.g`, whole, as it ran:
 
 ```
 # Rounding the sum or the difference of two doubles that is not zero
@@ -25287,13 +25425,7 @@ T = a - b; t = rnd(T);
 }
 ```
 
-`c_sum_half.g` is `sum.g` with both goals at `[-1b-54, 1b-54]` and the first
-comment line `# sum.g's control: the same at u / 2, which must fail.`
-
-The second lane's scripts, beside 464.34's `runpz.sh` and relay 3's
-`peak.sh` and `bg.sh` (`bg.sh startpm.log ./startpm.sh` started the run):
-
-`startpm.sh`:
+`startpm.sh`, whole, as it ran:
 
 ```bash
 #!/bin/bash
@@ -25307,7 +25439,7 @@ P=${P:-12} ./runpz.sh < casesm.txt > runpm.txt 2>&1
 echo done >> runpm.txt
 ```
 
-`capped.sh`:
+`capped.sh`, whole, as it ran:
 
 ```bash
 #!/bin/bash
@@ -25321,7 +25453,20 @@ for f in "$@"; do
 done
 ```
 
-`tallypm.py`, 464.34's `tallypz.py` with these names and the two averages:
+`peak.sh`, whole, as it ran:
+
+```bash
+#!/bin/bash
+# Run one Gappa script as one.sh does, without Coq, and print its exit, its
+# time and its peak memory. Run as: ./peak.sh <name>.g
+cd "$(dirname "$0")"
+g=/nix/store/0ihij0570a325g02l4wnf0idk8vqxr9b-gappa-1.8.0/bin/gappa
+n=${1%.g}
+/usr/bin/time -f "$n exit %x %es peak %M KB" timeout 600 "$g" -Eprecision=200 "$1" > "$n.out" 2> "$n.time"
+tail -1 "$n.time"
+```
+
+`tallypm.py`, whole, as it ran:
 
 ```python
 """Count what runpm.txt and the files beside it say of each case in casesm.txt
@@ -25452,11 +25597,7 @@ print("each best within 0.01% of its case's two averages added:",
       all(abs(bests[n] - total(n)) <= 1e-4 * total(n) for n in bests))
 ```
 
-The probe crate `subl`, built outside the tree with `RUSTUP_TOOLCHAIN=1.96.0
-cargo run --release --manifest-path <dir>/Cargo.toml` and read as
-`./target/release/subl | python3 subl.py`. Its `Cargo.toml` names
-`rcad-geom` by path, with an empty `[workspace]`, edition 2024; it built
-nalgebra 0.35.0. Its `src/main.rs`:
+`src/main.rs`, whole, as it ran:
 
 ```rust
 //! Turn points whose largest coordinate L is below the normals by 30 degrees
@@ -25495,7 +25636,7 @@ fn main() {
 }
 ```
 
-It printed:
+`subl`'s whole print:
 
 ```
 turn 9.659258262890683e-1 0e0 0e0 2.5881904510252074e-1
@@ -25507,7 +25648,7 @@ point 3 11258999068426240 0 0 -> 10353947156035968 6755399441055744 0
 POINT_ROUNDOFF 3.9968028886505635e-15
 ```
 
-`subl.py`:
+`subl.py`, whole, as it ran:
 
 ```python
 """Read subl's print on stdin and work each moved point's x and y without
@@ -25556,8 +25697,11 @@ for line in lines:
               f" past 36u * L: {err > 36 * U * big}")
 ```
 
-Its whole print (the nearest-double figure is wrong for point 3, whose exact
-`x` is above `2⁻¹⁰²¹`, where doubles are `2⁻¹⁰⁷³` apart):
+`subl.py`'s whole print, with `subl`'s on its input. Its nearest-double
+figure takes doubles to be `2⁻¹⁰⁷⁴` apart, which they are below `2⁻¹⁰²¹`.
+Point 3's exact `x` is above that, where they are `2⁻¹⁰⁷³` apart, but the
+code's `x`, a double, is within `0.002163 · 2⁻¹⁰⁷⁴` of it, so it is the
+nearest double there and the figure holds:
 
 ```
 point 0 L = 3 * 2^-1074 x: code 2, exact 2.59808 (* 2^-1074), off by 1.796e+15u * L, 0.5981 * 2^-1074; nearest double off by 1.207e+15u * L; past 36u * L: True
@@ -25568,4 +25712,85 @@ point 2 L = 1000 * 2^-1074 x: code 866, exact 866.025 (* 2^-1074), off by 2.288e
 point 2 L = 1000 * 2^-1074 y: code 500, exact 500 (* 2^-1074), off by 0.2793u * L, 3.101e-14 * 2^-1074; nearest double off by 0.2793u * L; past 36u * L: False
 point 3 L = 1.35108e+16 * 2^-1074 x: code 1.17007e+16, exact 1.17007e+16 (* 2^-1074), off by 0.001442u * L, 0.002163 * 2^-1074; nearest double off by 0.001442u * L; past 36u * L: False
 point 3 L = 1.35108e+16 * 2^-1074 y: code 6.7554e+15, exact 6.7554e+15 (* 2^-1074), off by 0.2793u * L, 0.4189 * 2^-1074; nearest double off by 0.2793u * L; past 36u * L: False
+```
+
+`samepm.py`, whole, as it ran:
+
+```python
+"""Check 464.35's text against the files that ran: each script it holds whole
+is byte for byte the file in the run's directory, pointsub.py and controls.py
+run again from the text write the scripts that ran, the three lemma controls
+are their lemmas as the text says, tallypm.py prints what the text says it
+printed, and the probe prints what the text says it printed.
+Run as: python3 samepm.py <464 file> <run directory> <probe directory>"""
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+section_file, run_dir, probe_dir = sys.argv[1:4]
+text = open(section_file).read()
+start = text.index("\n### 464.35 ")
+end = text.find("\n### ", start + 1)
+section = text[start:end if end >= 0 else len(text)].splitlines()
+
+# A block's caption is the last paragraph before its opening fence, across the
+# blank line between them.
+blocks = []
+caption, para, inside, body, fresh = None, [], False, [], True
+for line in section:
+    if line.startswith("```"):
+        if inside:
+            blocks.append((caption, "\n".join(body) + "\n"))
+            inside, body = False, []
+        else:
+            caption, para, inside = " ".join(para), [], True
+        fresh = True
+    elif inside:
+        body.append(line)
+    elif line.strip():
+        if fresh:
+            para, fresh = [], False
+        para.append(line)
+    else:
+        fresh = True
+
+WHOLE = re.compile(r"^`([^`]+)`, whole, as it ran:$")
+PRINT = re.compile(r"^`([^`]+)`'s whole print")
+wholes = {m[1]: b for c, b in blocks if (m := WHOLE.match(c))}
+prints = {m[1]: b for c, b in blocks if (m := PRINT.match(c))}
+here = {"samepm.py": os.path.abspath(__file__), "src/main.rs": os.path.join(probe_dir, "src/main.rs"),
+        "subl.py": os.path.join(probe_dir, "subl.py")}
+for name, body in wholes.items():
+    path = here.get(name, os.path.join(run_dir, name))
+    print(f"{name} in the text is the file that ran: {open(path).read() == body}")
+
+work = tempfile.mkdtemp()
+for name in ("pointsub.py", "controls.py"):
+    open(os.path.join(work, name), "w").write(wholes[name])
+for name in ("pointsub.py", "controls.py"):
+    subprocess.run([sys.executable, name], cwd=work, check=True, capture_output=True)
+written = sorted(f for f in os.listdir(work) if f.endswith(".g") or f == "casesm.txt")
+differ = [f for f in written if open(os.path.join(work, f)).read() != open(os.path.join(run_dir, f)).read()]
+print(f"pointsub.py and controls.py run from the text write {len(written)} files; "
+      f"differing from the ones that ran: {differ or 'none'}")
+
+for lemma in ("mixedn", "mixeds", "sum"):
+    lines = wholes[lemma + ".g"].splitlines(keepends=True)
+    rest = lines[next(i for i, l in enumerate(lines) if not l.startswith("#")):]
+    control = f"# {lemma}.g's control: the same at u / 2, which must fail.\n" + "".join(rest).replace(
+        "[-1b-53, 1b-53]", "[-1b-54, 1b-54]")
+    same = control == open(os.path.join(run_dir, f"c_{lemma}_half.g")).read()
+    print(f"c_{lemma}_half.g written by the text's rule is the one that ran: {same}")
+
+tally = subprocess.run([sys.executable, os.path.join(run_dir, "tallypm.py")], capture_output=True, text=True,
+                       check=True).stdout
+print(f"tallypm.py prints what the text says: {tally == prints['tallypm.py']}")
+probe = subprocess.run([os.path.join(probe_dir, "target/release/subl")], capture_output=True, text=True,
+                       check=True).stdout
+print(f"subl prints what the text says: {probe == prints['subl']}")
+read = subprocess.run([sys.executable, os.path.join(probe_dir, "subl.py")], input=probe, capture_output=True,
+                      text=True, check=True).stdout
+print(f"subl.py prints what the text says: {read == prints['subl.py']}")
 ```
