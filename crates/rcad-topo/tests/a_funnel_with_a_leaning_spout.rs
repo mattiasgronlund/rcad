@@ -26,8 +26,11 @@
 //! on the line the caps cross in. Since row Q3124 it orders points along the
 //! loop and along each branch round the ruled cone's axis, and since row Q3133
 //! it orders two of the four points along a branch that reaches each cone's
-//! wall there by an exact sign too, but every fuse of the pair is still
-//! refused, now finding a point inside a piece of a face a rounding across.
+//! wall there by an exact sign too. Since row Q3168 it places two specks of
+//! the leaning solid a rounding across by a flat surface one of their sides
+//! runs along, but every fuse of the pair is still refused, now after every
+//! piece is placed: five for an answer too fine to compute in beside its
+//! coordinates, and one meshing the answer.
 //! With the leaning one ten high the caps' rims are apart. Every fuse of that
 //! pair was refused marching along that branch until row Q3134, which walks a
 //! run between two corners on a branch one straight line of a cone at a time,
@@ -160,22 +163,49 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 /// `4e-16` below the leaning cap's plane, and the same reading tells the
 /// leaning cone's wall that side as well, where its box could not.
 ///
+/// From Q3133 until row Q3168 every fuse was refused finding a point inside a
+/// piece of a face whose three corners lie in boxes about `1e-14` across near
+/// `(−3.9541, −0.6045, 8)`, two of them on `z = 8`, and a second piece was
+/// placed by nothing near `(3.9541, −0.6045, 8)`. Both are specks of the
+/// leaning solid. The first is a piece of its cap, with its sides along the
+/// leaning cone, along `z = 8` with its material above, and along the upright
+/// cone; the second is a piece of its wall, with its sides along the leaning
+/// cap's plane, along `z = 8` with its material above, and along the upright
+/// cone. Since Q3168 `fuse/select.rs` places each outside the upright cone by
+/// the plane `z = 8` one of its sides runs along, since the whole upright cone
+/// is below that plane or on it.
+///
 /// **Every fuse is still refused**, under every rule both ways round, now
-/// finding a point inside a piece of a face whose three corners lie in boxes
-/// about `1e-14` across near `(−3.9541, −0.6045, 8)`, two of them on `z = 8`.
+/// after every piece is placed: the union both ways round, the intersection
+/// both ways round and the leaning cone less the upright one because the
+/// answer's coordinates span `2⁵⁵` times its smallest feature, and the upright
+/// cone less the leaning one meshing the answer, because a face's boundary
+/// crosses itself. Placed inside instead, as a probe, the two specks leave
+/// every fuse refused at a span of `2⁵³`, so they are not the answer's only
+/// feature that small.
 #[test]
-fn two_pointed_cones_one_leaning_off_the_other_are_refused_a_point_inside_a_piece_a_rounding_across()
- {
+fn two_pointed_cones_one_leaning_off_the_other_are_refused_too_wide_a_range_or_meshing_the_answer()
+{
     assert_eq!(
         every_fuse_of(two_pointed_cones).refusals(),
-        [[Some(NO_POINT_INSIDE_A_PIECE_A_ROUNDING_ACROSS); 2]; 3]
+        [
+            [Some(TOO_WIDE_A_RANGE); 2],
+            [Some(TOO_WIDE_A_RANGE); 2],
+            [
+                Some(THE_BOUNDARY_CROSSES_ITSELF_AT_CORNER_187),
+                Some(TOO_WIDE_A_RANGE)
+            ],
+        ]
     );
 }
 
-/// What a fuse is refused with where no point is found inside a piece of a
-/// face whose corners are a rounding apart.
-const NO_POINT_INSIDE_A_PIECE_A_ROUNDING_ACROSS: &str =
-    "could not settle 1 decisions the answer depends on: a point inside a piece of a face";
+/// What a fuse is refused with where the answer's coordinates span too wide a
+/// range beside its smallest feature to compute in.
+const TOO_WIDE_A_RANGE: &str = "the model is broken: coordinates span a range of 3.602879701896397e16, which is too wide to compute in";
+
+/// What the upright cone less the leaning one is refused with where a face of
+/// the answer, drawn, crosses itself.
+const THE_BOUNDARY_CROSSES_ITSELF_AT_CORNER_187: &str = "a face of this solid could not be cut into triangles: the boundary crosses itself, at the side leaving corner 187";
 
 /// **The same two, the leaning one ten high**, row Q2917, so the two caps'
 /// rims are apart. `intersect` names the crossing as one loop and two
