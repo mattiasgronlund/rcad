@@ -26878,3 +26878,129 @@ each best within 0.01% of its case's four parts added: True
 
 The 12 of the 44 that fall short of `119.2820u` past its fourth decimal are
 the cases with two parts of `v` zero, `sq_v0v1` to `sq_m2v1v2`.
+
+**Relay 4, on 2026-11-05: still a draft.** The run directory's `vm_n.g` was
+written again at 17:13:49 UTC, after relay 1's `peakv.sh` run at 17:09:39, by
+`vectorsub.py`, which was last written at 17:09:17. So relay 4 copied
+`peakv.sh` and its four scripts into `peak/` in the run directory and ran them
+again at 17:34 UTC, `./peak/peakv.sh vm_n.g c_vm_n_half.g vm_v0v1n0n1n2.g
+c_vm_v0v1n0n1n2_half.g`. Each figure it printed is within 2% of relay 1's:
+
+```text
+vm_n exit 0 6.58s peak 128404 KB
+c_vm_n_half exit 1 15.14s peak 153760 KB
+vm_v0v1n0n1n2 exit 0 0.01s peak 6556 KB
+c_vm_v0v1n0n1n2_half exit 1 0.17s peak 6760 KB
+```
+
+No `.time` file in the run directory or in `peak/` has the line `Command
+terminated` (`grep -l`). `sq_m0m1wv2.out` prints `VN` in
+`[2251799813685245b-51, 2251799813685251b-51]`, which is within `12u` of one,
+and `sq_m0m1v0v1.out` prints `F2` within `5b-50`, which is `40u`. `git diff
+4b642567 c40cc82e` was read again, with the same result as relay 3's. Left:
+the rewrite in 464.35's shape, `samevm.py`'s run and its whole print, the
+pointers, and what this leaves. `samevm.py` has been written but not run. It
+expects the captions of that rewrite: `` `X`, whole, as it ran: ``, `` `X`'s
+whole print: ``, `` `peakv.sh` printed: `` and `` `peakv.sh` printed again
+``.
+
+`samevm.py`, as written, not yet run:
+
+```python
+"""Check 464.36's text against the files that ran: each script it holds whole
+is byte for byte the file in the run's directory; the run's one.sh, runpz.sh,
+square.g, vector.g and pointsub.py are 464.13's, 464.34's, 464.20's and
+464.35's blocks; vectorsub.py and squarezero.py, run again from the text
+beside 464.20's square.g, print what the text says and write the scripts that
+ran; peakv.sh printed what the text says, both times; and tallyvm.py and
+tallysq.py print what the text says.
+Run as: python3 samevm.py <464 file> <run directory>"""
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+section_file, run_dir = sys.argv[1:3]
+text = open(section_file).read()
+
+
+def blocks_of(number):
+    """Each block of subsection 464.<number>, with its caption: the last
+    paragraph before its opening fence, across the blank line between them."""
+    start = text.index(f"\n### 464.{number} ")
+    end = text.find("\n### ", start + 1)
+    blocks = []
+    caption, para, inside, body, fresh = None, [], False, [], True
+    for line in text[start:end if end >= 0 else len(text)].splitlines():
+        if line.startswith("```"):
+            if inside:
+                blocks.append((caption, "\n".join(body) + "\n"))
+                inside, body = False, []
+            else:
+                caption, para, inside = " ".join(para), [], True
+            fresh = True
+        elif inside:
+            body.append(line)
+        elif line.strip():
+            if fresh:
+                para, fresh = [], False
+            para.append(line)
+        else:
+            fresh = True
+    return blocks
+
+
+def block(number, caption):
+    """The one block of 464.<number> whose caption starts with the words given."""
+    found = [b for c, b in blocks_of(number) if c.startswith(caption)]
+    assert len(found) == 1, (number, caption, len(found))
+    return found[0]
+
+
+def run(*args, **kwargs):
+    return subprocess.run([sys.executable, *args], capture_output=True, text=True, check=True, **kwargs).stdout
+
+
+def read(*parts):
+    return open(os.path.join(*parts)).read()
+
+
+WHOLE = re.compile(r"^`([^`]+)`, whole, as it ran:$")
+PRINT = re.compile(r"^`([^`]+)`'s whole print")
+blocks = blocks_of(36)
+wholes = {m[1]: b for c, b in blocks if (m := WHOLE.match(c))}
+prints = {m[1]: b for c, b in blocks if (m := PRINT.match(c))}
+for name, body in wholes.items():
+    path = os.path.abspath(__file__) if name == "samevm.py" else os.path.join(run_dir, name)
+    print(f"{name} in the text is the file that ran: {read(path) == body}")
+
+for name, number, caption in (("one.sh", 13, "`one.sh`, whole:"), ("runpz.sh", 34, "`runpz.sh`, whole,"),
+                              ("square.g", 20, "`square.g`:"), ("vector.g", 20, "`vector.g`:"),
+                              ("pointsub.py", 35, "`pointsub.py`, whole, as it ran:")):
+    print(f"{name} in the run directory is 464.{number}'s: {read(run_dir, name) == block(number, caption)}")
+
+work = tempfile.mkdtemp()
+open(os.path.join(work, "square.g"), "w").write(block(20, "`square.g`:"))
+for name in ("vectorsub.py", "squarezero.py"):
+    open(os.path.join(work, name), "w").write(wholes[name])
+    said = run(os.path.join(work, name)) == prints[name]
+    print(f"{name} run from the text prints what the text says: {said}")
+written = sorted(f for f in os.listdir(work) if (f.endswith(".g") and f != "square.g") or f.startswith("cases"))
+differ = [f for f in written if read(work, f) != read(run_dir, f)]
+print(f"vectorsub.py and squarezero.py run from the text write {len(written)} files; "
+      f"differing from the ones that ran: {differ or 'none'}")
+others = sorted(set(f for f in os.listdir(run_dir) if f.endswith(".g")) - set(written))
+print(".g files in the run directory that neither writes:", ", ".join(others) or "none")
+
+PEAK = ("vm_n", "c_vm_n_half", "vm_v0v1n0n1n2", "c_vm_v0v1n0n1n2_half")
+for where, caption in ((run_dir, "`peakv.sh` printed:"), (os.path.join(run_dir, "peak"), "`peakv.sh` printed again")):
+    lines = "".join(read(where, n + ".time").splitlines(keepends=True)[-1] for n in PEAK)
+    same = lines == block(36, caption)
+    print(f"{caption} is the last line of each .time in {os.path.relpath(where, run_dir)}: {same}")
+same = all(read(run_dir, "peak", f) == read(run_dir, f) for f in [n + ".g" for n in PEAK] + ["peakv.sh"])
+print("peakv.sh and the four scripts in peak are the run directory's:", same)
+
+for name in ("tallyvm.py", "tallysq.py"):
+    print(f"{name} prints what the text says: {run(os.path.join(run_dir, name)) == prints[name]}")
+```
