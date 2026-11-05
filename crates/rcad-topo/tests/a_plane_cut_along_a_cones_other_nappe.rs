@@ -1042,11 +1042,9 @@ fn a_turned_corner_up_cube_centred_three_and_a_half_above_a_steep_pointed_cones_
 /// Twenty slabs `14` deep across the steep cone's axis, each `a_slab`'s own
 /// 2 by 12 box turned `0`, `0.5`, `1` or `1.5` about it. At `low = −14` the
 /// slab's top runs through the apex, a touch ([`APART`]), and every rule
-/// answers right every turn. Every other slab answers every rule right turned
-/// `0` and `1.5`, with the cone in two solids either side of the slab from
-/// `low = −8` to `0`, and the intersection and the block less the cone answer
-/// right every turn. Turned `0.5` and `1` the union and the cone less the block
-/// refuse `ACurvedFaceGoesRightRoundWithNoSeam`.
+/// answers right every turn. Every other slab answers every rule right every
+/// turn too, with the cone in two solids either side of the slab from
+/// `low = −8` to `0`.
 ///
 /// **Turned `1.5` the cone less the block keeps one solid more than the ideal
 /// slab would leave.** The stored end at `−y` stands `3.6e−16` inside the
@@ -1055,9 +1053,13 @@ fn a_turned_corner_up_cube_centred_three_and_a_half_above_a_steep_pointed_cones_
 /// [`the_steep_cone_less_a_slab_turned_one_and_a_half_keeps_a_lens_past_the_end_its_rim_comes_inside`]).
 /// Turned `0.5` and `1` the end at `+y` stands inside the rim the same way
 /// ([`which_end_of_a_turned_slab_the_steep_cones_rim_comes_inside_is_decided_exactly`]),
-/// so the two rules that refuse there have a lens to find too.
+/// and the cone less the block keeps a lens past that end too.
 ///
-/// Until Q1837's fix to `walk.rs`, which keeps the arc of a cap rim it holds
+/// Until Q3196's fix to `mesh.rs`, which sums the area a loop encloses in its
+/// face's chart about the loop's first corner rather than the chart's origin,
+/// the union and the cone less the block refused
+/// `ACurvedFaceGoesRightRoundWithNoSeam` turned `0.5` and `1` from every `low`
+/// but `−14`: eight fuses in each test. Until Q1837's fix to `walk.rs`, which keeps the arc of a cap rim it holds
 /// when the other arc cannot be told, the union and the cone less the block
 /// refused `side of a half-space` from `−14` turned `0.5`, `1` and `1.5`, and
 /// from every other `low` turned `1.5`: fourteen fuses (Q1743). Until Q1537 the
@@ -1066,23 +1068,23 @@ fn a_turned_corner_up_cube_centred_three_and_a_half_above_a_steep_pointed_cones_
 /// other three turns among them (§35.6). This test holds the slabs from
 /// `−14`, `−8` and `−3`, and the next those from `0` and `2`.
 #[test]
-fn a_slab_fourteen_deep_from_below_the_apex_across_a_steep_pointed_cone_answers_right_or_refuses() {
+fn a_slab_fourteen_deep_from_below_the_apex_across_a_steep_pointed_cone_answers_every_rule_right() {
     assert_eq!(
         tally_on_every_second_point(&slabs(THE_STEEP_CONE, &[-14.0, -8.0, -3.0])),
         Tally {
-            right: 40,
-            refused: [("ACurvedFaceGoesRightRoundWithNoSeam", 8)].into()
+            right: 48,
+            refused: BTreeMap::new()
         }
     );
 }
 
 #[test]
-fn a_slab_fourteen_deep_from_the_apex_up_across_a_steep_pointed_cone_answers_right_or_refuses() {
+fn a_slab_fourteen_deep_from_the_apex_up_across_a_steep_pointed_cone_answers_every_rule_right() {
     assert_eq!(
         tally_on_every_second_point(&slabs(THE_STEEP_CONE, &[0.0, 2.0])),
         Tally {
-            right: 24,
-            refused: [("ACurvedFaceGoesRightRoundWithNoSeam", 8)].into()
+            right: 32,
+            refused: BTreeMap::new()
         }
     );
 }
