@@ -1613,9 +1613,20 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_cross_in_corners_
 /// `rcad-geom` parts them by, built on the exact numbers `E`'s sign is read off
 /// (Q3144), and the way out of each half is read on its own side of `y = 0`.
 ///
-/// **Every fuse is refused `CannotTellTheCellsOfAFaceApart`**: with the upright
-/// frustum first on its side, the upright cone, and with the lying one first on
-/// the lying frustum's near cap, `x + ε·z = 1`.
+/// With the lying frustum first, each fuse was refused
+/// `CannotTellTheCellsOfAFaceApart` on that frustum's near cap, `x + ε·z = 1`.
+/// The cap's rim is walked round from `(1.0000000000000002, 0,
+/// −0.9999999999999998)`, inside the box of the seam corner, and no node was
+/// named for the start of a loop a plane cuts a cone in. So the order along the
+/// rim between that corner and the meets near `(1 − ε, −2.1e−8, 1)` was
+/// undecided, with an enclosure of `1.14e−13` measured as an area. The policy
+/// read that as nought, and the fold left a cell across its own arc (Q3139's
+/// trace). The start of such a loop is named now (Q3145).
+///
+/// **Every fuse is refused**: with the upright frustum first
+/// `CannotTellTheCellsOfAFaceApart` on its side, the upright cone, and with the
+/// lying one first `TwoCurvesTouchWithoutCrossing` on its side, the lying cone
+/// (Q3146).
 #[test]
 fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_on_each_cap_as_one_point_under_a_tolerant_policy()
  {
@@ -1634,8 +1645,16 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_
             .fuse(&arguments, &tools, rule, &policy, &mut log)
             .map(|answer| answer.solids().to_vec());
         let what = format!("{rule:?} (first first: {first_first}): {said:?}");
-        let Err(rcad_topo::Error::CannotTellTheCellsOfAFaceApart { face }) = said else {
-            panic!("{what}");
+        let (face, axis) = if first_first {
+            let Err(rcad_topo::Error::CannotTellTheCellsOfAFaceApart { face }) = said else {
+                panic!("{what}");
+            };
+            (face, Vector::new(0.0, 0.0, 1.0))
+        } else {
+            let Err(rcad_topo::Error::TwoCurvesTouchWithoutCrossing { face }) = said else {
+                panic!("{what}");
+            };
+            (face, Vector::new(1.0, 0.0, f64::EPSILON))
         };
         let surface = model
             .solids()
@@ -1643,15 +1662,15 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_
             .find(|placed| placed.key() == face)
             .expect("the refusal names a face of one of the two frustums")
             .surface();
+        let Surface::Cone(side) = surface else {
+            panic!("{what}: refused on {surface:?}");
+        };
+        assert_eq!(
+            side.axis().direction(),
+            axis,
+            "{what}: refused on {surface:?}"
+        );
         if first_first {
-            let Surface::Cone(side) = surface else {
-                panic!("{what}: refused on {surface:?}");
-            };
-            assert_eq!(
-                side.axis().direction(),
-                Vector::new(0.0, 0.0, 1.0),
-                "{what}: refused on {surface:?}"
-            );
             let narrowed: Vec<&Record> = log
                 .records()
                 .iter()
@@ -1672,15 +1691,6 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_
                 assert_eq!(record.outcome(), Decision::Zero, "{what}: {record:#?}");
                 assert!(record.enclosure() <= 3.2e-16, "{what}: {record:#?}");
             }
-        } else {
-            let Surface::Plane(near) = surface else {
-                panic!("{what}: refused on {surface:?}");
-            };
-            assert_eq!(
-                (near.normal(), near.offset()),
-                (-Vector::new(1.0, 0.0, f64::EPSILON), -1.0),
-                "{what}: refused on {surface:?}"
-            );
         }
     }
 }
