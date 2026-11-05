@@ -127,6 +127,8 @@ pub const POINT_ALONG_A_CROSSING_ROUNDOFF: f64 = 256.0 * f64::EPSILON;
 /// is not a bound for another, and borrowing it would be the paragraph §15.6
 /// refuses.
 ///
+/// # Where the 64 comes from
+///
 /// Written with `u = f64::EPSILON / 2`, `L` the size below, `h` for how far the
 /// apex stands off the plane, `t` for the cone's slope, and
 ///
@@ -138,68 +140,103 @@ pub const POINT_ALONG_A_CROSSING_ROUNDOFF: f64 = 256.0 * f64::EPSILON;
 /// `vertex = foot − and·(C/K)` and `bend = −and/K`. `L` is the largest of the
 /// vertex's own coordinates, the apex's, `|K|`, `|C/K|` and `|h|`, which is what
 /// [`how_big_this_is`] is handed — and `|K|` and `|C/K|` are in that list
-/// **because this derivation needs them there**, not for tidiness.
+/// **because the proof below needs them there**, not for tidiness.
 ///
-/// - The **foot** is a dot product, a division and three scaled subtractions:
-///   about six roundings on terms under `2L`, so under `12u·L`.
-/// - `n̂·ŵ` and `and·ŵ` are each an exactly-summed dot over a square root of a
-///   dot: about ten roundings apiece, and both are ratios no bigger than one
-///   with nothing to cancel, so each is right to a relative `10u`.
-/// - **`K`** is five more products on top of those: relative `25u`. It is a
-///   length, `|K| = 2|h|t`, and `L` covers it.
-/// - **`C`** is where the cancellation is. `(1 + t²)(n̂·ŵ)²` is `t² + E` and `E`
-///   is zero on the parabola, so the bracket `1 − (1 + t²)(n̂·ŵ)²` is a
-///   difference that loses its leading digits when `t` is near one. Its
-///   *absolute* error stays under `4u·t²`, so `C` is out by under `6u·h²t²` —
-///   and that is the term the division turns into a position:
-///   `6u·h²t²/|K| = 3u·|h|t`, which is `1.5u·|K|` and so under `2u·L`.
-/// - **`C/K`** also carries `K`'s own relative `25u`, on a term `L` covers:
-///   under `25u·L`. Adding the vertex's own two roundings per coordinate gives
-///   the vertex under `43u·L` all told.
-/// - **`bend`** is `−and/K`: relative `27u`, on a vector of length `1/|K|`.
-/// - **Evaluating** `vertex + across·s + bend·s²` over `|s| ≤ |K|` puts both
-///   moving terms at no more than `|K| ≤ L`, so it is five roundings per
-///   coordinate on terms under `3L` — under `15u·L` — plus `across`'s own
-///   relative `4u` and `bend`'s `27u` on terms under `L`.
-/// - **The parameter** `s` is worked out as `from + (to − from)·step/steps`,
-///   three roundings on a term under `|K|`; the curve moves by at most
-///   `‖across + 2·bend·s‖ ≤ 3` times that, so under `9u·L`.
+/// On the parabola, Gappa proves that a point `Parabola::at` hands back is
+/// within `116.05u·L` of the true parabola's point at the same `s`, for slopes
+/// `t` from `2⁻⁵⁰⁰` to 5, and Coq checks each of the proof's five scripts,
+/// modulo their hints (`docs/decisions.md` §464.23). The constant is `128u·L`, which leaves
+/// `11.95u·L` over. The `116.05u` is four kinds of term:
 ///
-/// That comes to about `98u·L`, which is `49 · f64::EPSILON · L`. The constant
-/// is `64 · f64::EPSILON`, a factor of 1.3 on top — **and no more, because a
-/// safety factor nothing measures is a guess** (§15.6). There is no `cos` or
-/// `sin` here to buy a libm's slack for; `cosh` and `sinh` on the hyperbola
-/// branch are the one place that does, and the two roundings the parabola does
-/// not spend on `C`'s cancellation pay for them.
+/// - **Ten roundings of a point**: the foot's two, the vertex's two, `bend`'s
+///   own and the five in `at`. Each costs `u` times the length of what it
+///   rounds, which is up to `√3·L` for a point whose coordinates `L` covers
+///   and more for a sum of such terms, so they come to `(10 + 4√3)u·L`, which
+///   is `16.93u·L`.
+/// - **The foot's quotient** `reach / ‖n‖²` moves the foot along the normal by
+///   `h` times its own relative error: `3.125u·L`.
+/// - **The two directions**: `and` off by `4u` on `C/K + s²/K`, which is under
+///   `2L`, so `8u·L`, and `across` off by `4u` on `s`, so `4u·L`.
+/// - **The scalars' share** along `and`: what `C/K` and `1/K`, as worked out,
+///   put into the point against their true values. Over `|K|`, or over `|C/K|`
+///   for slopes under `7/16`, Gappa bounds it by `84u`, and both lengths are in
+///   `L`, so `84u·L`. `C`'s cancellation near a slope of one, the products that
+///   make `K` and both divisions by `K` are all in this term.
 ///
-/// **This is the parabola's chain, and the worst a search finds is a
+/// **`and·ŵ` is a plain `f64` dot**, nalgebra's, where `bend_up` works it out
+/// in [`what_a_plane_cuts_out_of_a_cone`], and not an exactly-summed one. The
+/// proof takes the `and·w` worked out within `7.5u·‖w‖` of the true one: the
+/// `4u` on `and`, the dot's own `3u`, and `0.5u` over. On a parabola `|and·w|`
+/// is `‖w‖/√(1 + t²)`, so that is a relative `7.5u·√(1 + t²)`, which grows
+/// with the slope and is `38u` at a slope of 5. It goes into `K`, and so into
+/// the scalars' share.
+///
+/// **An error in `s` does not come into it.** The proof compares the point at
+/// `s` with the true parabola's point at the same `s`, so getting `s` wrong
+/// slides the point *along* the curve and not off it, as getting the angle
+/// wrong does under [`POINT_ALONG_A_CROSSING_ROUNDOFF`].
+///
+/// **The proof stands on four things it does not prove:**
+///
+/// - The `4u` on each of `and` and `across`, which is what
+///   [`two_directions_in`] is taken to give. On a parabola the cross product
+///   both are built from is `1/√(1 + t²)` as long as `‖n‖‖w‖`, so their error
+///   may grow with the slope, and nothing has measured it (Q2851).
+/// - `|s|` no more than `|K|`, give or take `2⁻⁴⁰` of it. Where a run names no
+///   end it is walked out to `1/‖bend‖` that way, which is `|K|` but for
+///   roundings. Where it names one it is walked to that end, nothing holds
+///   that `s` to `|K|`, and the proof says nothing of the points past it
+///   (Q2855).
+/// - The plane lying exactly along a ruling, `E = 0`. A leaning that is not
+///   zero but rounds to `0.0` takes the parabola branch all the same, and is
+///   not modelled.
+/// - Every number normal. `h`, `‖n‖` and `‖w‖` are each taken in `[1, 2]`;
+///   scaling by a power of two puts any of them there and leaves the share as
+///   it is while every value stays normal, but `h²` is not normal for `|h|`
+///   under `2⁻⁵¹¹`. The proof starts at a slope of `2⁻⁵⁰⁰`.
+///
+/// **Past a slope of 5 the proof does not reach.** The other three terms leave
+/// `95.947u` for the scalars' share, and Gappa's bound on that share, with no
+/// split, is `76.21u` just under 5, `110.33u` at 8, `200.95u` at 16 and
+/// `381.12u` at 32. A straight line through the first two passes `95.947u` at
+/// a slope of about 6.7, which is a line through two probes and not a probe
+/// there. That is a proof that does not reach that far, not a kernel that
+/// fails there: the test below walks the parabola at slopes 6 to 32 as well.
+///
+/// **An older count here came to about `98u·L`, and it is not what is
+/// proved.** It took `and·ŵ` for an exactly-summed dot right to `10u`, charged
+/// a rounding of a point `u·L`, put `C`, `C/K` and `bend` at `54u·L` between
+/// them where Gappa's range for the share that holds all three reaches
+/// `80.52u` just above a slope of `7/16`, and charged `9u·L` for the error in
+/// `s` that does not come into it.
+///
+/// **This is the parabola's proof, and the worst a search finds is a
 /// hyperbola.** `cosh`/`sinh` and the `centre + out·cosh σ + across·sinh σ`
-/// evaluation are not counted above; they get the one sentence at the end of the
-/// last bullet and no term count of their own. So §15.6's "a published bound
-/// needs a derivation" is, as this stands, satisfied for the shape that is *not*
-/// the measured worst case. That is a **known hole in the derivation, not a
-/// claim that the hyperbola is cheaper** — writing its chain out is work this
-/// note does not do.
+/// evaluation are counted nowhere, and proving them is Q2697's. So §15.6's "a
+/// published bound needs a derivation" is, as this stands, satisfied for the
+/// shape that is *not* the measured worst case. That is a **known hole in the
+/// derivation, not a claim that the hyperbola is cheaper**.
 ///
 /// # What the test can and cannot fail on, with the number
 ///
 /// `every_point_along_an_endless_bend_is_on_both_surfaces_inside_the_published_bound`
-/// is the test §15.6 asks for. Over 158,623 walks and 8,462,349 points it finds
+/// is the test §15.6 asks for. Over 162,250 walks and 9,228,093 points it finds
 /// a worst of **0.075 of this bound** — about `4.8 · ε · L`, on a random plane
 /// against a random cone.
 ///
 /// **So halving this constant would not fail that test**, and the reason to
-/// believe that is a table rather than a paragraph. Six families were tried,
+/// believe that is a table rather than a paragraph. Seven families were tried,
 /// each on top of the last, and the test prints what each one reached: sweeping
-/// the slope and the height alone gets 0.0392; adding the deflection over 21
-/// octaves, slopes off the eighths grid, planes barely steeper than a ruling,
-/// scales that are not powers of two and finally 120,000 random pairs walks it
-/// up to 0.0750. **Five families the old sweep never varied moved the number by
-/// 1.9x between them**, so the honest reading is that a search pins the constant
-/// to within a factor of about thirteen, not that it is tight. §15.6 says the
-/// rest in as many words — *"that test cannot show a bound is tight — rounding
-/// errors cancel"* — and what makes `64 · ε` a bound here is the derivation
-/// above and not the search.
+/// the slope and the height alone gets 0.0392, and the parabola at slopes 6 to
+/// 32, where the proof above does not reach, leaves it there; adding the
+/// deflection over 21 octaves, slopes off the eighths grid, planes barely
+/// steeper than a ruling, scales that are not powers of two and finally
+/// 120,000 random pairs walks it up to 0.0750. **Five families the old sweep
+/// never varied moved the number by 1.9x between them**, so the honest reading
+/// is that a search pins the constant to within a factor of about thirteen, not
+/// that it is tight. §15.6 says the rest in as many words — *"that test cannot
+/// show a bound is tight — rounding errors cancel"* — and what makes `64 · ε` a
+/// bound here is the proof above, as far as it reaches, and not the search.
 ///
 /// **The measurement itself had to be fixed before the search could be
 /// widened, and the old 0.049 was an artefact of it.** The harness read the
