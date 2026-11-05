@@ -312,6 +312,107 @@ mod tests {
         assert!(product_is_normal(tiny, 0.0));
     }
 
+    /// [`product_is_normal`]'s doc, run on the shape it is about: a product
+    /// below the normals that is multiplied again. This is decisions.md §12.2's
+    /// tetrahedron, `a = (-3, 0, 2^1000)`, `b = (11s, s, 0)`, `c = (9s, s,
+    /// 2^462)` and `d` the origin, with `s = 2^-538`. Its determinant is
+    /// `-2^-76`. Every product `orient3d`'s level 1 forms is zero but the two of
+    /// the first minor, which the height `adz = 2^1000` multiplies, and `adx ·
+    /// bdy = -3s`, which `cdz = 2^462` multiplies, so on these numbers that
+    /// level is [`AHeightTimesAMinor`].
+    ///
+    /// The minor's two products, `11 · 2^-1076` and `9 · 2^-1076`, are below
+    /// the normals and round to `3` and `2` times `2^-1074`, so the minor comes
+    /// out `2^-1074` where it is `2^-1075`. A loss of `2^-1075` is `2^-53` of
+    /// the smallest normal number, but the height makes it `2^-75`, and the sum
+    /// comes out `+2^-76`, a 23rd of the permanent. So a bound of a 32nd of the
+    /// permanent, where `orient3d`'s is about `7 · 2^-53` of it, still certifies
+    /// `Pos`, and so does the `robust` crate. With the check, level 1 hands
+    /// over.
+    #[test]
+    fn a_minor_below_the_normals_times_a_large_height_certifies_a_wrong_sign_unless_checked() {
+        let s = 2f64.powi(-538);
+        let a = [-3.0, 0.0, 2f64.powi(1000)];
+        let b = [11.0 * s, s, 0.0];
+        let c = [9.0 * s, s, 2f64.powi(462)];
+        let d = [0.0; 3];
+        assert_eq!(crate::orient3d(a, b, c, d), Decision::Neg);
+        let robust = robust::orient3d(coord(a), coord(b), coord(c), coord(d));
+        assert!(robust > 0.0, "robust answered {robust:e}");
+
+        let unchecked = AHeightTimesAMinor {
+            height: a[2],
+            minor: [b[0], c[1], c[0], b[1]],
+            term: c[2] * (a[0] * b[1]),
+            checked: false,
+        };
+        let filtered = unchecked.on_floats().expect("nothing is checked");
+        assert_eq!(filtered.value, 2f64.powi(-76));
+        assert_eq!(filtered.error_bound, 23.0 * 2f64.powi(-76) / 32.0);
+        assert_eq!(decide(&unchecked), (Decision::Pos, Level::Float));
+
+        let checked = AHeightTimesAMinor {
+            checked: true,
+            ..unchecked
+        };
+        assert!(!product_is_normal(b[0], c[1]));
+        assert_eq!(checked.on_floats(), None);
+        assert!(matches!(
+            decide(&checked),
+            (Decision::Undecidable { .. }, Level::Interval)
+        ));
+    }
+
+    /// A height times a 2×2 minor, plus one more term: `h · (p·q − r·s) + t`,
+    /// with the permanent `h · (|p·q| + |r·s|) + |t|`, which is the shape of
+    /// each of `orient3d`'s three terms. Its bound is a 32nd of the permanent.
+    /// When `checked`, it asks [`product_is_normal`] about the minor's two
+    /// products and about the height times the minor first, as `orient3d`
+    /// does; `t` comes in already multiplied.
+    struct AHeightTimesAMinor {
+        height: f64,
+        minor: [f64; 4],
+        term: f64,
+        checked: bool,
+    }
+
+    impl Predicate for AHeightTimesAMinor {
+        fn name(&self) -> &'static str {
+            "a height times a minor"
+        }
+
+        fn on_floats(&self) -> Option<Filtered> {
+            let [p, q, r, s] = self.minor;
+            let (forwards, backwards) = (p * q, r * s);
+            let minor = forwards - backwards;
+            if self.checked
+                && !(product_is_normal(p, q)
+                    && product_is_normal(r, s)
+                    && product_is_normal(self.height, minor))
+            {
+                return None;
+            }
+            let permanent =
+                self.height.abs() * (forwards.abs() + backwards.abs()) + self.term.abs();
+            Some(Filtered {
+                value: self.height * minor + self.term,
+                error_bound: permanent / 32.0,
+            })
+        }
+
+        fn on_intervals(&self) -> Interval {
+            Interval::ENTIRE
+        }
+
+        fn exactly(&self) -> Option<Decision> {
+            None
+        }
+    }
+
+    fn coord([x, y, z]: [f64; 3]) -> robust::Coord3D<f64> {
+        robust::Coord3D { x, y, z }
+    }
+
     #[test]
     #[should_panic(expected = "cannot be negative")]
     fn a_negative_error_bound_is_a_bug() {
