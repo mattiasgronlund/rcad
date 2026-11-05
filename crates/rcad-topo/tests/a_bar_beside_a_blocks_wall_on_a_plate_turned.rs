@@ -300,14 +300,13 @@ fn the_blocks_wall(model: &Model, keys: &TheTwo, angle: f64) -> rcad_geom::Plane
         .solid(keys.plate)
         .expect("this model made the key")
         .faces()
-        .filter_map(|face| match face.surface() {
-            Surface::Plane(plane)
-                if (plane.normal().dot(turned_x).abs() - 1.0).abs() < 1e-9
-                    && (plane.offset().abs() - 1.5).abs() < 1e-9 =>
-            {
-                Some(plane)
-            }
-            _ => None,
+        .filter_map(|face| {
+            let Surface::Plane(plane) = face.surface() else {
+                return None;
+            };
+            ((plane.normal().dot(turned_x).abs() - 1.0).abs() < 1e-9
+                && (plane.offset().abs() - 1.5).abs() < 1e-9)
+                .then_some(plane)
         })
         .collect();
     let [wall] = walls[..] else {
