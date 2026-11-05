@@ -23371,3 +23371,201 @@ Its first line is `torzero.py`'s own, run again in the fresh directory; the
 parent's lines come after it because its output is buffered when it is not a
 terminal. The thirteen blocks are the eight scripts and five prints:
 `runzt2.sh`'s, `tallyzt.py`'s, `kut.py`'s, `hollowapart.py`'s and this one.
+
+### 464.33 The side of rcad-geom's torus with a checked product below the normals
+
+Q2787 asks whether `HowFarFromTheRing::on_floats` in
+`crates/rcad-geom/src/torus.rs` needs its `product_is_normal` checks, by
+running 464.17's `torsplit.py` with one, two and three of the checked products
+below the normals, as 464.14's 6 ran the sphere's squares. Its first lane, on
+2026-11-05 at `d8bd2284`, ran the probe of 2 and wrote this much. `torsplit.py`
+has not been run with any product below the normals, and the comment at
+`torus.rs:347-349` is not yet restated (4).
+
+One of the twenty checks carries a right sign on numbers `on_floats` can be
+handed: a direction component with itself. With it taken out and a direction
+far from length one, level 1 certifies `Neg` for a point outside (2). No
+`Torus` holds such a direction, by the doc on `Torus::basis`
+(`torus.rs:168-175`), which names each route an axis gets its direction by, as
+464.29's 3 does for the cylinder. With a direction of length one, the seven
+inputs of 2 that each fail one to three checks are answered the same with the
+failing checks taken out as with them in, and the same as in exact rationals.
+
+**1. The checks.** At `d8bd2284`, `stays_accurate` (`torus.rs:350-359`) and
+the check after it (`torus.rs:373-375`) are twenty `product_is_normal` calls.
+The probe numbers them:
+
+- 0 to 2: each difference with itself, `gx`, `gy` and `gz` in `tor.g`.
+- 3 to 5: each direction component with itself, `tx`, `ty` and `tz`.
+- 6 to 8: each component of the cross product with itself, `sx`, `sy`, `sz`.
+- 9 to 14: the halves, `hx`, `kx`, `hy`, `ky`, `hz` and `kz`.
+- 15 and 16: the ring with itself, `RR`, and the tube with itself, `rr`.
+- 17 to 19: `bulge` with itself, `bb`; `w·w` with `bulge²`, `left`; and `4R²`
+  with `across`, `right`.
+
+**2. The probe.** An uncommitted patch to `torus.rs` gave the module two
+thread-locals, `PROBE_DIRECTION`, which `on_floats`, `on_intervals` and
+`exactly` read in place of the axis's direction when it is set, and
+`PROBE_SKIP`, a bit mask; each of the twenty checks became
+`product_is_normal(..) || probe_skips(i)`, with `i` as in 1. The test finds the
+checks an input fails by leaving out every check but one, in turn, and then
+runs `on_floats`, `decide` and `exactly` with every check in and with the
+failing ones left out:
+
+```rust
+#[test]
+fn probe_q2787() {
+    let p = |e: i32| 2f64.powi(e);
+    let along = |d: [f64; 3]| Axis::new(Point::new(0.0, 0.0, 0.0), Vector::new(d[0], d[1], d[2])).unwrap();
+    let inputs: [(&str, Axis, Option<[f64; 3]>, f64, f64, [f64; 3]); 9] = [
+        ("A, direction squares below the normals", Axis::x(), Some([p(-540), 0.0, 0.0]), p(31), p(30), [0.0, 3.0 * p(31), 0.0]),
+        ("C, A made ordinary", Axis::x(), Some([1.0, 0.0, 0.0]), 1.0, 0.5, [0.0, 3.0, 0.0]),
+        ("U1, a difference squared to nothing", Axis::z(), None, 1.0, 0.5, [p(-540), 1.2, 0.0]),
+        ("U2, a unit direction component squared to nothing", along([1.0, p(-540), 0.0]), None, 1.0, 0.5, [0.0, 1.2, 0.0]),
+        ("U3, the tube squared to nothing", Axis::z(), None, 1.0, p(-540), [1.0, 0.0, 0.0]),
+        ("U4, both radii squared below the normals", Axis::z(), None, p(-520), p(-521), [1.0, 0.0, 0.0]),
+        ("U5, a half below the normals", Axis::z(), None, 1.0, 0.5, [p(-1030), 1.2, 0.0]),
+        ("U6, bulge squared below the normals", Axis::z(), None, p(-240), p(-240) * (1.0 - p(-53)), [0.0, 0.0, 0.0]),
+        ("U7, 4R squared times across below the normals", Axis::z(), None, p(-505), p(-506), [p(-15), 0.0, 0.0]),
+    ];
+    for (what, axis, direction, ring, tube, at) in inputs {
+        let torus = Torus { axis, ring_radius: ring, tube_radius: tube };
+        let point = PredicatePoint::from(at);
+        let pred = HowFarFromTheRing { torus, point };
+        PROBE_DIRECTION.with(|cell| cell.set(direction));
+        let d = pred.probe_direction();
+        println!(
+            "PROBE {what}: ring bits {:x}, tube bits {:x}, direction bits {:x} {:x} {:x}, point bits {:x} {:x} {:x}",
+            ring.to_bits(), tube.to_bits(), d[0].to_bits(), d[1].to_bits(), d[2].to_bits(),
+            at[0].to_bits(), at[1].to_bits(), at[2].to_bits()
+        );
+        let every = (1u32 << 20) - 1;
+        let failing: u32 = (0..20)
+            .filter(|&check| {
+                PROBE_SKIP.with(|cell| cell.set(every & !(1 << check)));
+                pred.on_floats().is_none()
+            })
+            .fold(0, |mask, check| mask | (1 << check));
+        for (how, mask) in [("checks all", 0), ("failing checks left out", failing)] {
+            PROBE_SKIP.with(|cell| cell.set(mask));
+            let filtered = pred.on_floats().map(|f| (f.value, f.error_bound));
+            println!(
+                "PROBE {what}, {how} {:?}: on_floats {filtered:?}, decide {:?}, exactly {:?}",
+                (0..20).filter(|c| mask & (1 << c) != 0).collect::<Vec<_>>(),
+                decide(&pred),
+                pred.exactly()
+            );
+        }
+        PROBE_SKIP.with(|cell| cell.set(0));
+        if direction.is_none() {
+            println!("PROBE {what}: side_of {:?}", torus.side_of(point));
+        }
+        PROBE_DIRECTION.with(|cell| cell.set(None));
+    }
+}
+```
+
+`mise exec -- just t -p rcad-geom probe_q2787 --no-capture` printed:
+
+```text
+PROBE A, direction squares below the normals: ring bits 41e0000000000000, tube bits 41d0000000000000, direction bits 1e30000000000000 0 0, point bits 0 41f8000000000000 0
+PROBE A, direction squares below the normals, checks all []: on_floats None, decide (Undecidable { enclosure: 9.988800759639728e-285 }, Interval), exactly None
+PROBE A, direction squares below the normals, failing checks left out [3]: on_floats Some((-5.910532993869662e-287, 1.181161767168138e-301)), decide (Neg, Float), exactly None
+PROBE C, A made ordinary: ring bits 3ff0000000000000, tube bits 3fe0000000000000, direction bits 3ff0000000000000 0 0, point bits 0 4008000000000000 0
+PROBE C, A made ordinary, checks all []: on_floats Some((59.0625, 2.8189950374013546e-13)), decide (Pos, Float), exactly Some(Pos)
+PROBE C, A made ordinary, failing checks left out []: on_floats Some((59.0625, 2.8189950374013546e-13)), decide (Pos, Float), exactly Some(Pos)
+PROBE U1, a difference squared to nothing: ring bits 3ff0000000000000, tube bits 3fe0000000000000, direction bits 0 0 3ff0000000000000, point bits 1e30000000000000 3ff3333333333333 0
+PROBE U1, a difference squared to nothing, checks all []: on_floats None, decide (Neg, Interval), exactly None
+PROBE U1, a difference squared to nothing, failing checks left out [0, 7]: on_floats Some((-0.9638999999999998, 2.5971425010595826e-14)), decide (Neg, Float), exactly None
+PROBE U1, a difference squared to nothing: side_of Neg
+PROBE U2, a unit direction component squared to nothing: ring bits 3ff0000000000000, tube bits 3fe0000000000000, direction bits 3ff0000000000000 1e30000000000000 0, point bits 0 3ff3333333333333 0
+PROBE U2, a unit direction component squared to nothing, checks all []: on_floats None, decide (Neg, Interval), exactly None
+PROBE U2, a unit direction component squared to nothing, failing checks left out [4]: on_floats Some((-0.9638999999999998, 2.5971425010595826e-14)), decide (Neg, Float), exactly None
+PROBE U2, a unit direction component squared to nothing: side_of Neg
+PROBE U3, the tube squared to nothing: ring bits 3ff0000000000000, tube bits 1e30000000000000, direction bits 0 0 3ff0000000000000, point bits 3ff0000000000000 0 0
+PROBE U3, the tube squared to nothing, checks all []: on_floats None, decide (Undecidable { enclosure: 8.881784197001252e-16 }, Interval), exactly None
+PROBE U3, the tube squared to nothing, failing checks left out [16]: on_floats Some((0.0, 1.5987211554602276e-14)), decide (Undecidable { enclosure: 8.881784197001252e-16 }, Interval), exactly None
+PROBE U3, the tube squared to nothing: side_of Undecidable { enclosure: 8.881784197001252e-16 }
+PROBE U4, both radii squared below the normals: ring bits 1f70000000000000, tube bits 1f60000000000000, direction bits 0 0 3ff0000000000000, point bits 3ff0000000000000 0 0
+PROBE U4, both radii squared below the normals, checks all []: on_floats None, decide (Pos, Interval), exactly None
+PROBE U4, both radii squared below the normals, failing checks left out [15, 16, 19]: on_floats Some((1.0, 1.9984014443252845e-15)), decide (Pos, Float), exactly None
+PROBE U4, both radii squared below the normals: side_of Pos
+PROBE U5, a half below the normals: ring bits 3ff0000000000000, tube bits 3fe0000000000000, direction bits 0 0 3ff0000000000000, point bits 100000000000 3ff3333333333333 0
+PROBE U5, a half below the normals, checks all []: on_floats None, decide (Neg, Interval), exactly None
+PROBE U5, a half below the normals, failing checks left out [0, 7, 12]: on_floats Some((-0.9638999999999998, 2.5971425010595826e-14)), decide (Neg, Float), exactly None
+PROBE U5, a half below the normals: side_of Neg
+PROBE U6, bulge squared below the normals: ring bits 30f0000000000000, tube bits 30efffffffffffff, direction bits 0 0 3ff0000000000000, point bits 0 0 0
+PROBE U6, bulge squared below the normals, checks all []: on_floats None, decide (Pos, Interval), exactly Some(Pos)
+PROBE U6, bulge squared below the normals, failing checks left out [17, 18]: on_floats Some((5.06e-321, 8.202512272000957e-304)), decide (Pos, Interval), exactly Some(Pos)
+PROBE U6, bulge squared below the normals: side_of Pos
+PROBE U7, 4R squared times across below the normals: ring bits 2060000000000000, tube bits 2050000000000000, direction bits 0 0 3ff0000000000000, point bits 3f00000000000000 0 0
+PROBE U7, 4R squared times across below the normals, checks all []: on_floats None, decide (Pos, Interval), exactly None
+PROBE U7, 4R squared times across below the normals, failing checks left out [19]: on_floats Some((8.673617379884035e-19, 1.7333369499485147e-33)), decide (Pos, Float), exactly None
+PROBE U7, 4R squared times across below the normals: side_of Pos
+```
+
+`truth2787.py` (not yet appended here) works each value out in exact rationals
+from the printed bits, `(w·w)(x·x + R² − r²)² − 4R²|x × w|²` with the centre
+at `0`, and `python3 -I truth2787.py` printed:
+
+```text
+A, direction squares below the normals: Pos, value 9.696968193067414e-287
+C, A made ordinary: Pos, value 59.0625
+U1, a difference squared to nothing: Neg, value -0.9639000000000001
+U2, a unit direction component squared to nothing: Neg, value -0.9639000000000001
+U3, the tube squared to nothing: Neg, value -0.0
+U4, both radii squared below the normals: Pos, value 1.0
+U5, a half below the normals: Neg, value -0.9639000000000001
+U6, bulge squared below the normals: Pos, value 5.06e-321
+U7, 4R squared times across below the normals: Pos, value 8.673617379884035e-19
+```
+
+U3's `-0.0` is a negative value too small for a double: `−4 · 2⁻¹⁰⁸⁰ +
+2⁻²¹⁶⁰`.
+
+So A is outside, and level 1 without check 3 says `Neg`: a wrong sign. With
+every check in, level 1 refuses it, level 2 cannot decide and level 3 refuses
+too. Why, by arithmetic: A is C with the direction times `2⁻⁵⁴⁰` and the
+point and both radii times `2³¹`, which multiplies the value by `2⁻¹⁰⁸⁰ ·
+2¹²⁴ = 2⁻⁹⁵⁶` and keeps its sign. `tx = rnd(2⁻¹⁰⁸⁰) = 0`, so `w·w = 0`, and
+`left` and `P1` are `0`: the whole `w·w · bulge²` term rounds to nothing and
+its share of the permanent with it. The one half not zero, `kz = fy · dx = 3 ·
+2⁻⁵⁰⁹`, leaves `across = 9 · 2⁻¹⁰¹⁸`, normal, and `right = 2⁶⁴ · across = 9 ·
+2⁻⁹⁵⁴`, which is `−value` and the permanent both, as printed. Only check 3
+fails. It is 464.29's input A, on the other term.
+
+In U1, U2, U4, U5 and U7 level 1 without the failing checks certifies the sign
+that level 2 certifies with them in, and that sign is the exact one. In U3 and
+U6 level 1 without them does not certify, `|value|` being within the bound, so
+the answer is level 2's either way. U3 is the point `(1, 0, 0)` on the centre
+circle of a ring of `1` round a tube of `2⁻⁵⁴⁰`, `Neg` exactly, and every level
+refuses it with or without check 16 (4).
+
+**3. With the direction near length one, by hand, not run.** Every product
+below the normals loses at most `2⁻¹⁰⁷⁵`. `eb` normal makes `P` at least about
+`2⁻⁹⁷³`. A loss in `bb`, `left` or `right` is then at most about `2⁻¹⁰²` of
+`P`, and a loss further down is multiplied on its way to `y` by factors the
+permanent also holds: a difference's square or a radius's square by `2 w·w ·
+bulge`, against `P ≥ w·w · bulge_reach²`; a component's square by `4R²`,
+against `P ≥ w·w · R⁴`; a half's by `2 |q| · 4R²`, against `P ≥ 4R² (|h| +
+|k|)²`. Taken with `P ≥ 2⁻⁹⁷³` each is under `2⁻⁵⁸⁰` of `P` when `w·w` is near
+one. A direction component's square loses `2⁻¹⁰⁷⁵` of a `w·w` near one, which
+`left` carries times `bb`. Each is far inside the room between the `17u +
+95u²` that 464.17 proved for `y` and the code's `18u + 224u²`. None of this
+has been run in Gappa, so it is no claim.
+
+**4. What this leaves.** Unfinished, for the lane after this one:
+
+- Restate the comment at `torus.rs:347-349` by 2 and 3, as 464.29's 5 did for
+  the cylinder: one check, a direction component's square, carries a right
+  sign with a direction far from length one, input A; no `Torus` holds such a
+  direction; with the direction near length one it has not been run in Gappa.
+  The doc on `SIDE_OF_TORUS_ERROR_BOUND` (`torus.rs:528-538`) ends with a
+  paragraph on the checks that should say the same, citing this subsection.
+- Run `torsplit.py` with one, two and three of the twenty products below the
+  normals under a hypothesis that `w·w` is near one, or file it as a row, as
+  464.29's 6 did.
+- U3 is a refusal of a point with a sign, at a tube `2⁻⁵⁴⁰` of its ring, far
+  outside §3.5's envelope; whether to file it `refuses/D`, and which step of
+  `exactly` gives up, is not traced.
+- Append `truth2787.py` here, whole.
