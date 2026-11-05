@@ -153,9 +153,10 @@
 //! one.** Where the roads do not prove that a plane and two curved surfaces
 //! share a curve, and the plane cuts both in circles — a ball under any plane,
 //! a pipe or a cone under one square to its axis — that are within
-//! [`Policy::max_wobble`] of each other, centre and radius together, the three
-//! are taken to share the one circle, through [`Policy::take_as_one_point`]. A
-//! rod with a ball of its radius on its cap, placed by a turn, is it: the
+//! [`Policy::max_wobble`] of each other, centre and radius together, and each
+//! wider than the wobble, the three are taken to share the one circle, through
+//! [`Policy::take_as_one_point`]. A circle no wider than the wobble is, to the
+//! policy, a point, and two of them are not taken as a curve. A rod with a ball of its radius on its cap, placed by a turn, is it: the
 //! stored numbers part the ball's circle from the rim by `1e−16` or less, and
 //! every exact answer leaves the cap a ring or two lunes `1e16` and more times
 //! smaller than the rod, past the range §3.5 lets a model span. A certified
@@ -2302,6 +2303,10 @@ fn the_policy_takes_their_two_circles_as_one(
     ) else {
         return false;
     };
+    let wobble = policy.max_wobble();
+    if !it_is_wider_than(flat, &mine, wobble) || !it_is_wider_than(flat, &theirs, wobble) {
+        return false;
+    }
     let Some(furthest) = the_furthest_two_circles_on_a_plane_are_apart(flat, &mine, &theirs) else {
         return false;
     };
