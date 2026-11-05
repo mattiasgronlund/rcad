@@ -26648,3 +26648,233 @@ controls' bests on `OO − 1` are `±1.3243e-14` (44, 119.28u, 464.20's
 `c_square_119`'s), `±1.30209e-14` (27), `±9.76996e-15` (3) and
 `±4.44089e-15` (3). A `tallysq.py` that reads each `.out` is still to
 write.
+
+**Relay 3, on 2026-11-05: still a draft.** `tallysq.py`, below, counts
+`square.g`'s 77 from `runsq.txt` and the files beside it, reading each bound
+from the exact number Gappa prints before its decimal: every case exits 0 at
+`128u`, every control at `u / 2` exits 1, Coq accepts all 77, every `.coqc`
+is empty, each `.bcoq` prints its `.out`'s results, and no divisor Gappa took
+to be nonzero names a component of `m` the case has zero. So
+`NORMAL_LENGTH_ROUNDOFF`'s `64ε` holds where `m` has one or two components
+zero and the turn up to two parts zero. The four parts add to at most
+`119.2820u`, 464.20's own sum, in 32 cases; with two of `m` zero `n·n` is
+exactly one, `NN − 1` is `[0, 0]`, and the sum is `117.28u` (27 controls).
+`F2` falls to `40u`, `2 · 20u`, in six cases, `n` along an axis and the turn
+holding it to that axis: `v` along `n` (`VN` `[0, 0]`, three, best `40u`) or
+`w` and `n`'s own part of `v` zero (`VN` within `12u` of one, three, best
+`88u`). Every best is within 0.01% of its case's four parts added. By the run
+directory's file times (`ls --time-style=full-iso`), `startvm.sh` wrote its
+pid at 17:14:28 UTC and `runvm.txt` last at 17:18:42, and `startsq.sh` its
+pid at 17:19:35 and `runsq.txt` last at 17:20:18. Left: the findings in
+464.35's shape, with the controls' `u / 2` explained (a zero `m` drops the
+constructor's `2u`, so 464.20's `119u` control would prove in 33 cases);
+`samevm.py`; and what this leaves.
+
+`tallysq.py`, whole, as it ran:
+
+```python
+"""Count what runsq.txt and the files beside it say of each case in casesq.txt
+and its control: each case's exit, Coq's two exits, its proof's size, the
+bounds it printed on square.g's five parts, what the four that make up OO - 1
+add to, each control's exit and its best on OO - 1 in u, and every line of an
+.out, .bcoq or .coqc that is not a result or a divisor Gappa took to be
+nonzero, and each such divisor that names a component of m the case has zero.
+tallyvm.py with squarezero.py's names and square.g's results.
+
+Each bound is read from the exact number Gappa prints before its decimal.
+Run as: python3 tallysq.py"""
+import collections
+import os
+import re
+from fractions import Fraction
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+U = Fraction(1, 2 ** 53)
+cases = open("casesq.txt").read().split()
+log = open("runsq.txt").read().splitlines()
+assert log and log[-1] == "done", "runsq.txt does not end done"
+
+EXIT = re.compile(r"^(\S+) exit (\d+) ([\d.]+)s$")
+COQ = re.compile(r"^(\S+) coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$")
+exits, coqs, odd_log = {}, {}, []
+for line in log[:-1]:
+    if m := EXIT.match(line):
+        exits[m[1]] = (int(m[2]), float(m[3]))
+    elif m := COQ.match(line):
+        coqs[m[1]] = (int(m[2]), int(m[3]), float(m[4]), int(m[5]), int(m[6]))
+    else:
+        odd_log.append(line)
+
+WARNING = re.compile(r"^Warning: the expression (.*) has been assumed to be nonzero when checking a rewriting rule\.$")
+RESULT = re.compile(r"^  (.*) in \[(.*)\]$")
+BEST = re.compile(r"^  BND\(OO - 1\), best: \[(\S+), (\S+)\]$")
+EXACT = re.compile(r"^(-?\d+)(?:b(-?\d+))?(?: \{.*\})?$")
+PARTS = ("NN - 1", "VN", "4 * (N4 - 1) * VN", "F2", "DD")
+SUMMED = ("NN - 1", "4 * (N4 - 1) * VN", "F2", "DD")
+SCALE = {"NN - 1": U, "VN": Fraction(1), "4 * (N4 - 1) * VN": U, "F2": U, "DD": U * U}
+UNIT = {"NN - 1": "u", "VN": "", "4 * (N4 - 1) * VN": "u", "F2": "u", "DD": "u^2"}
+
+
+def m_zeros(n):
+    return "".join(re.findall(r"m\d", n[len("sq_"):])) or "none"
+
+
+def exact(text):
+    """The exact number Gappa prints, mantissa b exponent, before its decimal."""
+    m = EXACT.match(text.strip())
+    return Fraction(int(m[1])) * Fraction(2) ** int(m[2] or 0)
+
+
+def ends(interval):
+    """A result interval's two ends, split at the comma outside every brace."""
+    depth = 0
+    for i, ch in enumerate(interval):
+        depth += {"{": 1, "}": -1}.get(ch, 0)
+        if ch == "," and depth == 0:
+            return exact(interval[:i]), exact(interval[i + 1:])
+    raise AssertionError(interval)
+
+
+def odd_lines(path, control, live_m):
+    """Every line that is not a result, a best where one is due, or a divisor
+    taken to be nonzero that names only components of m the case keeps."""
+    fixed = {"Results:"} | ({"Error: some properties were not satisfied:"} if control else set())
+    allowed = [RESULT] + ([BEST] if control else [])
+    if not os.path.exists(path):
+        return [f"{path} missing"]
+    odd = []
+    for line in open(path).read().splitlines():
+        if m := WARNING.match(line):
+            if not set(re.findall(r"[A-Za-z_]\w*", m[1])) <= live_m:
+                odd.append(f"{path}: {line}")
+        elif line not in fixed and not any(p.match(line) for p in allowed):
+            odd.append(f"{path}: {line}")
+    return odd
+
+
+def results(path):
+    return {m[1]: ends(m[2]) for line in open(path).read().splitlines() if (m := RESULT.match(line))}
+
+
+problems, bests, got, times, sizes, same_bcoq = [], {}, {}, [], [], 0
+for n in cases:
+    c = "c_" + n + "_half"
+    live_m = {f"m{i}" for i in range(3)} - set(re.findall(r"m\d", n[len("sq_"):]))
+    if exits.get(n, (None,))[0] != 0:
+        problems.append(f"{n} exit {exits.get(n)}")
+    if exits.get(c, (None,))[0] != 1:
+        problems.append(f"{c} exit {exits.get(c)}")
+    k = coqs.get(n)
+    if not k or k[0] != 0 or k[1] != 0:
+        problems.append(f"{n} coq {k}")
+    else:
+        sizes.append((k[3], k[4], k[2], n))
+    times.append((exits.get(n, (0, 0.0))[1], n))
+    for path, control in ((n + ".out", False), (n + ".bcoq", False), (c + ".out", True)):
+        problems += odd_lines(path, control, live_m)
+    if not os.path.exists(n + ".coqc") or open(n + ".coqc").read():
+        problems.append(f"{n}.coqc is missing or not empty")
+    got[n] = results(n + ".out")
+    if sorted(got[n]) != sorted(PARTS):
+        problems.append(f"{n}.out has {sorted(got[n])}, not {sorted(PARTS)}")
+    same_bcoq += results(n + ".bcoq") == got[n]
+    best = [m for line in open(c + ".out").read().splitlines() if (m := BEST.match(line))]
+    if len(best) != 1:
+        problems.append(f"{c} has {len(best)} best lines")
+    else:
+        bests[n] = float(best[0][2]) / float(U)
+
+
+def added(n):
+    """The four parts' largest sizes added, in u: what the proof of OO - 1 adds."""
+    return float(sum(max(abs(lo), abs(hi)) for lo, hi in (got[n][p] for p in SUMMED)) / U)
+
+
+def listed(names):
+    """The cases by name, or where there are more than 12, the zero sets of m
+    they come from."""
+    if len(names) <= 12:
+        return ", ".join(names)
+    zero_sets = sorted(set(map(m_zeros, names)), key=lambda z: (z != "none", len(z), z))
+    return "m zero " + ", ".join(zero_sets)
+
+
+def largest(value):
+    """The largest value over the cases, and the cases that reach it."""
+    top = max(value(n) for n in cases)
+    at = [n for n in cases if value(n) == top]
+    return top, at[0], len(at) - 1
+
+
+print(len(cases), "cases,", len(exits), "exit lines,", len(coqs), "coq lines")
+print("lines of runsq.txt that are neither:", odd_log or "none")
+print("problems:", len(problems))
+for p in problems:
+    print("  " + p)
+proved = sum(exits.get(n, (None,))[0] == 0 for n in cases)
+failed = sum(exits.get("c_" + n + "_half", (None,))[0] == 1 for n in cases)
+print(f"cases that exit 0: {proved} of {len(cases)}; controls that exit 1: {failed} of {len(cases)}")
+print("gappa time per case: %.2f s (%s) to %.2f s (%s)" % (min(times) + max(times)))
+sizes.sort()
+print("coq: %d lines %d hints %.2f s (%s) to %d lines %d hints %.2f s (%s)" % (sizes[0] + sizes[-1]))
+print("cases whose .bcoq prints the same results as their .out:", same_bcoq, "of", len(cases))
+print("cases by the components of m that are zero:",
+      ", ".join(f"{z} {k}" for z, k in collections.Counter(map(m_zeros, cases)).items()))
+print("each part's bound, and the cases it is in:")
+for p in PARTS:
+    print(f"  {p}, in {UNIT[p]}:" if UNIT[p] else f"  {p}:")
+    by = collections.defaultdict(list)
+    for n in cases:
+        lo, hi = got[n][p]
+        by[(round(float(lo / SCALE[p]), 4), round(float(hi / SCALE[p]), 4))].append(n)
+    for (lo, hi), names in sorted(by.items(), key=lambda kv: -len(kv[1])):
+        print(f"    [{lo}, {hi}]: {len(names)}, {listed(names)}")
+print("largest of the four parts added: %.4fu (%s and %d more), against NORMAL_LENGTH_ROUNDOFF's 128u"
+      % largest(added))
+print("control best on OO - 1, in u, and how many controls:")
+for b, k in sorted(collections.Counter(round(b, 2) for b in bests.values()).items()):
+    print(f"  {b}u: {k},", listed([n for n in bests if round(bests[n], 2) == b]))
+print("largest best: %.4fu (%s and %d more), against NORMAL_LENGTH_ROUNDOFF's 128u" % largest(bests.get))
+print("each best within 0.01% of its case's four parts added:",
+      all(abs(bests[n] - added(n)) <= 1e-4 * added(n) for n in bests))
+```
+
+`tallysq.py`'s whole print:
+
+```
+77 cases, 154 exit lines, 77 coq lines
+lines of runsq.txt that are neither: none
+problems: 0
+cases that exit 0: 77 of 77; controls that exit 1: 77 of 77
+gappa time per case: 0.89 s (sq_m1m2v1v2) to 2.74 s (sq_v0)
+coq: 1750 lines 12 hints 1.76 s (sq_m0m1v0v1) to 5525 lines 15 hints 3.66 s (sq_m1)
+cases whose .bcoq prints the same results as their .out: 77 of 77
+cases by the components of m that are zero: none 11, m0 11, m1 11, m2 11, m0m1 11, m0m2 11, m1m2 11
+each part's bound, and the cases it is in:
+  NN - 1, in u:
+    [-2.0, 2.0]: 44, m zero none, m0, m1, m2
+    [0.0, 0.0]: 33, m zero m0m1, m0m2, m1m2
+  VN:
+    [0.0, 1.0]: 71, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
+    [1.0, 1.0]: 3, sq_m0m1wv2, sq_m0m2wv1, sq_m1m2wv0
+    [0.0, 0.0]: 3, sq_m0m1v0v1, sq_m0m2v0v2, sq_m1m2v1v2
+  4 * (N4 - 1) * VN, in u:
+    [-48.0, 48.0]: 74, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
+    [0.0, 0.0]: 3, sq_m0m1v0v1, sq_m0m2v0v2, sq_m1m2v1v2
+  F2, in u:
+    [-69.282, 69.282]: 71, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
+    [-40.0, 40.0]: 6, sq_m0m1wv2, sq_m0m1v0v1, sq_m0m2wv1, sq_m0m2v0v2, sq_m1m2wv0, sq_m1m2v1v2
+  DD, in u^2:
+    [0.0, 1200.0]: 77, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
+largest of the four parts added: 119.2820u (sq_n and 31 more), against NORMAL_LENGTH_ROUNDOFF's 128u
+control best on OO - 1, in u, and how many controls:
+  40.0u: 3, sq_m0m1v0v1, sq_m0m2v0v2, sq_m1m2v1v2
+  88.0u: 3, sq_m0m1wv2, sq_m0m2wv1, sq_m1m2wv0
+  117.28u: 27, m zero m0m1, m0m2, m1m2
+  119.28u: 44, m zero none, m0, m1, m2
+largest best: 119.2823u (sq_n and 43 more), against NORMAL_LENGTH_ROUNDOFF's 128u
+each best within 0.01% of its case's four parts added: True
+```
+
+The 12 of the 44 that fall short of `119.2820u` past its fourth decimal are
+the cases with two parts of `v` zero, `sq_v0v1` to `sq_m2v1v2`.
