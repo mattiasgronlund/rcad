@@ -240,8 +240,11 @@ impl Shape {
 }
 
 /// Each answer rests on the policy taking the ball's circle on the cap and the
-/// rim as one, so its log says so: an empty log would read as certified, and
-/// every one of the 96 was empty until Q3180.
+/// rim as one, so its log says so, four times: once for each of the cap, the
+/// pipe and the ball, whose arrangement folds its crossings with the other two
+/// into one, and once where the answer's corners join the rim's two names, the
+/// cap and the pipe, and the cap and the ball. An empty log would read as
+/// certified, and every one of the 96 was empty until Q3180.
 #[test]
 fn a_rod_with_a_ball_of_its_radius_on_its_cap_turned_fuses_under_a_tolerant_policy() {
     for working_size in [100.0, 10.0] {
@@ -258,15 +261,21 @@ fn a_rod_with_a_ball_of_its_radius_on_its_cap_turned_fuses_under_a_tolerant_poli
                 let answer = model
                     .fuse(&[one], &[other], rule, &policy, &mut log)
                     .unwrap_or_else(|why| panic!("{what} was refused: {why:?}"));
-                assert!(
-                    log.records().iter().any(|record| {
+                let folds = log
+                    .records()
+                    .iter()
+                    .filter(|record| {
                         record.predicate() == "two circles on one plane taken as one"
                             && record.outcome() == Decision::Zero
                             && record
                                 .approximation()
                                 .is_some_and(|tag| tag.cause() == Cause::TolerantFallback)
-                    }),
-                    "{what} does not log taking the two circles as one: {:?}",
+                    })
+                    .count();
+                assert_eq!(
+                    folds,
+                    4,
+                    "{what}: how often it logs taking the two circles as one, in {:?}",
                     log.records()
                 );
                 let [solid] = answer.solids() else {
