@@ -21813,6 +21813,22 @@ check-queue-api-selftest:
     [ "$got" = docs/q3207-a.md ] \
         || fail "the re-take recorded the column, not the write set in force (Q3207): $got"
 
+    # Q3212: a take of a new row in the same apply as the drop of the row
+    # holding its file goes through, since the drop's release is not in the
+    # claims file until the apply ends; without the drop it stays refused.
+    held_q3212=$(q "$writes_wt" add 2 opus docs/q3212-a.md "from/- a held row an apply drops while taking its successor §230") \
+        || fail "add for the Q3212 held row failed"
+    g "$writes_wt" commit -qam "a row for the Q3212 drop"
+    got=$(q "$writes_wt" take "$held_q3212" lane-q3212-old 2>&1) || fail "take of the Q3212 held row failed"
+    got=$(q "$writes_wt" apply add 2 opus docs/q3212-a.md "from/- the successor taken beside the drop §230" \
+        + take @1 lane-q3212-new 2>&1) \
+        && fail "a take meeting a live hold was not refused, with no drop in the apply (Q3212)"
+    g "$writes_wt" checkout -q -- docs/queue.md
+    got=$(q "$writes_wt" apply drop "$held_q3212" 230 \
+        + add 2 opus docs/q3212-a.md "from/- the successor taken beside the drop §230" \
+        + take @1 lane-q3212-new 2>&1) \
+        || fail "a take beside a drop of the row holding its file was refused (Q3212): $got"
+
     # Q3162 (§479): `add` and `writes` print the pointer to
     # docs/where-a-rule-goes.md on stderr when a write set names an agent file,
     # the same line agent-file-written.sh puts in front of a model after a
