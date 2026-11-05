@@ -7821,11 +7821,25 @@ fn how_far_round(around: &WalkedLoop) -> f64 {
 /// [`how_far_the_second_coordinate_wraps`] on a pipe, a cone or a ball.
 /// `every_surface_but_a_torus_crosses_its_two_coordinates_out_of_the_material`
 /// in `rcad-geom` is the measurement, over all five surfaces.
+///
+/// **The sum is taken about the loop's first corner, not the chart's origin.**
+/// The area is the same either way, but the rounding is not: about the origin
+/// each term is as big as the corners' own numbers, and a loop much smaller
+/// than they are drowns in their rounding. The sliver a union of two cones
+/// keeps beyond a cap, `4.2e−8` by `4.4e−16` at `(π/2, 2)`, holds `9.4e−24`,
+/// and about the origin, where each term is about `π` and rounded by
+/// `4.4e−16`, it came out `0` (Q3196). About a corner, the steps between
+/// corners that close are exact, and so is every term but for its one
+/// rounding.
 fn how_much_of_the_chart_this_loop_encloses(around: &WalkedLoop) -> f64 {
     let corners = &around.corners;
+    let Some(&[u0, v0]) = corners.first() else {
+        return 0.0;
+    };
     let mut twice_the_area = 0.0;
     for step in 0..corners.len() {
         let (here, next) = (corners[step], corners[(step + 1) % corners.len()]);
+        let (here, next) = ([here[0] - u0, here[1] - v0], [next[0] - u0, next[1] - v0]);
         twice_the_area += here[0] * next[1] - next[0] * here[1];
     }
     twice_the_area / 2.0
