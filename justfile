@@ -17509,8 +17509,15 @@ queue mode="" *args:
     start_today=$(TZ=Europe/Stockholm date -d "$today_local 00:10:00" +%s)
     start_yesterday=$(TZ=Europe/Stockholm date -d "$yesterday_local 00:10:00" +%s)
     night=0
-    if [ "$now_epoch" -ge "$start_today" ] && [ "$now_epoch" -lt "$((start_today + 28800))" ]; then night=1; fi
-    if [ "$now_epoch" -ge "$start_yesterday" ] && [ "$now_epoch" -lt "$((start_yesterday + 28800))" ]; then night=1; fi
+    night_last_hour=0
+    if [ "$now_epoch" -ge "$start_today" ] && [ "$now_epoch" -lt "$((start_today + 28800))" ]; then
+        night=1
+        [ "$now_epoch" -lt "$((start_today + 25200))" ] || night_last_hour=1
+    fi
+    if [ "$now_epoch" -ge "$start_yesterday" ] && [ "$now_epoch" -lt "$((start_yesterday + 28800))" ]; then
+        night=1
+        [ "$now_epoch" -lt "$((start_yesterday + 25200))" ] || night_last_hour=1
+    fi
     # §308.8: the next window, in UTC, for a night row's skip line. Tomorrow's
     # local date is read from today's noon plus a day, since now plus a day
     # lands two dates on when the spring change makes a day 23 hours long.
@@ -17523,7 +17530,7 @@ queue mode="" *args:
     { printf '%s\n' "$rows"; [ -z "$elsewhere" ] || printf '%s\n' "$elsewhere"; [ -z "$narrowed" ] || printf '%s\n' "$narrowed"; } \
         | LC_ALL=C awk -v mode="$mode" -v n="$n" -v machine="$machine" -v cand_id="${2:-}" -v cand_ws="${3:-}" \
         -v families="$families" -v now_date="$now_date" -v threads="$threads" -v night="$night" \
-        -v night_window="$night_window" \
+        -v night_last_hour="$night_last_hour" -v night_window="$night_window" \
         -v slots='{{ queue_slots }}' -v bundle='{{ queue_bundle }}' -v file='{{ queue_file }}' \
         -v shared_files='{{ queue_shared_files }}' '
         BEGIN {
@@ -17884,9 +17891,12 @@ queue mode="" *args:
         # §308.8: a `night` entry names no path either; it says the row runs
         # only beside the night fuzz, so the fill passes it over by day. `meets`
         # asks for the paths alone, so that take, narrow and writes by day are
-        # not refused for the clock.
+        # not refused for the clock. The last hour of the window is passed over
+        # too: a lane needs prep, its start and a build of the fuzz targets
+        # under the load of the night before it measures, and a measurement
+        # that runs past the window end reads a load that is falling.
         function night_skip(i, say,    n, part, k) {
-            if (night || mode == "meets") return 0
+            if ((night && !night_last_hour) || mode == "meets") return 0
             n = split(ws[i], part, ",")
             for (k = 1; k <= n; k++)
                 if (part[k] == "night") {
@@ -18850,7 +18860,7 @@ check-queue-page-selftest:
 
     # Q3150 (§308.8): the fill's night_skip prints a fifth shape, for a row
     # whose `night` entry keeps it for the night fuzz's window while the clock
-    # sits outside it. It names a window and no holder, so it needs its own
+    # sits outside it or in its last hour. It names a window and no holder, so it needs its own
     # regex (NIGHT_LINE) and branch; without them parse_blocked_line's assert
     # fires on every daytime render that has a night row open.
     night_check=$(python3 - '{{ justfile_directory() }}/tooling/queue-page' <<'PY'
@@ -20014,7 +20024,9 @@ check-queue-selftest:
     # on 2026-10-25. 02:00Z on 2026-10-19 sits in the first; 06:30Z on
     # 2026-10-26 sits in the second only if the code reads the zone rather
     # than keeping summer time's offset, since 06:30Z was outside the window
-    # before the clocks changed.
+    # before the clocks changed. That time is also in the window's last hour
+    # (06:10Z to 07:10Z), where a night row is skipped, so the Q1 case reads
+    # Q2's skip line too, and 05:30Z is the moved window's time that Q2 takes.
     #
     # §308.8 (Q3150): Q2 runs only by night, and Q3, running, has the same
     # entry, which never meets Q2's. By night Q1 is skipped and Q2 fits; by day
@@ -20035,7 +20047,7 @@ check-queue-selftest:
     driveclock corenight 4 2026-10-19T12:00:00Z next 1
     [ "$(takes)" = "Q1 " ] || fail "a cores: row outside the night-fuzz window was skipped though nothing holds its threads"
     driveclock corenight 4 2026-10-26T06:30:00Z blocked
-    [ "$got" = "skip Q1 (tier 1): its cores:2 does not fit the 4 threads of the machine: the night fuzz holds them" ] \
+    [ "$got" = "skip Q1 (tier 1): its cores:2 does not fit the 4 threads of the machine: the night fuzz holds them"$'\n'"skip Q2 (tier 1): its night entry fits only inside the night fuzz's window, 23:10Z to 07:10Z" ] \
         || fail "the night window did not move an hour later in UTC once Stockholm left summer time on 2026-10-25"
     summer="skip Q2 (tier 1): its night entry fits only inside the night fuzz's window, 22:10Z to 06:10Z"
     winter="skip Q2 (tier 1): its night entry fits only inside the night fuzz's window, 23:10Z to 07:10Z"
@@ -20043,8 +20055,14 @@ check-queue-selftest:
     [ "$(takes)" = "Q2 " ] || fail "a night row inside the night-fuzz window, in summer time, was not taken"
     driveclock corenight 4 2026-10-19T12:00:00Z blocked
     [ "$got" = "$summer" ] || fail "a night row by day, in summer time, was not skipped naming the next window"
-    driveclock corenight 4 2026-10-26T06:30:00Z next 1
-    [ "$(takes)" = "Q2 " ] || fail "a night row inside only the window moved an hour later on 2026-10-25 was not taken"
+    driveclock corenight 4 2026-10-26T05:30:00Z next 1
+    [ "$(takes)" = "Q2 " ] || fail "a night row inside the window moved an hour later on 2026-10-25 was not taken"
+    driveclock corenight 4 2026-10-26T06:30:00Z blocked
+    [ "${got##*$'\n'}" = "$winter" ] || fail "a night row in the last hour of the moved window was not skipped naming the next window"
+    driveclock corenight 4 2026-10-19T05:30:00Z blocked
+    [ "${got##*$'\n'}" = "$summer" ] || fail "a night row in the last hour of a summer window was not skipped naming the next window"
+    driveclock corenight 4 2026-10-19T05:05:00Z next 1
+    [ "$(takes)" = "Q2 " ] || fail "a night row just before the last hour of a summer window was not taken"
     driveclock corenight 4 2026-10-26T07:30:00Z blocked
     [ "$got" = "$winter" ] || fail "a night row just after the moved window ends was not skipped naming the moved window"
     driveclock corenight 4 2026-10-25T22:30:00Z blocked
