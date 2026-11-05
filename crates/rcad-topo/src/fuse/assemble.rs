@@ -2734,6 +2734,25 @@ impl Assembly {
     /// `AFaceStraddlesSomethingTrimmingIt`. With every pipe let through by
     /// the cone's rule, 3 tests of the bar files failed, an answer
     /// `TheFuseWroteABrokenAnswer` among them.
+    ///
+    /// **That refusal is `Model::validate`'s, not the band's** (Q2673). The
+    /// corner belongs in the answer: it is the bar's own seam corner, and the
+    /// pin, which starts on the bar's axis, never reaches it. The pin's pipe
+    /// crosses the bar's wall in two loops, and the wall runs along only the
+    /// pin's own. `holds.rs`'s `what_a_curved_face_holds` reads a corner past
+    /// the half-space picking that loop out as outside the pin, but
+    /// `validate.rs` read it by its own sign twice: the sweep over every
+    /// face's trimming asks `the_side_this_face_lies_on` with no half-space,
+    /// and the closed-edge check's `what_a_corner_past_the_picker_says` names
+    /// none for two pipes. Read the way `holds.rs` reads them, both pass, and
+    /// with a pipe's ring of one side let through every `rcad-topo` test
+    /// passed but the 8 and 6 faces that `two_bars_of_one_radius_leaning_across_each_other.rs`
+    /// and `a_closed_edge_whose_corner_moved_after_one_face_read_it.rs` pin,
+    /// which came back 6 and 4. The fuse reaches the same refusal without the
+    /// band: a pin leaning along `(−0.6, 0, 0.8)` from the bar's axis at
+    /// `z = 4`, with the bar from `1.5` to `10`, joins the wall without a ring
+    /// of pieces, and its seam corner `(2, 0, 1.5)` lies inside the pin's pipe
+    /// behind its cap too.
     fn needs_no_seam(
         &self,
         members: &[usize],
