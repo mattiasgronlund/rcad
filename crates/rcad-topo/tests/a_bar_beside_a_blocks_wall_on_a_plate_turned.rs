@@ -108,7 +108,7 @@ fn a_bar_a_rounding_from_a_blocks_wall_is_refused_where_the_answer_keeps_the_gap
         (Rule::Union, false),
         (Rule::Difference, true),
     ] {
-        let (_, fused) = fused(A_QUARTER_TURN_BACK, rule, plate_first);
+        let fused = fused_and_said(A_QUARTER_TURN_BACK, rule, plate_first);
         assert!(
             is_refused_for_its_range(&fused),
             "{rule:?}, plate first {plate_first}: {:?}",
@@ -125,6 +125,9 @@ fn a_bar_a_rounding_from_a_blocks_wall_is_refused_where_the_answer_keeps_the_gap
 /// Where the wall misses the pipe, the union and the plate less the bar keep
 /// the gap and may answer or be refused for their range: the module doc's
 /// last paragraph says why both happen.
+///
+/// It prints how the wall meets the pipe at each turn, and each fuse's answer
+/// or the ratio it was refused for, so `--no-capture` reads the counts back.
 #[test]
 fn turned_sixty_ways_only_a_fuse_whose_answer_keeps_the_sliver_is_refused() {
     const THE_BAR_AND_ITS_SLIVER: [(Rule, bool); 3] = [
@@ -146,6 +149,8 @@ fn turned_sixty_ways_only_a_fuse_whose_answer_keeps_the_sliver_is_refused() {
         THE_PLATE_AND_THE_GAP[2],
     ];
     let mut turns_where_the_wall_cuts_into_the_pipe = 0;
+    let mut turns_where_the_wall_misses_the_pipe = 0;
+    let mut furthest_off: f64 = 0.0;
     for step in 0..60 {
         let angle = f64::from(step) * 0.05;
         let (model, keys) = turned_by(angle);
@@ -156,6 +161,7 @@ fn turned_sixty_ways_only_a_fuse_whose_answer_keeps_the_sliver_is_refused() {
             off.abs() < 1e-14,
             "turned {angle}: the wall is {off:e} off the pipe"
         );
+        furthest_off = furthest_off.max(off.abs());
 
         let meet = intersect(
             &Surface::Plane(wall),
@@ -163,17 +169,33 @@ fn turned_sixty_ways_only_a_fuse_whose_answer_keeps_the_sliver_is_refused() {
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         );
-        let (refused, answer_or_refused, answers): (&[_], &[_], &[_]) = match meet {
+        let (meets, refused, answer_or_refused, answers): (_, &[_], &[_], &[_]) = match meet {
             Ok(SurfaceMeet::Curves(lines)) if lines.len() == 2 => {
                 turns_where_the_wall_cuts_into_the_pipe += 1;
-                (&THE_BAR_AND_ITS_SLIVER, &[], &THE_PLATE_AND_THE_GAP)
+                (
+                    "cuts into it in two lines",
+                    &THE_BAR_AND_ITS_SLIVER,
+                    &[],
+                    &THE_PLATE_AND_THE_GAP,
+                )
             }
-            Ok(SurfaceMeet::Nothing) => (&[], &THE_PLATE_AND_THE_GAP, &THE_BAR_AND_ITS_SLIVER),
-            Ok(SurfaceMeet::Curves(lines)) if lines.len() == 1 => (&[], &[], &EVERY_FUSE),
+            Ok(SurfaceMeet::Nothing) => {
+                turns_where_the_wall_misses_the_pipe += 1;
+                (
+                    "misses it",
+                    &[],
+                    &THE_PLATE_AND_THE_GAP,
+                    &THE_BAR_AND_ITS_SLIVER,
+                )
+            }
+            Ok(SurfaceMeet::Curves(lines)) if lines.len() == 1 => {
+                ("touches it in one line", &[], &[], &EVERY_FUSE)
+            }
             other => panic!("turned {angle}: the wall meets the pipe as {other:?}"),
         };
+        println!("turned {angle}: the wall is {off:e} off the pipe and {meets}");
         for &(rule, plate_first) in refused {
-            let (_, fused) = fused(angle, rule, plate_first);
+            let fused = fused_and_said(angle, rule, plate_first);
             assert!(
                 is_refused_for_its_range(&fused),
                 "turned {angle}, {rule:?}, plate first {plate_first}: {:?}",
@@ -181,7 +203,7 @@ fn turned_sixty_ways_only_a_fuse_whose_answer_keeps_the_sliver_is_refused() {
             );
         }
         for &(rule, plate_first) in answer_or_refused {
-            let (_, fused) = fused(angle, rule, plate_first);
+            let fused = fused_and_said(angle, rule, plate_first);
             assert!(
                 fused.is_ok() || is_refused_for_its_range(&fused),
                 "turned {angle}, {rule:?}, plate first {plate_first}: {:?}",
@@ -189,7 +211,7 @@ fn turned_sixty_ways_only_a_fuse_whose_answer_keeps_the_sliver_is_refused() {
             );
         }
         for &(rule, plate_first) in answers {
-            let (_, fused) = fused(angle, rule, plate_first);
+            let fused = fused_and_said(angle, rule, plate_first);
             assert!(
                 fused.is_ok(),
                 "turned {angle}, {rule:?}, plate first {plate_first}: {:?}",
@@ -197,10 +219,30 @@ fn turned_sixty_ways_only_a_fuse_whose_answer_keeps_the_sliver_is_refused() {
             );
         }
     }
+    println!(
+        "of sixty turns the wall cut into the pipe at {turns_where_the_wall_cuts_into_the_pipe} \
+         and missed it at {turns_where_the_wall_misses_the_pipe}, and was at most \
+         {furthest_off:e} off it"
+    );
     assert!(
         turns_where_the_wall_cuts_into_the_pipe >= 20,
         "the wall cut into the pipe at {turns_where_the_wall_cuts_into_the_pipe} of sixty turns"
     );
+}
+
+/// [`fused`], printing how it answered or why it was refused.
+fn fused_and_said(angle: f64, rule: Rule, plate_first: bool) -> rcad_topo::Result<Fused> {
+    let (_, fused) = fused(angle, rule, plate_first);
+    match &fused {
+        Ok(answer) => println!(
+            "turned {angle}, {rule:?}, plate first {plate_first}: {} solids",
+            answer.solids().len()
+        ),
+        Err(refused) => {
+            println!("turned {angle}, {rule:?}, plate first {plate_first}: refused, {refused}");
+        }
+    }
+    fused
 }
 
 /// The plate and the bar of [`turned_by`] `angle`, fused under `rule`.
