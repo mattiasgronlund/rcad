@@ -440,19 +440,33 @@ pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Resu
 /// meet, `s` is `7.6e-13`, the two distances off are under `1.5e-15`, the flat
 /// bound is `3.7e-3`, and `h` comes out at `1.5e11`.
 ///
+/// # A seed settled off one surface is turned away first
+///
+/// As [`settled_with_a_bound`] and [`march`] turn it away. The radius left to
+/// a surface does not do it: a ball of radius 3 across a pipe of radius 2,
+/// settled from `2000` along the line the crossing runs on, is still bounded
+/// `1.1e-4` off it after eight rounds, which leaves both radii nearly whole and
+/// `h` far under a half, and the bound came back (Q2839). It was never an
+/// answer: each run of `walk` that asks this of a corner settles the same
+/// corner again with [`settled_with_a_bound`] before it draws anything, which
+/// refuses it, so all it did was let a march run first.
+///
 /// # Errors
 ///
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when `h` is more
 /// than a half, or the radius left to either surface is not more than nothing:
 /// the two surfaces are too nearly parallel for their bend to leave any bound
 /// on how far off the crossing the point is. And what [`settled_with_a_bound`]
-/// refuses, but for its seed check, which is not asked here.
+/// refuses.
 pub(crate) fn settled_with_a_bound_where_they_bend(
     surfaces: [&Surface; 2],
     seed: Point,
     radii: impl Fn(Point) -> [f64; 2],
 ) -> Result<(Point, f64)> {
     let settled = settled(surfaces, seed)?;
+    if the_settling_did_not_land_on_both(surfaces, settled) {
+        return Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces);
+    }
     let (flat, further_off, leaning) = the_flat_bound_and_what_it_is_made_of(surfaces, settled)?;
     let cannot_bound = || {
         gave_up(
@@ -2272,6 +2286,52 @@ mod tests {
             Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces),
             "and a seed settled with a bound is the same seed, so it is turned away too",
         );
+    }
+
+    /// **A seed eight rounds of settling leave off one surface is refused with
+    /// the bend counted, as it is without it** (§43.6, Q2839).
+    ///
+    /// Two crossings a long way from each seed: a ball of radius 3 across a pipe
+    /// of radius 2, from `2000` along the line the crossing runs on at
+    /// `(0, 2, 2.17)`, and two pipes of radius 1 leaning across each other, from
+    /// `1e5` off `(0, 1, 0)`. Eight rounds run out before Newton is near enough
+    /// to double its digits ([`ROUNDS_OF_SETTLING`]), and [`march`] and
+    /// [`settled_with_a_bound`] turn both away. [`settled_with_a_bound_where_they_bend`]
+    /// handed both back, bounded `1.1e-4` and `3.5e-2` off their crossings: both
+    /// radii are far more than the miss, so its radius-left test, which turns
+    /// away the thin pipe of
+    /// `a_seed_that_settles_off_one_surface_is_refused_as_the_march_refuses_it`,
+    /// let them through.
+    #[test]
+    fn a_seed_from_far_off_that_eight_rounds_do_not_settle_is_refused_with_the_bend_counted() {
+        let ball = a_ball([0.0, 3.0, 5.0], 3.0);
+        let pipe = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 2.0);
+        let upright = a_pipe([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], 1.0);
+        let leaning = a_pipe([1.0, 0.0, 0.3], [0.0, 0.5, 0.0], 1.0);
+        for (surfaces, seed, radii) in [
+            ([&ball, &pipe], Point::new(2000.0, 2.0, 2.2), [3.0, 2.0]),
+            (
+                [&upright, &leaning],
+                Point::new(0.0, 80001.0, -60000.0),
+                [1.0, 1.0],
+            ),
+        ] {
+            assert_eq!(
+                march(surfaces, seed, 1.0, 1000, &|_| true).map(|walked| walked.points.len()),
+                Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces),
+                "the march turns {seed:?} away once it has settled it",
+            );
+            assert_eq!(
+                settled_with_a_bound(surfaces, seed),
+                Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces),
+                "so does settling {seed:?} with the flat bound",
+            );
+            assert_eq!(
+                settled_with_a_bound_where_they_bend(surfaces, seed, |_| radii),
+                Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces),
+                "and settling {seed:?} with the bend counted is settling the same seed",
+            );
+        }
     }
 
     /// **How far a point is off a cone is enclosed even where the arithmetic
