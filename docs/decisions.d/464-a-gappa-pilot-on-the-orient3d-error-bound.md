@@ -24575,14 +24575,88 @@ Its first line is `pointzero.py`'s own, run again in the fresh directory;
 the parent's lines come after it because its output is buffered when it is
 not a terminal.
 
-### 464.35 DRAFT, Q2802 relay 3: point.g with products below the normals
+### 464.35 DRAFT, Q2802 second lane: point.g with products below the normals
 
-*Not a finished subsection: no index line, nothing in it run to the end. The
-lane that writes 464.35 replaces this block whole. It is here so the scripts
-outlive `/tmp`.*
+*Not a finished subsection: no index line. Every run is done; the prose is
+not written. The lane that writes 464.35 replaces this block whole. It is
+here so the scripts and the prints outlive `/tmp`.*
 
-Found so far, each run on 2026-11-05 under 464.4's pin through 464.13's
-`one.sh`:
+The answer, run by Q2802's second lane on 2026-11-05 at base `8dae715a`
+(`isometry.rs` changed only in doc comments since `c0859e3f`, `Cargo.lock`
+not at all), through 464.4's pin and 464.13's `one.sh`:
+
+- **`POINT_ROUNDOFF` needs `L` normal, and not the products.** In the form
+  below, all 88 cases prove `36u`, with `gappa -Bcoq` and `coqc`, and all 88
+  controls at `u / 2` exit 1. The largest is `34.7285u` (`pm_n`), against
+  464.19's `24.80u` with the products normal: the products below the normals
+  cost up to `9.93u · L` (`G / L`), leaving `1.27u` of room where 464.19 left
+  `11.2u`. `pm_n` alone: exit 0 in 5.46 s, peak 89 188 KB (`peak.sh`).
+  `startpm.sh` ran them 12 at once from 16:19:56 to 16:20:50 UTC.
+- `tallypm.py`'s whole print:
+
+```
+88 cases, 176 exit lines, 88 coq lines
+lines of runpm.txt that are neither: none
+problems: 0
+cases that exit 0: 88 of 88; controls that exit 1: 88 of 88
+gappa time per case: 0.11 s (pm_v0v1p0p1p2) to 5.56 s (pm_n)
+coq: 588 lines 6 hints 0.91 s (pm_v1v2p0p1p2) to 12299 lines 41 hints 10.96 s (pm_n)
+cases with a rounded product on a live path: 63 of 88
+terms' error / D, upper end in u: [(0.3333, 21), (0.931, 2), (0.9599, 6), (0.9636, 1), (0.9673, 6), (0.9724, 2), (0.9738, 2), (0.9787, 2), (0.9849, 1), (0.9859, 1), (1.0, 44)]
+D / L upper end: [(3.0, 25), (24.8, 63)]
+Asum / G, upper end in u: [(1.0, 63)]
+G / L upper end: [(3.0, 26), (4.8286, 18), (5.0, 7), (6.4643, 2), (6.4722, 4), (7.6569, 1), (7.8992, 4), (9.9286, 1)]
+largest of the two averages added: 34.7285u (pm_n), against POINT_ROUNDOFF's 36u
+control best on (out - Ex) / L, in u, and how many controls:
+  1.0u: 21 
+  3.0u: 4 pm_v1v2, pm_v1v2p1, pm_v1v2p2, pm_v1v2p1p2
+  26.8u: 6 pm_v0v1p0, pm_v0v2p0, pm_v1p0p2, pm_v2p0p1, pm_v0v1p0p2, pm_v0v2p0p1
+  26.99u: 6 pm_wv1p0, pm_wv2p0, pm_v1p0p1, pm_v2p0p2, pm_wv1p0p1, pm_wv2p0p2
+  27.11u: 2 pm_v0p0p1, pm_v0p0p2
+  27.15u: 2 pm_wp0p1, pm_wp0p2
+  27.8u: 10 pm_wv1p2, pm_wv2p1, pm_v0v1p1, pm_v0v2p2, pm_v1p1p2, pm_v2p1p2, pm_wv1p1p2, pm_wv2p1p2, pm_v0v1p1p2, pm_v0v2p1p2
+  27.92u: 2 pm_p0p1, pm_p0p2
+  29.1u: 2 pm_v1p0, pm_v2p0
+  29.25u: 1 pm_wp0
+  29.45u: 1 pm_v0p0
+  29.63u: 13 
+  29.8u: 6 pm_wv1, pm_wv2, pm_v1p1, pm_v2p2, pm_wv1p1, pm_wv2p2
+  31.26u: 2 pm_v0p1, pm_v0p2
+  31.27u: 4 pm_v1, pm_v2, pm_wp1, pm_wp2
+  31.8u: 1 pm_p0
+  32.46u: 1 pm_w
+  32.7u: 3 pm_v0, pm_p1, pm_p2
+  34.73u: 1 pm_n
+largest best: 34.7286u (pm_n), against POINT_ROUNDOFF's 36u
+each best within 0.01% of its case's two averages added: True
+```
+
+- `controls.py`'s two, through `capped.sh` (`peak.sh` under a 12 GB
+  `ulimit -v`): `c_pm_n_34` (goal `34u`) exit 1 in 47.10 s, best
+  `±3.85564e-15`, which is `34.73u`, so the hypotheses do not contradict;
+  `c_pm_n_l` (`L` down to `2⁻¹⁰⁷⁴`) exit 1, `Asum / G` only within `±0.5`,
+  best `±4.96429`: the proof needs `L` normal. `c_pm_n_half` exit 1, best
+  `±3.85565e-15`.
+- The lemmas run again: `mixedn`, `mixeds` and `sum` each exit 0, `-Bcoq`
+  exit 0, `coqc` exit 0 (274, 110 and 151 lines, 2, 0 and 0 hints); each
+  control exits 1. The three files are this block's, byte for byte.
+- **Below the normals no `f64` answer meets the bound.** The probe crate
+  `subl` (below, not in the tree) turns points by `Isometry::rotation(&Axis::z(),
+  PI / 6)`, stored `(w, v₀, v₁, v₂) = (9.659258262890683e-1, 0, 0,
+  2.5881904510252074e-1)`, shift 0, and `subl.py` works the exact answer from
+  the stored numbers. `(3·2⁻¹⁰⁷⁴, 0, 0)`, `L = 3·2⁻¹⁰⁷⁴`: `x` comes out
+  `2·2⁻¹⁰⁷⁴` against exact `2.59808·2⁻¹⁰⁷⁴`, off by `1.796e+15u · L`, and the
+  nearest double is off by `1.207e+15u · L`; `y` `2` against `1.5`, off by
+  `1.501e+15u · L`. `(1000·2⁻¹⁰⁷⁴, 0, 0)`: `x` off by `2.288e+11u · L`.
+  `(3·2⁻¹⁰²², 0, 0)`, `L` normal: `x` off by `0.001442u · L`, `y` by
+  `0.2793u · L`. So it is a limit of the bound's form, `18ε · L`, below the
+  normals: the gap between doubles is wider than the bound.
+- Downstream, not run: 464.21's pipe proves `CORNER_AFTER_MOVING_ROUNDOFF`
+  only with `point.g`'s slips at `25u` (464.21's opening), and with a product
+  below the normals a slip reaches `34.73u`.
+
+Found by the first lane's three relays, each run on 2026-11-05 under 464.4's
+pin through 464.13's `one.sh`:
 
 - `mixedn.g` and `mixeds.g` (below) prove, with `gappa -Bcoq` and `coqc`,
   that for every real `P`, `m = (rnd(P) − P) / (|P| + 2⁻¹⁰²²)` is in `[−u,
@@ -25094,3 +25168,283 @@ T = a - b; t = rnd(T);
 
 `c_sum_half.g` is `sum.g` with both goals at `[-1b-54, 1b-54]` and the first
 comment line `# sum.g's control: the same at u / 2, which must fail.`
+
+The second lane's scripts, beside 464.34's `runpz.sh` and relay 3's
+`peak.sh` and `bg.sh` (`bg.sh startpm.log ./startpm.sh` started the run):
+
+`startpm.sh`:
+
+```bash
+#!/bin/bash
+# Run every case in casesm.txt through runpz.sh, P at once (default 12), each
+# process capped at 12 GB of address space, writing runpm.txt, which ends
+# "done". 464.34's start.sh with pointsub.py's names.
+cd "$(dirname "$0")"
+echo $$ > startpm.pid
+ulimit -v ${CAP:-12000000}
+P=${P:-12} ./runpz.sh < casesm.txt > runpm.txt 2>&1
+echo done >> runpm.txt
+```
+
+`capped.sh`:
+
+```bash
+#!/bin/bash
+# Run each Gappa script named through peak.sh in turn, each under a 12 GB cap
+# on address space, printing peak.sh's line for each.
+# Run as: ./capped.sh <name>.g [<name>.g ...]
+cd "$(dirname "$0")"
+ulimit -v ${CAP:-12000000}
+for f in "$@"; do
+  ./peak.sh "$f"
+done
+```
+
+`tallypm.py`, 464.34's `tallypz.py` with these names and the two averages:
+
+```python
+"""Count what runpm.txt and the files beside it say of each case in casesm.txt
+and its control: each case's exit, Coq's two exits, its proof's size, the
+bounds it printed on the terms' error over D and on D / L, and where a
+product is rounded on a live path on Asum / G and G / L, what those add to,
+each control's exit and its best on (out - Ex) / L in u, and every line of an
+.out, .bcoq or .coqc that is not a result or a divisor Gappa took to be
+nonzero. 464.34's tallypz.py with pointsub.py's names and its two averages.
+Run as: python3 tallypm.py"""
+import collections
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+U = 2.0 ** -53
+cases = open("casesm.txt").read().split()
+log = open("runpm.txt").read().splitlines()
+assert log and log[-1] == "done", "runpm.txt does not end done"
+
+EXIT = re.compile(r"^(\S+) exit (\d+) ([\d.]+)s$")
+COQ = re.compile(r"^(\S+) coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$")
+exits, coqs, odd_log = {}, {}, []
+for line in log[:-1]:
+    if m := EXIT.match(line):
+        exits[m[1]] = (int(m[2]), float(m[3]))
+    elif m := COQ.match(line):
+        coqs[m[1]] = (int(m[2]), int(m[3]), float(m[4]), int(m[5]), int(m[6]))
+    else:
+        odd_log.append(line)
+
+WARNING = re.compile(r"^Warning: the expression .* has been assumed to be nonzero when checking a rewriting rule\.$")
+RESULT = re.compile(r"^  (.*) in \[(.*)\]$")
+BEST = re.compile(r"^  BND\(\(out - Ex\) / L\), best: \[(\S+), (\S+)\]$")
+DECIMAL = re.compile(r"\{(-?[\d.e+-]+),")
+# Where D is 3L, Gappa prints D written out.
+NAMES = {"E / D": "e", "(out - Ex) / D": "e", "(out - Ex) / (3 * L)": "e", "D / L": "d",
+         "3 * L / L": "d", "Asum / G": "a", "G / L": "g"}
+
+
+def odd_lines(path, control):
+    allowed = [WARNING, RESULT] + ([BEST] if control else [])
+    fixed = {"Results:"}
+    if control:
+        fixed.add("Error: some properties were not satisfied:")
+    if not os.path.exists(path):
+        return [f"{path} missing"]
+    return [f"{path}: {line}" for line in open(path).read().splitlines()
+            if line not in fixed and not any(p.match(line) for p in allowed)]
+
+
+def high_end(interval):
+    """The upper end of a Gappa result interval, as a float: the part after
+    the comma that is outside every brace."""
+    depth = 0
+    for i, ch in enumerate(interval):
+        depth += {"{": 1, "}": -1}.get(ch, 0)
+        if ch == "," and depth == 0:
+            hi = interval[i + 1:].strip()
+            break
+    m = DECIMAL.search(hi)
+    return float(m[1]) if m else float(hi)
+
+
+problems, bests, got, times, sizes = [], {}, {}, [], []
+for n in cases:
+    c = "c_" + n + "_half"
+    if exits.get(n, (None,))[0] != 0:
+        problems.append(f"{n} exit {exits.get(n)}")
+    if exits.get(c, (None,))[0] != 1:
+        problems.append(f"{c} exit {exits.get(c)}")
+    k = coqs.get(n)
+    if not k or k[0] != 0 or k[1] != 0:
+        problems.append(f"{n} coq {k}")
+    else:
+        sizes.append((k[3], k[4], k[2], n))
+    times.append((exits.get(n, (0, 0.0))[1], n))
+    problems += odd_lines(n + ".out", False) + odd_lines(n + ".bcoq", False)
+    problems += odd_lines(c + ".out", True)
+    if os.path.exists(n + ".coqc") and open(n + ".coqc").read():
+        problems.append(f"{n}.coqc is not empty")
+    got[n] = {}
+    for line in open(n + ".out").read().splitlines():
+        if m := RESULT.match(line):
+            got[n][NAMES[m[1]]] = high_end(m[2])
+    has_a = "Asum = " in open(n + ".g").read()
+    want = {"e", "d", "a", "g"} if has_a else {"e", "d"}
+    if set(got[n]) != want:
+        problems.append(f"{n}.out has {sorted(got[n])}, not {sorted(want)}")
+    best = [BEST.match(line) for line in open(c + ".out").read().splitlines()]
+    best = [m for m in best if m]
+    if len(best) != 1:
+        problems.append(f"{c} has {len(best)} best lines")
+    else:
+        bests[n] = float(best[0][2]) / U
+
+
+def total(n):
+    r = got[n]
+    return (r.get("e", 0) * r.get("d", 0) + r.get("a", 0) * r.get("g", 0)) / U
+
+
+print(len(cases), "cases,", len(exits), "exit lines,", len(coqs), "coq lines")
+print("lines of runpm.txt that are neither:", odd_log or "none")
+print("problems:", len(problems))
+for p in problems:
+    print("  " + p)
+proved = sum(exits.get(n, (None,))[0] == 0 for n in cases)
+failed = sum(exits.get("c_" + n + "_half", (None,))[0] == 1 for n in cases)
+print(f"cases that exit 0: {proved} of {len(cases)}; controls that exit 1: {failed} of {len(cases)}")
+print("gappa time per case: %.2f s (%s) to %.2f s (%s)" % (min(times) + max(times)))
+sizes.sort()
+print("coq: %d lines %d hints %.2f s (%s) to %d lines %d hints %.2f s (%s)" % (sizes[0] + sizes[-1]))
+with_a = [n for n in cases if "a" in got[n]]
+print("cases with a rounded product on a live path:", len(with_a), "of", len(cases))
+for key, what in (("e", "terms' error / D, upper end in u"), ("d", "D / L upper end"),
+                  ("a", "Asum / G, upper end in u"), ("g", "G / L upper end")):
+    scale = U if key in ("e", "a") else 1.0
+    print(what + ":", sorted(collections.Counter(round(got[n][key] / scale, 4)
+                                                 for n in cases if key in got[n]).items()))
+print("largest of the two averages added: %.4fu (%s), against POINT_ROUNDOFF's 36u"
+      % max((total(n), n) for n in cases))
+print("control best on (out - Ex) / L, in u, and how many controls:")
+for b, k in sorted(collections.Counter(round(b, 2) for b in bests.values()).items()):
+    print(f"  {b}u: {k}", ", ".join(n for n in bests if round(bests[n], 2) == b) if k <= 12 else "")
+print("largest best: %.4fu (%s), against POINT_ROUNDOFF's 36u" % max((b, n) for n, b in bests.items()))
+print("each best within 0.01% of its case's two averages added:",
+      all(abs(bests[n] - total(n)) <= 1e-4 * total(n) for n in bests))
+```
+
+The probe crate `subl`, built outside the tree with `RUSTUP_TOOLCHAIN=1.96.0
+cargo run --release --manifest-path <dir>/Cargo.toml` and read as
+`./target/release/subl | python3 subl.py`. Its `Cargo.toml` names
+`rcad-geom` by path, with an empty `[workspace]`, edition 2024; it built
+nalgebra 0.35.0. Its `src/main.rs`:
+
+```rust
+//! Turn points whose largest coordinate L is below the normals by 30 degrees
+//! about z through the origin, and print each turn part, the point and the
+//! moved point's x and y as f64 bits, for subl.py to compare with the exact
+//! arithmetic on the same stored numbers.
+use rcad_geom::{Axis, Isometry, Point};
+
+fn main() {
+    let turn = Isometry::rotation(&Axis::z(), std::f64::consts::PI / 6.0).unwrap();
+    let [w, v0, v1, v2] = turn.rotation_quaternion();
+    println!("turn {:e} {:e} {:e} {:e}", w, v0, v1, v2);
+    println!("bits {} {} {} {}", w.to_bits(), v0.to_bits(), v1.to_bits(), v2.to_bits());
+    let tiny = f64::from_bits(1);
+    for (k, p) in [
+        Point::new(3.0 * tiny, 0.0, 0.0),
+        Point::new(3.0 * tiny, 5.0 * tiny, 0.0),
+        Point::new(1000.0 * tiny, 0.0, 0.0),
+        Point::new(3.0 * 2f64.powi(-1022), 0.0, 0.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let m = turn.apply_to_point(p);
+        println!(
+            "point {k} {} {} {} -> {} {} {}",
+            p.x().to_bits(),
+            p.y().to_bits(),
+            p.z().to_bits(),
+            m.x().to_bits(),
+            m.y().to_bits(),
+            m.z().to_bits()
+        );
+    }
+    println!("POINT_ROUNDOFF {:e}", Isometry::POINT_ROUNDOFF);
+}
+```
+
+It printed:
+
+```
+turn 9.659258262890683e-1 0e0 0e0 2.5881904510252074e-1
+bits 4606875505927962389 0 0 4598334089338226320
+point 0 3 0 0 -> 2 2 0
+point 1 3 5 0 -> 0 6 0
+point 2 1000 0 0 -> 866 500 0
+point 3 11258999068426240 0 0 -> 10353947156035968 6755399441055744 0
+POINT_ROUNDOFF 3.9968028886505635e-15
+```
+
+`subl.py`:
+
+```python
+"""Read subl's print on stdin and work each moved point's x and y without
+rounding from the stored turn, point.g's Ex and its turn for y, in exact
+rationals, then print how far the code's answer is from it in units of L and
+of the smallest subnormal, against POINT_ROUNDOFF = 18 eps = 36u, and how far
+the nearest f64 to the exact answer is.
+Run as: ./target/release/subl | python3 subl.py"""
+import struct
+import sys
+from fractions import Fraction
+
+U = Fraction(1, 2**53)
+TINY = Fraction(1, 2**1074)
+
+
+def f(bits):
+    return Fraction(struct.unpack("<d", struct.pack("<Q", int(bits)))[0])
+
+
+def nearest_gap(x):
+    """How far x is from the nearest multiple of 2^-1074, which every f64
+    below 2^-1021 is."""
+    k = x / TINY
+    lo = k.numerator // k.denominator
+    return min(k - lo, lo + 1 - k) * TINY
+
+
+lines = sys.stdin.read().splitlines()
+w, v0, v1, v2 = (f(b) for b in next(l for l in lines if l.startswith("bits")).split()[1:])
+for line in lines:
+    if not line.startswith("point"):
+        continue
+    words = line.split()
+    p0, p1, p2 = (f(b) for b in words[2:5])
+    x, y = f(words[6]), f(words[7])
+    s0 = s1 = Fraction(0)
+    ex = 2 * w * (v1 * p2 - v2 * p1) + v1 * (2 * (v0 * p1 - v1 * p0)) - v2 * (2 * (v2 * p0 - v0 * p2)) + p0 + s0
+    ey = 2 * w * (v2 * p0 - v0 * p2) + v2 * (2 * (v0 * p1 - v1 * p0)) - v0 * (2 * (v1 * p2 - v2 * p1)) + p1 + s1
+    big = max(abs(p0), abs(p1), abs(p2))
+    for name, got, exact in (("x", x, ex), ("y", y, ey)):
+        err = abs(got - exact)
+        print(f"point {words[1]} L = {float(big / TINY):g} * 2^-1074 {name}: code {float(got / TINY):g}, exact "
+              f"{float(exact / TINY):.6g} (* 2^-1074), off by {float(err / big / U):.4g}u * L, "
+              f"{float(err / TINY):.4g} * 2^-1074; nearest double off by {float(nearest_gap(exact) / big / U):.4g}u * L;"
+              f" past 36u * L: {err > 36 * U * big}")
+```
+
+Its whole print (the nearest-double figure is wrong for point 3, whose exact
+`x` is above `2⁻¹⁰²¹`, where doubles are `2⁻¹⁰⁷³` apart):
+
+```
+point 0 L = 3 * 2^-1074 x: code 2, exact 2.59808 (* 2^-1074), off by 1.796e+15u * L, 0.5981 * 2^-1074; nearest double off by 1.207e+15u * L; past 36u * L: True
+point 0 L = 3 * 2^-1074 y: code 2, exact 1.5 (* 2^-1074), off by 1.501e+15u * L, 0.5 * 2^-1074; nearest double off by 1.501e+15u * L; past 36u * L: True
+point 1 L = 5 * 2^-1074 x: code 0, exact 0.0980762 (* 2^-1074), off by 1.767e+14u * L, 0.09808 * 2^-1074; nearest double off by 1.767e+14u * L; past 36u * L: True
+point 1 L = 5 * 2^-1074 y: code 6, exact 6.5 (* 2^-1074), off by 9.007e+14u * L, 0.5 * 2^-1074; nearest double off by 9.007e+14u * L; past 36u * L: True
+point 2 L = 1000 * 2^-1074 x: code 866, exact 866.025 (* 2^-1074), off by 2.288e+11u * L, 0.0254 * 2^-1074; nearest double off by 2.288e+11u * L; past 36u * L: True
+point 2 L = 1000 * 2^-1074 y: code 500, exact 500 (* 2^-1074), off by 0.2793u * L, 3.101e-14 * 2^-1074; nearest double off by 0.2793u * L; past 36u * L: False
+point 3 L = 1.35108e+16 * 2^-1074 x: code 1.17007e+16, exact 1.17007e+16 (* 2^-1074), off by 0.001442u * L, 0.002163 * 2^-1074; nearest double off by 0.001442u * L; past 36u * L: False
+point 3 L = 1.35108e+16 * 2^-1074 y: code 6.7554e+15, exact 6.7554e+15 (* 2^-1074), off by 0.2793u * L, 0.4189 * 2^-1074; nearest double off by 0.2793u * L; past 36u * L: False
+```
