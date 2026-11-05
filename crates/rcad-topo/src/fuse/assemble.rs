@@ -9206,6 +9206,7 @@ fn with_the_halves_of_each_whole_curve_joined<'a>(
             .iter()
             .map(|(side, curve, _)| (&side.carried_by, curve.clone(), side.ends[0].point())),
         policy,
+        log,
     );
     let one_name = |curve: &CurveName| goes_by.get(curve).unwrap_or(curve).clone();
     let whole: BTreeSet<CurveName> = named
@@ -10246,6 +10247,7 @@ impl Corners {
                     Some((&meet.carried_by, curve.clone()?, meet.ends[0].point()))
                 }),
                 policy,
+                log,
             ),
             arcs: the_name_each_arc_of_a_conic_goes_by(
                 model,
@@ -10254,6 +10256,7 @@ impl Corners {
                     .filter(|(_, curve)| curve.is_none())
                     .map(|(meet, _)| (&meet.carried_by, &meet.along[..])),
                 policy,
+                log,
             ),
             ..Self::default()
         };
@@ -11323,13 +11326,14 @@ fn closes_on_itself(meet: &FaceMeet) -> bool {
 /// ([`which_of_the_pairs_closed_crossings_it_is`]), but nothing here asks
 /// whether the three share it, so a join would need an argument of its own.
 ///
-/// A meet of the three that cannot be worked out joins nothing, and its
-/// records are not kept, as `arrange.rs` keeps none for the fold it makes of
-/// the same three: the answer is then refused as not a manifold, as it was
-/// before anything was asked.
+/// A meet of the three that cannot be worked out joins nothing, and the answer
+/// is then refused as not a manifold, as it was before anything was asked. A
+/// join made writes the meet's records to `log`
+/// ([`the_three_share_more_than_a_point`]).
 fn the_name_each_closed_curve_goes_by<'a>(
     closed: impl Iterator<Item = (&'a [Surface; 2], CurveName, PredicatePoint)>,
     policy: &Policy,
+    log: &mut ProvenanceLog,
 ) -> BTreeMap<CurveName, CurveName> {
     let mut cut_out_of: BTreeMap<CurveName, (Plane, Surface, PredicatePoint)> = BTreeMap::new();
     let mut cut_out_of_a_ring: BTreeMap<CurveName, (&[Surface; 2], Plane, Surface)> =
@@ -11360,16 +11364,6 @@ fn the_name_each_closed_curve_goes_by<'a>(
             Ordering::Equal => None,
         };
     };
-    let share_more_than_a_point = |flat: Plane, one: &Surface, other: &Surface| {
-        matches!(
-            meet_of_three_surfaces(
-                [&Surface::Plane(flat), one, other],
-                policy,
-                &mut ProvenanceLog::new(),
-            ),
-            Ok(MeetOfThree::MoreThanAPoint)
-        )
-    };
     let one_plane = |flat: Plane, other: Plane| {
         name_of_the_plane_at_any_scale(&Surface::Plane(flat))
             == name_of_the_plane_at_any_scale(&Surface::Plane(other))
@@ -11377,7 +11371,9 @@ fn the_name_each_closed_curve_goes_by<'a>(
     let named: Vec<(&CurveName, &(Plane, Surface, PredicatePoint))> = cut_out_of.iter().collect();
     for (at, &(one, &(flat, mine, _))) in named.iter().enumerate() {
         for &(other, &(other_flat, theirs, _)) in &named[at + 1..] {
-            if one_plane(flat, other_flat) && share_more_than_a_point(flat, &mine, &theirs) {
+            if one_plane(flat, other_flat)
+                && the_three_share_more_than_a_point(flat, &mine, &theirs, policy, log)
+            {
                 join(&mut leads_to, one.clone(), other.clone());
             }
         }
@@ -11395,7 +11391,7 @@ fn the_name_each_closed_curve_goes_by<'a>(
             );
             if one_plane(flat, other_flat)
                 && the_named_circle_keeps_it
-                && share_more_than_a_point(flat, &round, &ring)
+                && the_three_share_more_than_a_point(flat, &round, &ring, policy, log)
             {
                 join(&mut leads_to, on_the_ring.clone(), other.clone());
             }
@@ -11484,11 +11480,13 @@ fn the_plane_and_the_ring_of(carried_by: &[Surface; 2]) -> Option<(Plane, Surfac
 ///
 /// A meet of the three that cannot be worked out joins nothing, as it joins
 /// nothing for a closed curve, and the answer is refused as not a manifold, as
-/// it was before anything was asked.
+/// it was before anything was asked. A join made on the meet writes its
+/// records to `log` ([`the_three_share_more_than_a_point`]).
 fn the_name_each_arc_of_a_conic_goes_by<'a>(
     model: &Model,
     open_sides: impl Iterator<Item = (&'a [Surface; 2], &'a [EdgeKey])>,
     policy: &Policy,
+    log: &mut ProvenanceLog,
 ) -> BTreeMap<[[u64; 9]; 2], [[u64; 9]; 2]> {
     let mut cut_out_of: BTreeMap<[[u64; 9]; 2], (Plane, Surface, BTreeSet<EdgeSlot>)> =
         BTreeMap::new();
@@ -11513,20 +11511,41 @@ fn the_name_each_arc_of_a_conic_goes_by<'a>(
         for &(other, (_, theirs, theirs_along)) in &named[at + 1..] {
             let one_conic = one[1] == other[1]
                 && (!mine_along.is_disjoint(theirs_along)
-                    || matches!(
-                        meet_of_three_surfaces(
-                            [&Surface::Plane(*flat), mine, theirs],
-                            policy,
-                            &mut ProvenanceLog::new(),
-                        ),
-                        Ok(MeetOfThree::MoreThanAPoint)
-                    ));
+                    || the_three_share_more_than_a_point(*flat, mine, theirs, policy, log));
             if one_conic {
                 joined.push([*one, *other]);
             }
         }
     }
     the_least_name_of_each_group(joined)
+}
+
+/// Whether `flat`, `one` and `other` share more than a point
+/// ([`MeetOfThree::MoreThanAPoint`]), with the meet's records written to `log`
+/// when they do and dropped when they do not.
+///
+/// **A join rests on the answer, so its records are the fuse's.** A tolerant
+/// policy may take two circles on `flat` a rounding apart as one
+/// ([`Policy::take_as_one_point`]), and an answer joined on that is not
+/// certified, so its log must say so. Any other answer, or a meet that cannot
+/// be worked out, joins nothing, and the names stay apart as they were before
+/// anything was asked.
+fn the_three_share_more_than_a_point(
+    flat: Plane,
+    one: &Surface,
+    other: &Surface,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> bool {
+    let mut records = ProvenanceLog::new();
+    let shared = matches!(
+        meet_of_three_surfaces([&Surface::Plane(flat), one, other], policy, &mut records),
+        Ok(MeetOfThree::MoreThanAPoint)
+    );
+    if shared {
+        records.drain_into(log);
+    }
+    shared
 }
 
 /// The lower of two points, `x` first and then `y` and `z`, the order
