@@ -27259,3 +27259,633 @@ print("peakv.sh and the four scripts in peak are the run directory's:", same)
 for name in ("tallyvm.py", "tallysq.py"):
     print(f"{name} prints what the text says: {run(os.path.join(run_dir, name)) == prints[name]}")
 ```
+
+### 464.37 Plane::NORMAL_LENGTH_ROUNDOFF for a normal that does not come straight from a constructor
+
+**Draft, unfinished: Q2826's first lane handed over here (§416).** What
+ran is below with its prints. What is still to do is at the end of this
+subsection, under "Next".
+
+Q2826 asks whether a normal that does not come straight from a constructor
+stays within `NORMAL_LENGTH_ROUNDOFF`'s `64ε` once turned: one kept by
+`from_point_and_normal_as_written` at up to `64ε`, or a plane stored after
+one turn and turned again. 464.20's `square.g` assumes the constructor's `ε`
+before the turn.
+
+`plane.rs`, `point.rs` and `Cargo.lock` do not change from `c40cc82e`, where
+464.36 restates them, to this lane's base `b1f1bf1a`, and `isometry.rs`
+changes `POINT_ROUNDOFF`'s doc alone (`git diff -U0 c40cc82e b1f1bf1a`). So
+the cases here restate `b1f1bf1a`. `u` is `2⁻⁵³` and `ε` is
+`f64::EPSILON = 2u`.
+
+**What the kernel does: a probe.** Five tests, appended to
+`crates/rcad-geom/tests/a_plane_turned_a_step_at_a_time_keeps_the_normal_its_file_wrote.rs`,
+run with `mise exec -- just t -p rcad-geom -E 'test(/q2826/)' --no-capture`,
+and taken out again; the text is below. "Leaves the bound" is the kernel's
+own exact check: `from_point_and_normal_as_written` scales the normal rather
+than keep its bits. `turned` builds each plane through that constructor, so
+a normal that left is scaled before its next turn, as a file read back
+would scale it. Printed:
+
+```text
+edge: 10000 of 10000 grown normals kept, n.n - 1 from 60.75 to 63.23 eps; turned once, 813 leave the bound; worst |n.n - 1| 71.67 eps
+edge first: n [0.39688426649721364, -0.4955742373687464, 0.7725859526702307] q [0.5884081549810857, -0.1488802319761373, -0.3052407454472525, -0.7337837603799174] turned [-0.6861716037159713, 0.23486817205296384, 0.6884805531097924] off 62.1524 -> 64.1712 eps
+random turns: after 1 turns worst |n.n - 1| 6.32 eps, 0 of 2000 have left
+random turns: after 2 turns worst |n.n - 1| 8.37 eps, 0 of 2000 have left
+random turns: after 3 turns worst |n.n - 1| 10.48 eps, 0 of 2000 have left
+random turns: after 4 turns worst |n.n - 1| 13.60 eps, 0 of 2000 have left
+random turns: after 8 turns worst |n.n - 1| 16.93 eps, 0 of 2000 have left
+random turns: after 16 turns worst |n.n - 1| 21.06 eps, 0 of 2000 have left
+random turns: after 64 turns worst |n.n - 1| 53.21 eps, 0 of 2000 have left
+random turns: after 256 turns worst |n.n - 1| 70.11 eps, 979 of 2000 have left
+random turns: fewest turns to leave Some(107); within two None
+half turns: after 2 flips 0 of 2000 have left
+half turns: after 4 flips 0 of 2000 have left
+half turns: after 8 flips 0 of 2000 have left
+half turns: after 16 flips 153 of 2000 have left
+half turns: after 32 flips 398 of 2000 have left
+half turns: after 64 flips 557 of 2000 have left
+half turns: fewest flips to leave Some(10); worst |n.n - 1| after two 13.86 eps
+steps by transformed: 0 of 3240 leave the bound, the first after None steps; worst |n.n - 1| 14.34 eps
+edge turn: q [0.0, 1.0, 2.9802322387695313e-8, 0.0]
+edge turn: start [0.0, 0.0, 1.0] off 0.0000 | 1: 16.0000 | 2: 32.0000 | 3: 48.0000 | 4: 64.0000 scaled | 5: 16.0000 | 6: 32.0000
+edge turn: start [-2.9802322387695286e-8, 0.9999999999999991, 2.9802322387695286e-8] off -0.0000 | 1: 16.0000 | 2: 32.0000 | 3: 48.0000 | 4: 64.0000 scaled | 5: 16.0000 | 6: 32.0000
+edge turn: start [-0.8594207595991519, 0.4453151103816188, 0.2511780452902352] off -0.1065 | 1: 4.2343 | 2: 8.1374 | 3: 12.4781 | 4: 16.3812 | 5: 20.7220 | 6: 24.6250
+edge turn: start [0.8010868038680996, 0.4091442676288361, 0.4368762993512652] off 0.1554 | 1: 5.6577 | 2: 11.5905 | 3: 17.0929 | 4: 23.0257 | 5: 28.5280 | 6: 34.4608
+edge turn bits: 1 [0.0, 0.0, -1.0000000000000018]
+edge turn bits: 2 [0.0, 0.0, 1.0000000000000036]
+edge turn bits: 3 [0.0, 0.0, -1.0000000000000053]
+edge turn bits: 4 [0.0, 0.0, 1.000000000000007]
+edge turn bits: 5 [0.0, 0.0, -1.0000000000000018]
+```
+
+(The "steps by transformed" test's nine lines, one per axis and step, came
+before its last line and are not copied here; each says `first left None`.)
+
+Read so far, not yet written up: a normal kept at the edge leaves the bound
+on one turn from `Isometry::rotation` in 813 of 10 000 draws; a
+constructor's normal turned twice stays inside in every draw, at worst
+`13.86ε`; and a constructor's normal leaves after four turns by
+`(0, 1, 2⁻²⁵, 0)`, a turn `TryFrom<na::Isometry3<f64>>` keeps bit for bit
+(its `f64` `q·q` is `1 + 4ε`), after ten half turns from
+`Isometry::rotation`, and after 107 random turns from it.
+
+**What Gappa says: four cases and a control.** `fetch.py` writes 464.13's
+`one.sh` and 464.20's `square.g` from this file; `squarekept.py` writes the
+cases from `square.g`; `allkept.sh` runs them. Its print, saved as
+`all.log`:
+
+```text
+written: kept_128.g, again_119.g, kept_11.g, kept_10.g, c_kept_10_127.g
+kept_10 exit 0 0.41s
+kept_10 coq -Bcoq exit 0 coqc exit 0 1.68s lines 2795 hints 6
+kept_128 exit 1 0.68s
+again_119 exit 1 0.73s
+kept_11 exit 1 1.39s
+c_kept_10_127 exit 1 1.71s
+== kept_10.out
+Results:
+  DD in [0, 75b-102 {1.47911e-29, 2^(-95.7712)}]
+  F2 in [-869780730397577462520463993245060338957644496378465825728793b-246 {-7.69185e-15, -2^(-46.8856)}, 869780730397577462520463993245060338957644496378465825728793b-246 {7.69185e-15, 2^(-46.8856)}]
+  VN in [0, 10141204801825859981771576180751b-103 {1, 2^(0)}]
+  NN - 1 in [-5b-52 {-1.11022e-15, -2^(-49.6781)}, 5b-52 {1.11022e-15, 2^(-49.6781)}]
+  4 * (N4 - 1) * VN in [-30423614405477579945314728542253b-152 {-5.32907e-15, -2^(-47.415)}, 30423614405477579945314728542253b-152 {5.32907e-15, 2^(-47.415)}]
+== kept_128.out
+Results:
+  DD in [0, 75b-102 {1.47911e-29, 2^(-95.7712)}]
+  F2 in [-869780730397583159856307857732879157234244052102579662972029b-246 {-7.69185e-15, -2^(-46.8856)}, 869780730397583159856307857732879157234244052102579662972029b-246 {7.69185e-15, 2^(-46.8856)}]
+  VN in [0, 158456325028531138093134118915b-97 {1, 2^(0)}]
+  NN - 1 in [-1b-46 {-1.42109e-14, -2^(-46)}, 1b-46 {1.42109e-14, 2^(-46)}]
+  4 * (N4 - 1) * VN in [-475368975085593414279402356745b-146 {-5.32907e-15, -2^(-47.415)}, 475368975085593414279402356745b-146 {5.32907e-15, 2^(-47.415)}]
+Error: some properties were not satisfied:
+  BND(OO - 1), best: [-2.72318e-14, 2.72318e-14]
+== again_119.out
+Results:
+  DD in [0, 75b-102 {1.47911e-29, 2^(-95.7712)}]
+  F2 in [-434890365198791362656871747593599030462505941299099049557247b-245 {-7.69185e-15, -2^(-46.8856)}, 434890365198791362656871747593599030462505941299099049557247b-245 {7.69185e-15, 2^(-46.8856)}]
+  VN in [0, 20282409603651965409722844053861b-104 {1, 2^(0)}]
+  NN - 1 in [-119b-53 {-1.32117e-14, -2^(-46.1052)}, 119b-53 {1.32117e-14, 2^(-46.1052)}]
+  4 * (N4 - 1) * VN in [-60847228810955896229168532161583b-153 {-5.32907e-15, -2^(-47.415)}, 60847228810955896229168532161583b-153 {5.32907e-15, 2^(-47.415)}]
+Error: some properties were not satisfied:
+  BND(OO - 1), best: [-2.62326e-14, 2.62326e-14]
+== kept_11.out
+Results:
+  DD in [0, 75b-102 {1.47911e-29, 2^(-95.7712)}]
+  F2 in [-434890365198788755401485572319512452607112924272809666412037b-245 {-7.69185e-15, -2^(-46.8856)}, 434890365198788755401485572319512452607112924272809666412037b-245 {7.69185e-15, 2^(-46.8856)}]
+  VN in [0, 20282409603651722215342966046753b-104 {1, 2^(0)}]
+  NN - 1 in [-11b-53 {-1.22125e-15, -2^(-49.5406)}, 11b-53 {1.22125e-15, 2^(-49.5406)}]
+  4 * (N4 - 1) * VN in [-60847228810955166646028898140259b-153 {-5.32907e-15, -2^(-47.415)}, 60847228810955166646028898140259b-153 {5.32907e-15, 2^(-47.415)}]
+Error: some properties were not satisfied:
+  BND(OO - 1), best: [-1.42422e-14, 1.42422e-14]
+== c_kept_10_127.out
+Results:
+  DD in [0, 75b-102 {1.47911e-29, 2^(-95.7712)}]
+  F2 in [-869780730397577462520463993245060338957644496378465825728793b-246 {-7.69185e-15, -2^(-46.8856)}, 869780730397577462520463993245060338957644496378465825728793b-246 {7.69185e-15, 2^(-46.8856)}]
+  VN in [0, 10141204801825859981771576180751b-103 {1, 2^(0)}]
+  NN - 1 in [-5b-52 {-1.11022e-15, -2^(-49.6781)}, 5b-52 {1.11022e-15, 2^(-49.6781)}]
+  4 * (N4 - 1) * VN in [-30423614405477579945314728542253b-152 {-5.32907e-15, -2^(-47.415)}, 30423614405477579945314728542253b-152 {5.32907e-15, 2^(-47.415)}]
+Error: some properties were not satisfied:
+  BND(OO - 1), best: [-1.41311e-14, 1.41311e-14]
+```
+
+The bests, in `u` (`python3 -c` on each over `2**-53`): `kept_128`
+`245.28u`, `again_119` `236.28u`, `kept_11` `128.28u`, `c_kept_10_127`
+`127.28u`. So by square.g's argument a normal within `10u` (`5ε`) of length
+one stays inside `64ε` after one turn and one at `11u` does not, given
+`vector.g`'s `20u` for components up to `1 + 5u` (Q2831); the argument's
+reach for a kept normal is `128u + 117.28u` and for a second turn `119u +
+117.28u`.
+
+**Next**, in order, for the lane after this one:
+
+1. `exact.py`: each counterexample above in exact rationals, from the printed
+   decimals (`Fraction(float(s))`): the edge case's `n·n − 1` (`62.15ε`,
+   inside) and its turned `out·out − 1` (`64.17ε`, outside), and the turn's
+   exact `q·q − 1`, which must be within `6ε` for the case to sit inside
+   square.g's hypotheses; the edge turn's `q·q − 1 = 2⁻⁵⁰ = 4ε` and `(1 +
+   32ε)² − 1 = 64ε + 1024ε²` after four turns.
+2. Write the subsection's answer and its sections in 464.36's form: (a) a
+   normal kept at the edge does not stay inside on one turn, a
+   counterexample; (b) a constructor's normal turned twice stays inside in
+   every draw and Gappa's argument does not reach it (`236.28u`), so it is
+   neither proved nor refuted; four turns the code keeps, ten half turns
+   from `Isometry::rotation`, or 107 random ones, take one out. A normal
+   that leaves is scaled on reading, not refused: the plane comes back an
+   ulp moved, the §355.7 failure by another route.
+3. Classes: the repeated `Plane::transformed` chain is built only by the
+   probe, so `wrong/C`. Read, not run: `fuse/bake.rs`
+   `the_surface_a_side_is_baked_against` stores `plane.transformed(&mine.movement)`
+   in a fuse's answer, so fusing, placing and fusing again turns a stored
+   normal again; a designer shape on that path has no class until it is run.
+4. `samekept.py`, checking this text against the files that ran, as 464.36's
+   `samevm.py` does.
+5. Rows for `rows`: the plane.rs doc (`NORMAL_LENGTH_ROUNDOFF`'s first
+   sentence says "once a turn has moved it", true for one turn however
+   composed and not for a stored plane turned again); a fix row asking
+   whether `Plane::transformed` should hold a normal past the bound as
+   `held_near_length_one` holds a turn (`wrong/C`, tier 5); a row to run a
+   fuse-place-fuse designer shape.
+
+`fetch.py`:
+
+```python
+"""Write one.sh and square.g into this directory from the 464 file: 464.13's
+one.sh and 464.20's square.g, each the one block of its subsection that
+starts with its first line.
+Run as: python3 fetch.py <464 file>"""
+import os
+import re
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+text = open(sys.argv[1]).read()
+FENCED = re.compile(r"^```(\w*)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+def block_of(n, first):
+    got = [body for lang, body in FENCED.findall(section(n)) if body.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+for name, n, first in (
+    ("one.sh", 13, "#!/bin/bash\n# Run one Gappa script under 464.4's pin"),
+    ("square.g", 20, "# restates: crates/rcad-geom/src/plane.rs NORMAL_LENGTH_ROUNDOFF at 4b642567\n"),
+):
+    open(name, "w").write(block_of(n, first))
+    print(name, "written from 464." + str(n))
+os.chmod("one.sh", 0o755)
+```
+
+`squarekept.py`:
+
+```python
+"""Write square.g's cases for a normal that does not come straight from a
+constructor, from 464.20's square.g by replacing its lines, each asserted
+found once, as 464.36's squarezero.py does.
+
+square.g has n = rnd(m) for an exact unit vector m, and averages the
+constructor's slip over the m_i^2 to put n.n within 2u of one. Here n is any
+f64 vector whose n.n is held within K u of one, which is all that
+from_point_and_normal_as_written asks of a normal it keeps (K = 128) and all
+that square.g proves of a normal one turn has moved (K = 119.28): so m, its
+shares and their hints go, and n.n - 1 is a hypothesis. Everything else is
+square.g's: the turn's q.q within 6 epsilon of one, and each turned
+component within vector.g's 20u of the turn's own arithmetic. vector.g proves
+that 20u for components at most one; these reach 1 + K/2 u, and Q2831 asks
+whether it holds there. So a case that proves rests on Q2831, and one that
+fails does not: a larger d could only fail by more."""
+
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+square = open("square.g").read()
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+HEAD = """# restates: crates/rcad-geom/src/plane.rs NORMAL_LENGTH_ROUNDOFF at 4b642567
+# restates: crates/rcad-geom/src/plane.rs transformed at 4b642567
+# restates: crates/rcad-geom/src/point.rs scaled_to_length_one_from_anywhere at 4b642567
+# restates: crates/rcad-geom/src/isometry.rs apply_to_vector at 4b642567
+# restates: crates/rcad-geom/src/isometry.rs held_near_length_one at 4b642567
+# Plane::NORMAL_LENGTH_ROUNDOFF, crates/rcad-geom/src/plane.rs at 4b642567:
+# a constructor's normal, turned once, has n.n within 64 * f64::EPSILON of
+# one. The constructor rounds each component of an exact unit vector m to
+# the nearest f64; the turn is nalgebra's arithmetic, and vector.g,
+# vector1.g and vector2.g prove each turned component within 20u of what
+# that arithmetic gives without rounding, which is the hypothesis on d0, d1
+# and d2 here.
+"""
+
+NEW_HEAD = """# restates: crates/rcad-geom/src/plane.rs NORMAL_LENGTH_ROUNDOFF at b1f1bf1a
+# restates: crates/rcad-geom/src/plane.rs transformed at b1f1bf1a
+# restates: crates/rcad-geom/src/plane.rs from_point_and_normal_as_written at b1f1bf1a
+# restates: crates/rcad-geom/src/plane.rs has_length_one_to_within_a_turn at b1f1bf1a
+# restates: crates/rcad-geom/src/isometry.rs apply_to_vector at b1f1bf1a
+# restates: crates/rcad-geom/src/isometry.rs held_near_length_one at b1f1bf1a
+# 464.37: Plane::NORMAL_LENGTH_ROUNDOFF for a normal that does not come
+# straight from a constructor, turned once: n is any f64 vector with n.n
+# within {k}u of one, {what}. This is 464.20's square.g with its
+# constructor taken out. The hypothesis on d0, d1 and d2 is vector.g's 20u,
+# which vector.g proves for components at most one; these reach 1 + {half}u
+# (Q2831).
+"""
+
+CONSTRUCTOR = """# The constructor: n is the nearest f64 to the exact unit vector m.
+n0 = rnd(m0); n1 = rnd(m1); n2 = rnd(m2);
+M2 = m0 * m0 + m1 * m1 + m2 * m2;
+NN = n0 * n0 + n1 * n1 + n2 * n2;
+"""
+
+NEW_CONSTRUCTOR = """# The normal: any f64 vector, held below to n.n near one.
+n0 = rnd(n0_); n1 = rnd(n1_); n2 = rnd(n2_);
+NN = n0 * n0 + n1 * n1 + n2 * n2;
+"""
+
+SHARES = """
+# The constructor's shares: m_i^2, and what rounding m_i adds to its square.
+g0 = m0 * m0; g1 = m1 * m1; g2 = m2 * m2;
+h0 = n0 * n0 - m0 * m0; h1 = n1 * n1 - m1 * m1; h2 = n2 * n2 - m2 * m2;
+"""
+
+M = """  # m is a unit vector, so each component is at most one.
+     M2 in [1, 1]
+  /\\ m0 in [-1, 1] /\\ m1 in [-1, 1] /\\ m2 in [-1, 1]
+  # Above 2^-1012 each component is the nearest f64 to the exact ratio
+  # (scaled_to_length_one_from_anywhere's doc), and none is zero.
+  /\\ |m0| >= 1b-1012 /\\ |m1| >= 1b-1012 /\\ |m2| >= 1b-1012
+"""
+
+NEW_M = """  # n.n within {k}u of one, so each component is at most 1 + {half}u.
+     NN - 1 in [-{k2}b-54, {k2}b-54]
+  /\\ n0 in [-{b}b-54, {b}b-54] /\\ n1 in [-{b}b-54, {b}b-54]
+  /\\ n2 in [-{b}b-54, {b}b-54]
+"""
+
+AVERAGING = """
+# The constructor: each n_i^2 is m_i^2 times a factor within 2u + u^2 of
+# one, and the m_i^2 add to one; add_rr averages them.
+NN - 1 -> ((NN - M2) / M2) * M2 + (M2 - 1);
+(NN - M2) / M2 -> ((M2 + (NN - M2)) - M2) / M2;
+M2 + (NN - M2) -> (g0 + h0) + (g1 + h1) + (g2 + h2);
+(g0 + h0) - g0 -> h0;
+(g1 + h1) - g1 -> h1;
+(g2 + h2) - g2 -> h2;
+h0 / g0 -> (n0 / m0) * (n0 / m0) - 1;
+h1 / g1 -> (n1 / m1) * (n1 / m1) - 1;
+h2 / g2 -> (n2 / m2) * (n2 / m2) - 1;
+n0 / m0 -> 1 + (n0 - m0) / m0;
+n1 / m1 -> 1 + (n1 - m1) / m1;
+n2 / m2 -> 1 + (n2 - m2) / m2;
+"""
+
+GOAL = "/\\ OO - 1 in [-128b-53, 128b-53]"
+
+# k is in units of u = 2^-53, written in halves so that 1 + k/2 u is a whole
+# number of 2^-54.
+CASES = (
+    ("kept_128.g", 256, "as much as from_point_and_normal_as_written keeps"),
+    ("again_119.g", 238, "inside what square.g proves of a normal turned once"),
+    ("kept_11.g", 22, "the first whole u past what one turn leaves room for"),
+    ("kept_10.g", 20, "the last whole u inside what one turn leaves room for"),
+)
+
+written = []
+for name, k2, what in CASES:
+    k = k2 / 2
+    half = k / 2
+    b = 2 ** 54 + k2 // 2
+    src = sub(square, HEAD, NEW_HEAD.format(k=f"{k:g}", what=what, half=f"{half:g}"))
+    src = sub(src, CONSTRUCTOR, NEW_CONSTRUCTOR)
+    src = sub(src, SHARES, "")
+    src = sub(src, M, NEW_M.format(k=f"{k:g}", half=f"{half:g}", k2=k2, b=b))
+    src = sub(src, AVERAGING, "")
+    open(name, "w").write(src)
+    written.append(name)
+    if name == "kept_10.g":
+        # The goal at 127u, under the 10u + 48u + 69.28u the parts reach.
+        control = sub(src, GOAL, "/\\ OO - 1 in [-127b-53, 127b-53]")
+        open("c_kept_10_127.g", "w").write(control)
+        written.append("c_kept_10_127.g")
+print("written:", ", ".join(written))
+```
+
+`allkept.sh`:
+
+```sh
+#!/bin/bash
+# Write squarekept.py's cases and run each at once through 464.13's one.sh:
+# kept_10.g with coq, the only one expected to prove, and the rest without.
+cd "$(dirname "$0")"
+python3 squarekept.py
+./one.sh kept_10.g coq > kept_10.run 2>&1 &
+for f in kept_128.g again_119.g kept_11.g c_kept_10_127.g; do
+  ./one.sh "$f" > "${f%.g}.run" 2>&1 &
+done
+wait
+cat kept_10.run kept_128.run again_119.run kept_11.run c_kept_10_127.run
+for f in kept_10 kept_128 again_119 kept_11 c_kept_10_127; do
+  echo "== $f.out"
+  grep -v 'assumed to be nonzero' "$f.out"
+done
+```
+
+The probe, appended to the end of
+`crates/rcad-geom/tests/a_plane_turned_a_step_at_a_time_keeps_the_normal_its_file_wrote.rs`
+and taken out after its run:
+
+```rust
+// Q2826's probe, not committed: 464.37 holds it whole.
+mod q2826_probe {
+    use nalgebra as na;
+    use rcad_geom::{Axis, Isometry, Plane, Point, Vector};
+
+    const EPS: f64 = f64::EPSILON;
+
+    struct Draws(u64);
+
+    impl Draws {
+        fn next(&mut self) -> f64 {
+            self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^= z >> 31;
+            (z >> 11) as f64 / 9_007_199_254_740_992.0 * 2.0 - 1.0
+        }
+
+        fn direction(&mut self) -> Vector {
+            loop {
+                let v = Vector::new(self.next(), self.next(), self.next());
+                if (0.01..=1.0).contains(&v.length_squared()) {
+                    return v;
+                }
+            }
+        }
+
+        fn turn(&mut self) -> Isometry {
+            let axis = Axis::new(Point::origin(), self.direction()).unwrap();
+            Isometry::rotation(&axis, self.next() * std::f64::consts::PI).unwrap()
+        }
+    }
+
+    fn unit_normal(direction: Vector) -> Vector {
+        Plane::from_point_and_normal(Point::origin(), direction)
+            .unwrap()
+            .normal()
+    }
+
+    fn kept(normal: Vector) -> bool {
+        let read = Plane::from_point_and_normal_as_written(Point::origin(), normal).unwrap();
+        read.normal()
+            .components()
+            .iter()
+            .zip(normal.components())
+            .all(|(read, wrote)| read.to_bits() == wrote.to_bits())
+    }
+
+    fn turned(normal: Vector, turn: &Isometry) -> Vector {
+        Plane::from_point_and_normal_as_written(Point::origin(), normal)
+            .unwrap()
+            .transformed(turn)
+            .normal()
+    }
+
+    /// `n·n − 1` in `ε`: each square exact, summed in two parts.
+    fn off_one(n: Vector) -> f64 {
+        let (mut hi, mut lo) = (-1.0_f64, 0.0_f64);
+        for c in n.components() {
+            let square = c * c;
+            let below = c.mul_add(c, -square);
+            let sum = hi + square;
+            let back = sum - hi;
+            lo += (hi - (sum - back)) + (square - back) + below;
+            hi = sum;
+        }
+        (hi + lo) / EPS
+    }
+
+    fn quaternion(turn: &Isometry) -> String {
+        format!("{:?}", turn.rotation_quaternion())
+    }
+
+    #[test]
+    fn q2826_a_normal_kept_at_the_edge_turned_once() {
+        let mut draws = Draws(2826);
+        let grown = 1.0 + 31.0 * EPS;
+        let (mut at_the_edge, mut left) = (0, 0);
+        let (mut lowest, mut highest, mut worst) = (f64::INFINITY, f64::NEG_INFINITY, 0.0_f64);
+        let mut first = None;
+        for _ in 0..10_000 {
+            let n = unit_normal(draws.direction()) * grown;
+            let turn = draws.turn();
+            if !kept(n) {
+                continue;
+            }
+            at_the_edge += 1;
+            lowest = lowest.min(off_one(n));
+            highest = highest.max(off_one(n));
+            let out = turned(n, &turn);
+            worst = worst.max(off_one(out).abs());
+            if !kept(out) {
+                left += 1;
+                first.get_or_insert((n, quaternion(&turn), out));
+            }
+        }
+        println!(
+            "edge: {at_the_edge} of 10000 grown normals kept, n.n - 1 from {lowest:.2} to \
+             {highest:.2} eps; turned once, {left} leave the bound; worst |n.n - 1| {worst:.2} eps"
+        );
+        if let Some((n, q, out)) = first {
+            println!(
+                "edge first: n {:?} q {q} turned {:?} off {:.4} -> {:.4} eps",
+                n.components(),
+                out.components(),
+                off_one(n),
+                off_one(out)
+            );
+        }
+    }
+
+    #[test]
+    fn q2826_a_constructor_normal_turned_again_and_again() {
+        let mut draws = Draws(2690);
+        let depths = [1, 2, 3, 4, 8, 16, 64, 256];
+        let mut worst = [0.0_f64; 8];
+        let mut gone = [0; 8];
+        let mut fewest = None;
+        let mut first_two = None;
+        for _ in 0..2_000 {
+            let mut n = unit_normal(draws.direction());
+            let mut left_at = None;
+            for step in 1..=256 {
+                let turn = draws.turn();
+                let before = n;
+                n = turned(n, &turn);
+                if left_at.is_none() && !kept(n) {
+                    left_at = Some(step);
+                    if step <= 2 {
+                        first_two.get_or_insert((before, quaternion(&turn), n));
+                    }
+                }
+                if let Some(at) = depths.iter().position(|d| *d == step) {
+                    worst[at] = worst[at].max(off_one(n).abs());
+                    if left_at.is_some() {
+                        gone[at] += 1;
+                    }
+                }
+            }
+            if let Some(at) = left_at {
+                fewest = Some(fewest.map_or(at, |f: i32| f.min(at)));
+            }
+        }
+        for (at, depth) in depths.iter().enumerate() {
+            println!(
+                "random turns: after {depth} turns worst |n.n - 1| {:.2} eps, {} of 2000 have left",
+                worst[at], gone[at]
+            );
+        }
+        println!("random turns: fewest turns to leave {fewest:?}; within two {first_two:?}");
+    }
+
+    #[test]
+    fn q2826_a_plane_turned_a_step_at_a_time_by_transformed() {
+        let start = Plane::from_point_and_normal(Point::new(1.0, 2.0, 3.0), Vector::new(1.0, 2.0, 3.0))
+            .unwrap();
+        let mut written = 0;
+        let mut moved = 0;
+        let mut fewest = None;
+        let mut worst = 0.0_f64;
+        for direction in [
+            Vector::new(1.0, 2.0, 3.0),
+            Vector::new(-2.0, 1.0, 5.0),
+            Vector::new(3.0, -1.0, 1.0),
+        ] {
+            let axis = Axis::new(Point::new(1.0, -2.0, 0.5), direction).unwrap();
+            for step_in_degrees in [1.0_f64, 5.0, 7.5] {
+                let step = Isometry::rotation(&axis, step_in_degrees.to_radians()).unwrap();
+                let mut plane = start;
+                let mut first = None;
+                for steps in 1..=360 {
+                    plane = plane.transformed(&step);
+                    let normal = plane.normal();
+                    worst = worst.max(off_one(normal).abs());
+                    written += 1;
+                    if !kept(normal) {
+                        moved += 1;
+                        first.get_or_insert(steps);
+                    }
+                }
+                println!(
+                    "steps by transformed: axis {:?} step {step_in_degrees} q {} first left {first:?} \
+                     end off {:.2} eps",
+                    direction.components(),
+                    quaternion(&step),
+                    off_one(plane.normal())
+                );
+                if let Some(at) = first {
+                    fewest = Some(fewest.map_or(at, |f: i32| f.min(at)));
+                }
+            }
+        }
+        println!(
+            "steps by transformed: {moved} of {written} leave the bound, the first after {fewest:?} \
+             steps; worst |n.n - 1| {worst:.2} eps"
+        );
+    }
+
+    #[test]
+    fn q2826_a_plane_flipped_by_a_half_turn_again_and_again() {
+        let mut draws = Draws(464);
+        let checked = [2, 4, 8, 16, 32, 64];
+        let mut gone = [0; 6];
+        let mut fewest = None;
+        let mut worst_two = 0.0_f64;
+        for _ in 0..2_000 {
+            let mut n = unit_normal(draws.direction());
+            let across = Axis::new(Point::origin(), n.cross(draws.direction())).unwrap();
+            let flip = Isometry::rotation(&across, std::f64::consts::PI).unwrap();
+            let mut left_at = None;
+            for flips in 1..=64 {
+                n = turned(n, &flip);
+                if flips == 2 {
+                    worst_two = worst_two.max(off_one(n).abs());
+                }
+                if left_at.is_none() && !kept(n) {
+                    left_at = Some(flips);
+                }
+                if let (Some(at), Some(_)) = (checked.iter().position(|c| *c == flips), left_at) {
+                    gone[at] += 1;
+                }
+            }
+            if let Some(at) = left_at {
+                fewest = Some(fewest.map_or(at, |f: i32| f.min(at)));
+            }
+        }
+        for (at, flips) in checked.iter().enumerate() {
+            println!("half turns: after {flips} flips {} of 2000 have left", gone[at]);
+        }
+        println!("half turns: fewest flips to leave {fewest:?}; worst |n.n - 1| after two {worst_two:.2} eps");
+    }
+
+    #[test]
+    fn q2826_a_turn_at_the_edge_the_code_keeps() {
+        let b = 2.0_f64.powi(-25);
+        let stored = na::UnitQuaternion::new_unchecked(na::Quaternion::new(0.0, 1.0, b, 0.0));
+        let turn = Isometry::try_from(na::Isometry3::from_parts(na::Translation3::identity(), stored))
+            .unwrap();
+        println!("edge turn: q {}", quaternion(&turn));
+        let mut draws = Draws(3);
+        for start in [
+            Vector::new(0.0, 0.0, 1.0),
+            unit_normal(Vector::new(0.0, -b, 1.0).cross(Vector::new(1.0, b, 0.0))),
+            unit_normal(draws.direction()),
+            unit_normal(draws.direction()),
+        ] {
+            let mut n = start;
+            print!("edge turn: start {:?} off {:.4}", n.components(), off_one(n));
+            for turns in 1..=6 {
+                n = turned(n, &turn);
+                print!(" | {turns}: {:.4}{}", off_one(n), if kept(n) { "" } else { " scaled" });
+            }
+            println!();
+        }
+        let mut n = Vector::new(0.0, 0.0, 1.0);
+        for turns in 1..=5 {
+            n = turned(n, &turn);
+            println!("edge turn bits: {turns} {:?}", n.components());
+        }
+    }
+}
+```
