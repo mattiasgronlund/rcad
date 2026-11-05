@@ -1590,8 +1590,8 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_cross_in_corners_
 /// cap sees three meets of the two caps and the two cones round
 /// `(1 − ε, y₀, 1)`, within `1.2e−24` of one another, and each far cap the same
 /// twice as far out: the coincidence such a policy merges (§17.4). **The policy
-/// takes each pair of them along a cap's rim as one point, three of the six
-/// fuses answer, and the other three are refused further on.**
+/// takes each pair of them along a cap's rim as one point, and all six fuses
+/// answer.**
 ///
 /// At `d6ba161f` every fuse was refused on the order along a crossing round
 /// a cap's rim: the meet of that cap and both cones, whose own box is
@@ -1641,14 +1641,21 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_cross_in_corners_
 /// tell of a meet's own box, it is asked now of the narrowed box, which rules
 /// the meet off the other half (Q3146).
 ///
-/// **The intersection and the upright frustum less the lying one answer**,
-/// each way round for the intersection: one solid of six faces that measures
-/// nothing within what the mesh may miss, and two solids, the frustum less
-/// the sliver the two share, `7π/3` within what the mesh may miss, and a chip
-/// of three faces, the upright cone, its far cap and the lying frustum's far
-/// cap. **The union both ways and the lying frustum less the upright one are
-/// refused `ACurvedFaceGoesRightRoundWithNoSeam` on the lying cone**, by the
-/// mesh of the answer.
+/// The union both ways and the lying frustum less the upright one were then
+/// refused `ACurvedFaceGoesRightRoundWithNoSeam` on the lying cone, by the mesh
+/// of the answer. The union keeps a sliver of that cone `4.2e−8` by `4.4e−16`
+/// in its chart beyond the upright frustum's far cap, round `(2, 0, 2)`, and
+/// the area it holds, `9.4e−24`, was summed about the chart's origin, two
+/// units and a quarter turn away, and came out `0`. So it was taken for a hole
+/// with the material outside it, a ball less a disc, which a cone cannot be
+/// opened as. The sum is taken about the loop's own first corner now (Q3196).
+///
+/// **Every fuse answers**, each way round: the intersection one solid of six
+/// faces that measures nothing within what the mesh may miss, the union one
+/// solid of fourteen faces, `14π/3` within what the mesh may miss, and each
+/// frustum less the other two solids, the frustum less the sliver the two
+/// share, `7π/3` within what the mesh may miss, and a chip of three faces,
+/// the frustum's cone, its far cap and the other frustum's far cap.
 #[test]
 fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_on_each_cap_as_one_point_under_a_tolerant_policy()
  {
@@ -1691,28 +1698,8 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_
         }
         let (faces, volume): (&[usize], f64) = match (rule, first_first) {
             (Rule::Intersection, _) => (&[6], 0.0),
-            (Rule::Difference, true) => (&[7, 3], 7.0 * PI / 3.0),
-            (Rule::Union | Rule::Difference, _) => {
-                let Err(rcad_topo::Error::ACurvedFaceGoesRightRoundWithNoSeam { face }) = said
-                else {
-                    panic!("{what}: {said:?}");
-                };
-                let surface = model
-                    .solids()
-                    .flat_map(|solid| solid.faces())
-                    .find(|placed| placed.key() == face)
-                    .expect("the refusal names a face of one of the two frustums")
-                    .surface();
-                let Surface::Cone(side) = surface else {
-                    panic!("{what}: refused on {surface:?}");
-                };
-                assert_eq!(
-                    side.axis().direction(),
-                    Vector::new(1.0, 0.0, f64::EPSILON),
-                    "{what}: refused on {surface:?}"
-                );
-                continue;
-            }
+            (Rule::Union, _) => (&[14], 14.0 * PI / 3.0),
+            (Rule::Difference, _) => (&[7, 3], 7.0 * PI / 3.0),
             (other, _) => panic!("{other:?} is not one of the six"),
         };
         let (_, measured, error) = measures_under(&mut model, said, faces, &what, &policy);
