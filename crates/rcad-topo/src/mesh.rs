@@ -1360,6 +1360,27 @@ impl BuildingAMesh {
             ends.iter()
                 .all(|end| point.coordinates() != end.coordinates())
         });
+        // **A point where the walk turns back on itself, by no more than the
+        // walk says a point may sit off the curve, is dropped**, and what that
+        // moves the line is charged. Such a point is one the walk could not
+        // tell from its neighbours; a point where the line turns back by more
+        // is kept, since the curve itself may bend that sharply between two
+        // steps. Where two branches of a crossing pass a rounding
+        // apart, the walk closes in on the place in steps it halves down to
+        // `1e−7`, and its points there zigzag by up to `3e−7`, inside the
+        // `3.6e−7` the walk owns to. The upright cone of slope a half and
+        // height 8 less one 10 high turned 0.3 about `x` through `(0, 0, 4)`
+        // has such a place where the loop the two cones cross in turns a right
+        // angle, and the face holding it as a hole was refused because its
+        // boundary crossed itself there; so was the face it bounds the other
+        // way round (`a_funnel_with_a_leaning_spout.rs`, Q3206). Across the
+        // six fuses of that pair, 59 walks dropped points, and the most any of
+        // them moved its line was `0.69` of what that walk owns to.
+        let turned_back = without_the_points_where_it_turns_back(
+            &mut points,
+            ends,
+            along_it.deviation().magnitude(),
+        );
         // **A straight edge lying across a flat face of the same solid gets a
         // point in its middle**, or that face draws its side a second time. The
         // wedge less the frustum it rests on keeps its slanted face whole and
@@ -1484,7 +1505,7 @@ impl BuildingAMesh {
         let moving = how_far_moving_this_face_rounds(face, &self.along_each_edge);
         self.worst = self
             .worst
-            .max(along_it.deviation().magnitude() + moved + halved + moving);
+            .max(along_it.deviation().magnitude() + turned_back + moved + halved + moving);
         Ok(points
             .into_iter()
             .map(|along| self.remember_made_on(face, &there, along))
@@ -1554,31 +1575,6 @@ impl BuildingAMesh {
                 )
             })
             .collect();
-        // PROBE TEMPORARY
-        if std::env::var("PROBE_MESH").is_ok() {
-            eprintln!("PROBE MESH face {:?} surface {:?}", face.key(), surface);
-            for (i, w) in walked.iter().enumerate() {
-                let (lo, hi) = longitudes_of(w);
-                let lat_lo = w.corners.iter().map(|c| c[1]).fold(f64::INFINITY, f64::min);
-                let lat_hi = w
-                    .corners
-                    .iter()
-                    .map(|c| c[1])
-                    .fold(f64::NEG_INFINITY, f64::max);
-                eprintln!(
-                    "PROBE MESH  loop {i}: n={} round={} climbed={} one_curve={} once={} encloses={} lon=[{lo},{hi}] lat=[{lat_lo},{lat_hi}]",
-                    w.corners.len(),
-                    w.goes_right_round,
-                    w.climbed,
-                    w.closes_on_one_curve,
-                    it_passes_each_of_its_points_once(w),
-                    how_much_of_the_chart_this_loop_encloses(w)
-                );
-                for (c, p) in w.corners.iter().zip(&w.points) {
-                    eprintln!("PROBE MESH    {p}: {:?}", c);
-                }
-            }
-        }
         // **A wire that winds is only allowed beside wires that wind too**, or
         // as the rim of a cap on a ball or a cone beside islands, or as one of
         // the two rims of a ring on a pipe or a cone beside islands. The loops
@@ -4222,21 +4218,6 @@ impl BuildingAMesh {
                 Err(why) => {
                     // A refused lobe is refused for what the whole loop it was
                     // cut from is refused for (`what_the_triangulator_can_cut`).
-                    // PROBE TEMPORARY
-                    if std::env::var("PROBE_MESH").is_ok() {
-                        eprintln!(
-                            "PROBE MESH refused {:?} piece of {} loops",
-                            why,
-                            piece.len()
-                        );
-                        let mut k = 0;
-                        for (i, l) in piece.iter().enumerate() {
-                            for (c, p) in l.corners.corners().iter().zip(&l.points) {
-                                eprintln!("PROBE MESH   piece loop {i} #{k} pt {p}: {:?}", c);
-                                k += 1;
-                            }
-                        }
-                    }
                     let Some(whole) = cut_from else {
                         return Err(refusal_for(face, why, &corner_is, &self.points, log));
                     };
@@ -9168,6 +9149,64 @@ fn a_flat_face_off_it_holds_both_its_ends(solid: SolidView<'_>, edge: EdgeView<'
                 .iter()
                 .all(|&end| coedges().any(|coedge| coedge.start().key() == end))
     })
+}
+
+/// `points`, walked along one edge between `ends`, with each point dropped
+/// where the line through the ends and them turns back on itself, so long as
+/// dropping it moves the line no more than `within`; and how far dropping them
+/// moved it.
+///
+/// The line turns back at a point where the side leaving it heads more than a
+/// quarter turn away from the side reaching it. Each point is dropped once the
+/// next is read, and the point before it is read again against the side that
+/// is left, so a run of points that zigzag goes as far as it has to. Dropping
+/// the points between two that stay moves the line from the old sides between
+/// those two onto the one straight side joining them, and the farthest any
+/// dropped point lies from that side is the farthest the line moves.
+fn without_the_points_where_it_turns_back(
+    points: &mut Vec<Point>,
+    ends: [Point; 2],
+    within: f64,
+) -> f64 {
+    let line: Vec<Point> = core::iter::once(ends[0])
+        .chain(points.iter().copied())
+        .chain(core::iter::once(ends[1]))
+        .collect();
+    let how_far_dropping_moves_it = |from: usize, to: usize| {
+        line[from + 1..to]
+            .iter()
+            .map(|&dropped| how_far_from_the_side(dropped, [line[from], line[to]]))
+            .fold(0.0, f64::max)
+    };
+    let mut kept: Vec<usize> = Vec::with_capacity(line.len());
+    for next in 0..line.len() {
+        while let [.., before, last] = kept[..]
+            && (line[last] - line[before]).dot(line[next] - line[last]) < 0.0
+            && how_far_dropping_moves_it(before, next) <= within
+        {
+            kept.pop();
+        }
+        kept.push(next);
+    }
+    let moved = kept
+        .windows(2)
+        .map(|pair| how_far_dropping_moves_it(pair[0], pair[1]))
+        .fold(0.0, f64::max);
+    *points = kept[1..kept.len() - 1].iter().map(|&at| line[at]).collect();
+    moved
+}
+
+/// How far `point` is from the nearest point of the straight side between
+/// `ends`.
+fn how_far_from_the_side(point: Point, ends: [Point; 2]) -> f64 {
+    let along = ends[1] - ends[0];
+    let squared = along.dot(along);
+    let part = if squared == 0.0 {
+        0.0
+    } else {
+        ((point - ends[0]).dot(along) / squared).clamp(0.0, 1.0)
+    };
+    point.distance_to(ends[0] + along * part)
 }
 
 /// A face's surface as the arena holds it, with where that face is placed kept

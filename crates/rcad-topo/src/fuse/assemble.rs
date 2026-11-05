@@ -929,8 +929,7 @@ impl Assembly {
         match swept {
             Ok(()) => {}
             Err(Error::Invalid(broken)) => return Err(Error::TheFuseWroteABrokenAnswer { broken }),
-            Err(mut refused) => {
-                probe_dump(&throwaway, &mut refused);
+            Err(refused) => {
                 return Err(
                     self.handing_back_the_model_it_was_raised_in(throwaway, &rehearsal, refused)
                 );
@@ -6158,8 +6157,7 @@ impl Assembly {
         for &solid in &written.solids {
             let volume = match how_much_space_it_encloses(apart.solid_at(solid), policy, log) {
                 Ok(volume) => volume,
-                Err(mut refused) => {
-                    probe_dump(&apart, &mut refused);
+                Err(refused) => {
                     return Err(
                         self.handing_back_the_model_it_was_raised_in(apart, &written, refused)
                     );
@@ -7338,45 +7336,6 @@ pub(crate) struct Written {
     pub(crate) edges: Vec<EdgeSlot>,
     pub(crate) faces: Vec<FaceSlot>,
     pub(crate) solids: Vec<SolidSlot>,
-}
-
-fn probe_dump(model: &Model, refused: &mut Error) {
-    if std::env::var_os("PROBE_DUMP").is_none() {
-        return;
-    }
-    eprintln!("PROBE refused {refused:?}");
-    let named = refused.the_face_it_names().map(|face| *face);
-    for solid in model.solids() {
-        eprintln!("SOLID {:?}", solid.key());
-        for face in solid.faces() {
-            eprintln!(
-                "FACE {:?}{} {:?} surface {:?} wires {}",
-                face.key(),
-                if Some(face.key()) == named {
-                    " REFUSED"
-                } else {
-                    ""
-                },
-                face.orientation(),
-                face.surface(),
-                face.wire_count()
-            );
-            for wire in face.wires() {
-                eprintln!("  WIRE {} steps", wire.step_count());
-                for coedge in wire.coedges() {
-                    let edge = coedge.edge();
-                    eprintln!(
-                        "    {:?} -> {:?}  {:?} -> {:?} run {:?}",
-                        coedge.start().key(),
-                        coedge.end().key(),
-                        coedge.start().point(),
-                        coedge.end().point(),
-                        edge.run()
-                    );
-                }
-            }
-        }
-    }
 }
 
 /// One solid of the result: the shell round the outside of it and the shells
