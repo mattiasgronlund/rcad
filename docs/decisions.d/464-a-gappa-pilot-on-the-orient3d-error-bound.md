@@ -24575,24 +24575,145 @@ Its first line is `pointzero.py`'s own, run again in the fresh directory;
 the parent's lines come after it because its output is buffered when it is
 not a terminal.
 
-### 464.35 DRAFT, Q2802 second lane: point.g with products below the normals
+### 464.35 Isometry::POINT_ROUNDOFF with products below the normals
 
-*Not a finished subsection: no index line. Every run is done; the prose is
-not written. The lane that writes 464.35 replaces this block whole. It is
-here so the scripts and the prints outlive `/tmp`.*
+Q2802 ran 464.19's `point.g` with each of its nine products free to fall
+below the normals, in two lanes on 2026-11-05. The first, over four runs,
+proved the lemmas the form below stands on, wrote `pointsub.py` and
+`controls.py`, and tried three forms of the generator that each ran out of
+memory (6). The second ran the fourth form's 88 cases and their controls,
+probed the code with `L` below the normals, and wrote this.
 
-The answer, run by Q2802's second lane on 2026-11-05 at base `8dae715a`
-(`isometry.rs` changed only in doc comments since `c0859e3f`, `Cargo.lock`
-not at all), through 464.4's pin and 464.13's `one.sh`:
+`POINT_ROUNDOFF`'s `18ε · L` needs `L` normal, and not the products. With
+`L` at least `2⁻¹⁰²²` and each product on a live path normal, below the
+normals or 0, each of the 88 cases proves the moved point's `x` within the
+code's `36u · L` of where the movement's own numbers, worked without
+rounding, put it (3). `y` and `z` are covered by the same cases (2), Coq
+checks each proof, modulo its hints (3), and each of the 88 controls fails
+(4). The products below the normals cost up to `9.93u · L` on top of
+464.19's `24.80u · L`: the largest case reaches `34.73u · L`, which leaves
+`1.27u · L` of room where 464.19 left `11.2u · L`. With `L` below the
+normals the proof fails (4), and the code lands past `36u · L` with no `f64`
+within `36u · L` of the exact answer, so there the bound's form is a limit
+and not a gap (5). That is under 464.19's other hypothesis, the turn's `q·q`
+within `6ε` of one. The 88 cases take in the zero branches as well, so they
+cover every input 464.34's 436 cover, at the looser bound.
 
-- **`POINT_ROUNDOFF` needs `L` normal, and not the products.** In the form
-  below, all 88 cases prove `36u`, with `gappa -Bcoq` and `coqc`, and all 88
-  controls at `u / 2` exit 1. The largest is `34.7285u` (`pm_n`), against
-  464.19's `24.80u` with the products normal: the products below the normals
-  cost up to `9.93u · L` (`G / L`), leaving `1.27u` of room where 464.19 left
-  `11.2u`. `pm_n` alone: exit 0 in 5.46 s, peak 89 188 KB (`peak.sh`).
-  `startpm.sh` ran them 12 at once from 16:19:56 to 16:20:50 UTC.
-- `tallypm.py`'s whole print:
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, unchanged, against `isometry.rs` at `c0859e3f` and
+nalgebra 0.35.0, as 464.34's were. At the second lane's base, `8dae715a`,
+`isometry.rs` differs from `c0859e3f` in `POINT_ROUNDOFF`'s doc alone, and
+`Cargo.lock` not at all. `u` is `2⁻⁵³` and `ε` is `f64::EPSILON = 2u`.
+
+**1. The form.** `point.g` gives each rounded product `rnd(P)` a ratio within
+`u` of one, which holds while `P` is a normal number (464.5's lemma). Below
+the normals no ratio bounds it: a product of two nonzero doubles can round
+to 0. What holds of every real `P` is a slip of at most `u · (|P| +
+2⁻¹⁰²²)`:
+
+- `mixedn.g` proves `m = (rnd(P) − P) / (|P| + 2⁻¹⁰²²)` in `[−u, u]` for
+  `|P|` at least `2⁻¹⁰²²`, and `mixeds.g` for `|P|` at most `2⁻¹⁰²²`, each
+  with `gappa -Bcoq` and `coqc`, and each control at `u / 2` exits 1.
+- So `rnd(P) = P · (1 + m · s) + m · 2⁻¹⁰²²`, with `s = |P| / P` where `P`
+  is not zero: a ratio `1 + m · s` within `u` of one, as in `point.g`, and
+  an amount `m · 2⁻¹⁰²²` that no ratio carries. Where `P` is zero, `m` is 0.
+- `sum.g` proves that rounding the sum or the difference of two doubles,
+  where it is not zero, multiplies it by a ratio `r` within `u` of one, with
+  `gappa -Bcoq` and `coqc`, and its control at `u / 2` exits 1. A sum that
+  is 0 is `0 · r` for every `r`.
+
+`pointsub.py` (8) writes each rounded product on a live path as `P * (1 + m
+* s) + m * 1b-1022`, with `m` in `[−u, u]` and `s` in `[−1, 1]`, and each
+rounded sum on a live path as `C * r`, with `r` in `[1 − u, 1 + u]`, all of
+them free. A run of the code meets each with one value in its interval, so a
+script that proves the goal for every value proves it for every run. That
+takes in at once a product normal, below the normals, or rounded to 0 with
+neither factor 0; a product with a factor that is a sum that cancelled,
+which is 0, with `m` 0; a sum that cancels; and a sum with one part zero,
+which rounds nothing, with `r` 1. So no case is split by which sums cancel,
+as 464.34's were, no live path keeps a `rnd`, and no sum needs 464.34's
+`@FIX`. A zero factor is still the double 0, and each product and sum it
+makes zero is written unrounded, as in 464.34's 2.
+
+`out − Ex` is then `E + Asum`: `E` the terms' errors, each term of `Ex`
+carried through the ratios on its path as in `point.g`, and `Asum` the
+amounts as they reach `out`. Each amount reaches `out` multiplied by the
+factor `f` that the sums and products after it multiply its product by, and
+by the ratios after it on its path. `f` is `2w` for `q01`, `−2w` for `q02`,
+`2v₁` for `q21`, `−2v₁` for `q22`, `−2v₂` for `q11`, `2v₂` for `q12`, and
+`1`, `−1` and `1` for `k01`, `k02` and `m0`. Each amount gets a share of its
+own, `|f| · L`, and their sum is `G`:
+
+`G / L = 2n_w|w| + 2n₁|v₁| + 2n₂|v₂| + n_c`,
+
+each `n` the rounded products on a live path among `q01` and `q02`, `q21`
+and `q22`, `q11` and `q12`, and `k01`, `k02` and `m0`. An amount over its
+share is `m · (2⁻¹⁰²² / L)`, a sign and the ratios after it: within `u`, and
+a little more, while `L` is at least `2⁻¹⁰²²`, and up to `2⁵²u = 0.5` at `L
+= 2⁻¹⁰⁷⁴` (4). That is the one place the proof needs `L` normal.
+
+`E` is averaged over `point.g`'s `D` as before, `Asum` over `G` on its own,
+and the two add. The hint on `G / L` writes each `2n|x|` as `λ|x|² + n²/λ −
+λ(|x| − n/λ)²`, and the three `λ|x|²` as `λ q·q` less `λ|v₀|²`, so Gappa
+bounds it by `λ(1 + 12u)` and a constant. `λ` is near `√(n_w² + n₁² +
+n₂²)`, which makes `λ + (n_w² + n₁² + n₂²) / λ` smallest. With all nine
+products live, `G / L` is `4|w| + 4|v₁| + 4|v₂| + 3`, whose largest on a
+unit quaternion is `3 + 4√3 = 9.9282`, and `λ = 24/7` bounds it by
+`9.9286`.
+
+**2. The cases.** One case for each zero set of 464.34's 2, `pm_<zeros>.g`,
+`<zeros>` the zero factors or `n` for none, with a control
+`c_pm_<zeros>_half.g` beside each (4). Of the 128 sets of the seven factors,
+the 40 that hold three or four of the turn's parts never reach this
+arithmetic or cannot keep `q·q` near one (464.34's 1), which leaves 88. In 25
+of them no term through the turn keeps all its factors, so no product is on
+a live path and `D` is `3L`. The other 63 have a rounded product on a live
+path, and so an `Asum` and a `G`; `pm_n`, with nothing zero, has all nine.
+`y` and `z` are `x` with every index turned (464.19's `turn.py`), which turns
+each amount's factor with it, and the 88 zero sets are closed under that
+turn, so the cases for `x` are the cases for `y` and `z`.
+
+**3. What they print.** `startpm.sh` (8) ran the 88 cases, each with `gappa
+-Bcoq` and `coqc`, and their 88 controls, 12 at once, from 16:19:56 to
+16:20:50 UTC by its files' times. `tallypm.py` (8), 464.34's `tallypz.py`
+with these names and the two averages, counts them, and its whole print is
+below:
+
+- Each of the 88 exits 0 at the code's `36u`, in 0.11 s (`pm_v0v1p0p1p2`)
+  to 5.56 s (`pm_n`).
+- `E / D` is within `u`, and a little more, in 44 cases; within `0.93u` to
+  `0.99u` in 23; and within `u / 3` in the 21 where `p₀` is zero and no term
+  is live, so that only `s₀`'s rounding is left, over `D = 3L`.
+- The upper end of `D / L` is 3 in the 25 cases where `D` is `3L`, and 24.8
+  in the other 63, `point.g`'s own, for the reason 464.34's 3 gives.
+- `Asum / G` is within `u`, and a little more, in each of the 63.
+- The upper end of `G / L` is 9.93 in `pm_n`, and 3 to 7.90 in the other 62.
+- So `(out − Ex) / L` is within `E / D · D / L + Asum / G · G / L`, at most
+  `34.7285u` (`pm_n`), against the goal's `36u`. With the products normal,
+  464.19's `point.g` and 464.34's cases reach `24.80u`.
+- `gappa -Bcoq` and `coqc` exit 0 on all 88: 588 lines with 6 hints
+  (`pm_v1v2p0p1p2`, 0.91 s) to 12 299 lines with 41 hints (`pm_n`, 10.96
+  s), where 464.34's `pz_n` came to 8130 lines with 34.
+- No `.out`, `.bcoq` or `.coqc` of the 88 has a line other than its results
+  and warnings that a divisor has been assumed to be nonzero, 64 of them in
+  `pm_n.out`. So no hint was reported as not an identity, and each `.coqc`
+  is empty.
+
+`pm_n` alone through `peak.sh` (8) proves in 5.46 s at a peak of 89 188 KB,
+where 464.19's `point.g` takes 49.18 s and 4 496 464 KB (6).
+
+`34.73u` is how far this averaging reaches, not a point any input has been
+seen at. `D / L` and `G / L` reach their tops at different turns, and the
+proof adds the tops. And the amounts' part is at its largest at `L =
+2⁻¹⁰²²`: each amount's hint carries `2⁻¹⁰²² / L`, so by the form, not run,
+that part falls in proportion as `L` grows past the floor.
+
+Gappa does not write the same proof each run (464.4), so the sizes and times
+are this run's. Each proof stands on its hints and on the divisors Gappa
+took to be nonzero, as 464.19's 8 says of its own. `field` has not been run
+on these hints (464.10).
+
+`tallypm.py`'s whole print:
 
 ```
 88 cases, 176 exit lines, 88 coq lines
