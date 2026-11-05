@@ -21792,6 +21792,27 @@ check-queue-api-selftest:
     grep -qxF 'write set in force: docs/q2670-fresh.md' <<<"$got" \
         || fail "show did not name the hold a writes-given set was taken with as the write set in force (Q3166): $got"
 
+    # Q3207: a re-take of a held row judges it by the write set in force, not
+    # the column. The row is taken with two files, `writes` drops the second,
+    # another lane takes that second file, and the re-take onto a new branch
+    # must go through and record the narrowed set.
+    retake_set=$(q "$writes_wt" add 2 opus docs/q3207-a.md,docs/q3207-b.md "from/- a row writes narrows while held, then retakes §230") \
+        || fail "add for the in-force retake row failed"
+    other_set=$(q "$writes_wt" add 2 opus docs/q3207-c.md "from/- a row that takes the file the first row let go §230") \
+        || fail "add for the other lane's row failed"
+    g "$writes_wt" commit -qam "two rows for the in-force retake"
+    got=$(q "$writes_wt" take "$retake_set" lane-q3207-old 2>&1) || fail "take of the in-force retake row failed"
+    got=$(q "$writes_wt" writes "$other_set" docs/q3207-b.md 2>&1) \
+        && fail "writes gave another row a file the held row still holds"
+    got=$(q "$writes_wt" writes "$retake_set" docs/q3207-a.md 2>&1) || fail "writes refused to narrow the held retake row"
+    got=$(q "$writes_wt" writes "$other_set" docs/q3207-b.md 2>&1) || fail "writes refused the file the retake row let go"
+    got=$(q "$writes_wt" take "$other_set" lane-q3207-other 2>&1) || fail "take of the other lane's row failed"
+    got=$(q "$writes_wt" take "$retake_set" lane-q3207-new 2>&1) \
+        || fail "re-take was refused on the column's second file, though writes had let it go (Q3207): $got"
+    got=$(awk -F '\t' -v id="$retake_set" '$1 == "take" && $2 == id && $5 == "lane-q3207-new" { print $6 }' "$claims_file")
+    [ "$got" = docs/q3207-a.md ] \
+        || fail "the re-take recorded the column, not the write set in force (Q3207): $got"
+
     # Q3162 (§479): `add` and `writes` print the pointer to
     # docs/where-a-rule-goes.md on stderr when a write set names an agent file,
     # the same line agent-file-written.sh puts in front of a model after a
