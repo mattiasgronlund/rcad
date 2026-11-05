@@ -33,16 +33,9 @@ so use them only for a file that diff does not name.
 
 Read each row with `mise exec -- just queue show <id>`, one id a call. A bundle,
 `queueId` `Q1,Q2,Q3` (§352.4), is one prep for all its rows. Report each row in
-`rows`: its id, its model column, its write-set column and its whole line, each
-exactly as the command prints it — **unless** the same `show` also prints a
-line under the row naming a newer set: `narrowed to <set>, taken with <...>`
-when a hold has narrowed below what it was taken with, or `` write set set to
-<set> by `writes`, <column> in docs/queue.md `` otherwise — on a row not yet
-held, or one a plain `writes` has already moved onto the entry it is held
-with too (Q2670, so `write_set` and `taken` agree and the first line does not
-fire). Either line means a `writes` ran after the column was written
-(§230.3); report that printed set as the row's write set instead of the
-column, and check `needs` against it too, not the column.
+`rows`: its id, its model column and its whole line, each exactly as the
+command prints it, and as its write set the set on the `write set in force:`
+line under it, which is the one to check `needs` against too.
 `lanes.js` cannot read the queue file, so what you copy is what the lane is
 given, and what your answer is checked against.
 
@@ -50,8 +43,8 @@ given, and what your answer is checked against.
 
 The lane's write set is the union of the rows' write sets, leaving out `-`,
 and nothing else; `lanes.js` builds that union itself from the write set you
-copy into `rows` above — the column, or the newer set a `writes` line
-replaces it with — so you report no `writeSet` of your own. **You
+copy into `rows` above off each `write set in force:` line, so you report no
+`writeSet` of your own. **You
 never widen it or narrow it, not even when it is wrong**: that is a `needs`.
 Only `queue next` checks a write set against the rows already running, `take`
 does not, and two preps in one fill could widen two rows onto one file at once
@@ -141,14 +134,7 @@ changed behaviour and found no test looks like. Its lane names the tests that
 reach the change, and its verifier shows they pass with the source reverted and
 fail under a mutation of a line the change adds.
 
-**A row whose text asks for a test that fails without its change is not
-`sameBehaviour`**, whatever results it keeps: the failing test it asks for is
-the behaviour it changes. Prep marked Q3078 `sameBehaviour` because the gate
-kept every step's result, while the row asked for a pin that fails at the base:
-the stub `cargo` of `check-gate-docs-selftest` seeing one nextest run where the
-base runs two. Its lane named that pin, `lanes.js` stopped the lane at its
-report for a `sameBehaviour` lane naming a failing test, and the row went again
-in the full form (§399).
+Before you set either mark, read `docs/prep-marks.md`.
 
 **Never both marks on one row**; `lanes.js` refuses that answer. Decide each
 mark from what the row's work is, and put why it holds in `marks_why`, which
