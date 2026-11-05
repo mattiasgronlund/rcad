@@ -36,7 +36,9 @@ anywhere, and 464.28 is Q2771, on the side of rcad-geom's cylinder with a zero
 factor. 464.29 is Q2773, on that cylinder with a checked product below the
 normals. 464.30 is Q2781, on the side of rcad-geom's cone with a zero factor.
 464.31 is Q2782, on that cone with a checked product below the normals, and
-464.32 is Q2786, on the side of rcad-geom's torus with a zero factor.*
+464.32 is Q2786, on the side of rcad-geom's torus with a zero factor. 464.33
+is Q2787, on that torus with a checked product below the normals, and 464.34
+is Q2801, on `Isometry::POINT_ROUNDOFF` in the zero branches.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -70,6 +72,8 @@ normals. 464.30 is Q2781, on the side of rcad-geom's cone with a zero factor.
   464.30  The side of rcad-geom's cone with a zero factor
   464.31  The side of rcad-geom's cone with a checked product below the normals
   464.32  The side of rcad-geom's torus with a zero factor
+  464.33  The side of rcad-geom's torus with a checked product below the normals
+  464.34  Isometry::POINT_ROUNDOFF in the zero branches
 
 ### 464.1 The bugs a bound prover is for
 
@@ -12536,9 +12540,10 @@ no factor is zero, no sum cancels to zero, the nine products of the
 arithmetic are normal numbers, and the turn's `q·q` is within `6ε` of one. The
 proof reaches `24.80u · L` where the doc counts `35.78u · L` (3, 4). A turn of
 a cube is one addition per coordinate, which `shiftball.g` already proved
-(6). The zero branches and the products below the normals are not run (10),
-and one public route to a movement does not hold its turn near length one
-(5). Coq checks the proof, modulo its hints (8).
+(6). The products below the normals are not run (10), the zero branches are
+run in 464.34 and reach the same `24.80u`, and one public route to a movement
+does not hold its turn near length one (5). Coq checks the proof, modulo its
+hints (8).
 
 Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
 464.13's `one.sh`, unchanged, against `isometry.rs` at `ba0a654e` and
@@ -12634,7 +12639,7 @@ the constant the count was for.
 
 - every input a finite `f64`;
 - no factor of a product zero, and no sum cancelling to zero: the zero
-  branches, which 10 leaves;
+  branches, which 10 leaves and 464.34 runs;
 - the nine products normal, which `apply_to_point` does not check, and
   464.5's lemma for each. The doc says its count holds only while nothing
   falls into the subnormals, and so far so does this (10);
@@ -13197,7 +13202,8 @@ each from Q2689:
   coordinate axis stores two of `v` as zero and a point on a coordinate
   plane has a zero coordinate, and each sum that may cancel to zero, as 464.11
   and 464.18 ran the plane's. These are common inputs. Not run, so no class
-  (§360.5).
+  (§360.5). Done, in 464.34: each of the 436 cases proves the code's `36u`,
+  reaching `24.80u`, under the other hypotheses of 5.
 - Run `point.g` with one or more of the nine products below the normals and
   `L` normal, as 464.8's `planecases.py` split the plane's, and say whether
   `POINT_ROUNDOFF` needs the products normal or only `L`, as `nearest.g` found
@@ -24199,8 +24205,8 @@ def main():
 main()
 ```
 
-`runpz.sh`, which runs each case named on its input, one a line, through
-464.13's `one.sh`, unchanged, with `coq`, and its control without:
+`runpz.sh`, whole, which runs each case named on its input, one a line,
+through 464.13's `one.sh` with `coq`, and its control without:
 
 ```sh
 #!/bin/bash
@@ -24215,8 +24221,8 @@ while read -r n; do
 done | xargs -P "$P" -I{} sh -c '{}'
 ```
 
-`start.sh`, which the second lane started with `setsid -f nohup ./start.sh`
-and waited on by the pid it writes:
+`start.sh`, whole, which the second and third lanes started with `setsid -f
+nohup ./start.sh` and waited on by the pid it writes:
 
 ```sh
 #!/bin/bash
@@ -24229,7 +24235,7 @@ echo $$ > start.pid
 echo done >> runpz.txt
 ```
 
-`tallypz.py`, which counts a finished run:
+`tallypz.py`, whole:
 
 ```python
 """Count what runpz.txt and the files beside it say of each case in cases.txt
@@ -24354,7 +24360,119 @@ for b, k in sorted(collections.Counter(round(b, 2) for b in bests.values()).item
 print("largest best: %.4fu (%s), against POINT_ROUNDOFF's 36u" % max((b, n) for n, b in bests.items()))
 ```
 
-`samepz.py`, which checks this text against the files that ran:
+`python3 tallypz.py`, on the third lane's run, prints:
+
+```text
+436 cases, 872 exit lines, 436 coq lines
+lines of runpz.txt that are neither: none
+problems: 0
+cases that exit 0: 436 of 436; controls that exit 1: 436 of 436
+gappa time per case: 0.21 s (pz_v1v2p0p1_xo) to 164.14 s (pz_n_xc0)
+coq: 657 lines 7 hints 4.20 s (pz_v1v2p0p1p2) to 8130 lines 34 hints 104.60 s (pz_n)
+(out - Ex) / D or / (3L), upper end in u: [(0.0, 21), (0.1631, 1), (0.3333, 34), (0.4052, 1), (0.4228, 1), (0.5123, 2), (0.5403, 1), (0.5484, 1), (0.5556, 2), (0.5584, 1), (0.5628, 1), (0.5682, 1), (0.5688, 5), (0.5695, 1), (0.5697, 1), (0.5699, 2), (0.5702, 1), (0.6316, 2), (0.6426, 2), (0.6452, 1), (0.6559, 2), (0.6609, 2), (0.6618, 1), (0.6749, 2), (0.6767, 4), (0.6879, 10), (0.6885, 6), (0.6935, 1), (0.6942, 4), (0.6976, 6), (0.6989, 6), (0.7005, 3), (0.7028, 2), (0.7037, 2), (0.7054, 6), (0.7065, 5), (0.7081, 2), (0.7082, 2), (0.7085, 1), (0.7091, 2), (0.7098, 4), (0.7107, 3), (0.711, 2), (0.7115, 1), (0.7685, 2), (0.7832, 6), (0.7879, 1), (0.7988, 2), (0.8065, 1), (0.807, 2), (0.8104, 2), (0.8152, 6), (0.8153, 2), (0.8157, 1), (0.8246, 2), (0.8253, 2), (0.8273, 2), (0.829, 2), (0.8296, 4), (0.8297, 1), (0.8307, 2), (0.8319, 2), (0.8321, 1), (0.8334, 2), (0.8344, 2), (0.8378, 10), (0.8382, 6), (0.8387, 1), (0.8449, 6), (0.8456, 1), (0.8459, 6), (0.8471, 4), (0.8487, 2), (0.8501, 10), (0.8503, 6), (0.8514, 5), (0.8526, 2), (0.8527, 6), (0.8529, 1), (0.853, 6), (0.8533, 2), (0.8539, 4), (0.8541, 2), (0.8545, 3), (0.8551, 5), (0.8555, 2), (0.8556, 1), (0.8558, 2), (0.856, 4), (0.8562, 3), (0.931, 2), (0.9599, 6), (0.9636, 3), (0.9673, 6), (0.9724, 2), (0.9815, 2), (0.9823, 2), (0.9859, 1), (0.991, 1), (1.0, 103)]
+D / L upper end: [(3.0, 50), (24.8, 386)]
+largest (out - Ex) / D times D / L: 24.7999u (pz_wv2p2_xc2), against POINT_ROUNDOFF's 36u
+controls at [2^-60, 1], out and Ex both 0, (out - Ex) / (3L) in [0, 0]: 21 True
+control best on (out - Ex) / L, in u, and how many controls:
+  1.0u: 25 
+  3.0u: 4 pz_v1v2, pz_v1v2p1, pz_v1v2p2, pz_v1v2p1p2
+  4.05u: 1 pz_v0p0_xc0o
+  8.27u: 9 pz_n_xc0c1c2o, pz_w_xc1c2o, pz_wv1_xc1o, pz_wv2_xc2o, pz_v0p0_xc0, pz_v1p1_xc1o, pz_v2p2_xc2o, pz_wv1p1_xc1o, pz_wv2p2_xc2o
+  10.05u: 1 pz_p0_xc0kko
+  10.49u: 1 pz_wp0_xkko
+  12.71u: 2 pz_p0p1_xao, pz_p0p2_xao
+  13.4u: 1 pz_p0_xao
+  13.6u: 1 pz_p1p2_xkko
+  13.78u: 2 pz_v1p0_xao, pz_v2p0_xao
+  13.85u: 1 pz_p0_xc0kk
+  13.96u: 1 pz_n_xc0kko
+  14.09u: 1 pz_wp0_xkk
+  14.11u: 5 pz_wv0_xkko, pz_wv0p1_xkko, pz_wv0p2_xkko, pz_v0p1p2_xkko, pz_wv0p1p2_xkko
+  14.12u: 1 pz_wp1p2_xkko
+  14.13u: 3 pz_v0_xc0kko, pz_wp1_xkko, pz_wp2_xkko
+  14.14u: 1 pz_w_xkko
+  15.66u: 2 pz_p1_xkkro, pz_p2_xkkro
+  15.94u: 2 pz_n_xkkro, pz_n_xc1c2ro
+  16.0u: 1 pz_p1p2_xro
+  16.27u: 2 pz_v1_xc1ro, pz_v2_xc2ro
+  16.39u: 2 pz_v0p1_xkkro, pz_v0p2_xkkro
+  16.41u: 1 pz_v0_xkkro
+  16.74u: 2 pz_p0p1_xa, pz_p0p2_xa
+  16.78u: 4 pz_p1_xro, pz_p1_xc1ro, pz_p2_xro, pz_p2_xc2ro
+  17.06u: 10 pz_wv1p2_xro, pz_wv2p1_xro, pz_v0v1p1_xro, pz_v0v2p2_xro, pz_v1p1p2_xro, pz_v2p1p2_xro, pz_wv1p1p2_xro, pz_wv2p1p2_xro, pz_v0v1p1p2_xro, pz_v0v2p1p2_xro
+  17.07u: 6 pz_n_xro, pz_n_xc2ro, pz_n_xc1ro, pz_n_xc0ro, pz_n_xc0c2ro, pz_n_xc0c1ro
+  17.2u: 1 pz_p0_xa
+  17.22u: 4 pz_p1_xao, pz_p1_xc1ao, pz_p2_xao, pz_p2_xc2ao
+  17.3u: 6 pz_v0v1_xro, pz_v0v2_xro, pz_v1p2_xro, pz_v2p1_xro, pz_v0v1p2_xro, pz_v0v2p1_xro
+  17.33u: 6 pz_wv1_xro, pz_wv2_xro, pz_v1p1_xro, pz_v2p2_xro, pz_wv1p1_xro, pz_wv2p2_xro
+  17.37u: 3 pz_n_xao, pz_n_xc2ao, pz_n_xc1ao
+  17.43u: 2 pz_v1_xro, pz_v2_xro
+  17.45u: 2 pz_v1p0_xa, pz_v2p0_xa
+  17.49u: 6 pz_v0v1_xao, pz_v0v2_xao, pz_v1p2_xao, pz_v2p1_xao, pz_v0v1p2_xao, pz_v0v2p1_xao
+  17.52u: 5 pz_wv0_xro, pz_wv0p1_xro, pz_wv0p2_xro, pz_v0p1p2_xro, pz_wv0p1p2_xro
+  17.56u: 4 pz_v1_xao, pz_v2_xao, pz_v0p1_xro, pz_v0p2_xro
+  17.57u: 1 pz_wp1p2_xro
+  17.59u: 2 pz_v0_xro, pz_v0_xc0ro
+  17.6u: 4 pz_wp1_xro, pz_wp1_xc1ro, pz_wp2_xro, pz_wp2_xc2ro
+  17.62u: 3 pz_w_xro, pz_w_xc2ro, pz_w_xc1ro
+  17.63u: 2 pz_v0p1_xao, pz_v0p2_xao
+  17.65u: 1 pz_v0_xao
+  19.06u: 2 pz_p0p1_xo, pz_p0p2_xo
+  19.42u: 6 pz_v0v1p0_xo, pz_v0v2p0_xo, pz_v1p0p2_xo, pz_v2p0p1_xo, pz_v0v1p0p2_xo, pz_v0v2p0p1_xo
+  19.54u: 1 pz_p0_xkko
+  19.81u: 2 pz_v0p0p1_xo, pz_v0p0p2_xo
+  20.0u: 1 pz_p1p2_xo
+  20.01u: 2 pz_p1_xkko, pz_p2_xkko
+  20.1u: 2 pz_p0_xo, pz_p0_xc0o
+  20.22u: 8 pz_n_xkko, pz_n_xc1c2o, pz_wv1p0_xo, pz_wv2p0_xo, pz_v1p0p1_xo, pz_v2p0p2_xo, pz_wv1p0p1_xo, pz_wv2p0p2_xo
+  20.23u: 1 pz_v0p0_xo
+  20.45u: 2 pz_p1_xkkr, pz_p2_xkkr
+  20.47u: 2 pz_v1_xc1o, pz_v2_xc2o
+  20.52u: 2 pz_n_xkkr, pz_n_xc1c2r
+  20.56u: 2 pz_v0p1_xkko, pz_v0p2_xkko
+  20.57u: 4 pz_p1_xo, pz_p1_xc1o, pz_p2_xo, pz_p2_xc2o
+  20.58u: 1 pz_v0_xkko
+  20.6u: 2 pz_v1_xc1r, pz_v2_xc2r
+  20.63u: 2 pz_v0p1_xkkr, pz_v0p2_xkkr
+  20.64u: 1 pz_v0_xkkr
+  20.67u: 2 pz_v1p0_xo, pz_v2p0_xo
+  20.69u: 2 pz_wp0p1_xo, pz_wp0p2_xo
+  20.78u: 10 pz_wv1p2_xo, pz_wv2p1_xo, pz_v0v1p1_xo, pz_v0v2p2_xo, pz_v1p1p2_xo, pz_v2p1p2_xo, pz_wv1p1p2_xo, pz_wv2p1p2_xo, pz_v0v1p1p2_xo, pz_v0v2p1p2_xo
+  20.79u: 6 pz_n_xo, pz_n_xc2o, pz_n_xc1o, pz_n_xc0o, pz_n_xc0c2o, pz_n_xc0c1o
+  20.8u: 1 pz_p1p2_xr
+  20.95u: 6 pz_v0v1_xo, pz_v0v2_xo, pz_v1p2_xo, pz_v2p1_xo, pz_v0v1p2_xo, pz_v0v2p1_xo
+  20.97u: 1 pz_wp0_xo
+  20.98u: 6 pz_wv1_xo, pz_wv2_xo, pz_v1p1_xo, pz_v2p2_xo, pz_wv1p1_xo, pz_wv2p2_xo
+  21.01u: 4 pz_p1_xr, pz_p1_xc1r, pz_p2_xr, pz_p2_xc2r
+  21.05u: 2 pz_v1_xo, pz_v2_xo
+  21.08u: 10 pz_wv1p2_xr, pz_wv2p1_xr, pz_v0v1p1_xr, pz_v0v2p2_xr, pz_v1p1p2_xr, pz_v2p1p2_xr, pz_wv1p1p2_xr, pz_wv2p1p2_xr, pz_v0v1p1p2_xr, pz_v0v2p1p2_xr
+  21.09u: 6 pz_n_xr, pz_n_xc2r, pz_n_xc1r, pz_n_xc0r, pz_n_xc0c2r, pz_n_xc0c1r
+  21.12u: 5 pz_wv0_xo, pz_wv0p1_xo, pz_wv0p2_xo, pz_v0p1p2_xo, pz_wv0p1p2_xo
+  21.14u: 2 pz_v0p1_xo, pz_v0p2_xo
+  21.15u: 7 pz_v0v1_xr, pz_v0v2_xr, pz_v1p2_xr, pz_v2p1_xr, pz_wp1p2_xo, pz_v0v1p2_xr, pz_v0v2p1_xr
+  21.16u: 8 pz_v0_xo, pz_v0_xc0o, pz_wv1_xr, pz_wv2_xr, pz_v1p1_xr, pz_v2p2_xr, pz_wv1p1_xr, pz_wv2p2_xr
+  21.18u: 6 pz_v1_xr, pz_v2_xr, pz_wp1_xo, pz_wp1_xc1o, pz_wp2_xo, pz_wp2_xc2o
+  21.19u: 3 pz_w_xo, pz_w_xc2o, pz_w_xc1o
+  21.21u: 5 pz_wv0_xr, pz_wv0p1_xr, pz_wv0p2_xr, pz_v0p1p2_xr, pz_wv0p1p2_xr
+  21.22u: 5 pz_v0_xr, pz_v0_xc0r, pz_v0p1_xr, pz_v0p2_xr, pz_wp1p2_xr
+  21.23u: 7 pz_w_xr, pz_w_xc2r, pz_w_xc1r, pz_wp1_xr, pz_wp1_xc1r, pz_wp2_xr, pz_wp2_xc2r
+  23.09u: 2 pz_p0p1, pz_p0p2
+  23.8u: 6 pz_v0v1p0, pz_v0v2p0, pz_v1p0p2, pz_v2p0p1, pz_v0v1p0p2, pz_v0v2p0p1
+  23.9u: 3 pz_p0, pz_p0_xkk, pz_p0_xc0
+  23.99u: 6 pz_wv1p0, pz_wv2p0, pz_v1p0p1, pz_v2p0p2, pz_wv1p0p1, pz_wv2p0p2
+  24.11u: 2 pz_v0p0p1, pz_v0p0p2
+  24.34u: 2 pz_v1p0, pz_v2p0
+  24.36u: 2 pz_wp0p1, pz_wp0p2
+  24.45u: 1 pz_v0p0
+  24.58u: 1 pz_wp0
+  24.8u: 99 
+largest best: 24.8000u (pz_wv2p2_xc2), against POINT_ROUNDOFF's 36u
+```
+
+The controls of 25 at `u` and 99 at `24.8u` are not listed by name, since
+`tallypz.py` names a best's controls only when there are 12 or fewer.
+
+`samepz.py`, whole:
 
 ```python
 """Check that each script 464.34 appends whole is byte for byte the file that
@@ -24436,3 +24554,23 @@ pz_n = open(os.path.join(fresh, "pz_n.g")).read()
 print("pz_n.g is point.g but for layout, comments, @FIX and queries:", parts(point) == parts(pz_n))
 shutil.rmtree(fresh)
 ```
+
+It prints:
+
+```text
+436 cases, 21 with out and Ex both 0
+code blocks in 464.34: 7
+pointzero.py same
+runpz.sh same
+start.sh same
+tallypz.py same
+samepz.py same
+one.sh is 464.13's block: True
+written again: 872 same as ran: 872 differ: []
+cases.txt same as ran: True
+pz_n.g is point.g but for layout, comments, @FIX and queries: True
+```
+
+Its first line is `pointzero.py`'s own, run again in the fresh directory;
+the parent's lines come after it because its output is buffered when it is
+not a terminal.
