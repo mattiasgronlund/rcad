@@ -115,7 +115,7 @@ just queue cores <id> <n>|all|-            set, replace or (with -) remove the w
                                             (§308); the fill skips a row whose count does not fit the machine's
                                             free threads, and cores:all fits only when nothing else holds any
 just queue night <id> on|off               set or take off the write set's night entry (§308.8); the fill offers the
-                                            row only inside the night fuzz's window and skips it by day; refused
+                                            row only inside the night fuzz's window, not its last hour, and skips it by day; refused
                                             beside a cores: entry, since the night fuzz holds every thread then
 just queue rank <id> before <id>           move <id> to sit just before the other id, within their shared tier
 just queue pick <id> ours|theirs           keep one side of a row the merge driver left in conflict
