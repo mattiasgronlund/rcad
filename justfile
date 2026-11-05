@@ -24390,6 +24390,10 @@ verify-lane *args:
 #
 # The JSON's fields are held to `verdictSchema` in `lanes.js`, read out of that
 # file, so a field the schema renames fails here and not in a verifier's report.
+# Three keys are notes to the verifier rather than verdict fields, and are let
+# through: `skipped`, `left_to_you`, and `about_commands_that_cannot_run`, which
+# says beside `commands_that_cannot_run`, when that is not empty, what the
+# verifier does with such a number, so `verifier.md` need not (§479.3).
 [private]
 check-verify-lane-selftest:
     #!/usr/bin/env bash
@@ -24508,7 +24512,7 @@ check-verify-lane-selftest:
     }
     held_to_the_schema() {
         local stray
-        stray=$(python3 -c 'import json, sys; d = json.loads(sys.argv[1]); print(" ".join(k for k in d if k not in sys.argv[2].split() + ["skipped", "left_to_you"]))' "$json" "$schema" 2>&1) \
+        stray=$(python3 -c 'import json, sys; d = json.loads(sys.argv[1]); print(" ".join(k for k in d if k not in sys.argv[2].split() + ["skipped", "left_to_you", "about_commands_that_cannot_run"]))' "$json" "$schema" 2>&1) \
             || fail "its last line is not JSON: $stray"
         [ -z "$stray" ] || fail "its JSON has fields that verdictSchema in lanes.js does not: $stray"
     }
