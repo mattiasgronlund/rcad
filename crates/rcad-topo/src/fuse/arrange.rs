@@ -1757,7 +1757,8 @@ impl<'f> Arrangement<'f> {
                 }
                 return Ok(Some(index));
             }
-            if !same && self.one_curve_two_partners_cut(index, partner, run, picked_by, policy) {
+            if !same && self.one_curve_two_partners_cut(index, partner, run, picked_by, policy, log)
+            {
                 self.crossings[index].also_cut_by.push(*partner);
                 return Ok(Some(index));
             }
@@ -1797,8 +1798,17 @@ impl<'f> Arrangement<'f> {
     ///
     /// A meet that cannot be worked out folds nothing, and leaves the two to
     /// [`Arrangement::place_the_meets`], which asks the same three again and
-    /// refuses there if it has to. Its records are not kept: a fold that is
-    /// not proved here decides nothing.
+    /// refuses there if it has to; so does a meet that answers anything else,
+    /// and a curve the pickers do not pick the whole of. None of those decides
+    /// anything here, and their records are dropped.
+    ///
+    /// **A fold made writes the meet's records to `log`.** A tolerant policy
+    /// may have folded two circles on the plane a rounding apart into one
+    /// ([`Policy::take_as_one_point`]), and then the fuse's answer rests on a
+    /// move it did not prove. A rod turned with a ball of its radius on its
+    /// cap is that: thrown away, every tolerant fuse of it came back with an
+    /// empty log, which reads as certified
+    /// (`tests/a_bar_and_a_ball_on_its_cap_turned.rs`, Q3180).
     fn one_curve_two_partners_cut(
         &self,
         index: usize,
@@ -1806,6 +1816,7 @@ impl<'f> Arrangement<'f> {
         run: &NamedRun,
         picked_by: &[Picker],
         policy: &Policy,
+        log: &mut ProvenanceLog,
     ) -> bool {
         let (mine, my_run) = (self.crossings[index].partner, &self.crossings[index].run);
         let my_pickers = self.crossings[index].picked_by();
@@ -1819,24 +1830,25 @@ impl<'f> Arrangement<'f> {
             return false;
         }
         let whole = [my_pickers.is_empty(), picked_by.is_empty()];
+        let mut records = ProvenanceLog::new();
         if whole == [false, false]
             || !matches!(
-                meet_of_three_surfaces(
-                    [&three[0], &three[1], &three[2]],
-                    policy,
-                    &mut ProvenanceLog::new()
-                ),
+                meet_of_three_surfaces([&three[0], &three[1], &three[2]], policy, &mut records),
                 Ok(MeetOfThree::MoreThanAPoint)
             )
         {
             return false;
         }
-        match whole {
+        let folded = match whole {
             [true, true] => true,
             [true, false] => self.picks_the_whole_of(&mine, my_run, picked_by),
             [false, true] => self.picks_the_whole_of(partner, run, my_pickers),
             [false, false] => unreachable!("two curves both picked out were turned away above"),
+        };
+        if folded {
+            records.drain_into(log);
         }
+        folded
     }
 
     /// Whether every one of `picked_by` certainly holds the point where the one
