@@ -1960,7 +1960,7 @@ impl<'f> Arrangement<'f> {
                                     &corner,
                                     &crossing.partner,
                                 )) {
-                        nothing_rules_the_point_out(crossing.picked_by(), at)
+                        self.nothing_rules_the_corner_off(index, at)
                     } else {
                         self.passes_through(index, &corner, policy, log)?
                     };
@@ -2268,11 +2268,8 @@ impl<'f> Arrangement<'f> {
         log: &mut ProvenanceLog,
     ) -> Result<bool> {
         let point = corner.point;
-        let (partner, picked_by) = (
-            self.crossings[crossing].partner,
-            self.crossings[crossing].picked_by(),
-        );
-        if !nothing_rules_the_point_out(picked_by, point) {
+        let partner = self.crossings[crossing].partner;
+        if !self.nothing_rules_the_corner_off(crossing, point) {
             return Ok(false);
         }
         let settled = must_decide(
@@ -2284,6 +2281,55 @@ impl<'f> Arrangement<'f> {
             log,
         )?;
         Ok(settled == Decision::Zero)
+    }
+
+    /// Whether nothing rules the corner at `at` off `crossing`: none of its
+    /// pickers, and, where it is one of the half rulings two cones on one apex
+    /// share, neither cone's nappe.
+    ///
+    /// **`rcad-geom` names such a half by a corner of flat surfaces through the
+    /// apex, and those need not tell the face's two nappes apart.** The pitch
+    /// cones of two mitre gears are `x² + y² = z²` and that cone turned onto
+    /// the `x` axis, by a rotation that leaves its axis `2.2e−16` off it. They
+    /// cross in four halves picked by the signs of `y` and `z`, which the turn
+    /// parts out of `x = z`, where the two touch exactly, and the two with
+    /// `z < 0` run on the lying cone's far nappe. Exactly, the two also touch
+    /// along `x = −z`, where the turn leaves no crossing, and that line passes
+    /// the corner of the lying cone's seam on its near cap, `(1, 0, −1)`, so
+    /// the corner is within a rounding of the upright cone. Its box straddles
+    /// `y = 0`, `z < 0` holds, and a tolerant
+    /// policy reads it as on the upright cone, so both of those halves were
+    /// taken through it, and every fuse with the lying cone first was refused
+    /// (Q3146).
+    ///
+    /// A point on the half is `apex + t·along` for some `t > 0`, so
+    /// `(point − apex)·w` and `along·w` have one sign for every `w`. Either
+    /// cone's axis reads both well away from nothing, since every ruling of a
+    /// cone leans off its axis by the cone's half angle, so where one reads
+    /// the two signs apart the corner is off the half.
+    fn nothing_rules_the_corner_off(&self, crossing: usize, at: PredicatePoint) -> bool {
+        let on = &self.crossings[crossing];
+        if !nothing_rules_the_point_out(on.picked_by(), at) {
+            return false;
+        }
+        let (Surface::Cone(one), Surface::Cone(other), Some(half)) =
+            (self.surface, on.partner, on.through_an_apex)
+        else {
+            return true;
+        };
+        let apex = half.apex.enclosure();
+        let from_the_apex: [Interval; 3] =
+            core::array::from_fn(|axis| at.enclosure()[axis] - apex[axis]);
+        [one, other].iter().all(|cone| {
+            let up = cone.axis().direction().components().map(Interval::exactly);
+            !matches!(
+                (
+                    dot_of(from_the_apex, up).sign(),
+                    dot_of(half.along, up).sign()
+                ),
+                (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos)
+            )
+        })
     }
 
     /// Which side of `partner` a corner of the face is on, asked without a
