@@ -1624,7 +1624,7 @@ def writes(here, args):
         write_set = ",".join(entries) if entries else "-"
         holds = claims.holds()
         hold = holds.get(row_id)
-        current = hold["write_set"] if hold else latest_writes(here.claims).get(row_id, row.write_set)
+        current = write_set_in_force(here.claims, row_id, row, hold)
         if write_set == current:
             raise Refused(f"{row_id}'s write set is {write_set} already")
         others = {other: theirs for other, theirs in holds.items()
@@ -1771,6 +1771,8 @@ def show(here, args):
             print(f"handed out by `just queue add` in {event[3]} at {event[2]}:\n    {event[4]}")
     hold = claims.holds().get(row_id)
     print(f"held by {hold['branch']} from {hold['tree']} since {hold['time']}" if hold else "no hold")
+    if hold or row is not None:
+        print(f"write set in force: {write_set_in_force(here.claims, row_id, row, hold)}")
     if hold:
         # `writes` on a held row moves `taken` along with `write_set` (Q2670),
         # so the two agree right after one and this `!=` would miss it; the
@@ -1790,6 +1792,19 @@ def show(here, args):
         theirs = Queue(text).find(row_id) if row_id in text else None
         if theirs and (row is None or theirs.state != row.state):
             print(f"{theirs.state} in {tree.path}")
+
+
+def write_set_in_force(claims_path, row_id, row, hold):
+    """The write set a row's lane owns now: its hold's, else its latest `writes`, else its column (§230.3, §479.3).
+
+    `narrow` and `writes` write the claims file alone, so the column in
+    `docs/queue.md` can lag both. `show` prints this on a line of its own, so
+    whoever reads a row copies one set and never chooses between the column
+    and a line under it; `writes` compares a new set against it.
+    """
+    if hold:
+        return hold["write_set"]
+    return latest_writes(claims_path).get(row_id, row.write_set)
 
 
 def branch_tip(branch):
