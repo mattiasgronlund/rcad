@@ -418,6 +418,22 @@ and `as_the_two_meets_of_one_cut_alone_on_the_loop_say` in `fuse/arrange.rs`
 and `which_side_of_a_wall_back_along_the_chord` in `fuse/select.rs` say, in
 place of the "side of plane" and "order along a crossing" refusals above.
 
+**2026-11-05 note (Q2504, recorded by Q3215): a round bar a rounding from a
+block's wall, on a plate, turned about `z`, is a limit (§437.6).** The bar,
+radius `0.5` at `(2, 2.5)`, `z` from `-1` to `2.5`, touches the wall `x = 1.5`
+of a block (`x` 0.5 to 1.5, `y` 1.5 to 3.5, `z` 1 to 2) united onto a 4x4x1
+plate. Turned, it is refused `Invalid(DynamicRangeTooWide)`, but only by the
+fuses whose exact answer keeps the sliver the turn's rounding leaves. Where
+`rcad_geom::intersect` names the wall plane crossing the pipe in two lines (turn
+`0.15`, `pi/2`) those are the intersection and the bar less the plate, ratio
+about `7.2e15`, at 31 of 60 turns of `0.05`. Where it names `Nothing` (`-pi/2`)
+they are the union and the plate less the bar, ratio `5146971002709139.0`. The
+sliver is a lens of the bar inside the block where the wall cuts the pipe, and a
+gap where it misses; each is in the true answer of the fuse that refuses it, as
+Q2237's bar dipping `4.4e-16` through a block's top is, so the answer exists
+and `f64` cannot hold it: a limit, not a gap. Pinned in
+`a_bar_beside_a_blocks_wall_on_a_plate_turned.rs`.
+
 ### 191.6 What is left
 
 `ignored_tests` goes 2 → 6 and `wildcard_arms` 87 → 88 (the justfile says which

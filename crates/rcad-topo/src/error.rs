@@ -2290,7 +2290,9 @@ impl Invalid {
     /// not known by [`Error::limit_or_gap`]'s rule. It is a limit of today's
     /// kernel, which holds every number as one `f64` (§437.6), where the
     /// sliver is in the true answer: a bar dipping `4.4e−16` through a block's
-    /// top (Q2237), or the step `what_a_fuse_refusal_says_about_its_answer.rs`
+    /// top (Q2237), a round bar a rounding from a block's wall on a plate,
+    /// turned about `z`, refused only by the fuses whose exact answer keeps the
+    /// lens or the gap the turn leaves (Q2504, §191.5), or the step `what_a_fuse_refusal_says_about_its_answer.rs`
     /// reaches. It is a gap where the fuse left the sliver itself: the plate
     /// less a block cornered on its round tab's rim was refused for an arc
     /// `1.78e-15` long that the plate, its answer, does not have, until Q2296.
