@@ -1365,7 +1365,8 @@ impl BuildingAMesh {
         // moves the line is charged. Such a point is one the walk could not
         // tell from its neighbours; a point where the line turns back by more
         // is kept, since the curve itself may bend that sharply between two
-        // steps. Where two branches of a crossing pass a rounding
+        // steps, and so is the last point between the ends, so a curved edge
+        // stays curved. Where two branches of a crossing pass a rounding
         // apart, the walk closes in on the place in steps it halves down to
         // `1e−7`, and its points there zigzag by up to `3e−7`, inside the
         // `3.6e−7` the walk owns to. The upright cone of slope a half and
@@ -9163,6 +9164,19 @@ fn a_flat_face_off_it_holds_both_its_ends(solid: SolidView<'_>, edge: EdgeView<'
 /// the points between two that stay moves the line from the old sides between
 /// those two onto the one straight side joining them, and the farthest any
 /// dropped point lies from that side is the farthest the line moves.
+///
+/// **The last point between the two ends is never dropped**, however far
+/// off the curve the walk says a point may sit, so a curved edge stays
+/// curved. Drawn straight, it can lie along another edge of the same loop
+/// between the same two corners, and the loop is then two corners and nothing
+/// to cut. A bar dipping a hair through a block's top cuts the top in an arc
+/// that runs out `2` from the bar's end and back, its two ends `6e−8` apart,
+/// and the walk puts one point at its tip and owns to `256` off the curve
+/// under `tolerant`. Dropped, every tolerant fuse of the two was refused, a
+/// loop of the answer being two corners
+/// (`a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top`
+/// in `a_bar_lying_along_a_plane_or_a_bar.rs`, and the same bar along the
+/// block's floor).
 fn without_the_points_where_it_turns_back(
     points: &mut Vec<Point>,
     ends: [Point; 2],
@@ -9172,6 +9186,7 @@ fn without_the_points_where_it_turns_back(
         .chain(points.iter().copied())
         .chain(core::iter::once(ends[1]))
         .collect();
+    let the_far_end = line.len() - 1;
     let how_far_dropping_moves_it = |from: usize, to: usize| {
         line[from + 1..to]
             .iter()
@@ -9181,6 +9196,7 @@ fn without_the_points_where_it_turns_back(
     let mut kept: Vec<usize> = Vec::with_capacity(line.len());
     for next in 0..line.len() {
         while let [.., before, last] = kept[..]
+            && (before, next) != (0, the_far_end)
             && (line[last] - line[before]).dot(line[next] - line[last]) < 0.0
             && how_far_dropping_moves_it(before, next) <= within
         {
