@@ -5208,7 +5208,8 @@ impl<'f> Arrangement<'f> {
     /// `0.54` at the sharpest and starts at `(2.5, 0, 20)`, where the wedge's
     /// edge on its slanted face touches the ellipse. That node is a meet of two
     /// planes and a cone at a double root, a box round the start, and every
-    /// fuse was refused on the order along the ellipse.
+    /// fuse was refused on the order along the ellipse
+    /// (`a_wedge_whose_ellipse_starts_where_its_edge_touches_it_shares_and_leaves_what_is_worked_out_by_hand`).
     ///
     /// **Or where both boxes lie on one half of a pipe's loop**, either side of
     /// its long axis. Going along a half moves steadily along that axis, so the

@@ -50,7 +50,7 @@ use rcad_geom::{
     Axis, Cone, Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface,
     SurfaceMeet, Vector, intersect, where_a_closed_crossing_starts,
 };
-use rcad_predicates::{Point as PredicatePoint, Policy, ProvenanceLog};
+use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{
     Containment, DraftStep, EdgeKey, Error, Fused, Model, ProfileBuilder, Rule, SolidBuilder,
     SolidKey, WireView,
@@ -148,32 +148,6 @@ fn fused_under(model: &mut Model, pair: &Pair, rule: Rule, policy: &Policy) -> F
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .expect("a fuse writes a sound model or writes nothing");
     answer
-}
-
-/// The refusal a fuse came back with, or a panic naming what it did instead.
-fn refusal(model: &mut Model, pair: &Pair, rule: Rule, policy: &Policy) -> Error {
-    match model.fuse(
-        &pair.arguments,
-        &pair.tools,
-        rule,
-        policy,
-        &mut ProvenanceLog::new(),
-    ) {
-        Err(why) => why,
-        Ok(fused) => panic!("expected a refusal, got {} solids", fused.solids().len()),
-    }
-}
-
-/// Which predicate a refusal named last, or a panic if it was not a refusal.
-fn what_it_gave_up_on(why: &Error) -> &str {
-    match why {
-        Error::Undecidable { records } => records
-            .records()
-            .last()
-            .expect("a refusal names at least one decision")
-            .predicate(),
-        other => panic!("expected `Undecidable`, got {other:?}"),
-    }
 }
 
 /// How much space the answer takes up, all of its solids together, at
@@ -647,8 +621,9 @@ fn a_plane_resting_on_a_cones_side() -> Plane {
 /// all four of its half-spaces and inside the cone, whose radius there is
 /// `9/8`.
 ///
-/// **Its back corner is at `(−5, 1, 8)` and not `(−5, 0, 8)`**, and
-/// [`A_BACK_WHOSE_ELLIPSE_STARTS_ON_THE_RULING`] says what the other one meets.
+/// **Its back corner is at `(−5, 1, 8)`.**
+/// [`A_BACK_WHOSE_ELLIPSE_STARTS_ON_THE_RULING`] is the corner it was first
+/// written with, whose ellipse starts where the wedge's edge touches it.
 fn a_wedge_resting_on_a_cones_side(model: &mut Model) -> SolidKey {
     a_wedge_resting_on_a_cones_side_with_its_back_at(model, THE_WEDGES_BACK)
 }
@@ -670,9 +645,11 @@ const THE_WEDGES_BACK: Back = Back {
 /// which is also where the wedge's edge on the slanted face touches the
 /// ellipse. That node is a meet of two planes and a cone at a double root, a
 /// box and not a point, so sweeping round the ellipse from its start cannot
-/// tell the node from the start, and the order round it is refused.
-/// [`a_wedge_whose_ellipse_starts_where_its_edge_touches_it_is_refused_on_the_order_round_it`]
-/// pins it.
+/// tell the node from the start. The order round it was refused until
+/// `arrange.rs` named the node round the start of such a loop (queue row
+/// Q3145), and
+/// [`a_wedge_whose_ellipse_starts_where_its_edge_touches_it_shares_and_leaves_what_is_worked_out_by_hand`]
+/// pins every fuse of it answered.
 const A_BACK_WHOSE_ELLIPSE_STARTS_ON_THE_RULING: Back = Back {
     at: [-5.0, 0.0, 8.0],
     one_side: [-8.0, 16.0, 3.0],
@@ -1112,24 +1089,33 @@ fn either_way_round(pair: Pair, turned: bool) -> Pair {
     }
 }
 
-/// **With its back corner at `(−5, 0, 8)` the same wedge is refused on the
-/// order round one ellipse**, and what stops it is where that ellipse starts,
-/// not the touch.
+/// **With its back corner at `(−5, 0, 8)` the same wedge answers every fuse**,
+/// under either policy and either way round, and holds the volumes worked out
+/// by hand.
 ///
-/// [`A_BACK_WHOSE_ELLIPSE_STARTS_ON_THE_RULING`] has the geometry. Every
-/// certified fuse, either way round, gives up on *order along a crossing* with
-/// the node at `(2.5, 0, 20)` in its record, and the ellipse's start is inside
-/// that node's box: sweeping round from a point in the box cannot say where in
-/// the box the node is. A tolerant policy settles that sweep its own way and
-/// then cannot tell the cells of a face apart.
+/// [`A_BACK_WHOSE_ELLIPSE_STARTS_ON_THE_RULING`] has the geometry. The face
+/// through that corner cuts the cone in an ellipse that starts at
+/// `(2.5, 0, 20)`, where the wedge's edge on the slanted face touches it, and
+/// the first thing here checks that it still does. The node there is a meet of
+/// two planes and a cone at a double root, a box and not a point, and the start
+/// lies inside it.
 ///
-/// **A gap and not a limit** (§16.10). The order round the ellipse exists, and
-/// the node is a box only because a meet of two planes and a cone at a double
-/// root is not one point in `f64`; the wedge one unit along `y` at its back,
-/// [`a_wedge_lying_on_a_cones_side_shares_and_leaves_what_is_worked_out_by_hand`],
-/// has its ellipses start elsewhere and answers.
+/// **It used to be refused on the order round that ellipse** (queue row Q885):
+/// every certified fuse gave up on *order along a crossing* with that node in
+/// its record, since sweeping round from a point in the box cannot say where in
+/// the box the node is, and a tolerant policy settled the sweep its own way and
+/// then could not tell the cells of a face apart. Since queue row Q3145
+/// `arrange.rs` names the node round the start of a loop a plane cuts a cone
+/// in, and counts the order round the ellipse from that node.
+///
+/// The union, what the two share and the frustum less the wedge measure under
+/// the hand-worked volumes, as an inscribed mesh does. The frustum less the
+/// wedge is two solids, since the wedge's floor holds the frustum's whole disc
+/// at `z = 8`. The wedge less the frustum measures over, since the cone's skin
+/// bounds a hole in it.
 #[test]
-fn a_wedge_whose_ellipse_starts_where_its_edge_touches_it_is_refused_on_the_order_round_it() {
+fn a_wedge_whose_ellipse_starts_where_its_edge_touches_it_shares_and_leaves_what_is_worked_out_by_hand()
+ {
     let flat = Surface::Plane(
         Plane::from_point_and_normal(Point::new(-5.0, 0.0, 8.0), Vector::new(-8.0, -16.0, 5.0))
             .expect("a normal with length"),
@@ -1145,40 +1131,44 @@ fn a_wedge_whose_ellipse_starts_where_its_edge_touches_it_is_refused_on_the_orde
         panic!("a plane steeper than the cone's side cuts it in a curve");
     };
     let start = where_a_closed_crossing_starts(&runs[0], [&flat, &cone], &mut ProvenanceLog::new())
-        .expect("an ellipse has a start")
-        .coordinates();
-    let holds = |node: [[f64; 2]; 3], point: [f64; 3]| {
-        (0..3).all(|axis| node[axis][0] <= point[axis] && point[axis] <= node[axis][1])
-    };
+        .expect("an ellipse has a start");
+    assert!(
+        start.distance_to(Point::new(2.5, 0.0, 20.0)) < 1e-12,
+        "the ellipse starts where the wedge's edge touches it, not at {start:?}"
+    );
 
+    let frustum =
+        PI * A_CONES_SLOPE * A_CONES_SLOPE * (A_CONES_FAR_END.powi(3) - A_CONES_NEAR_END.powi(3))
+            / 3.0;
+    let shared = what_the_wedge_shares_with_a_cone_of_slope(
+        A_CONES_SLOPE,
+        A_BACK_WHOSE_ELLIPSE_STARTS_ON_THE_RULING,
+    );
     for policy in [Policy::certified(), Policy::tolerant(100.0)] {
-        for rule in [Rule::Union, Rule::Intersection, Rule::Difference] {
-            for turned in [false, true] {
-                let mut model = a_model();
-                let cone =
-                    cones::a_frustum(&mut model, A_CONES_SLOPE, A_CONES_NEAR_END, A_CONES_FAR_END);
-                let wedge = a_wedge_resting_on_a_cones_side_with_its_back_at(
-                    &mut model,
-                    A_BACK_WHOSE_ELLIPSE_STARTS_ON_THE_RULING,
-                );
-                let pair = either_way_round(Pair::of(cone, wedge), turned);
-                let why = refusal(&mut model, &pair, rule, &policy);
-                if policy.max_wobble() > 0.0 {
-                    assert!(
-                        matches!(why, Error::CannotTellTheCellsOfAFaceApart { .. }),
-                        "{rule:?}, turned {turned}: {why:?}"
-                    );
-                    continue;
-                }
-                assert_eq!(what_it_gave_up_on(&why), "order along a crossing");
-                let nodes = the_points_it_could_not_order(&why);
-                assert!(
-                    nodes
-                        .iter()
-                        .any(|&node| holds(node, start) && holds(node, [2.5, 0.0, 20.0])),
-                    "{rule:?}, turned {turned}: one node is the touch and holds the start, {nodes:?}"
-                );
-            }
+        for (rule, turned, solids, closed_form, side) in [
+            (Rule::Union, false, 1, frustum + 96.0 - shared, Side::Under),
+            (Rule::Union, true, 1, frustum + 96.0 - shared, Side::Under),
+            (Rule::Intersection, false, 1, shared, Side::Under),
+            (Rule::Intersection, true, 1, shared, Side::Under),
+            (Rule::Difference, false, 2, frustum - shared, Side::Under),
+            (Rule::Difference, true, 1, 96.0 - shared, Side::Over),
+        ] {
+            let mut model = a_model();
+            let cone =
+                cones::a_frustum(&mut model, A_CONES_SLOPE, A_CONES_NEAR_END, A_CONES_FAR_END);
+            let wedge = a_wedge_resting_on_a_cones_side_with_its_back_at(
+                &mut model,
+                A_BACK_WHOSE_ELLIPSE_STARTS_ON_THE_RULING,
+            );
+            let pair = either_way_round(Pair::of(cone, wedge), turned);
+            let answer = fused_under(&mut model, &pair, rule, &policy);
+            assert_eq!(
+                answer.solids().len(),
+                solids,
+                "{rule:?}, turned {turned}, wobble {}",
+                policy.max_wobble()
+            );
+            measures(volume_of(&model, answer.solids()), closed_form, side);
         }
     }
 }
@@ -1259,27 +1249,6 @@ fn inside_of_a_line(ring: &[[f64; 2]], past: impl Fn([f64; 2]) -> f64) -> Vec<[f
         }
     }
     kept
-}
-
-/// The two nodes an order along a crossing could not tell apart, read straight
-/// out of the refusal's own record, each as its box.
-fn the_points_it_could_not_order(why: &Error) -> Vec<[[f64; 2]; 3]> {
-    let Error::Undecidable { records } = why else {
-        panic!("expected `Undecidable`, got {why:?}");
-    };
-    let last = records
-        .records()
-        .last()
-        .expect("a refusal names a decision");
-    last.inputs()
-        .iter()
-        .map(|node| {
-            let PredicatePoint::Constructed(box_) = node else {
-                panic!("a node this refusal names is worked out, got {node:?}");
-            };
-            box_.map(|along| [along.lo(), along.hi()])
-        })
-        .collect()
 }
 
 // 3. Seam-crossing intersections — criterion 14's third entry.
