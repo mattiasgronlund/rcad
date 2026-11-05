@@ -14184,8 +14184,9 @@ mod tests {
         JoinedFace, Lump, MeetPoint, Model, Point, PredicatePoint, Side, SmallVec, Vector,
         VertexKey, WhichArc, WireStep, Written, assemble, is_a_side_with_no_length,
         name_of_the_closed_crossing_through, names_of_the_three_surfaces,
-        the_crossing_of_these_runs_straight, the_nappe_an_arc_that_does_not_close_is_on,
-        turns_round, vertices_that_only_start_a_closed_edge, winding_round,
+        the_crossing_of_these_runs_straight, the_name_each_arc_of_a_conic_goes_by,
+        the_nappe_an_arc_that_does_not_close_is_on, turns_round,
+        vertices_that_only_start_a_closed_edge, winding_round,
     };
 
     /// A corner that settles on a lower rounding leaves the coordinate it came
@@ -17081,6 +17082,97 @@ mod tests {
             "between the arc and its chord"
         );
         assert_eq!(turns_round(&arcs, normal, [-12.0, 0.0, -15.0]), Some(0));
+    }
+
+    /// **An arc of a rim joined on a tolerant fold logs the fold** (Q3180). A
+    /// rod of radius one turned 7° about `x`, with a ball of its radius on its
+    /// cap, stores the ball's circle on the cap and the rim a rounding apart.
+    /// The cap, the pipe and the ball share more than a point only where a
+    /// tolerant policy takes the two circles as one, and an arc of the rim
+    /// named by the cap and the pipe is then one arc with an arc named by the
+    /// cap and the ball. The answer rests on that move, so its record goes to
+    /// the fuse's log: an empty log reads as certified. Certified, the two names
+    /// stay apart and nothing is logged.
+    #[test]
+    fn an_arc_of_a_turned_rods_rim_joined_on_a_tolerant_fold_logs_the_fold() {
+        let (model, [cap, pipe, ball]) = the_cap_pipe_and_ball_of_a_turned_rod();
+        let sides = [[cap, pipe], [cap, ball]];
+        for (policy, joined) in [
+            (Policy::tolerant(100.0), true),
+            (Policy::certified(), false),
+        ] {
+            let mut log = ProvenanceLog::new();
+            let goes_by = the_name_each_arc_of_a_conic_goes_by(
+                &model,
+                sides.iter().map(|side| (side, &[] as &[EdgeKey])),
+                &policy,
+                &mut log,
+            );
+            assert_eq!(
+                goes_by.len(),
+                if joined { 2 } else { 0 },
+                "{policy:?}: whether the two names go by one, in {goes_by:?}"
+            );
+            let folds = log
+                .records()
+                .iter()
+                .filter(|record| record.predicate() == "two circles on one plane taken as one")
+                .count();
+            assert_eq!(
+                (folds, log.records().len()),
+                (usize::from(joined), usize::from(joined)),
+                "{policy:?}: what the join logs, in {:?}",
+                log.records()
+            );
+        }
+    }
+
+    /// The model, and the cap, the pipe and the ball of a rod of radius one
+    /// and length two with a ball of its radius centred on its cap, both turned
+    /// 7° about `x`, as `tests/a_bar_and_a_ball_on_its_cap_turned.rs` builds
+    /// them.
+    fn the_cap_pipe_and_ball_of_a_turned_rod() -> (Model, [Surface; 3]) {
+        let turn = Isometry::rotation(
+            &Axis::new(Point::origin(), Vector::new(1.0, 0.0, 0.0)).expect("a direction"),
+            7.0_f64.to_radians(),
+        )
+        .expect("a finite angle");
+        let mut model = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let rod = model
+            .add_round_bar(1.0, 2.0, &turn)
+            .expect("a bar of radius one");
+        let on_the_cap =
+            turn.compose(&Isometry::translation(Vector::new(0.0, 0.0, 2.0)).expect("a move"));
+        let ball = model
+            .add_ball(1.0, &on_the_cap)
+            .expect("a ball of radius one");
+        let surfaces_of = |solid| {
+            model
+                .solid(solid)
+                .expect("this model made the key")
+                .faces()
+                .map(|face| face.surface())
+                .collect::<Vec<Surface>>()
+        };
+        let of_the_rod = surfaces_of(rod);
+        let cap = of_the_rod
+            .iter()
+            .filter_map(|surface| {
+                let Surface::Plane(plane) = surface else {
+                    return None;
+                };
+                Some(*plane)
+            })
+            .max_by(|one, other| one.offset().total_cmp(&other.offset()))
+            .expect("a bar has caps");
+        let pipe = *of_the_rod
+            .iter()
+            .find(|surface| matches!(surface, Surface::Cylinder(_)))
+            .expect("a bar has a side");
+        let [sphere] = surfaces_of(ball)[..] else {
+            panic!("a ball has one face");
+        };
+        (model, [Surface::Plane(cap), pipe, sphere])
     }
 
     /// The plane `z = 0`, facing out of a bar that stands on it.
