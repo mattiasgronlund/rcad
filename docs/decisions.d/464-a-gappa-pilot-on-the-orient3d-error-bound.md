@@ -26192,8 +26192,33 @@ the run's directory, `python3 samevm.py <464 file> <run directory>`.
 `samevm.py`'s whole print:
 
 ```
-not yet run
+vectorsub.py in the text is the file that ran: True
+peakv.sh in the text is the file that ran: True
+startvm.sh in the text is the file that ran: True
+tallyvm.py in the text is the file that ran: True
+squarezero.py in the text is the file that ran: True
+startsq.sh in the text is the file that ran: True
+tallysq.py in the text is the file that ran: True
+samevm.py in the text is the file that ran: True
+one.sh in the run directory is 464.13's: True
+runpz.sh in the run directory is 464.34's: True
+square.g in the run directory is 464.20's: True
+vector.g in the run directory is 464.20's: True
+pointsub.py in the run directory is 464.35's: True
+vectorsub.py run from the text prints what the text says: True
+squarezero.py run from the text prints what the text says: True
+vectorsub.py and squarezero.py run from the text write 332 files; differing from the ones that ran: none
+.g files in the run directory that neither writes: square.g, vector.g
+`peakv.sh` printed: is the last line of each .time in .: True
+`peakv.sh` printed again is the last line of each .time in peak: True
+peakv.sh and the four scripts in peak are the run directory's: True
+tallyvm.py prints what the text says: True
+tallysq.py prints what the text says: True
 ```
+
+The two `.g` files that neither script writes are 464.20's own, as two
+lines of the print find: `square.g`, which `squarezero.py` reads, and
+`vector.g`, which `vectorsub.py` restates without reading it.
 
 `vectorsub.py`, whole, as it ran:
 
@@ -26608,59 +26633,7 @@ for f in "$@"; do
 done
 ```
 
-Gappa writes its results and warnings to standard error, so `peakv.sh` puts
-them in `<name>.time`, above the time line, and leaves `<name>.out` empty.
-
-**Relay 2, on 2026-11-05: still a draft.** `startvm.sh`, below, ran all 88
-cases with `gappa -Bcoq` and `coqc`, and their 88 controls, 12 at once, and
-ended before 17:19:35 UTC. `tallyvm.py`, below, counted them: every case
-exits 0 at `20u`, every control exits 1, Coq accepts all 88, and the largest
-terms' part is `19.5999u`. So `vector.g`'s `20u` holds with every product on
-a live path free to fall below the normals and in every zero branch: Q3211,
-and Q2825's `vector.g` half. Gappa printed `E -> (E / D) * D` (189 times)
-and `out - Ex -> ((out - Ex) / D) * D` (12) as hints it had no need of while
-`D` is not zero, as 464.20's `vector.out` did. In 16 cases the control's best
-is up to 1.2% below the case's `E / D · D`, so the 0.01% check of 464.35 is
-replaced by "at most". `squarezero.py`, below, writes `square.g`'s 77 zero
-cases; `startsq.sh` was started on them at 17:19:35 UTC and had not been
-tallied. Left: tally the 77, write the findings, and `samevm.py`.
-
-`tallyvm.py`'s whole print:
-
-```
-88 cases, 176 exit lines, 88 coq lines
-lines of runvm.txt that are neither: none
-problems: 0
-cases that exit 0: 88 of 88; controls that exit 1: 88 of 88
-gappa time per case: 0.03 s (vm_v2n0n1n2) to 20.44 s (vm_n)
-coq: 427 lines 6 hints 2.10 s (vm_v1v2n1n2) to 9338 lines 41 hints 27.55 s (vm_n)
-cases where nothing is live, so out and Ex are 0: 21 of 88
-  they are the cases where n0 is zero and every term has a zero factor: True
-cases with a rounded product on a live path: 63 of 88
-terms' error / D, upper end in u: [(1.0, 67)]
-D upper end: [(1.0, 4), (13.0, 10), (15.871, 6), (18.6, 17), (19.6, 30)]
-Asum / G, upper end in u: [(1.0, 63)]
-G / Lo upper end: [(3.0, 26), (4.8286, 18), (5.0, 7), (6.4643, 2), (6.4722, 4), (7.6569, 1), (7.8992, 4), (9.9286, 1)]
-hints Gappa had no need of, while D is not zero, and how often:
-  189: E -> (E / D) * D;
-  12: out - Ex -> ((out - Ex) / D) * D;
-largest terms' part: 19.5999u (vm_wv2n2), against vector.g's 20u
-largest amounts' part: 9.9285u * 2^-1022 (vm_n)
-control best on out - Ex, in u, and how many controls:
-  1.0u: 4 vm_v1v2, vm_v1v2n1, vm_v1v2n2, vm_v1v2n1n2
-  13.0u: 10 vm_wv1n2, vm_wv2n1, vm_v0v1n1, vm_v0v2n2, vm_v1n1n2, vm_v2n1n2, vm_wv1n1n2, vm_wv2n1n2, vm_v0v1n1n2, vm_v0v2n1n2
-  15.69u: 6 vm_wv1n0, vm_wv2n0, vm_v1n0n1, vm_v2n0n2, vm_wv1n0n1, vm_wv2n0n2
-  18.56u: 6 vm_v0v1n0, vm_v0v2n0, vm_v1n0n2, vm_v2n0n1, vm_v0v1n0n2, vm_v0v2n0n1
-  18.57u: 2 vm_v0n0n1, vm_v0n0n2
-  18.6u: 9 vm_n0, vm_wn0, vm_v0n0, vm_v1n0, vm_v2n0, vm_n0n1, vm_n0n2, vm_wn0n1, vm_wn0n2
-  19.6u: 30 
-largest best: 19.6000u (vm_wv2n2), against vector.g's 20u
-each best at most its case's terms' part, and a little more: True
-bests within 0.01% of their case's terms' part: 51 of 67
-the others, best and terms' part in u: vm_wv1n0 15.6860 15.8710, vm_wv2n0 15.6860 15.8710, vm_wn0n1 18.5951 18.5999, vm_wn0n2 18.5951 18.5999, vm_v0v1n0 18.5567 18.5999, vm_v0v2n0 18.5567 18.5999, vm_v0n0n1 18.5650 18.5999, vm_v0n0n2 18.5650 18.5999, vm_v1n0n1 15.6865 15.8710, vm_v1n0n2 18.5616 18.5999, vm_v2n0n1 18.5616 18.5999, vm_v2n0n2 15.6865 15.8710, vm_wv1n0n1 15.6860 15.8710, vm_wv2n0n2 15.6860 15.8710, vm_v0v1n0n2 18.5567 18.5999, vm_v0v2n0n1 18.5567 18.5999
-```
-
-`startvm.sh`, as it ran:
+`startvm.sh`, whole, as it ran:
 
 ```bash
 #!/bin/bash
@@ -26674,7 +26647,7 @@ P=${P:-12} ./runpz.sh < casesv.txt > runvm.txt 2>&1
 echo done >> runvm.txt
 ```
 
-`tallyvm.py`, as it ran:
+`tallyvm.py`, whole, as it ran:
 
 ```python
 """Count what runvm.txt and the files beside it say of each case in casesv.txt
@@ -26884,7 +26857,7 @@ print("the others, best and terms' part in u:",
       ", ".join(f"{n} {bests[n]:.4f} {terms(n):.4f}" for n in bests if n not in close))
 ```
 
-`squarezero.py`, as it was started:
+`squarezero.py`, whole, as it ran:
 
 ```python
 """Write 464.20's square.g in the zero branches: one script for each zero set
@@ -26988,40 +26961,25 @@ if __name__ == "__main__":
     main()
 ```
 
-It printed `77 cases`. `sq_n.g` differs from `square.g` in the sha on its
-six restating lines, the added `# 464.36:` line, and `and none is zero but
-none.` (`diff`). `startsq.sh` is `startvm.sh` with `casesq.txt`,
-`runsq.txt` and `startsq.pid`, and the comment's last line `"done".
-startvm.sh with squarezero.py's names.`
+`squarezero.py`'s whole print:
 
-`startsq.sh`'s `runsq.txt` ended `done`, untallied: `grep -c` finds 77
-lines `coq -Bcoq exit 0 coqc exit 0`, 154 starting `sq_` with `exit 0 `
-(the 77 cases and their Coq lines) and 77 `c_sq_` with `exit 1 `. The
-controls' bests on `OO − 1` are `±1.3243e-14` (44, 119.28u, 464.20's
-`c_square_119`'s), `±1.30209e-14` (27), `±9.76996e-15` (3) and
-`±4.44089e-15` (3). A `tallysq.py` that reads each `.out` is still to
-write.
+```
+77 cases
+```
 
-**Relay 3, on 2026-11-05: still a draft.** `tallysq.py`, below, counts
-`square.g`'s 77 from `runsq.txt` and the files beside it, reading each bound
-from the exact number Gappa prints before its decimal: every case exits 0 at
-`128u`, every control at `u / 2` exits 1, Coq accepts all 77, every `.coqc`
-is empty, each `.bcoq` prints its `.out`'s results, and no divisor Gappa took
-to be nonzero names a component of `m` the case has zero. So
-`NORMAL_LENGTH_ROUNDOFF`'s `64ε` holds where `m` has one or two components
-zero and the turn up to two parts zero. The four parts add to at most
-`119.2820u`, 464.20's own sum, in 32 cases; with two of `m` zero `n·n` is
-exactly one, `NN − 1` is `[0, 0]`, and the sum is `117.28u` (27 controls).
-`F2` falls to `40u`, `2 · 20u`, in six cases, `n` along an axis and the turn
-holding it to that axis: `v` along `n` (`VN` `[0, 0]`, three, best `40u`) or
-`w` and `n`'s own part of `v` zero (`VN` within `12u` of one, three, best
-`88u`). Every best is within 0.01% of its case's four parts added. By the run
-directory's file times (`ls --time-style=full-iso`), `startvm.sh` wrote its
-pid at 17:14:28 UTC and `runvm.txt` last at 17:18:42, and `startsq.sh` its
-pid at 17:19:35 and `runsq.txt` last at 17:20:18. Left: the findings in
-464.35's shape, with the controls' `u / 2` explained (a zero `m` drops the
-constructor's `2u`, so 464.20's `119u` control would prove in 33 cases);
-`samevm.py`; and what this leaves.
+`startsq.sh`, whole, as it ran:
+
+```bash
+#!/bin/bash
+# Run every case in casesq.txt through runpz.sh, P at once (default 12), each
+# process capped at 12 GB of address space, writing runsq.txt, which ends
+# "done". startvm.sh with squarezero.py's names.
+cd "$(dirname "$0")"
+echo $$ > startsq.pid
+ulimit -v ${CAP:-12000000}
+P=${P:-12} ./runpz.sh < casesq.txt > runsq.txt 2>&1
+echo done >> runsq.txt
+```
 
 `tallysq.py`, whole, as it ran:
 
@@ -27192,72 +27150,7 @@ print("each best within 0.01% of its case's four parts added:",
       all(abs(bests[n] - added(n)) <= 1e-4 * added(n) for n in bests))
 ```
 
-`tallysq.py`'s whole print:
-
-```
-77 cases, 154 exit lines, 77 coq lines
-lines of runsq.txt that are neither: none
-problems: 0
-cases that exit 0: 77 of 77; controls that exit 1: 77 of 77
-gappa time per case: 0.89 s (sq_m1m2v1v2) to 2.74 s (sq_v0)
-coq: 1750 lines 12 hints 1.76 s (sq_m0m1v0v1) to 5525 lines 15 hints 3.66 s (sq_m1)
-cases whose .bcoq prints the same results as their .out: 77 of 77
-cases by the components of m that are zero: none 11, m0 11, m1 11, m2 11, m0m1 11, m0m2 11, m1m2 11
-each part's bound, and the cases it is in:
-  NN - 1, in u:
-    [-2.0, 2.0]: 44, m zero none, m0, m1, m2
-    [0.0, 0.0]: 33, m zero m0m1, m0m2, m1m2
-  VN:
-    [0.0, 1.0]: 71, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
-    [1.0, 1.0]: 3, sq_m0m1wv2, sq_m0m2wv1, sq_m1m2wv0
-    [0.0, 0.0]: 3, sq_m0m1v0v1, sq_m0m2v0v2, sq_m1m2v1v2
-  4 * (N4 - 1) * VN, in u:
-    [-48.0, 48.0]: 74, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
-    [0.0, 0.0]: 3, sq_m0m1v0v1, sq_m0m2v0v2, sq_m1m2v1v2
-  F2, in u:
-    [-69.282, 69.282]: 71, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
-    [-40.0, 40.0]: 6, sq_m0m1wv2, sq_m0m1v0v1, sq_m0m2wv1, sq_m0m2v0v2, sq_m1m2wv0, sq_m1m2v1v2
-  DD, in u^2:
-    [0.0, 1200.0]: 77, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
-largest of the four parts added: 119.2820u (sq_n and 31 more), against NORMAL_LENGTH_ROUNDOFF's 128u
-control best on OO - 1, in u, and how many controls:
-  40.0u: 3, sq_m0m1v0v1, sq_m0m2v0v2, sq_m1m2v1v2
-  88.0u: 3, sq_m0m1wv2, sq_m0m2wv1, sq_m1m2wv0
-  117.28u: 27, m zero m0m1, m0m2, m1m2
-  119.28u: 44, m zero none, m0, m1, m2
-largest best: 119.2823u (sq_n and 43 more), against NORMAL_LENGTH_ROUNDOFF's 128u
-each best within 0.01% of its case's four parts added: True
-```
-
-The 12 of the 44 that fall short of `119.2820u` past its fourth decimal are
-the cases with two parts of `v` zero, `sq_v0v1` to `sq_m2v1v2`.
-
-**Relay 4, on 2026-11-05: still a draft.** The run directory's `vm_n.g` was
-written again at 17:13:49 UTC, after relay 1's `peakv.sh` run at 17:09:39, by
-`vectorsub.py`, which was last written at 17:09:17. So relay 4 copied
-`peakv.sh` and its four scripts into `peak/` in the run directory and ran them
-again at 17:34 UTC, `./peak/peakv.sh vm_n.g c_vm_n_half.g vm_v0v1n0n1n2.g
-c_vm_v0v1n0n1n2_half.g`. Each figure it printed is within 2% of relay 1's:
-
-```text
-vm_n exit 0 6.58s peak 128404 KB
-c_vm_n_half exit 1 15.14s peak 153760 KB
-vm_v0v1n0n1n2 exit 0 0.01s peak 6556 KB
-c_vm_v0v1n0n1n2_half exit 1 0.17s peak 6760 KB
-```
-
-No `.time` file in the run directory or in `peak/` has the line `Command
-terminated` (`grep -l`). `sq_m0m1wv2.out` prints `VN` in
-`[2251799813685245b-51, 2251799813685251b-51]`, which is within `12u` of one,
-and `sq_m0m1v0v1.out` prints `F2` within `5b-50`, which is `40u`. `git diff
-4b642567 c40cc82e` was read again, with the same result as relay 3's. Left:
-the rewrite in 464.35's shape, `samevm.py`'s run and its whole print, the
-pointers, and what this leaves. `samevm.py` has been written but not run. It
-expects the captions of that rewrite: `` `X`, whole, as it ran: ``, `` `X`'s
-whole print: ``, `` `peakv.sh` printed: `` and `` `peakv.sh` printed again
-``.
-
-`samevm.py`, as written, not yet run:
+`samevm.py`, whole, as it ran:
 
 ```python
 """Check 464.36's text against the files that ran: each script it holds whole
