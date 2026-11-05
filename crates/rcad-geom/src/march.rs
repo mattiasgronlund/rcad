@@ -440,19 +440,33 @@ pub(crate) fn settled_with_a_bound(surfaces: [&Surface; 2], seed: Point) -> Resu
 /// meet, `s` is `7.6e-13`, the two distances off are under `1.5e-15`, the flat
 /// bound is `3.7e-3`, and `h` comes out at `1.5e11`.
 ///
+/// # A seed settled off one surface is turned away first
+///
+/// As [`settled_with_a_bound`] and [`march`] turn it away. The radius left to
+/// a surface does not do it: a ball of radius 3 across a pipe of radius 2,
+/// settled from `2000` along the line the crossing runs on, is still bounded
+/// `1.1e-4` off it after eight rounds, which leaves both radii nearly whole and
+/// `h` far under a half, and the bound came back (Q2839). It was never an
+/// answer: each run of `walk` that asks this of a corner settles the same
+/// corner again with [`settled_with_a_bound`] before it draws anything, which
+/// refuses it, so all it did was let a march run first.
+///
 /// # Errors
 ///
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] when `h` is more
 /// than a half, or the radius left to either surface is not more than nothing:
 /// the two surfaces are too nearly parallel for their bend to leave any bound
 /// on how far off the crossing the point is. And what [`settled_with_a_bound`]
-/// refuses, but for its seed check, which is not asked here.
+/// refuses.
 pub(crate) fn settled_with_a_bound_where_they_bend(
     surfaces: [&Surface; 2],
     seed: Point,
     radii: impl Fn(Point) -> [f64; 2],
 ) -> Result<(Point, f64)> {
     let settled = settled(surfaces, seed)?;
+    if the_settling_did_not_land_on_both(surfaces, settled) {
+        return Err(Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces);
+    }
     let (flat, further_off, leaning) = the_flat_bound_and_what_it_is_made_of(surfaces, settled)?;
     let cannot_bound = || {
         gave_up(
