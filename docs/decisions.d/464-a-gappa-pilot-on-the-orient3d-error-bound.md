@@ -38,7 +38,8 @@ normals. 464.30 is Q2781, on the side of rcad-geom's cone with a zero factor.
 464.31 is Q2782, on that cone with a checked product below the normals, and
 464.32 is Q2786, on the side of rcad-geom's torus with a zero factor. 464.33
 is Q2787, on that torus with a checked product below the normals, and 464.34
-is Q2801, on `Isometry::POINT_ROUNDOFF` in the zero branches.*
+is Q2801, on `Isometry::POINT_ROUNDOFF` in the zero branches. 464.35 is
+Q2802, on it with products below the normals.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -74,6 +75,7 @@ is Q2801, on `Isometry::POINT_ROUNDOFF` in the zero branches.*
   464.32  The side of rcad-geom's torus with a zero factor
   464.33  The side of rcad-geom's torus with a checked product below the normals
   464.34  Isometry::POINT_ROUNDOFF in the zero branches
+  464.35  Isometry::POINT_ROUNDOFF with products below the normals
 
 ### 464.1 The bugs a bound prover is for
 
@@ -12540,7 +12542,8 @@ no factor is zero, no sum cancels to zero, the nine products of the
 arithmetic are normal numbers, and the turn's `q·q` is within `6ε` of one. The
 proof reaches `24.80u · L` where the doc counts `35.78u · L` (3, 4). A turn of
 a cube is one addition per coordinate, which `shiftball.g` already proved
-(6). The products below the normals are not run (10), the zero branches are
+(6). The products below the normals are run in 464.35, which proves the
+`36u` with `L` normal, reaching `34.73u`, the zero branches are
 run in 464.34 and reach the same `24.80u`, and one public route to a movement
 does not hold its turn near length one (5). Coq checks the proof, modulo its
 hints (8).
@@ -12642,7 +12645,9 @@ the constant the count was for.
   branches, which 10 leaves and 464.34 runs;
 - the nine products normal, which `apply_to_point` does not check, and
   464.5's lemma for each. The doc says its count holds only while nothing
-  falls into the subnormals, and so far so does this (10);
+  falls into the subnormals, and so far so does this (10). Done, in 464.35:
+  with the products free to fall below the normals and `L` normal, the `36u`
+  still proves;
 - `L` at least every `|p_i|` and `|s_i|`;
 - `|q·q − 1| ≤ 6ε` worked out exactly, written `N4` in `[1 − 12u, 1 + 12u]`;
 - `x / |x|` in `[−1, 1]` for `w` and each `v_i`, so that the hint on a
@@ -12694,7 +12699,8 @@ thing, and each exits 1:
 - without the nine products normal and the lemma they give: best
   `±1.06019e+633`, with `W1` and `W3` unproved and `(out − Ex) / D` within
   `±3.53398e+632`. The proof needs the products normal, or another argument
-  for them (10).
+  for them (10). 464.35 is that argument: a slip of `u · (|P| + 2⁻¹⁰²²)` for
+  each product, with `L` normal.
 
 **8. Coq checks the proof, modulo its hints.** `gappa -Bcoq` and `coqc`,
 through `one.sh` against gappalib 1.8.0 and Flocq 4.2.2, exit 0 on `point.g`
@@ -13207,7 +13213,9 @@ each from Q2689:
 - Run `point.g` with one or more of the nine products below the normals and
   `L` normal, as 464.8's `planecases.py` split the plane's, and say whether
   `POINT_ROUNDOFF` needs the products normal or only `L`, as `nearest.g` found
-  `L` normal enough (464.9's 1). Not run, so no class.
+  `L` normal enough (464.9's 1). Not run, so no class. Done, in 464.35: only
+  `L`, and each of its 88 cases proves the code's `36u`, reaching `34.73u`.
+  With `L` below the normals the bound's form is a limit.
 - Whether `apply_to_point` keeps within `POINT_ROUNDOFF` on a movement that
   came in through `From<na::Isometry3<f64>>` (5) with a turn whose `q·q` is
   further from one than `6ε`, and if not, hold that route to the length as
@@ -14038,7 +14046,9 @@ from Q2690:
 And what is not a row: the hypotheses 464.19 already leaves, the nine
 products below the normals (Q2802) and the route through
 `From<na::Isometry3<f64>>` (Q2803), which `vector.g` shares with `point.g`;
-Q2700, which moves these scripts into `proofs/gappa/` with 464.19's.
+Q2700, which moves these scripts into `proofs/gappa/` with 464.19's. Q2802 ran
+`point.g` alone, in 464.35, and files `vector.g` in its form as a row (464.35's
+7).
 
 ### 464.21 CORNER_AFTER_MOVING_ROUNDOFF
 
@@ -15233,7 +15243,9 @@ from Q2691:
 And what is not a row: the zero branches (Q2801, Q2825), the products below
 normal (Q2802) and the route through `From<na::Isometry3<f64>>` (Q2803), which
 these scripts share with `point.g` and `vector.g`; and Q2700, which moves these
-scripts into `proofs/gappa/` with the rest of 464's.
+scripts into `proofs/gappa/` with the rest of 464's. Q2802 ran `point.g` alone,
+in 464.35, where a product below the normals lets a slip reach `34.73u`, and
+files the pipe with that slip as a row (464.35's 7).
 
 ### 464.22 EVALUATION_ROUNDOFF's one stage
 
@@ -23694,7 +23706,8 @@ movement's own numbers, worked without rounding, put it, and none goes past
 checks each proof, modulo its hints (3), and each of the 436 controls fails
 (4). That is under 464.19's other hypotheses: the turn's `q·q` within `6ε` of
 one, and each product whose factors are not zero a normal number where it
-reaches `out`, which is Q2802's to run. The doc on the constant says these
+reaches `out`, which is Q2802's to run, and which 464.35 drops for `L`
+normal. The doc on the constant says these
 branches have not been run, which is a row (6).
 
 Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
@@ -23730,7 +23743,8 @@ arithmetic in any of these:
 
 A product whose factors are both nonzero can still round to zero, below the
 normals. That is Q2802's: every case here keeps 464.19's hypothesis that such
-a product, where it reaches `out`, is normal.
+a product, where it reaches `out`, is normal. 464.35 runs the same 88 zero
+sets with each such product free to fall below the normals.
 
 **2. The cases.** `pointzero.py` (7) writes one script per case,
 `pz_<zeros>[_x<sums>].g`, `<zeros>` the zero factors or `n` for none and
@@ -23839,7 +23853,9 @@ answer to look for.
   been run." By 3 the first two are run and prove. It is a comment that
   claims less than is proved, not a wrong answer, so it has no class.
 - Not a row: Q2802 runs `point.g` with the products below the normals, which
-  every case here keeps normal where they reach `out`. Q2825 runs 464.20's
+  every case here keeps normal where they reach `out`. Done, in 464.35: the
+  same 88 zero sets prove the `36u` with each such product free to fall below
+  the normals and `L` normal, reaching `34.73u`. Q2825 runs 464.20's
   `vector.g` and `square.g` in the zero branches, and `vector.g` is
   `point.g` with no shift, so 1 and 2 are its split with `s₀` gone. Q2700
   moves into `proofs/gappa/` each script a row of 464 appended, these among
@@ -24574,3 +24590,1213 @@ pz_n.g is point.g but for layout, comments, @FIX and queries: True
 Its first line is `pointzero.py`'s own, run again in the fresh directory;
 the parent's lines come after it because its output is buffered when it is
 not a terminal.
+
+### 464.35 Isometry::POINT_ROUNDOFF with products below the normals
+
+Q2802 ran 464.19's `point.g` with each of its nine products free to fall
+below the normals, in two lanes on 2026-11-05. The first, over four runs,
+proved the lemmas the form below stands on, wrote `pointsub.py` and
+`controls.py`, and tried three forms of the generator that each ran out of
+memory (6). The second ran the fourth form's 88 cases and their controls,
+probed the code with `L` below the normals, and wrote this.
+
+`POINT_ROUNDOFF`'s `18ε · L` needs `L` normal, and not the products. With
+`L` at least `2⁻¹⁰²²` and each product on a live path normal, below the
+normals or 0, each of the 88 cases proves the moved point's `x` within the
+code's `36u · L` of where the movement's own numbers, worked without
+rounding, put it (3). `y` and `z` are covered by the same cases (2), Coq
+checks each proof, modulo its hints (3), and each of the 88 controls fails
+(4). The products below the normals cost up to `9.93u · L` on top of
+464.19's `24.80u · L`: the largest case reaches `34.73u · L`, which leaves
+`1.27u · L` of room where 464.19 left `11.2u · L`. With `L` below the
+normals the proof fails (4), and the code lands past `36u · L` with no `f64`
+within `36u · L` of the exact answer, so there the bound's form is a limit
+and not a gap (5). That is under 464.19's other hypothesis, the turn's `q·q`
+within `6ε` of one. The 88 cases take in the zero branches as well, so they
+cover every input 464.34's 436 cover, at the looser bound.
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, unchanged, against `isometry.rs` at `c0859e3f` and
+nalgebra 0.35.0, as 464.34's were. At the second lane's base, `8dae715a`,
+`isometry.rs` differs from `c0859e3f` in `POINT_ROUNDOFF`'s doc alone, and
+`Cargo.lock` not at all. `u` is `2⁻⁵³` and `ε` is `f64::EPSILON = 2u`.
+
+**1. The form.** `point.g` gives each rounded product `rnd(P)` a ratio within
+`u` of one, which holds while `P` is a normal number (464.5's lemma). Below
+the normals no ratio bounds it: a product of two nonzero doubles can round
+to 0. What holds of every real `P` is a slip of at most `u · (|P| +
+2⁻¹⁰²²)`:
+
+- `mixedn.g` proves `m = (rnd(P) − P) / (|P| + 2⁻¹⁰²²)` in `[−u, u]` for
+  `|P|` at least `2⁻¹⁰²²`, and `mixeds.g` for `|P|` at most `2⁻¹⁰²²`, each
+  with `gappa -Bcoq` and `coqc`, and each control at `u / 2` exits 1.
+- So `rnd(P) = P · (1 + m · s) + m · 2⁻¹⁰²²`, with `s = |P| / P` where `P`
+  is not zero: a ratio `1 + m · s` within `u` of one, as in `point.g`, and
+  an amount `m · 2⁻¹⁰²²` that no ratio carries. Where `P` is zero, `m` is 0.
+- `sum.g` proves that rounding the sum or the difference of two doubles,
+  where it is not zero, multiplies it by a ratio `r` within `u` of one, with
+  `gappa -Bcoq` and `coqc`, and its control at `u / 2` exits 1. A sum that
+  is 0 is `0 · r` for every `r`.
+
+`pointsub.py` (8) writes each rounded product on a live path as `P * (1 + m
+* s) + m * 1b-1022`, with `m` in `[−u, u]` and `s` in `[−1, 1]`, and each
+rounded sum on a live path as `C * r`, with `r` in `[1 − u, 1 + u]`, all of
+them free. A run of the code meets each with one value in its interval, so a
+script that proves the goal for every value proves it for every run. That
+takes in at once a product normal, below the normals, or rounded to 0 with
+neither factor 0; a product with a factor that is a sum that cancelled,
+which is 0, with `m` 0; a sum that cancels; and a sum with one part zero,
+which rounds nothing, with `r` 1. So no case is split by which sums cancel,
+as 464.34's were, no live path keeps a `rnd`, and no sum needs 464.34's
+`@FIX`. A zero factor is still the double 0, and each product and sum it
+makes zero is written unrounded, as in 464.34's 2.
+
+`out − Ex` is then `E + Asum`: `E` the terms' errors, each term of `Ex`
+carried through the ratios on its path as in `point.g`, and `Asum` the
+amounts as they reach `out`. Each amount reaches `out` multiplied by the
+factor `f` that the sums and products after it multiply its product by, and
+by the ratios after it on its path. `f` is `2w` for `q01`, `−2w` for `q02`,
+`2v₁` for `q21`, `−2v₁` for `q22`, `−2v₂` for `q11`, `2v₂` for `q12`, and
+`1`, `−1` and `1` for `k01`, `k02` and `m0`. Each amount gets a share of its
+own, `|f| · L`, and their sum is `G`:
+
+`G / L = 2n_w|w| + 2n₁|v₁| + 2n₂|v₂| + n_c`,
+
+each `n` the rounded products on a live path among `q01` and `q02`, `q21`
+and `q22`, `q11` and `q12`, and `k01`, `k02` and `m0`. An amount over its
+share is `m · (2⁻¹⁰²² / L)`, a sign and the ratios after it: within `u`, and
+a little more, while `L` is at least `2⁻¹⁰²²`, and up to `2⁵²u = 0.5` at `L
+= 2⁻¹⁰⁷⁴` (4). That is the one place the proof needs `L` normal.
+
+`E` is averaged over `point.g`'s `D` as before, `Asum` over `G` on its own,
+and the two add. The hint on `G / L` writes each `2n|x|` as `λ|x|² + n²/λ −
+λ(|x| − n/λ)²`, and the three `λ|x|²` as `λ q·q` less `λ|v₀|²`, so Gappa
+bounds it by `λ(1 + 12u)` and a constant. `λ` is near `√(n_w² + n₁² +
+n₂²)`, which makes `λ + (n_w² + n₁² + n₂²) / λ` smallest. With all nine
+products live, `G / L` is `4|w| + 4|v₁| + 4|v₂| + 3`, whose largest on a
+unit quaternion is `3 + 4√3 = 9.9282`, and `λ = 24/7` bounds it by
+`9.9286`.
+
+**2. The cases.** One case for each zero set of 464.34's 2, `pm_<zeros>.g`,
+`<zeros>` the zero factors or `n` for none, with a control
+`c_pm_<zeros>_half.g` beside each (4). Of the 128 sets of the seven factors,
+the 40 that hold three or four of the turn's parts never reach this
+arithmetic or cannot keep `q·q` near one (464.34's 1), which leaves 88. In 25
+of them no term through the turn keeps all its factors, so no product is on
+a live path and `D` is `3L`. The other 63 have a rounded product on a live
+path, and so an `Asum` and a `G`; `pm_n`, with nothing zero, has all nine.
+`y` and `z` are `x` with every index turned (464.19's `turn.py`), which turns
+each amount's factor with it, and the 88 zero sets are closed under that
+turn, so the cases for `x` are the cases for `y` and `z`.
+
+**3. What they print.** `startpm.sh` (8) ran the 88 cases, each with `gappa
+-Bcoq` and `coqc`, and their 88 controls, 12 at once, from 16:19:56 to
+16:20:50 UTC by its files' times. `tallypm.py` (8), 464.34's `tallypz.py`
+with these names and the two averages, counts them, and its whole print is
+below:
+
+- Each of the 88 exits 0 at the code's `36u`, in 0.11 s (`pm_v0v1p0p1p2`)
+  to 5.56 s (`pm_n`).
+- `E / D` is within `u`, and a little more, in 44 cases; within `0.93u` to
+  `0.99u` in 23; and within `u / 3` in the 21 where `p₀` is zero and no term
+  is live, so that only `s₀`'s rounding is left, over `D = 3L`.
+- The upper end of `D / L` is 3 in the 25 cases where `D` is `3L`, and 24.8
+  in the other 63, `point.g`'s own, for the reason 464.34's 3 gives.
+- `Asum / G` is within `u`, and a little more, in each of the 63.
+- The upper end of `G / L` is 9.93 in `pm_n`, and 3 to 7.90 in the other 62.
+- So `(out − Ex) / L` is within `E / D · D / L + Asum / G · G / L`, at most
+  `34.7285u` (`pm_n`), against the goal's `36u`. With the products normal,
+  464.19's `point.g` and 464.34's cases reach `24.80u`.
+- `gappa -Bcoq` and `coqc` exit 0 on all 88: 588 lines with 6 hints
+  (`pm_v1v2p0p1p2`, 0.91 s) to 12 299 lines with 41 hints (`pm_n`, 10.96
+  s), where 464.34's `pz_n` came to 8130 lines with 34.
+- No `.out`, `.bcoq` or `.coqc` of the 88 has a line other than its results
+  and warnings that a divisor has been assumed to be nonzero, 64 of them in
+  `pm_n.out`. So no hint was reported as not an identity, and each `.coqc`
+  is empty.
+
+`pm_n` alone through `peak.sh` (8) proves in 5.46 s at a peak of 89 188 KB,
+where 464.19's `point.g` takes 49.18 s and 4 496 464 KB (6).
+
+`34.73u` is how far this averaging reaches, not a point any input has been
+seen at. `D / L` and `G / L` reach their tops at different turns, and the
+proof adds the tops. And the amounts' part is at its largest at `L =
+2⁻¹⁰²²`: each amount's hint carries `2⁻¹⁰²² / L`, so by the form, not run,
+that part falls in proportion as `L` grows past the floor.
+
+Gappa does not write the same proof each run (464.4), so the sizes and times
+are this run's. Each proof stands on its hints and on the divisors Gappa
+took to be nonzero, as 464.19's 8 says of its own. `field` has not been run
+on these hints (464.10).
+
+`tallypm.py`'s whole print:
+
+```
+88 cases, 176 exit lines, 88 coq lines
+lines of runpm.txt that are neither: none
+problems: 0
+cases that exit 0: 88 of 88; controls that exit 1: 88 of 88
+gappa time per case: 0.11 s (pm_v0v1p0p1p2) to 5.56 s (pm_n)
+coq: 588 lines 6 hints 0.91 s (pm_v1v2p0p1p2) to 12299 lines 41 hints 10.96 s (pm_n)
+cases with a rounded product on a live path: 63 of 88
+terms' error / D, upper end in u: [(0.3333, 21), (0.931, 2), (0.9599, 6), (0.9636, 1), (0.9673, 6), (0.9724, 2), (0.9738, 2), (0.9787, 2), (0.9849, 1), (0.9859, 1), (1.0, 44)]
+D / L upper end: [(3.0, 25), (24.8, 63)]
+Asum / G, upper end in u: [(1.0, 63)]
+G / L upper end: [(3.0, 26), (4.8286, 18), (5.0, 7), (6.4643, 2), (6.4722, 4), (7.6569, 1), (7.8992, 4), (9.9286, 1)]
+largest of the two averages added: 34.7285u (pm_n), against POINT_ROUNDOFF's 36u
+control best on (out - Ex) / L, in u, and how many controls:
+  1.0u: 21 
+  3.0u: 4 pm_v1v2, pm_v1v2p1, pm_v1v2p2, pm_v1v2p1p2
+  26.8u: 6 pm_v0v1p0, pm_v0v2p0, pm_v1p0p2, pm_v2p0p1, pm_v0v1p0p2, pm_v0v2p0p1
+  26.99u: 6 pm_wv1p0, pm_wv2p0, pm_v1p0p1, pm_v2p0p2, pm_wv1p0p1, pm_wv2p0p2
+  27.11u: 2 pm_v0p0p1, pm_v0p0p2
+  27.15u: 2 pm_wp0p1, pm_wp0p2
+  27.8u: 10 pm_wv1p2, pm_wv2p1, pm_v0v1p1, pm_v0v2p2, pm_v1p1p2, pm_v2p1p2, pm_wv1p1p2, pm_wv2p1p2, pm_v0v1p1p2, pm_v0v2p1p2
+  27.92u: 2 pm_p0p1, pm_p0p2
+  29.1u: 2 pm_v1p0, pm_v2p0
+  29.25u: 1 pm_wp0
+  29.45u: 1 pm_v0p0
+  29.63u: 13 
+  29.8u: 6 pm_wv1, pm_wv2, pm_v1p1, pm_v2p2, pm_wv1p1, pm_wv2p2
+  31.26u: 2 pm_v0p1, pm_v0p2
+  31.27u: 4 pm_v1, pm_v2, pm_wp1, pm_wp2
+  31.8u: 1 pm_p0
+  32.46u: 1 pm_w
+  32.7u: 3 pm_v0, pm_p1, pm_p2
+  34.73u: 1 pm_n
+largest best: 34.7286u (pm_n), against POINT_ROUNDOFF's 36u
+each best within 0.01% of its case's two averages added: True
+```
+
+**4. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3), so each case has a control at `u / 2`, `1b-54`, that
+must fail, and each of the 88 exits 1. Gappa's best for a goal it does not
+prove can change from one run to the next (464.26), so these are this run's,
+each a bound Gappa found on the size of `(out − Ex) / L`:
+
+- `u` in 21 controls, the cases where `p₀` is zero and no term is live, whose
+  `out` is `s₀` times a free ratio;
+- `3u` in 4, `pm_v1v2`, `pm_v1v2p1`, `pm_v1v2p2` and `pm_v1v2p1p2`, a turn
+  about the `x` axis;
+- `26.8u` to `34.73u` in the other 63.
+
+`tallypm.py` finds each within 0.01% of its case's two averages added (3).
+Unlike 464.34's 4, no case holds `out − Ex` at 0 for every input: a sum that
+cancels is no case of its own, and in the 21 `s₀` may be nonzero, so every
+control asks for `u / 2`. Beside them:
+
+- `controls.py` writes two more on `pm_n`, and `capped.sh` ran them, and
+  `c_pm_n_half` again, each under a 12 GB `ulimit -v`:
+  - `c_pm_n_34`, the goal at `34u`, exits 1 in 47.10 s, best `±3.85564e-15`,
+    which is `34.73u`. So the hypotheses do not contradict each other. It
+    does not show that any input reaches `34.73u` (3).
+  - `c_pm_n_l`, `L` free down to `2⁻¹⁰⁷⁴`, exits 1 in 6.27 s: `Asum / G` is
+    only within `±0.5`, which is `2⁵²u`, and the best is `±4.96429`. So the
+    proof needs `L` normal (1).
+  - `c_pm_n_half` exits 1 in 5.81 s, best `±3.85565e-15`.
+- The lemmas ran again in the second lane: `mixedn`, `mixeds` and `sum` each
+  exit 0, and their `gappa -Bcoq` and `coqc` exit 0, at 274, 110 and 151
+  lines with 2, 0 and 0 hints; each control exits 1. Each control is its
+  lemma with its opening comment replaced by the one line `# mixedn.g's
+  control: the same at u / 2, which must fail.` (`mixeds.g's`, `sum.g's`),
+  and each goal at `[-1b-54, 1b-54]`, which `samepm.py` checks (8).
+
+So none of the 88 proofs came from a contradiction in its hypotheses.
+
+**5. Below the normals.** The probe crate `subl` (8), built outside the tree
+against `rcad-geom` in the second lane's tree, turns points by
+`Isometry::rotation(&Axis::z(), PI / 6)`, which stores `(w, v₀, v₁, v₂) =
+(9.659258262890683e-1, 0, 0, 2.5881904510252074e-1)` and a zero shift, and
+`subl.py` (8) works the exact answer from the stored numbers, in rationals:
+
+- `(3·2⁻¹⁰⁷⁴, 0, 0)`, so `L = 3·2⁻¹⁰⁷⁴`: `x` comes out `2·2⁻¹⁰⁷⁴` against
+  an exact `2.59808·2⁻¹⁰⁷⁴`, off by `1.796e+15u · L`, and the nearest
+  double, `3·2⁻¹⁰⁷⁴`, is off by `1.207e+15u · L`. `y` is `2·2⁻¹⁰⁷⁴` against
+  `1.5·2⁻¹⁰⁷⁴`, a tie, so every double is at least `1.501e+15u · L` off. By
+  hand, from `point.g`'s lines: `c1 = rnd(v₂ · 3·2⁻¹⁰⁷⁴)` rounds
+  `0.776·2⁻¹⁰⁷⁴` up to `2⁻¹⁰⁷⁴`, `k02 = rnd(v₂ · 2·2⁻¹⁰⁷⁴)` rounds
+  `0.518·2⁻¹⁰⁷⁴` up to `2⁻¹⁰⁷⁴`, so `k0` is `−2⁻¹⁰⁷⁴` and `x` is `3 − 1`
+  times `2⁻¹⁰⁷⁴`.
+- `(3·2⁻¹⁰⁷⁴, 5·2⁻¹⁰⁷⁴, 0)`: `x` is 0 against `0.0981·2⁻¹⁰⁷⁴`, and `y`
+  `6·2⁻¹⁰⁷⁴` against `6.5·2⁻¹⁰⁷⁴`, a tie again.
+- `(1000·2⁻¹⁰⁷⁴, 0, 0)`: `x` is off by `2.288e+11u · L`, and so is the
+  nearest double, which is the code's.
+- `(3·2⁻¹⁰²², 0, 0)`, `L` normal: `x` is off by `0.001442u · L` and `y` by
+  `0.2793u · L`, inside the bound.
+
+Doubles below `2⁻¹⁰²¹` are `2⁻¹⁰⁷⁴` apart, so an exact answer half way
+between two is `2⁻¹⁰⁷⁵` from each, which is more than `36u · L` for `L` below
+`2⁻¹⁰²² / 36`, about `2⁻¹⁰²⁷`. The ties above are such answers. So there
+`18ε · L` asks for more than any `f64` answer can give: a limit of the bound's
+form, not a gap the arithmetic could close (§16.10). Between `2⁻¹⁰²⁷` and
+`2⁻¹⁰²²` nothing was run, and the proof, which takes `L` at least `2⁻¹⁰²²`,
+says nothing there.
+
+`apply_to_point`'s doc (`isometry.rs:314-315` at `8dae715a`) promises
+`POINT_ROUNDOFF` times the largest number involved, with no condition on it.
+`POINT_ROUNDOFF`'s own doc says its count holds "only while nothing overflows
+and nothing falls into the subnormals" (`102-103`), and the method's doc does
+not say so. So the method's promise is wrong for `L` below about `2⁻¹⁰²⁷`, of
+class C: only a probe builds it, and no designer writes a coordinate of
+`1e-323`. It is not D: a block of side 100 with a corner at `(3·2⁻¹⁰⁷⁴, 0, 0)`
+has its largest coordinate over its smallest feature near one, §3.5's
+measure, so no number puts it outside §3.5's envelope. A row (7).
+
+**6. The forms tried.** The generator had four forms, and every case ran on
+the fourth. Each of the first three was tried on the case with nothing zero
+alone, and ran out of memory. For scale, 464.19's `point.g` proves in 49.18 s
+at a peak of 4 496 464 KB.
+
+- The first wrote each product's rounding by the lemma, with `m` defined by
+  its formula, and each sum's by `rnd`, with one average over the terms and
+  the amounts. It was 24 GB resident when the out-of-memory killer stopped it
+  at 354 s.
+- The second set `m` and `s` free, and went past a 12 GB `ulimit -v` at 76 s.
+- The third averaged `E` and `Asum` apart, and went past 12 GB at 182.64 s;
+  `Asum` alone went past 12 GB at 155.55 s.
+- Each run that went past the cap ended `GNU MP: Cannot allocate memory`.
+- The fourth, 1's, writes each rounded sum on a live path as `C * r`, which
+  drops 464.34's split by which sums cancel, its `@FIX` and the `|C| ≥
+  2⁻¹⁰⁷⁴` each rounded sum carried. `pm_n` proves on it in 5.46 s at 89 188
+  KB (3).
+
+By relay 3's handoff the third and the fourth differ in the sums alone. The
+third's files were written over, so that was not diffed, and which of the
+sums' changes the memory needed was not run.
+
+Gappa 1.8.0 aborts, exit 134, `src/parser/ast.cpp:255: dump_real ...
+Assertion 'false' failed`, on a script with a name defined as another name
+alone, `gk01 = L;`, while it prints the warning that a divisor was assumed
+nonzero. `1 * L` in its place exits 1. `pointsub.py` writes such a share as
+`L` itself.
+
+`/usr/bin/time`'s `%x` prints 0 for a run a signal ends, so `peak.sh`'s `exit
+0` there is not a proof: read `Command terminated by signal` in its `.time`.
+No `.time` in the second lane's run directory has that line (`grep -l`), and
+`one.sh`, which ran the 88, takes its exit from the shell.
+
+**7. What this leaves.** Four rows, filed from this write-up when it merges,
+each from Q2802:
+
+- `POINT_ROUNDOFF`'s doc (`isometry.rs:78-90` at `8dae715a`) says Gappa
+  proves the 18 while "the products on a live path are normal numbers", that
+  this leaves `11.2·u·L` of room, and "Only the products below the normals
+  have not been run." By 3 they prove with `L` normal, reaching `34.73u` and
+  leaving `1.27u`, and `L` normal is the condition, not the products. A
+  comment that claims less than is proved, so no class.
+- `apply_to_point`'s doc promises `POINT_ROUNDOFF` times `L` with no
+  condition on `L` (5): state `L` at least `2⁻¹⁰²²` and pin 5's first point
+  in a test. Class C, after the first, since both edit `isometry.rs`.
+- Run 464.21's pipe with the point's slips at `34.73u`, not `point.g`'s
+  `25u`, and say whether `CORNER_AFTER_MOVING_ROUNDOFF`'s `128ε` still holds.
+  464.21's pipe proves it only with those slips at `25u` (464.21's opening).
+  Not run, so no class.
+- Run 464.20's `vector.g` in this form, each product on a live path free to
+  fall below the normals, and say whether its `20u` holds. 464.20 left it to
+  Q2802, which ran `point.g` alone. Not run, so no class.
+
+And what is not a row: Q2700, which moves these scripts into `proofs/gappa/`
+with the rest of 464's; and `field` on these hints, which 464.10 leaves for
+every script of 464.
+
+**8. The scripts.** `pointsub.py` writes the 88 cases, their controls and
+`casesm.txt`; `controls.py` writes 4's two further controls on `pm_n`;
+`mixedn.g`, `mixeds.g` and `sum.g` are 1's lemmas; `startpm.sh` runs every
+case in `casesm.txt` through 464.34's `runpz.sh`, each process under a 12 GB
+cap, writing `runpm.txt`; `capped.sh` runs the scripts it names through
+`peak.sh` under the same cap; `peak.sh` runs one script as `one.sh` does,
+without Coq, and prints its exit, its time and its peak memory; `tallypm.py`
+counts the run; `subl`'s `src/main.rs` and `subl.py` are 5's probe; and
+`samepm.py` checks this text against the files that ran.
+
+To run them again, save the scripts beside 464.13's `one.sh` and 464.34's
+`runpz.sh`, run `python3 pointsub.py` and `python3 controls.py`, then start
+`./startpm.sh` with `setsid -f nohup` and wait on the pid it writes to
+`startpm.pid`. Its `runpm.txt` ends `done`, and `python3 tallypm.py` counts
+it. `./capped.sh c_pm_n_half.g c_pm_n_l.g c_pm_n_34.g` runs 4's three, and
+`./one.sh mixedn.g coq` and `./one.sh c_mixedn_half.g` a lemma and its
+control. The probe crate's `Cargo.toml` names `rcad-geom` by path, at the
+second lane's tree, with an empty `[workspace]` and edition 2024, and
+`RUSTUP_TOOLCHAIN=1.96.0 cargo build --release` built it against nalgebra
+0.35.0. `./target/release/subl | python3 subl.py`, in the crate's directory,
+reads it.
+
+The second lane ran `samepm.py` on this text from its tree's `target/`, with
+the run's directory and the probe's directory, `python3 samepm.py <464 file>
+<run directory> <probe directory>`.
+
+`samepm.py`'s whole print:
+
+```
+pointsub.py in the text is the file that ran: True
+controls.py in the text is the file that ran: True
+mixedn.g in the text is the file that ran: True
+mixeds.g in the text is the file that ran: True
+sum.g in the text is the file that ran: True
+startpm.sh in the text is the file that ran: True
+capped.sh in the text is the file that ran: True
+peak.sh in the text is the file that ran: True
+tallypm.py in the text is the file that ran: True
+src/main.rs in the text is the file that ran: True
+subl.py in the text is the file that ran: True
+samepm.py in the text is the file that ran: True
+pointsub.py and controls.py run from the text write 179 files; differing from the ones that ran: none
+c_mixedn_half.g written by the text's rule is the one that ran: True
+c_mixeds_half.g written by the text's rule is the one that ran: True
+c_sum_half.g written by the text's rule is the one that ran: True
+tallypm.py prints what the text says: True
+subl prints what the text says: True
+subl.py prints what the text says: True
+```
+
+The 179 are the 88 cases, their 88 controls, `controls.py`'s two and
+`casesm.txt`.
+
+`pointsub.py`, whole, as it ran:
+
+```python
+"""Write 464.34's zero sets of 464.19's point.g again with each product on a
+live path free to fall below the normals, one script per zero set and a
+control at u / 2 beside each.
+
+pointzero.py (464.34) took each rounded product on a live path to be a normal
+number, and gave its rounding lemma.g's relative bound. Here a product
+q = rnd(P) may be normal, below the normals, or 0, and what mixedn.g and
+mixeds.g prove of every real P is all the script knows of it:
+
+  m = (q - P) / (|P| + 2^-1022) is in [-u, u].
+
+So for P not zero, q = P * (1 + m * s) + m * 2^-1022 with s = |P| / P in
+[-1, 1]: a rounding by the ratio 1 + m * s, within u of 1 as before, and an
+amount m * 2^-1022 that no ratio carries. A product that rounds to 0 with
+neither factor 0 is such a q too. The script writes each such product that
+way, with m and s free in their intervals, which every rnd(P) meets, so it
+proves the goal for more than the rounded products and so for them. Each
+rounded sum on a live path is written C * r, r free within u of 1, which
+sum.g proves of the sum of two doubles that is not zero, and which holds of
+any r where C is 0.
+
+Each amount reaches out multiplied by the factor the sums and products after
+it multiply the product by, f, and by the ratios of the roundings after it:
+f is 2w for q01, -2w for q02, 2v1 for q21, -2v1 for q22, -2v2 for q11, 2v2
+for q12, 1 for k01, -1 for k02 and 1 for m0. So the amount is at most
+|f| * 2^-1022 * u, and a little more for the ratios, and it gets a share of
+its own, |f| * L. With L at least 2^-1022, the amount is at most u of its
+share. With L below 2^-1022 nothing bounds 2^-1022 / L.
+
+out - Ex is then E, the sum of the terms' errors as in point.g, plus Asum,
+the sum of the amounts. E is averaged over D, point.g's shares, as before,
+and Asum over G, the amounts' shares, on its own. G / L is
+2 n_w |w| + 2 n_1 |v1| + 2 n_2 |v2| + n_c, the n the live rounded products
+among q01 and q02, q21 and q22, q11 and q12, and k01, k02 and m0. Each
+2 n |x| is written as lam |x|^2 + n^2 / lam - lam (|x| - n / lam)^2, and the
+three lam |x|^2 as lam q.q less lam |v0|^2, so the hint is lam q.q, a
+constant and squares taken away, which Gappa bounds by lam (1 + 12u) plus
+the constant. lam is about sqrt(n_w^2 + n_1^2 + n_2^2), which makes
+lam + (n_w^2 + n_1^2 + n_2^2) / lam smallest. An x whose n is 0 has its
+square written lam * |x| * |x|, which Gappa bounds where x is the double 0
+(464.34's 2).
+
+Every other line is pointzero.py's. A sum that cancels is 0, and 0 times any
+ratio is 0, so it needs no case of its own, and nor does a product that
+rounds to 0: one case for each of the 88 zero sets.
+
+The names are pm_<zeros>.g, as pointzero.py's pz_, and c_pm_<zeros>_half.g
+at u / 2.
+Run as: python3 pointsub.py
+"""
+import itertools
+import math
+import os
+from fractions import Fraction
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+FACTORS = ("w", "v0", "v1", "v2", "p0", "p1", "p2")
+TURN = ("w", "v0", "v1", "v2")
+GOAL = "(out - Ex) / L in [-36b-53, 36b-53]"
+HALF = "(out - Ex) / L in [-1b-54, 1b-54]"
+RATIO = "9007199254740991b-53, 9007199254740993b-53"
+# Where a product is rounded on a live path, out - Ex = E + Asum. These goals
+# on each, which add up to 36u, are for a script of E or Asum alone.
+PART_GOAL = {"e": "E / L in [-26b-53, 26b-53]", "a": "Asum / L in [-10b-53, 10b-53]"}
+NORMAL_L = "1b-1022"
+
+# Each rounding of point.g: its result, its argument, the argument's
+# definition, its ratio, and whether it is a product or a sum.
+OPS = (
+    ("q01", "P01", "v1 * p2", "rq01", "product"),
+    ("q02", "P02", "v2 * p1", "rq02", "product"),
+    ("q11", "P11", "v2 * p0", "rq11", "product"),
+    ("q12", "P12", "v0 * p2", "rq12", "product"),
+    ("q21", "P21", "v0 * p1", "rq21", "product"),
+    ("q22", "P22", "v1 * p0", "rq22", "product"),
+    ("c0", "C0", "q01 - q02", "rc0", "sum"),
+    ("c1", "C1", "q11 - q12", "rc1", "sum"),
+    ("c2", "C2", "q21 - q22", "rc2", "sum"),
+    ("k01", "K1", "v1 * t2", "rk01", "product"),
+    ("k02", "K2", "v2 * t1", "rk02", "product"),
+    ("k0", "KK", "k01 - k02", "rk0", "sum"),
+    ("m0", "M", "t0 * w", "rm", "product"),
+    ("a0", "A", "m0 + k0", "ra", "sum"),
+    ("r0", "R", "a0 + p0", "rr", "sum"),
+    ("out", "O", "r0 + s0", "ro", "sum"),
+)
+# t_i is c_i * 2, which rounds nothing (464.19's doubling.g).
+DOUBLED = {"t0": "c0", "t1": "c1", "t2": "c2"}
+
+# Each product's amount as it reaches out: its sign, and the part of the turn
+# its factor f is twice, or None where f is 1.
+AMOUNTS = {
+    "q01": ("", "w"), "q02": ("-", "w"),
+    "q21": ("", "v1"), "q22": ("-", "v1"),
+    "q11": ("-", "v2"), "q12": ("", "v2"),
+    "k01": ("", None), "k02": ("-", None), "m0": ("", None),
+}
+# The names the squares of G / L are written with.
+SQUARES = {"w": "Hw", "v1": "H1", "v2": "H2"}
+
+# The six terms of Ex with a product of the turn: the term, its factors, the
+# roundings it passes through in order, its share of D, and e / d as point.g
+# writes it.
+TERMS = (
+    ("2 * w * v1 * p2", ("w", "v1", "p2"), ("q01", "c0", "m0", "a0", "r0", "out"),
+     "12 * |w| * |v1|", "(w / |w|) * (v1 / |v1|) * (p2 / L) * (W1 / 6)"),
+    ("-(2 * w * v2 * p1)", ("w", "v2", "p1"), ("q02", "c0", "m0", "a0", "r0", "out"),
+     "12 * |w| * |v2|", "-((w / |w|) * (v2 / |v2|) * (p1 / L) * (W2 / 6))"),
+    ("2 * v1 * v0 * p1", ("v1", "v0", "p1"), ("q21", "c2", "k01", "k0", "a0", "r0", "out"),
+     "14 * |v1| * |v0|", "(v1 / |v1|) * (v0 / |v0|) * (p1 / L) * (W3 / 7)"),
+    ("-(2 * v1 * v1 * p0)", ("v1", "p0"), ("q22", "c2", "k01", "k0", "a0", "r0", "out"),
+     "14 * |v1| * |v1|", "-((v1 / |v1|) * (v1 / |v1|) * (p0 / L) * (W4 / 7))"),
+    ("-(2 * v2 * v2 * p0)", ("v2", "p0"), ("q11", "c1", "k02", "k0", "a0", "r0", "out"),
+     "14 * |v2| * |v2|", "-((v2 / |v2|) * (v2 / |v2|) * (p0 / L) * (W5 / 7))"),
+    ("2 * v2 * v0 * p2", ("v2", "v0", "p2"), ("q12", "c1", "k02", "k0", "a0", "r0", "out"),
+     "14 * |v2| * |v0|", "(v2 / |v2|) * (v0 / |v0|) * (p2 / L) * (W6 / 7)"),
+)
+P0_PATH = ("r0", "out")
+S0_PATH = ("out",)
+
+
+def cases():
+    """Every zero set."""
+    for n in range(len(FACTORS) + 1):
+        for zero in itertools.combinations(FACTORS, n):
+            if sum(f in zero for f in TURN) >= 3:
+                continue
+            yield from branches(set(zero), 0, {})
+
+
+def used(zero):
+    """The roundings on the path of a term that has no zero factor."""
+    paths = [t[2] for t in TERMS if not set(t[1]) & zero] + [S0_PATH]
+    if "p0" not in zero:
+        paths.append(P0_PATH)
+    return {r for path in paths for r in path}
+
+
+def branches(zero, i, state):
+    """state maps each rounding's result to rounded or zero: zero where a
+    factor of a product is zero, or both parts of a sum."""
+    if i == len(OPS):
+        yield frozenset(zero), dict(state)
+        return
+    result, _, arg, _, kind = OPS[i]
+    a, _, b = arg.split(" ")
+
+    def is_zero(name):
+        name = DOUBLED.get(name, name)
+        if name in FACTORS:
+            return name in zero
+        if name == "s0":
+            return False
+        return state[name] != "rounded"
+
+    za, zb = is_zero(a), is_zero(b)
+    if kind == "product":
+        state[result] = "zero" if za or zb else "rounded"
+    else:
+        state[result] = "zero" if za and zb else "rounded"
+    yield from branches(zero, i + 1, state)
+    del state[result]
+
+
+def name_of(zero, state):
+    return "pm_" + ("".join(f for f in FACTORS if f in zero) or "n")
+
+
+def products(zero, state):
+    """The rounded products on a live path."""
+    live_ops = used(zero)
+    return [op for op in OPS if state[op[0]] == "rounded" and op[0] in live_ops and op[4] == "product"]
+
+
+def make(zero, state, goal=GOAL, lmin=NORMAL_L, part=None):
+    """part is None where no product is rounded on a live path. Otherwise it
+    is "both", which bounds E and Asum and adds them, or "e" or "a" for a
+    script that bounds E or Asum alone."""
+    live_ops = used(zero)
+    rounded = [op for op in OPS if state[op[0]] == "rounded" and op[0] in live_ops]
+    assert (part is None) == (not products(zero, state)), part
+    live = [k for k, t in enumerate(TERMS) if not set(t[1]) & zero]
+    gone = [k for k in range(len(TERMS)) if k not in live]
+    p0_live = "p0" not in zero
+    zeros = [f for f in FACTORS if f in zero]
+    unrounded = [op[1] for op in OPS if state[op[0]] != "rounded"]
+    rp = [op for op in rounded if op[4] == "product"]
+    rs = [op for op in rounded if op[4] == "sum"]
+
+    def listed(names):
+        return ", ".join(names) if names else "none"
+
+    src = [
+        "# restates: crates/rcad-geom/src/isometry.rs apply_to_point at c0859e3f",
+        "# restates: crates/rcad-geom/src/isometry.rs turned_by at c0859e3f",
+        "# restates: crates/rcad-geom/src/isometry.rs POINT_ROUNDOFF at c0859e3f",
+        "# restates: crates/rcad-geom/src/isometry.rs named_by at c0859e3f",
+        "# restates: Cargo.lock nalgebra at c0859e3f",
+        "# 464.19's point.g, the moved point's x, with zero factors " + listed(zeros) + ",",
+        "# and so zero " + listed(unrounded) + ", each rounded product on a live",
+        "# path normal, below the normals or 0, and each rounded sum on one free",
+        "# to cancel.",
+        "@rnd = float<ieee_64, ne>;",
+        "",
+        "# The quaternion (w, v), the point and the shift's x, each an f64, a zero",
+        "# factor the double 0.",
+    ]
+
+    def inputs(names):
+        return " ".join(f"{n} = 0;" if n in zero else f"{n} = rnd({n}_);" for n in names)
+
+    src += [inputs(TURN), inputs(("p0", "p1", "p2")), "s0 = rnd(s0_);", "",
+            "# What apply_to_point computes, line for line, a zero written unrounded,",
+            "# since it rounds to itself (464.11's refl.g). A rounded product on a live",
+            "# path is written as what mixedn.g and mixeds.g prove of it, rnd(P) =",
+            "# P * (1 + m * s) + m * 2^-1022, m in [-u, u] and s, |P| / P, in [-1, 1],",
+            "# and a rounded sum on one as what sum.g proves of it, C * r."]
+    for op in OPS:
+        result, argname, arg, r, _ = op
+        if op in rp:
+            src.append(f"{argname} = {arg}; {r} = 1 + m{result} * s{result};"
+                       f" {result} = {argname} * {r} + m{result} * 1b-1022;")
+        elif op in rs:
+            src.append(f"{argname} = {arg}; {result} = {argname} * {r};")
+        else:
+            value = f"rnd({argname})" if state[result] == "rounded" else argname
+            src.append(f"{argname} = {arg}; {result} = {value};")
+        if result == "c2":
+            src.append("t0 = c0 * 2; t1 = c1 * 2; t2 = c2 * 2;")
+    src += ["", "# The same arithmetic without rounding.",
+            "Ex = 2 * w * (v1 * p2 - v2 * p1)",
+            "   + v1 * (2 * (v0 * p1 - v1 * p0)) - v2 * (2 * (v2 * p0 - v0 * p2))",
+            "   + p0 + s0;", ""]
+    ratio = {op[0]: op[3] for op in rounded}
+
+    def share(q):
+        return f"g{q}" if AMOUNTS[q][1] else "L"
+
+    def ratios_on(path):
+        return [ratio[r] for r in reversed(path) if r in ratio]
+
+    def chain(path):
+        rs_ = ratios_on(path)
+        return " * ".join(rs_) + " - 1" if rs_ else "0"
+
+    def after(result):
+        path = next(t[2] for k, t in enumerate(TERMS) if k in live and result in t[2])
+        return ratios_on(path[path.index(result) + 1:])
+
+    src += ["# Each term of Ex as out carries it, less the term itself, through the",
+            "# roundings left on its path. A term with a zero factor is zero."]
+    src += [f"W{k + 1} = {chain(TERMS[k][2])};" for k in live]
+    if p0_live:
+        src.append(f"W7 = {chain(P0_PATH)};")
+    src.append(f"W8 = {chain(S0_PATH)};")
+    for k in live:
+        t = TERMS[k][0]
+        src.append(f"e{k + 1} = -({t[2:-1]} * W{k + 1});" if t.startswith("-(") else f"e{k + 1} = {t} * W{k + 1};")
+    src.append("e7 = p0 * W7 + s0 * W8;" if p0_live else "e7 = s0 * W8;")
+
+    amounts, hints = [], []
+    for op in rp:
+        q = op[0]
+        sign, x = AMOUNTS[q]
+        rest = after(q)
+        tail = " * (" + " * ".join(rest) + ")" if rest else ""
+        factor = f" * (2 * {x})" if x else ""
+        body = f"m{q} * 1b-1022{factor}{tail}"
+        amounts.append(f"A{q} = {sign}({body});" if sign else f"A{q} = {body};")
+        unit = f" * ({x} / |{x}|)" if x else ""
+        hbody = f"m{q} * (1b-1022 / L){unit}{tail}"
+        hints.append(f"A{q} / {share(q)} -> {sign}({hbody});" if sign else f"A{q} / {share(q)} -> {hbody};")
+    if amounts:
+        src += ["", "# What each rounded product's m * 2^-1022 comes to in out, through the",
+                "# sums and products after it and the roundings left on its path."]
+        src += amounts
+
+    src += ["", "# Each live term's share of D, as point.g's, p0 and s0 sharing 3L."]
+    src += [f"d{k + 1} = {TERMS[k][3]} * L;" for k in live]
+    src.append("d7 = 3 * L;")
+    src += ["D = " + " + ".join(f"d{k + 1}" for k in live + [6]) + ";"]
+    if rp:
+        src += ["", "# Each amount's share of G, |f| L, written L itself where f is 1: Gappa",
+                "# 1.8.0 aborts on a name defined as another name alone, as in g = L.",
+                "# E is out - Ex less the amounts, the terms' errors alone."]
+        src += [f"g{op[0]} = 2 * |{AMOUNTS[op[0]][1]}| * L;" for op in rp if AMOUNTS[op[0]][1]]
+        src += ["G = " + " + ".join(share(op[0]) for op in rp) + ";",
+                "Asum = " + " + ".join(f"A{op[0]}" for op in rp) + ";",
+                "E = out - Ex - Asum;"]
+    src += ["",
+            "# q.q and the four squares D / L is written with below.",
+            "N4 = |w| * |w| + |v0| * |v0| + |v1| * |v1| + |v2| * |v2|;",
+            "X = |w| - 30/109 * (|v1| + |v2|);",
+            "Y = |v0| - 35/109 * (|v1| + |v2|);",
+            "Z = |v1| - |v2|;"]
+
+    n = {x: sum(AMOUNTS[op[0]][1] == x for op in rp) for x in ("w", "v1", "v2")}
+    n_c = sum(AMOUNTS[op[0]][1] is None for op in rp)
+    s = sum(c * c for c in n.values())
+    lam = Fraction(math.sqrt(s)).limit_denominator(8) if s else None
+    if lam is not None:
+        src += ["", f"# G / L's linear part as squares, lam = {lam}."]
+        src += [f"{SQUARES[x]} = |{x}| - {Fraction(c) / lam};" for x, c in n.items() if c]
+    src.append("")
+
+    nz = [f for f in FACTORS if f not in zero]
+    hyp = ["  # Every input is a finite f64.",
+           "     " + " /\\ ".join(f"|{f}| <= 1b1024" for f in nz[:4]),
+           "  /\\ " + " /\\ ".join(f"|{f}| <= 1b1024" for f in nz[4:] + ["s0"]),
+           "  # No factor of a product is zero but " + listed(zeros) + ".",
+           "  /\\ " + " /\\ ".join(f"|{f}| >= 1b-1074" for f in nz)]
+    if rs:
+        hyp += ["  # What sum.g proves of each rounded sum on a live path, the sum of two",
+                "  # doubles, or 0 where it cancels, which any ratio meets."]
+        hyp += ["  /\\ " + " /\\ ".join(f"{op[3]} in [{RATIO}]" for op in rs[k:k + 2]) for k in range(0, len(rs), 2)]
+    if rp:
+        hyp += ["  # What mixedn.g and mixeds.g prove of each rounded product on a live",
+                "  # path, normal or not, and |P| / P in [-1, 1] for any P not zero."]
+        hyp += ["  /\\ " + " /\\ ".join(f"m{op[0]} in [-1b-53, 1b-53]" for op in rp[k:k + 3]) for k in range(0, len(rp), 3)]
+        hyp += ["  /\\ " + " /\\ ".join(f"s{op[0]} in [-1, 1]" for op in rp[k:k + 3]) for k in range(0, len(rp), 3)]
+    hyp += ["  # L is a normal number at least every coordinate of the point and the shift.",
+            f"  /\\ L in [{lmin}, 1b1024]",
+            "  /\\ " + " /\\ ".join(f"{f} / L in [-1, 1]" for f in ("p0", "p1", "p2", "s0") if f not in zero),
+            "  # A stored turn has |q.q - 1| <= 6 epsilon (held_near_length_one), and",
+            "  # 6 epsilon is 12b-53.",
+            "  /\\ N4 in [9007199254740980b-53, 9007199254741004b-53]",
+            "  # x / |x| is in [-1, 1] for any x that is not zero.",
+            "  /\\ " + " /\\ ".join(f"{f} / |{f}| in [-1, 1]" for f in TURN if f not in zero)]
+    err = "E" if rp else "(out - Ex)"
+    do_e, do_a = part != "a", part in ("a", "both")
+    queries = []
+    if do_e:
+        queries.append(f"{err} / D in ? /\\ D / L in ?")
+    if do_a:
+        queries.append("Asum / G in ? /\\ G / L in ?")
+    src += ["{"] + hyp + ["->", "  " + " /\\ ".join(queries), f"  /\\ {goal}", "}", ""]
+    if part == "both":
+        src += ["# out - Ex is the terms' error and the amounts, each averaged on its own.",
+                "(out - Ex) / L -> E / L + Asum / L;"]
+    if do_a:
+        src += ["# The amounts, each a fraction of its own share of G; add_rr averages them.",
+                "Asum / L -> (Asum / G) * (G / L);",
+                "Asum / G -> ((G + Asum) - G) / G;",
+                "G + Asum -> " + " + ".join(f"({share(op[0])} + A{op[0]})" for op in rp) + ";"]
+        src += [f"({share(op[0])} + A{op[0]}) - {share(op[0])} -> A{op[0]};" for op in rp]
+        src += hints
+    if do_e:
+        src += ["# The terms' error is the sum of the live shares' errors, each a fraction",
+                "# of its own share of D; add_rr then averages them.",
+                f"{err} / L -> ({err} / D) * (D / L);",
+                f"{err} / D -> ((D + {err}) - D) / D;",
+                f"D + {err} -> " + " + ".join(f"(d{k + 1} + e{k + 1})" for k in live + [6]) + ";"]
+        src += [f"(d{k + 1} + e{k + 1}) - d{k + 1} -> e{k + 1};" for k in live + [6]]
+        src += [f"e{k + 1} / d{k + 1} -> {TERMS[k][4]};" for k in live]
+        src.append("e7 / d7 -> ((p0 / L) * W7 + (s0 / L) * W8) / 3;" if p0_live else "e7 / d7 -> ((s0 / L) * W8) / 3;")
+
+    kept = [v for v in ("v1", "v2") if v not in zero]
+    took = [TERMS[k][3] for k in gone] + [f"1/545 * |{v}| * |{v}|" for v in ("v1", "v2") if v in zero]
+    hint = ["D / L -> 109/5 * N4 - (109/5 * (X * X) + 109/5 * (Y * Y) + 425/109 * (Z * Z)"]
+    if kept:
+        hint.append("                       + 1/545 * (" + " + ".join(f"|{v}| * |{v}|" for v in kept) + ")) + 3")
+    else:
+        hint[0] += ") + 3"
+    if took:
+        hint.append("        - (" + " + ".join(took) + ")")
+    if do_e:
+        src += ["", "# D / L is point.g's 3 and quadratic, 109/5 q.q less four squares, less",
+                "# the share of each term a zero factor took out, and a zero v's square."]
+        src += hint[:-1] + [hint[-1] + ";"]
+    if do_a and lam is not None:
+        constant = sum(Fraction(c * c) / lam for c in n.values()) + n_c
+        squares = [f"{lam} * |v0| * |v0|"] + [
+            f"{lam} * ({SQUARES[x]} * {SQUARES[x]})" if c else f"{lam} * |{x}| * |{x}|" for x, c in n.items()]
+        src += ["", "# G / L is the amounts' shares, 2 n_w |w| + 2 n_1 |v1| + 2 n_2 |v2| + n_c,",
+                "# written as lam q.q, a constant and squares.",
+                f"G / L -> {lam} * N4 + {constant}",
+                "        - (" + " + ".join(squares) + ");"]
+    elif do_a:
+        src += ["", "# G / L is the amounts' shares, n_c L.", f"G / L -> {n_c};"]
+    return "\n".join(src) + "\n"
+
+
+def main():
+    seen = []
+    for zero, state in cases():
+        name = name_of(zero, state)
+        assert name not in seen, name
+        seen.append(name)
+        part = "both" if products(zero, state) else None
+        open(name + ".g", "w").write(make(zero, state, part=part))
+        open("c_" + name + "_half.g", "w").write(make(zero, state, HALF, part=part))
+    open("casesm.txt", "w").write("\n".join(seen) + "\n")
+    print(len(seen), "cases,", sum(not products(z, s) for z, s in cases()), "with no rounded product on a live path")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+`controls.py`, whole, as it ran:
+
+```python
+"""Write pm_n's further controls, which must each fail: c_pm_n_l.g, pm_n.g
+with L free down to 2^-1074, below the normals, and c_pm_n_34.g, pm_n.g at
+34u, below the 34.73u the two averages reach together.
+Run as: python3 controls.py"""
+import os
+
+import pointsub
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+zero, state = next((z, s) for z, s in pointsub.cases() if pointsub.name_of(z, s) == "pm_n")
+open("c_pm_n_l.g", "w").write(pointsub.make(zero, state, lmin="1b-1074", part="both"))
+open("c_pm_n_34.g", "w").write(
+    pointsub.make(zero, state, "(out - Ex) / L in [-34b-53, 34b-53]", part="both"))
+print("wrote c_pm_n_l.g and c_pm_n_34.g")
+```
+
+`mixedn.g`, whole, as it ran:
+
+```
+# Rounding a real P to an f64 is off by at most u (|P| + 2^-1022): here for
+# |P| at least 2^-1022, where the slip is relative. mixeds.g is the rest.
+@rnd = float<ieee_64, ne>;
+
+q = rnd(P);
+
+{
+     |P| <= 1b1024 /\ |P| >= 1b-1022
+  /\ P / |P| in [-1, 1]
+->
+  (q - P) / (|P| + 1b-1022) in [-1b-53, 1b-53]
+}
+
+(q - P) / (|P| + 1b-1022) -> ((q - P) / |P|) * (1 / (1 + 1b-1022 / |P|));
+(q - P) / |P| -> ((q - P) / P) * (P / |P|);
+```
+
+`mixeds.g`, whole, as it ran:
+
+```
+# Rounding a real P to an f64 is off by at most u (|P| + 2^-1022): here for
+# |P| at most 2^-1022, below the normals, where the slip is at most 2^-1075.
+# mixedn.g is the rest.
+@rnd = float<ieee_64, ne>;
+
+q = rnd(P);
+
+{
+  |P| <= 1b-1022
+->
+  (q - P) / (|P| + 1b-1022) in [-1b-53, 1b-53]
+}
+```
+
+`sum.g`, whole, as it ran:
+
+```
+# Rounding the sum or the difference of two doubles that is not zero
+# multiplies it by a ratio within u of 1: a sum below the normals is a
+# double already. pointsub.py writes each rounded sum that way.
+@rnd = float<ieee_64, ne>;
+
+a = rnd(a_); b = rnd(b_);
+S = a + b; s = rnd(S);
+T = a - b; t = rnd(T);
+
+{
+     |a| <= 1b1024 /\ |b| <= 1b1024
+  /\ |S| >= 1b-1074 /\ |T| >= 1b-1074
+->
+  (s - S) / S in [-1b-53, 1b-53] /\ (t - T) / T in [-1b-53, 1b-53]
+}
+```
+
+`startpm.sh`, whole, as it ran:
+
+```bash
+#!/bin/bash
+# Run every case in casesm.txt through runpz.sh, P at once (default 12), each
+# process capped at 12 GB of address space, writing runpm.txt, which ends
+# "done". 464.34's start.sh with pointsub.py's names.
+cd "$(dirname "$0")"
+echo $$ > startpm.pid
+ulimit -v ${CAP:-12000000}
+P=${P:-12} ./runpz.sh < casesm.txt > runpm.txt 2>&1
+echo done >> runpm.txt
+```
+
+`capped.sh`, whole, as it ran:
+
+```bash
+#!/bin/bash
+# Run each Gappa script named through peak.sh in turn, each under a 12 GB cap
+# on address space, printing peak.sh's line for each.
+# Run as: ./capped.sh <name>.g [<name>.g ...]
+cd "$(dirname "$0")"
+ulimit -v ${CAP:-12000000}
+for f in "$@"; do
+  ./peak.sh "$f"
+done
+```
+
+`peak.sh`, whole, as it ran:
+
+```bash
+#!/bin/bash
+# Run one Gappa script as one.sh does, without Coq, and print its exit, its
+# time and its peak memory. Run as: ./peak.sh <name>.g
+cd "$(dirname "$0")"
+g=/nix/store/0ihij0570a325g02l4wnf0idk8vqxr9b-gappa-1.8.0/bin/gappa
+n=${1%.g}
+/usr/bin/time -f "$n exit %x %es peak %M KB" timeout 600 "$g" -Eprecision=200 "$1" > "$n.out" 2> "$n.time"
+tail -1 "$n.time"
+```
+
+`tallypm.py`, whole, as it ran:
+
+```python
+"""Count what runpm.txt and the files beside it say of each case in casesm.txt
+and its control: each case's exit, Coq's two exits, its proof's size, the
+bounds it printed on the terms' error over D and on D / L, and where a
+product is rounded on a live path on Asum / G and G / L, what those add to,
+each control's exit and its best on (out - Ex) / L in u, and every line of an
+.out, .bcoq or .coqc that is not a result or a divisor Gappa took to be
+nonzero. 464.34's tallypz.py with pointsub.py's names and its two averages.
+Run as: python3 tallypm.py"""
+import collections
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+U = 2.0 ** -53
+cases = open("casesm.txt").read().split()
+log = open("runpm.txt").read().splitlines()
+assert log and log[-1] == "done", "runpm.txt does not end done"
+
+EXIT = re.compile(r"^(\S+) exit (\d+) ([\d.]+)s$")
+COQ = re.compile(r"^(\S+) coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$")
+exits, coqs, odd_log = {}, {}, []
+for line in log[:-1]:
+    if m := EXIT.match(line):
+        exits[m[1]] = (int(m[2]), float(m[3]))
+    elif m := COQ.match(line):
+        coqs[m[1]] = (int(m[2]), int(m[3]), float(m[4]), int(m[5]), int(m[6]))
+    else:
+        odd_log.append(line)
+
+WARNING = re.compile(r"^Warning: the expression .* has been assumed to be nonzero when checking a rewriting rule\.$")
+RESULT = re.compile(r"^  (.*) in \[(.*)\]$")
+BEST = re.compile(r"^  BND\(\(out - Ex\) / L\), best: \[(\S+), (\S+)\]$")
+DECIMAL = re.compile(r"\{(-?[\d.e+-]+),")
+# Where D is 3L, Gappa prints D written out.
+NAMES = {"E / D": "e", "(out - Ex) / D": "e", "(out - Ex) / (3 * L)": "e", "D / L": "d",
+         "3 * L / L": "d", "Asum / G": "a", "G / L": "g"}
+
+
+def odd_lines(path, control):
+    allowed = [WARNING, RESULT] + ([BEST] if control else [])
+    fixed = {"Results:"}
+    if control:
+        fixed.add("Error: some properties were not satisfied:")
+    if not os.path.exists(path):
+        return [f"{path} missing"]
+    return [f"{path}: {line}" for line in open(path).read().splitlines()
+            if line not in fixed and not any(p.match(line) for p in allowed)]
+
+
+def high_end(interval):
+    """The upper end of a Gappa result interval, as a float: the part after
+    the comma that is outside every brace."""
+    depth = 0
+    for i, ch in enumerate(interval):
+        depth += {"{": 1, "}": -1}.get(ch, 0)
+        if ch == "," and depth == 0:
+            hi = interval[i + 1:].strip()
+            break
+    m = DECIMAL.search(hi)
+    return float(m[1]) if m else float(hi)
+
+
+problems, bests, got, times, sizes = [], {}, {}, [], []
+for n in cases:
+    c = "c_" + n + "_half"
+    if exits.get(n, (None,))[0] != 0:
+        problems.append(f"{n} exit {exits.get(n)}")
+    if exits.get(c, (None,))[0] != 1:
+        problems.append(f"{c} exit {exits.get(c)}")
+    k = coqs.get(n)
+    if not k or k[0] != 0 or k[1] != 0:
+        problems.append(f"{n} coq {k}")
+    else:
+        sizes.append((k[3], k[4], k[2], n))
+    times.append((exits.get(n, (0, 0.0))[1], n))
+    problems += odd_lines(n + ".out", False) + odd_lines(n + ".bcoq", False)
+    problems += odd_lines(c + ".out", True)
+    if os.path.exists(n + ".coqc") and open(n + ".coqc").read():
+        problems.append(f"{n}.coqc is not empty")
+    got[n] = {}
+    for line in open(n + ".out").read().splitlines():
+        if m := RESULT.match(line):
+            got[n][NAMES[m[1]]] = high_end(m[2])
+    has_a = "Asum = " in open(n + ".g").read()
+    want = {"e", "d", "a", "g"} if has_a else {"e", "d"}
+    if set(got[n]) != want:
+        problems.append(f"{n}.out has {sorted(got[n])}, not {sorted(want)}")
+    best = [BEST.match(line) for line in open(c + ".out").read().splitlines()]
+    best = [m for m in best if m]
+    if len(best) != 1:
+        problems.append(f"{c} has {len(best)} best lines")
+    else:
+        bests[n] = float(best[0][2]) / U
+
+
+def total(n):
+    r = got[n]
+    return (r.get("e", 0) * r.get("d", 0) + r.get("a", 0) * r.get("g", 0)) / U
+
+
+print(len(cases), "cases,", len(exits), "exit lines,", len(coqs), "coq lines")
+print("lines of runpm.txt that are neither:", odd_log or "none")
+print("problems:", len(problems))
+for p in problems:
+    print("  " + p)
+proved = sum(exits.get(n, (None,))[0] == 0 for n in cases)
+failed = sum(exits.get("c_" + n + "_half", (None,))[0] == 1 for n in cases)
+print(f"cases that exit 0: {proved} of {len(cases)}; controls that exit 1: {failed} of {len(cases)}")
+print("gappa time per case: %.2f s (%s) to %.2f s (%s)" % (min(times) + max(times)))
+sizes.sort()
+print("coq: %d lines %d hints %.2f s (%s) to %d lines %d hints %.2f s (%s)" % (sizes[0] + sizes[-1]))
+with_a = [n for n in cases if "a" in got[n]]
+print("cases with a rounded product on a live path:", len(with_a), "of", len(cases))
+for key, what in (("e", "terms' error / D, upper end in u"), ("d", "D / L upper end"),
+                  ("a", "Asum / G, upper end in u"), ("g", "G / L upper end")):
+    scale = U if key in ("e", "a") else 1.0
+    print(what + ":", sorted(collections.Counter(round(got[n][key] / scale, 4)
+                                                 for n in cases if key in got[n]).items()))
+print("largest of the two averages added: %.4fu (%s), against POINT_ROUNDOFF's 36u"
+      % max((total(n), n) for n in cases))
+print("control best on (out - Ex) / L, in u, and how many controls:")
+for b, k in sorted(collections.Counter(round(b, 2) for b in bests.values()).items()):
+    print(f"  {b}u: {k}", ", ".join(n for n in bests if round(bests[n], 2) == b) if k <= 12 else "")
+print("largest best: %.4fu (%s), against POINT_ROUNDOFF's 36u" % max((b, n) for n, b in bests.items()))
+print("each best within 0.01% of its case's two averages added:",
+      all(abs(bests[n] - total(n)) <= 1e-4 * total(n) for n in bests))
+```
+
+`src/main.rs`, whole, as it ran:
+
+```rust
+//! Turn points whose largest coordinate L is below the normals by 30 degrees
+//! about z through the origin, and print each turn part, the point and the
+//! moved point's x and y as f64 bits, for subl.py to compare with the exact
+//! arithmetic on the same stored numbers.
+use rcad_geom::{Axis, Isometry, Point};
+
+fn main() {
+    let turn = Isometry::rotation(&Axis::z(), std::f64::consts::PI / 6.0).unwrap();
+    let [w, v0, v1, v2] = turn.rotation_quaternion();
+    println!("turn {:e} {:e} {:e} {:e}", w, v0, v1, v2);
+    println!("bits {} {} {} {}", w.to_bits(), v0.to_bits(), v1.to_bits(), v2.to_bits());
+    let tiny = f64::from_bits(1);
+    for (k, p) in [
+        Point::new(3.0 * tiny, 0.0, 0.0),
+        Point::new(3.0 * tiny, 5.0 * tiny, 0.0),
+        Point::new(1000.0 * tiny, 0.0, 0.0),
+        Point::new(3.0 * 2f64.powi(-1022), 0.0, 0.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let m = turn.apply_to_point(p);
+        println!(
+            "point {k} {} {} {} -> {} {} {}",
+            p.x().to_bits(),
+            p.y().to_bits(),
+            p.z().to_bits(),
+            m.x().to_bits(),
+            m.y().to_bits(),
+            m.z().to_bits()
+        );
+    }
+    println!("POINT_ROUNDOFF {:e}", Isometry::POINT_ROUNDOFF);
+}
+```
+
+`subl`'s whole print:
+
+```
+turn 9.659258262890683e-1 0e0 0e0 2.5881904510252074e-1
+bits 4606875505927962389 0 0 4598334089338226320
+point 0 3 0 0 -> 2 2 0
+point 1 3 5 0 -> 0 6 0
+point 2 1000 0 0 -> 866 500 0
+point 3 11258999068426240 0 0 -> 10353947156035968 6755399441055744 0
+POINT_ROUNDOFF 3.9968028886505635e-15
+```
+
+`subl.py`, whole, as it ran:
+
+```python
+"""Read subl's print on stdin and work each moved point's x and y without
+rounding from the stored turn, point.g's Ex and its turn for y, in exact
+rationals, then print how far the code's answer is from it in units of L and
+of the smallest subnormal, against POINT_ROUNDOFF = 18 eps = 36u, and how far
+the nearest f64 to the exact answer is.
+Run as: ./target/release/subl | python3 subl.py"""
+import struct
+import sys
+from fractions import Fraction
+
+U = Fraction(1, 2**53)
+TINY = Fraction(1, 2**1074)
+
+
+def f(bits):
+    return Fraction(struct.unpack("<d", struct.pack("<Q", int(bits)))[0])
+
+
+def nearest_gap(x):
+    """How far x is from the nearest multiple of 2^-1074, which every f64
+    below 2^-1021 is."""
+    k = x / TINY
+    lo = k.numerator // k.denominator
+    return min(k - lo, lo + 1 - k) * TINY
+
+
+lines = sys.stdin.read().splitlines()
+w, v0, v1, v2 = (f(b) for b in next(l for l in lines if l.startswith("bits")).split()[1:])
+for line in lines:
+    if not line.startswith("point"):
+        continue
+    words = line.split()
+    p0, p1, p2 = (f(b) for b in words[2:5])
+    x, y = f(words[6]), f(words[7])
+    s0 = s1 = Fraction(0)
+    ex = 2 * w * (v1 * p2 - v2 * p1) + v1 * (2 * (v0 * p1 - v1 * p0)) - v2 * (2 * (v2 * p0 - v0 * p2)) + p0 + s0
+    ey = 2 * w * (v2 * p0 - v0 * p2) + v2 * (2 * (v0 * p1 - v1 * p0)) - v0 * (2 * (v1 * p2 - v2 * p1)) + p1 + s1
+    big = max(abs(p0), abs(p1), abs(p2))
+    for name, got, exact in (("x", x, ex), ("y", y, ey)):
+        err = abs(got - exact)
+        print(f"point {words[1]} L = {float(big / TINY):g} * 2^-1074 {name}: code {float(got / TINY):g}, exact "
+              f"{float(exact / TINY):.6g} (* 2^-1074), off by {float(err / big / U):.4g}u * L, "
+              f"{float(err / TINY):.4g} * 2^-1074; nearest double off by {float(nearest_gap(exact) / big / U):.4g}u * L;"
+              f" past 36u * L: {err > 36 * U * big}")
+```
+
+`subl.py`'s whole print, with `subl`'s on its input. Its nearest-double
+figure takes doubles to be `2⁻¹⁰⁷⁴` apart, which they are below `2⁻¹⁰²¹`.
+Point 3's exact `x` is above that, where they are `2⁻¹⁰⁷³` apart, but the
+code's `x`, a double, is within `0.002163 · 2⁻¹⁰⁷⁴` of it, so it is the
+nearest double there and the figure holds:
+
+```
+point 0 L = 3 * 2^-1074 x: code 2, exact 2.59808 (* 2^-1074), off by 1.796e+15u * L, 0.5981 * 2^-1074; nearest double off by 1.207e+15u * L; past 36u * L: True
+point 0 L = 3 * 2^-1074 y: code 2, exact 1.5 (* 2^-1074), off by 1.501e+15u * L, 0.5 * 2^-1074; nearest double off by 1.501e+15u * L; past 36u * L: True
+point 1 L = 5 * 2^-1074 x: code 0, exact 0.0980762 (* 2^-1074), off by 1.767e+14u * L, 0.09808 * 2^-1074; nearest double off by 1.767e+14u * L; past 36u * L: True
+point 1 L = 5 * 2^-1074 y: code 6, exact 6.5 (* 2^-1074), off by 9.007e+14u * L, 0.5 * 2^-1074; nearest double off by 9.007e+14u * L; past 36u * L: True
+point 2 L = 1000 * 2^-1074 x: code 866, exact 866.025 (* 2^-1074), off by 2.288e+11u * L, 0.0254 * 2^-1074; nearest double off by 2.288e+11u * L; past 36u * L: True
+point 2 L = 1000 * 2^-1074 y: code 500, exact 500 (* 2^-1074), off by 0.2793u * L, 3.101e-14 * 2^-1074; nearest double off by 0.2793u * L; past 36u * L: False
+point 3 L = 1.35108e+16 * 2^-1074 x: code 1.17007e+16, exact 1.17007e+16 (* 2^-1074), off by 0.001442u * L, 0.002163 * 2^-1074; nearest double off by 0.001442u * L; past 36u * L: False
+point 3 L = 1.35108e+16 * 2^-1074 y: code 6.7554e+15, exact 6.7554e+15 (* 2^-1074), off by 0.2793u * L, 0.4189 * 2^-1074; nearest double off by 0.2793u * L; past 36u * L: False
+```
+
+`samepm.py`, whole, as it ran:
+
+```python
+"""Check 464.35's text against the files that ran: each script it holds whole
+is byte for byte the file in the run's directory, pointsub.py and controls.py
+run again from the text write the scripts that ran, the three lemma controls
+are their lemmas as the text says, tallypm.py prints what the text says it
+printed, and the probe prints what the text says it printed.
+Run as: python3 samepm.py <464 file> <run directory> <probe directory>"""
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+section_file, run_dir, probe_dir = sys.argv[1:4]
+text = open(section_file).read()
+start = text.index("\n### 464.35 ")
+end = text.find("\n### ", start + 1)
+section = text[start:end if end >= 0 else len(text)].splitlines()
+
+# A block's caption is the last paragraph before its opening fence, across the
+# blank line between them.
+blocks = []
+caption, para, inside, body, fresh = None, [], False, [], True
+for line in section:
+    if line.startswith("```"):
+        if inside:
+            blocks.append((caption, "\n".join(body) + "\n"))
+            inside, body = False, []
+        else:
+            caption, para, inside = " ".join(para), [], True
+        fresh = True
+    elif inside:
+        body.append(line)
+    elif line.strip():
+        if fresh:
+            para, fresh = [], False
+        para.append(line)
+    else:
+        fresh = True
+
+WHOLE = re.compile(r"^`([^`]+)`, whole, as it ran:$")
+PRINT = re.compile(r"^`([^`]+)`'s whole print")
+wholes = {m[1]: b for c, b in blocks if (m := WHOLE.match(c))}
+prints = {m[1]: b for c, b in blocks if (m := PRINT.match(c))}
+here = {"samepm.py": os.path.abspath(__file__), "src/main.rs": os.path.join(probe_dir, "src/main.rs"),
+        "subl.py": os.path.join(probe_dir, "subl.py")}
+for name, body in wholes.items():
+    path = here.get(name, os.path.join(run_dir, name))
+    print(f"{name} in the text is the file that ran: {open(path).read() == body}")
+
+work = tempfile.mkdtemp()
+for name in ("pointsub.py", "controls.py"):
+    open(os.path.join(work, name), "w").write(wholes[name])
+for name in ("pointsub.py", "controls.py"):
+    subprocess.run([sys.executable, name], cwd=work, check=True, capture_output=True)
+written = sorted(f for f in os.listdir(work) if f.endswith(".g") or f == "casesm.txt")
+differ = [f for f in written if open(os.path.join(work, f)).read() != open(os.path.join(run_dir, f)).read()]
+print(f"pointsub.py and controls.py run from the text write {len(written)} files; "
+      f"differing from the ones that ran: {differ or 'none'}")
+
+for lemma in ("mixedn", "mixeds", "sum"):
+    lines = wholes[lemma + ".g"].splitlines(keepends=True)
+    rest = lines[next(i for i, l in enumerate(lines) if not l.startswith("#")):]
+    control = f"# {lemma}.g's control: the same at u / 2, which must fail.\n" + "".join(rest).replace(
+        "[-1b-53, 1b-53]", "[-1b-54, 1b-54]")
+    same = control == open(os.path.join(run_dir, f"c_{lemma}_half.g")).read()
+    print(f"c_{lemma}_half.g written by the text's rule is the one that ran: {same}")
+
+tally = subprocess.run([sys.executable, os.path.join(run_dir, "tallypm.py")], capture_output=True, text=True,
+                       check=True).stdout
+print(f"tallypm.py prints what the text says: {tally == prints['tallypm.py']}")
+probe = subprocess.run([os.path.join(probe_dir, "target/release/subl")], capture_output=True, text=True,
+                       check=True).stdout
+print(f"subl prints what the text says: {probe == prints['subl']}")
+read = subprocess.run([sys.executable, os.path.join(probe_dir, "subl.py")], input=probe, capture_output=True,
+                      text=True, check=True).stdout
+print(f"subl.py prints what the text says: {read == prints['subl.py']}")
+```
