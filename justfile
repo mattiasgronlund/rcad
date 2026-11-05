@@ -24205,7 +24205,7 @@ check-land-selftest:
     hold_lock
     start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
     waiter=$(cat "$at/lander2/target/land/pid")
-    kill -STOP -- "-$waiter"
+    kill -STOP -- "-$waiter" 2>/dev/null || true
     stopped_pids="$stopped_pids $waiter"
     wait_stopped "$waiter"
     release_lock
@@ -24214,7 +24214,7 @@ check-land-selftest:
     grep -qxF "land: still running: the run in $at/lander2 (pid $waiter) waits to land it. Run \`mise exec -- just land wait-for lane-y\` to keep waiting" <<<"$got" \
         || fail "wait-for does not name the run that waits to land lane-y"
     hold_lock
-    kill -9 -- "-$waiter"
+    kill -9 -- "-$waiter" 2>/dev/null || true
     land_in verify 0.5 wait-for lane-y
     [ "$rc" -eq 3 ] || fail "wait-for exited $rc while a holder had the land lock, not 3 for still running"
     grep -qF 'land: still running: a holder has the land lock.' <<<"$got" || fail "wait-for does not say a holder has the lock"
@@ -24252,7 +24252,7 @@ check-land-selftest:
     start_in lander Q1 lane-x "$lane_sha" merge-x "$at/lane" "$at/verify"
     until_there "$at/stub/gate-started"
     start_in lander2 Q2 lane-y "$lane2_sha" merge-y "$at/lane2" "$at/verify2"
-    kill -9 -- "-$(cat "$at/lander/target/land/pid")"
+    kill -9 -- "-$(cat "$at/lander/target/land/pid")" 2>/dev/null || true
     wait_for lander2
     [ "$rc" -eq 0 ] && [ "$(field merged)" = true ] || fail "a lane waiting behind a holder that was killed did not land"
     on_origin "$lane2_sha" || fail "the waiting lane is not on origin/main"
