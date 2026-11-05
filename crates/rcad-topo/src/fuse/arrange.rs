@@ -5102,11 +5102,12 @@ impl<'f> Arrangement<'f> {
         }
     }
 
-    /// Count each loop a plane cuts a pipe or a ball in from the one node at
-    /// the place it starts, where no other node can lie between the two: the
-    /// `named_the_start` of [`HowItRuns::RoundAClosedCurve`]. That is the one
-    /// node whose box holds the walked start, or, where no node's box holds
-    /// it, the one whose box lies inside `node`, the box the start is held as.
+    /// Count each loop a plane cuts a pipe, a ball or a cone in from the one
+    /// node at the place it starts, where no other node can lie between the
+    /// two: the `named_the_start` of [`HowItRuns::RoundAClosedCurve`]. That is
+    /// the one node whose box holds the walked start, or, where no node's box
+    /// holds it, the one whose box lies inside `node`, the box the start is
+    /// held as.
     ///
     /// **A node whose box misses the walked start can still be at it.** The
     /// walked start is a rounding off the loop, and a node is a box round
@@ -5156,18 +5157,26 @@ impl<'f> Arrangement<'f> {
     /// pipe's axis, so it turns most sharply at the ends of its long axis, on
     /// a radius of `r cos θ`. The loop a plane cuts a ball of radius `R` in is
     /// a circle of radius `√(R² − h²)`, for `h` the plane's distance from the
-    /// ball's centre, and it turns on that radius everywhere. Where that radius
-    /// is proved to be `4d` or more
+    /// ball's centre, and it turns on that radius everywhere. The loop a plane
+    /// cuts a cone of half angle `α` and slope `s = tan α` in is an ellipse
+    /// whose half axes are `h sin α cos α / (cos² γ − sin² α)` and
+    /// `h sin α / √(cos² γ − sin² α)`, for `h` the plane's distance from the
+    /// apex and `γ` the angle between the plane's normal and the cone's axis.
+    /// It turns most sharply at the ends of its long axis, on a radius of `s·h`
+    /// however the plane leans
+    /// (`how_sharply_the_loop_a_plane_cuts_a_cone_in_turns` measures it). Where
+    /// that radius is proved to be `4d` or more
     /// ([`turns_on_four_times_the_diagonal_at_least`]), the stretch leaves the
     /// line by `d/16` at most, which is under the widest side. A node whose box
     /// is clear of the grown box is not on the stretch.
     ///
-    /// **Only a plane and a pipe or a ball**, since that radius is worked out
-    /// for them alone. A plane leaning against a pipe by a rounding cuts an
-    /// ellipse `1e16` long, whose ends turn on a radius near `1e-15`, far under
-    /// a box hundreds wide out there, and there the radius is not proved. A
-    /// plane that grazes a ball cuts a circle as small, and there it is not
-    /// proved either.
+    /// **Only a plane and a pipe, a ball or a cone**, since that radius is
+    /// worked out for them alone. A plane leaning against a pipe by a rounding
+    /// cuts an ellipse `1e16` long, whose ends turn on a radius near `1e-15`,
+    /// far under a box hundreds wide out there, and there the radius is not
+    /// proved. A plane that grazes a ball cuts a circle as small, and there it
+    /// is not proved either, nor where a plane near a cone's apex cuts it in a
+    /// loop as small.
     ///
     /// The dome of `LED_D5.0mm_Horizontal_O1.27mm_Z15.0mm.step`, the ball of
     /// radius `2.5` about `(1.27, −7.37, 15)`, is the shape for a ball (Q2989).
@@ -5180,6 +5189,26 @@ impl<'f> Arrangement<'f> {
     /// cut by those two planes and `z = 14.7` alone was refused on its order
     /// against one where `z = 14.7` crosses the circle
     /// (`a_ball_cut_by_two_planes_that_cross_where_its_circle_starts`).
+    ///
+    /// The pitch cones of a pair of mitre gears turned by `Isometry::rotation`
+    /// are the shape for a cone (Q3145). The lying frustum's near cap,
+    /// `x + ε·z = 1`, cuts the lying cone of slope 1 and apex `(0, 0, 0)` in an
+    /// ellipse that turns on a radius of 1 at the sharpest. It is walked from
+    /// `(1.0000000000000002, 0, −0.9999999999999998)`, inside the box of the
+    /// lying frustum's seam corner on that rim. Under `Policy::tolerant(100.0)`
+    /// the order of that corner against the meets near `(1 − ε, −2.1e−8, 1)`
+    /// was undecided, the policy read it as nought, and the fold left a cell of
+    /// the cap across its own arc: with the lying frustum first every fuse was
+    /// refused `CannotTellTheCellsOfAFaceApart` on the cap
+    /// (`the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_on_each_cap_as_one_point_under_a_tolerant_policy`).
+    /// So is the wedge of `degenerate_curved_fuses.rs` with its back corner
+    /// at `(−5, 0, 8)` (`A_BACK_WHOSE_ELLIPSE_STARTS_ON_THE_RULING`), under a
+    /// certified policy. Its face `(−8, −16, 5)` through that corner cuts the
+    /// cone of slope `1/8` in an ellipse that turns on a radius of about
+    /// `0.54` at the sharpest and starts at `(2.5, 0, 20)`, where the wedge's
+    /// edge on its slanted face touches the ellipse. That node is a meet of two
+    /// planes and a cone at a double root, a box round the start, and every
+    /// fuse was refused on the order along the ellipse.
     ///
     /// **Or where both boxes lie on one half of a pipe's loop**, either side of
     /// its long axis. Going along a half moves steadily along that axis, so the
@@ -5770,6 +5799,12 @@ impl<'f> Arrangement<'f> {
     /// out are put in order with the ellipse passing it once
     /// ([`Arrangement::round_two_places_two_curves_cross`]), and no run has
     /// yet shown the pipe face needing it passed twice.
+    ///
+    /// **Not for a loop a plane cuts a cone in**, though it is an ellipse that
+    /// bulges nowhere inwards as well, since no run has yet shown one needing
+    /// it. Its start is named since Q3145
+    /// ([`Arrangement::count_each_loop_from_the_node_round_its_start`]), and
+    /// that alone is what the shape there needed.
     fn a_node_the_loop_passes_twice(
         &self,
         crossing: usize,
@@ -5784,9 +5819,12 @@ impl<'f> Arrangement<'f> {
         else {
             return None;
         };
-        if self.surface.as_plane().is_none() || ALoopAPlaneCuts::of(wound_as).is_none() {
+        let Some(ALoopAPlaneCuts::Ellipse { .. } | ALoopAPlaneCuts::Circle { .. }) =
+            ALoopAPlaneCuts::of(wound_as)
+        else {
             return None;
-        }
+        };
+        self.surface.as_plane()?;
         let mut passed_twice = on_it.iter().flat_map(|&node| {
             self.nodes[node].crossings.iter().filter_map(move |&other| {
                 let cut = self.crossings[other].partner;
@@ -17845,16 +17883,26 @@ enum ALoopAPlaneCuts<'s> {
     Ellipse { flat: &'s Plane, pipe: &'s Cylinder },
     /// The circle a plane cuts a ball in.
     Circle { flat: &'s Plane, ball: &'s Sphere },
+    /// The ellipse a plane cuts one nappe of a cone in. A plane and a cone
+    /// cross in a loop only there: `a_pair_that_crosses_in_a_conic` lets them
+    /// through as a closed crossing once the lines through the apex and the
+    /// bends that never close are picked off.
+    EllipseOfACone { flat: &'s Plane, cone: &'s Cone },
 }
 
 impl<'s> ALoopAPlaneCuts<'s> {
-    /// The loop the pair is a plane and a pipe, or a plane and a ball, cut in,
-    /// in either order. `None` for every other pair.
+    /// The loop the pair is a plane and a pipe, a plane and a ball, or a plane
+    /// and a cone, cut in, in either order. `None` for every other pair.
     fn of(pair: &'s [Surface; 2]) -> Option<Self> {
         if let [Surface::Plane(flat), Surface::Cylinder(pipe)]
         | [Surface::Cylinder(pipe), Surface::Plane(flat)] = pair
         {
             return Some(ALoopAPlaneCuts::Ellipse { flat, pipe });
+        }
+        if let [Surface::Plane(flat), Surface::Cone(cone)]
+        | [Surface::Cone(cone), Surface::Plane(flat)] = pair
+        {
+            return Some(ALoopAPlaneCuts::EllipseOfACone { flat, cone });
         }
         let ([Surface::Plane(flat), Surface::Sphere(ball)]
         | [Surface::Sphere(ball), Surface::Plane(flat)]) = pair
@@ -17880,6 +17928,12 @@ impl<'s> ALoopAPlaneCuts<'s> {
 /// `n·x = k`. So this asks whether `R²|n|² − (n·c − k)² − 16d²|n|²` is above
 /// nought.
 ///
+/// The ellipse a plane cuts a cone of slope `s` in turns most sharply on a
+/// radius of `s·h`, for `h = |n·p − k|/|n|` the plane's distance from the
+/// apex `p`, however the plane leans
+/// ([`Arrangement::count_each_loop_from_the_node_round_its_start`]). So this
+/// asks whether `s²(n·p − k)² − 16d²|n|²` is above nought.
+///
 /// Squared and multiplied through by `|n|²`, so that nothing is divided and
 /// no root is taken.
 fn turns_on_four_times_the_diagonal_at_least(cut: ALoopAPlaneCuts, near: PredicatePoint) -> bool {
@@ -17904,8 +17958,115 @@ fn turns_on_four_times_the_diagonal_at_least(cut: ALoopAPlaneCuts, near: Predica
             let squared = dot_of(normal, normal);
             radius * radius * squared - off * off - sixteen_d_squared * squared
         }
+        ALoopAPlaneCuts::EllipseOfACone { flat, cone } => {
+            let normal = flat.normal().components().map(Interval::exactly);
+            let apex = cone.apex().coordinates().map(Interval::exactly);
+            let off = dot_of(normal, apex) - Interval::exactly(flat.offset());
+            let slope = Interval::exactly(cone.slope());
+            slope * slope * off * off - sixteen_d_squared * dot_of(normal, normal)
+        }
     };
     room.sign() == Decision::Pos
+}
+
+#[cfg(test)]
+mod how_sharply_the_loop_a_plane_cuts_a_cone_in_turns {
+    //! The bound [`turns_on_four_times_the_diagonal_at_least`] reads for a
+    //! plane and a cone, measured round the loop rather than taken from the
+    //! half axes (Q3145).
+
+    use rcad_geom::{Axis, Cone, Plane, Point, Vector};
+    use rcad_predicates::{Interval, Point as PredicatePoint};
+
+    use super::{ALoopAPlaneCuts, turns_on_four_times_the_diagonal_at_least};
+
+    /// Four cones, of slopes `1/4` to `2`, cut by planes leaning from square
+    /// to their axes up to most of the way to a ruling, at distances `3/4` to
+    /// `3` from the apex. Walked through `200 000` rulings, the circle through
+    /// each three neighbouring points of the loop is never smaller than
+    /// `s·h`, and the smallest is `s·h`, both to a part in `10⁵`. A box whose
+    /// diagonal is a hundredth under `s·h/4` is proved clear, and one a
+    /// hundredth over is not.
+    #[test]
+    fn the_loop_a_plane_cuts_a_cone_in_turns_on_no_radius_under_the_slope_times_the_apexs_distance()
+    {
+        let cuts = [
+            ([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], 1.0, 0.0_f64, 1.0),
+            ([1.0, -2.0, 0.5], [1.0, 2.0, 2.0], 0.5, 0.7, 2.0),
+            ([-3.0, 0.0, 4.0], [0.0, -1.0, 0.0], 2.0, 0.4, 0.75),
+            ([0.25, 0.5, -1.0], [-1.0, 1.0, 1.0], 0.25, 1.2, 3.0),
+        ];
+        for (apex, along, slope, lean, distance) in cuts {
+            let apex = Point::from(apex);
+            let w = Vector::from(along).normalized().expect("an axis");
+            let cone = Cone::new(Axis::new(apex, w).expect("an axis"), slope).expect("a cone");
+            let u = w
+                .cross(Vector::new(0.3, 0.5, 0.7))
+                .normalized()
+                .expect("off the axis");
+            let v = w.cross(u);
+            let facing = w * lean.cos() + u * lean.sin();
+            let flat =
+                Plane::from_point_and_normal(apex + facing * distance, facing).expect("a plane");
+            let normal = flat.normal();
+            let off = normal.dot(apex - Point::origin()) - flat.offset();
+            let sharpest_allowed = slope * off.abs() / normal.length();
+            let sharpest = the_smallest_circle_round_the_loop(&cone, &flat, u, v);
+            let what = format!("slope {slope}, lean {lean}, {distance} from the apex");
+            assert!(
+                (sharpest / sharpest_allowed - 1.0).abs() < 1e-5,
+                "{what}: turns on {sharpest} at the sharpest, against {sharpest_allowed}"
+            );
+            let cut = ALoopAPlaneCuts::EllipseOfACone {
+                flat: &flat,
+                cone: &cone,
+            };
+            for (times, proved) in [(0.99, true), (1.01, false)] {
+                let side = times * sharpest_allowed / 4.0 / 3f64.sqrt();
+                let near = PredicatePoint::Constructed(
+                    apex.coordinates()
+                        .map(|at| Interval::new(at, at + side).expect("a side of nought or more")),
+                );
+                assert_eq!(
+                    turns_on_four_times_the_diagonal_at_least(cut, near),
+                    proved,
+                    "{what}: a box of diagonal {times} of a quarter of {sharpest_allowed}"
+                );
+            }
+        }
+    }
+
+    /// The radius of the smallest circle through three neighbouring points of
+    /// the loop `flat` cuts `cone` in, each where a ruling of the cone's
+    /// nappe facing `flat` crosses it, for `u` and `v` square to each other
+    /// and to the cone's axis.
+    fn the_smallest_circle_round_the_loop(cone: &Cone, flat: &Plane, u: Vector, v: Vector) -> f64 {
+        const RULINGS: u32 = 200_000;
+        let apex = cone.apex();
+        let w = cone.axis().direction().normalized().expect("an axis");
+        let normal = flat.normal();
+        let height = flat.offset() - normal.dot(apex - Point::origin());
+        let points: Vec<Point> = (0..RULINGS)
+            .map(|each| {
+                let turned = std::f64::consts::TAU * f64::from(each) / f64::from(RULINGS);
+                let ruling = w + (u * turned.cos() + v * turned.sin()) * cone.slope();
+                let along = height / normal.dot(ruling);
+                assert!(along > 0.0, "the plane cuts this nappe in a loop");
+                apex + ruling * along
+            })
+            .collect();
+        (0..points.len())
+            .map(|each| {
+                let [a, b, c] = [
+                    points[(each + points.len() - 1) % points.len()],
+                    points[each],
+                    points[(each + 1) % points.len()],
+                ];
+                let twice_the_area = (b - a).cross(c - a).length();
+                (b - a).length() * (c - b).length() * (a - c).length() / (2.0 * twice_the_area)
+            })
+            .fold(f64::INFINITY, f64::min)
+    }
 }
 
 /// Whether `place` is proved off the stretch of the loop `flat` cuts `pipe`
