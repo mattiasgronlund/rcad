@@ -5201,6 +5201,14 @@ impl<'f> Arrangement<'f> {
     /// the cap across its own arc: with the lying frustum first every fuse was
     /// refused `CannotTellTheCellsOfAFaceApart` on the cap
     /// (`the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_on_each_cap_as_one_point_under_a_tolerant_policy`).
+    /// So is the wedge of `degenerate_curved_fuses.rs` with its back corner
+    /// at `(−5, 0, 8)` (`A_BACK_WHOSE_ELLIPSE_STARTS_ON_THE_RULING`), under a
+    /// certified policy. Its face `(−8, −16, 5)` through that corner cuts the
+    /// cone of slope `1/8` in an ellipse that turns on a radius of about
+    /// `0.54` at the sharpest and starts at `(2.5, 0, 20)`, where the wedge's
+    /// edge on its slanted face touches the ellipse. That node is a meet of two
+    /// planes and a cone at a double root, a box round the start, and every
+    /// fuse was refused on the order along the ellipse.
     ///
     /// **Or where both boxes lie on one half of a pipe's loop**, either side of
     /// its long axis. Going along a half moves steadily along that axis, so the
