@@ -13324,7 +13324,9 @@ shift, and each `|nᵢ| ≤ 1`. `square.g`'s, in its order:
 
 - `m` of length exactly one, so each `|mᵢ| ≤ 1`;
 - each `|mᵢ| ≥ 2⁻¹⁰¹²`, where `scaled_to_length_one_from_anywhere`
-  (`point.rs:335-398`) promises the nearest `f64`, and so no component zero;
+  (`point.rs:335-398`) promises the nearest `f64`, and so no component zero.
+  464.36 runs `square.g` with one or two components of `m` zero, and its
+  `64ε` holds;
 - the quaternion's components finite, and `|q·q − 1| ≤ 6ε` worked out exactly;
 - each `|dᵢ| ≤ 20u`, what `vector.g`, `vector1.g` and `vector2.g` prove.
 
@@ -14048,7 +14050,9 @@ products below the normals (Q2802) and the route through
 `From<na::Isometry3<f64>>` (Q2803), which `vector.g` shares with `point.g`;
 Q2700, which moves these scripts into `proofs/gappa/` with 464.19's. Q2802 ran
 `point.g` alone, in 464.35, and files `vector.g` in its form as a row (464.35's
-7).
+7). 464.36 runs both rows, the zero branches of the second bullet and
+`vector.g` in 464.35's form (Q2825, Q3211): `vector.g`'s `20u` and
+`square.g`'s `64ε` hold.
 
 ### 464.21 CORNER_AFTER_MOVING_ROUNDOFF
 
@@ -14234,7 +14238,8 @@ Two hypotheses are left unproved:
   like of a normal, and one of the rows 9 files asks it of an axis.
 - `point.g` and `vector.g` are proved away from their zero branches and with
   their products normal, as 464.19's 5 says; Q2801, Q2825 and Q2802 run them
-  there.
+  there. Done: `point.g` in 464.34 and 464.35, whose `36u · L` holds with `L`
+  normal, and `vector.g` in 464.36, whose `20u` holds.
 
 **6. The controls.** Each changes one thing and exits 1. A goal just under
 what the script reaches shows its hypotheses do not contradict each other,
@@ -15245,7 +15250,9 @@ normal (Q2802) and the route through `From<na::Isometry3<f64>>` (Q2803), which
 these scripts share with `point.g` and `vector.g`; and Q2700, which moves these
 scripts into `proofs/gappa/` with the rest of 464's. Q2802 ran `point.g` alone,
 in 464.35, where a product below the normals lets a slip reach `34.73u`, and
-files the pipe with that slip as a row (464.35's 7).
+files the pipe with that slip as a row (464.35's 7). Q2825 and Q3211 ran
+`vector.g` in the zero branches and with its products below the normals, in
+464.36, and its `20u` holds there.
 
 ### 464.22 EVALUATION_ROUNDOFF's one stage
 
@@ -23857,7 +23864,8 @@ answer to look for.
   same 88 zero sets prove the `36u` with each such product free to fall below
   the normals and `L` normal, reaching `34.73u`. Q2825 runs 464.20's
   `vector.g` and `square.g` in the zero branches, and `vector.g` is
-  `point.g` with no shift, so 1 and 2 are its split with `s₀` gone. Q2700
+  `point.g` with no shift, so 1 and 2 are its split with `s₀` gone. Done, in
+  464.36: both hold in every zero branch. Q2700
   moves into `proofs/gappa/` each script a row of 464 appended, these among
   them.
 
@@ -24893,7 +24901,8 @@ each from Q2802:
   Not run, so no class.
 - Run 464.20's `vector.g` in this form, each product on a live path free to
   fall below the normals, and say whether its `20u` holds. 464.20 left it to
-  Q2802, which ran `point.g` alone. Not run, so no class.
+  Q2802, which ran `point.g` alone. Not run, so no class. (Q3211; 464.36 runs
+  it, and its `20u` holds.)
 
 And what is not a row: Q2700, which moves these scripts into `proofs/gappa/`
 with the rest of 464's; and `field` on these hints, which 464.10 leaves for
@@ -25799,4 +25808,1454 @@ print(f"subl prints what the text says: {probe == prints['subl']}")
 read = subprocess.run([sys.executable, os.path.join(probe_dir, "subl.py")], input=probe, capture_output=True,
                       text=True, check=True).stdout
 print(f"subl.py prints what the text says: {read == prints['subl.py']}")
+```
+
+### 464.36 Plane::NORMAL_LENGTH_ROUNDOFF's vector.g below the normals and in the zero branches
+
+Q2825 and Q3211 ran 464.20's `vector.g` with each of its products free to
+fall below the normals and in the zero branches, and its `square.g` in the
+zero branches, in two lanes on 2026-11-05. The first, over four runs, wrote
+`vectorsub.py` and ran four of its cases through `peakv.sh` (5); ran all 88
+cases and their controls, wrote `squarezero.py` and started its 77; counted
+those; and ran `peakv.sh` again and wrote `samevm.py`. The second ran
+`samevm.py` and wrote this.
+
+`vector.g`'s `20u` holds with each product on a live path normal, below the
+normals or 0, and in each zero branch of the turn and the vector that the
+turn's arithmetic can reach (2). Each of the 88 cases proves the turned
+vector's `x` within `20u` of what the turn's own numbers, worked without
+rounding, give (3). `y` and `z` are covered by the same cases (2), Coq checks
+each proof, modulo its hints (3), and each control fails (4). The terms'
+errors reach at most `19.5999u`, as 464.20's `vector.g` does with its
+products normal, and the products below the normals add at most `9.93u ·
+2⁻¹⁰²²` on top, which is nothing beside `20u`. Unlike 464.35's `36u · L`,
+this needs no floor under any number: `vector.g`'s goal is absolute, since
+each component of the vector is at most one, and so is what the products
+below the normals add (1). That answers Q3211, and the `vector.g` half of
+Q2825.
+
+With that `20u` as its `d`, `square.g` proves `NORMAL_LENGTH_ROUNDOFF`'s
+`64ε` with one or two components of `m` zero and up to two parts of the turn
+zero, in each of 77 cases (2, 3), and each control fails (4). Where at most
+one component of `m` is zero, the four parts add to `119.28u`, 464.20's own
+sum. Where two are, `n` is exactly `±1` along an axis, the constructor's
+`2u` drops out, and they add to `117.28u`, or to `40u` for a turn about that
+axis and `88u` for a half turn about an axis at right angles to it. So the
+`64ε` holds in the zero branches, and with the turn's products below the
+normals, under 464.20's other hypotheses: the turn's `q·q` within `6ε` of
+one, and each component of `m` that is not zero at least `2⁻¹⁰¹²`. Below
+`2⁻¹⁰¹²`, `scaled_to_length_one_from_anywhere` promises one ulp and not the
+nearest `f64`, and nothing here ran there: a row (6). That answers the
+`square.g` half of Q2825.
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, started by 464.34's `runpz.sh`, both unchanged (7),
+against `isometry.rs`, `plane.rs` and `point.rs` at `c40cc82e` and nalgebra
+0.35.0. 464.20's `square.g` restates them at `4b642567`. From there to
+`c40cc82e`, `point.rs` and `Cargo.lock` do not change and `plane.rs` changes
+in comments alone. `isometry.rs` changes `POINT_ROUNDOFF`'s doc and one more
+doc line, adds `TryFrom<na::Isometry3<f64>>` and its tests in place of the
+`From` it drops, and has `held_near_length_one` call a new
+`sits_near_length_one`, which makes the same test, `(q.norm_squared() -
+1).abs() <= TURN_LENGTH_DRIFT`; `apply_to_vector`, `turned_by` and
+`named_by` have no hunk (`git diff -U0`). So `squarezero.py` writes each of
+its cases restating `c40cc82e`. At this lane's base, `ab689aa7`, the four
+files are `c40cc82e`'s (`git diff --stat`). `u` is `2⁻⁵³` and `ε` is
+`f64::EPSILON = 2u`.
+
+**1. The form.** `vectorsub.py` (7) writes `vector.g` in 464.35's form, from
+464.35's `pointsub.py`. Each rounded product on a live path is `P * (1 + m *
+s) + m * 1b-1022`, with `m` in `[−u, u]` and `s` in `[−1, 1]`, and each
+rounded sum on one is `C * r`, with `r` in `[1 − u, 1 + u]`, all of them
+free, from the same three lemmas, `mixedn.g`, `mixeds.g` and `sum.g`
+(464.35's 1). That takes in at once a product normal, below the normals or
+rounded to 0 with neither factor 0, a sum that cancels, and a sum with one
+part zero, so no case is split by which sums cancel. A zero factor is the
+double 0, and each product and sum it makes zero is written unrounded. What
+differs from `pointsub.py`:
+
+- The vector `n` takes the point's place, each component in `[−1, 1]`, as a
+  constructor's normal is (464.20's 2). There is no shift, so no `s₀`, and
+  one rounding fewer on each path.
+- The terms' shares of `D` are `vector.g`'s: `10|w||v₁|` and `10|w||v₂|` for
+  the two through `w`, `12` times its two parts of `v` for each of the four
+  through `k`, and `1` for `n₀`. `D`'s hint is `vector.g`'s, `93/5 · q·q`
+  less four squares, plus 1 for `n₀`, with what a zero factor takes out of
+  `D` taken out of the hint.
+- The goal is `vector.g`'s, `out − Ex` within `20u`, which is absolute. So
+  each amount's share of `G` is `|f| · Lo`, with `Lo` a name held to
+  `2⁻¹⁰²²`, the smallest normal number, where 464.35's is `|f| · L`. Each
+  amount is then within `u` of its share for every input, `G / Lo` is
+  `pointsub.py`'s `G / L`, the same shares of the same nine products, and
+  its hint is 464.35's, with `λ` as there. `out − Ex` is within `E / D · D +
+  Asum / G · G / Lo · 2⁻¹⁰²²`, every part of it absolute, so no hypothesis
+  puts a floor under any number, where 464.35's needs `L` at least
+  `2⁻¹⁰²²`.
+- Where no term of `Ex` keeps all its factors and `n₀` is zero, `out` and
+  `Ex` are both exactly 0, and the script has no `D`. Its control asks for
+  `out − Ex` in `[2⁻⁶⁰, 1]`, which leaves out the 0, as 464.34's 4 does for
+  its 21.
+
+`squarezero.py` (7) writes `square.g`'s cases from 464.20's `square.g`
+itself, by replacing its lines, each of which it asserts it finds once. A
+zero `mᵢ` is the constructor's `nᵢ = 0` exactly, so `mᵢ`'s `gᵢ` and `hᵢ`
+drop out of the averaging over the `mᵢ²`, with their three hints, and `M2`
+is the sum of the squares left, still one. A zero part of the turn is the
+double 0, with its bound as a finite `f64` dropped. `square.g` puts no lower
+bound on a part of the turn, so a zero part was inside its hypotheses
+already, and writing it 0 shows it. The hypothesis on `d` is `vector.g`'s
+`20u`, which 3 proves in every zero branch of the vector and the turn.
+`sq_n.g`, the case with nothing zero, differs from `square.g` in the sha on
+the six lines that name it, an added `# 464.36:` line naming the zero
+factors, and `and none is zero but none.` (`diff`).
+
+**2. The cases.** One case for each zero set of 464.34's 2, `vm_<zeros>.g`,
+`<zeros>` the zero factors or `n` for none, with a control
+`c_vm_<zeros>_half.g` beside each (4). Of the 128 sets of the seven factors,
+the 40 that hold three or four of the turn's parts never reach this
+arithmetic or cannot keep `q·q` near one (464.34's 1), which leaves 88. In 25
+of them no rounded product is on a live path. In 21 of the 25 nothing is
+live: `n₀` is zero and each term has a zero factor. The other four,
+`vm_v1v2`, `vm_v1v2n1`, `vm_v1v2n2` and `vm_v1v2n1n2`, are turns about the
+`x` axis with `n₀` not zero, and there `n₀` is all that is live and `D` is
+1. The other 63 have a rounded product on a live path, and so an `Asum` and a
+`G`; `vm_n`, with nothing zero, has all nine. `y` and `z` are `x` with every
+index turned (464.20's `turn.py`), and the 88 zero sets are closed under that
+turn, so the cases for `x` are the cases for `y` and `z`.
+
+`square.g`'s cases are `sq_<zeros>.g`, `<zeros>` the zero factors, `m`'s
+first, or `n` for none, with `c_sq_<zeros>_half.g` beside each. `m` has
+length one, so at most two of its components are zero, which is 7 zero
+sets, and the turn has at most two parts zero, as above, which is 11: 77 in
+all. `square.g` holds all three turned components, so its `d` stands on the
+88 for `x`, `y` and `z` alike, each case on the 88's case with its zero
+parts of the turn and its zero components of `n`.
+
+**3. What they print.** `startvm.sh` (7) ran the 88 cases, each with `gappa
+-Bcoq` and `coqc`, and their 88 controls, 12 at once, from 17:14:28 to
+17:18:42 UTC by its files' times. `tallyvm.py` (7), 464.35's `tallypm.py`
+with these names and the absolute goal, counts them, and its whole print is
+below:
+
+- Each of the 88 exits 0 at `vector.g`'s `20u`, in 0.03 s (`vm_v2n0n1n2`) to
+  20.44 s (`vm_n`).
+- In the 21 where nothing is live there is no result to print, and
+  `tallyvm.py` finds them to be the cases where `n₀` is zero and every term
+  has a zero factor.
+- The terms' error over `D` is within `u`, and a little more, in each of the
+  other 67.
+- The upper end of `D` is 1 in the four turns about `x`, 13 to 18.6 in 33,
+  and 19.6, `vector.g`'s own `93/5 + 1`, in 30.
+- `Asum / G` is within `u`, and a little more, in each of the 63.
+- The upper end of `G / Lo` is 9.93 in `vm_n`, and 3 to 7.90 in the other 62:
+  the same eight values, in the same counts, as 464.35's `G / L`.
+- So the terms' part of `out − Ex` reaches at most `19.5999u`
+  (`vm_wv2n2`), and the amounts' part at most `9.9285u · 2⁻¹⁰²²` (`vm_n`),
+  against the goal's `20u`. With the products normal, 464.20's `vector.g`
+  reaches `19.6u` (464.20's 4).
+- `gappa -Bcoq` and `coqc` exit 0 on all 88: 427 lines with 6 hints
+  (`vm_v1v2n1n2`, 2.10 s) to 9338 lines with 41 hints (`vm_n`, 27.55 s),
+  where 464.20's `vector.v` came to 6740 lines with 33.
+- No `.out`, `.bcoq` or `.coqc` of the 88 has a line other than its results,
+  warnings that a divisor has been assumed to be nonzero, and one warning
+  more in each `.out`, `.bcoq` and control `.out` of the 67: that Gappa had
+  no need of the hint writing the terms' error as its fraction of `D` times
+  `D`, if `D` is not zero. That is `E -> (E / D) * D` in the 63 and `out -
+  Ex -> ((out - Ex) / D) * D` in the four, as 464.20's `vector.out` said of
+  the second (464.20's 7). So no hint was reported as not an identity, and
+  each `.coqc` is empty.
+
+`tallyvm.py`'s whole print:
+
+```
+88 cases, 176 exit lines, 88 coq lines
+lines of runvm.txt that are neither: none
+problems: 0
+cases that exit 0: 88 of 88; controls that exit 1: 88 of 88
+gappa time per case: 0.03 s (vm_v2n0n1n2) to 20.44 s (vm_n)
+coq: 427 lines 6 hints 2.10 s (vm_v1v2n1n2) to 9338 lines 41 hints 27.55 s (vm_n)
+cases where nothing is live, so out and Ex are 0: 21 of 88
+  they are the cases where n0 is zero and every term has a zero factor: True
+cases with a rounded product on a live path: 63 of 88
+terms' error / D, upper end in u: [(1.0, 67)]
+D upper end: [(1.0, 4), (13.0, 10), (15.871, 6), (18.6, 17), (19.6, 30)]
+Asum / G, upper end in u: [(1.0, 63)]
+G / Lo upper end: [(3.0, 26), (4.8286, 18), (5.0, 7), (6.4643, 2), (6.4722, 4), (7.6569, 1), (7.8992, 4), (9.9286, 1)]
+hints Gappa had no need of, while D is not zero, and how often:
+  189: E -> (E / D) * D;
+  12: out - Ex -> ((out - Ex) / D) * D;
+largest terms' part: 19.5999u (vm_wv2n2), against vector.g's 20u
+largest amounts' part: 9.9285u * 2^-1022 (vm_n)
+control best on out - Ex, in u, and how many controls:
+  1.0u: 4 vm_v1v2, vm_v1v2n1, vm_v1v2n2, vm_v1v2n1n2
+  13.0u: 10 vm_wv1n2, vm_wv2n1, vm_v0v1n1, vm_v0v2n2, vm_v1n1n2, vm_v2n1n2, vm_wv1n1n2, vm_wv2n1n2, vm_v0v1n1n2, vm_v0v2n1n2
+  15.69u: 6 vm_wv1n0, vm_wv2n0, vm_v1n0n1, vm_v2n0n2, vm_wv1n0n1, vm_wv2n0n2
+  18.56u: 6 vm_v0v1n0, vm_v0v2n0, vm_v1n0n2, vm_v2n0n1, vm_v0v1n0n2, vm_v0v2n0n1
+  18.57u: 2 vm_v0n0n1, vm_v0n0n2
+  18.6u: 9 vm_n0, vm_wn0, vm_v0n0, vm_v1n0, vm_v2n0, vm_n0n1, vm_n0n2, vm_wn0n1, vm_wn0n2
+  19.6u: 30 
+largest best: 19.6000u (vm_wv2n2), against vector.g's 20u
+each best at most its case's terms' part, and a little more: True
+bests within 0.01% of their case's terms' part: 51 of 67
+the others, best and terms' part in u: vm_wv1n0 15.6860 15.8710, vm_wv2n0 15.6860 15.8710, vm_wn0n1 18.5951 18.5999, vm_wn0n2 18.5951 18.5999, vm_v0v1n0 18.5567 18.5999, vm_v0v2n0 18.5567 18.5999, vm_v0n0n1 18.5650 18.5999, vm_v0n0n2 18.5650 18.5999, vm_v1n0n1 15.6865 15.8710, vm_v1n0n2 18.5616 18.5999, vm_v2n0n1 18.5616 18.5999, vm_v2n0n2 15.6865 15.8710, vm_wv1n0n1 15.6860 15.8710, vm_wv2n0n2 15.6860 15.8710, vm_v0v1n0n2 18.5567 18.5999, vm_v0v2n0n1 18.5567 18.5999
+```
+
+`startsq.sh` (7) ran `square.g`'s 77 cases the same way, and their 77
+controls, from 17:19:35 to 17:20:18 UTC by its files' times. `tallysq.py`
+(7), `tallyvm.py` with these names and `square.g`'s five results, reads each
+bound from the exact number Gappa prints before its decimal, counts them, and
+its whole print is below:
+
+- Each of the 77 exits 0 at the code's `128u`, in 0.89 s (`sq_m1m2v1v2`) to
+  2.74 s (`sq_v0`).
+- `n·n − 1` is within 464.20's `2u` in the 44 where at most one component of
+  `m` is zero, and `[0, 0]` in the 33 where two are, since there `n` is
+  exactly `±1` along an axis.
+- `|v × n|²`, `VN`, is in `[0, 1]` in 71. It is within `12u` of one in the
+  three where `w` and `n`'s own part of `v` are zero, a half turn about an
+  axis at right angles to `n`: `sq_m0m1wv2.out` prints `[2251799813685245b-51,
+  2251799813685251b-51]`, which the print rounds to `[1.0, 1.0]`. It is `[0,
+  0]` in the three where `v` lies along `n`, a turn about `n`'s axis.
+- `4(q·q − 1)|v × n|²` is within `48u` in 74, and `[0, 0]` in those last
+  three.
+- `2 Ex·d`, `F2`, is within `69.28u`, 464.20's `2√3 · 20u`, in 71, and within
+  `40u`, `2 · 20u`, in the six of those two kinds, where `Ex` is `±n` and so
+  only one `dᵢ` meets it: `sq_m0m1v0v1.out` prints `5b-50`.
+- `d·d`, `DD`, is at most `1200u²` in all 77.
+- So the four parts add to at most `119.2820u`, 464.20's own sum, in `sq_n`
+  and 31 more. The other 12 of the 44 with at most one component of `m`
+  zero, the cases with two parts of `v` zero, `sq_v0v1` to `sq_m2v1v2`, fall
+  short of it only past the print's fourth decimal. With two components of
+  `m` zero the parts add to `117.28u` in 27, `88u` in 3 and `40u` in 3 (4).
+- `gappa -Bcoq` and `coqc` exit 0 on all 77: 1750 lines with 12 hints
+  (`sq_m0m1v0v1`, 1.76 s) to 5525 lines with 15 hints (`sq_m1`, 3.66 s),
+  where 464.20's `square.v` came to 4398 with 18. Each `.bcoq` prints the
+  same results as its `.out`.
+- No `.out`, `.bcoq` or `.coqc` of the 77 has a line other than its results
+  and warnings that a divisor has been assumed to be nonzero, and no such
+  divisor names a component of `m` that the case has zero. Each `.coqc` is
+  empty.
+
+`tallysq.py`'s whole print:
+
+```
+77 cases, 154 exit lines, 77 coq lines
+lines of runsq.txt that are neither: none
+problems: 0
+cases that exit 0: 77 of 77; controls that exit 1: 77 of 77
+gappa time per case: 0.89 s (sq_m1m2v1v2) to 2.74 s (sq_v0)
+coq: 1750 lines 12 hints 1.76 s (sq_m0m1v0v1) to 5525 lines 15 hints 3.66 s (sq_m1)
+cases whose .bcoq prints the same results as their .out: 77 of 77
+cases by the components of m that are zero: none 11, m0 11, m1 11, m2 11, m0m1 11, m0m2 11, m1m2 11
+each part's bound, and the cases it is in:
+  NN - 1, in u:
+    [-2.0, 2.0]: 44, m zero none, m0, m1, m2
+    [0.0, 0.0]: 33, m zero m0m1, m0m2, m1m2
+  VN:
+    [0.0, 1.0]: 71, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
+    [1.0, 1.0]: 3, sq_m0m1wv2, sq_m0m2wv1, sq_m1m2wv0
+    [0.0, 0.0]: 3, sq_m0m1v0v1, sq_m0m2v0v2, sq_m1m2v1v2
+  4 * (N4 - 1) * VN, in u:
+    [-48.0, 48.0]: 74, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
+    [0.0, 0.0]: 3, sq_m0m1v0v1, sq_m0m2v0v2, sq_m1m2v1v2
+  F2, in u:
+    [-69.282, 69.282]: 71, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
+    [-40.0, 40.0]: 6, sq_m0m1wv2, sq_m0m1v0v1, sq_m0m2wv1, sq_m0m2v0v2, sq_m1m2wv0, sq_m1m2v1v2
+  DD, in u^2:
+    [0.0, 1200.0]: 77, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
+largest of the four parts added: 119.2820u (sq_n and 31 more), against NORMAL_LENGTH_ROUNDOFF's 128u
+control best on OO - 1, in u, and how many controls:
+  40.0u: 3, sq_m0m1v0v1, sq_m0m2v0v2, sq_m1m2v1v2
+  88.0u: 3, sq_m0m1wv2, sq_m0m2wv1, sq_m1m2wv0
+  117.28u: 27, m zero m0m1, m0m2, m1m2
+  119.28u: 44, m zero none, m0, m1, m2
+largest best: 119.2823u (sq_n and 43 more), against NORMAL_LENGTH_ROUNDOFF's 128u
+each best within 0.01% of its case's four parts added: True
+```
+
+`19.5999u` and `119.28u` are how far this averaging reaches, not points any
+input has been seen at, for the reason 464.35's 3 gives. Gappa does not write
+the same proof each run (464.4), so the sizes and times are this run's. Each
+proof stands on its hints and on the divisors Gappa took to be nonzero, as
+464.19's 8 says of its own. `field` has not been run on these hints (464.10).
+
+**4. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3), so each case has a control that must fail, and each
+of the 165 exits 1. Gappa's best for a goal it does not prove can change from
+one run to the next (464.26), so these are this run's, each a bound Gappa
+found on the size of the goal's expression.
+
+`vector.g`'s controls ask for `out − Ex` within `u / 2`, `1b-54`, in the 67
+cases where something is live, and for `out − Ex` in `[2⁻⁶⁰, 1]` in the 21
+where nothing is, which leaves out the 0 that both are there. Each of the 21
+prints `Error: no contradiction was found.` and no best. The bests of the 67:
+
+- `u` in the four turns about `x`, `vm_v1v2`, `vm_v1v2n1`, `vm_v1v2n2` and
+  `vm_v1v2n1n2`, whose `out` is `n₀` times a free ratio;
+- `13u` to `19.6u` in the 63, the largest `19.6000u` (`vm_wv2n2`), which is
+  464.20's `c_vector_195`'s.
+
+Each is at most its case's terms' part, and a little more, and 51 of the 67
+are within 0.01% of it, the check 464.35's 4 makes. The other 16, each with
+`n₀` zero, are up to 1.2% under it: `vm_wv1n0`'s best is `15.6860u` where
+its terms' part is `15.8710u`. So `tallyvm.py` checks "at most" where
+464.35's `tallypm.py` checks "within 0.01%".
+
+`square.g`'s controls ask for `out·out − 1`, `OO − 1`, within `u / 2`, where
+464.20's `c_square_119` asks for `119u`. With two components of `m` zero the
+cases reach only `117.28u`, `88u` or `40u` (3), so a goal at `119u` would
+sit above what 33 of them reach, and a proof there would show nothing. The
+bests are `119.28u` in the 44 with at most one component of `m` zero, which
+is `c_square_119`'s, `117.28u` in 27, `88u` in 3 and `40u` in 3, each within
+0.01% of its case's four parts added.
+
+So none of the 165 proofs came from a contradiction in its hypotheses.
+
+**5. The memory.** 464.35's first three forms ran out of memory on
+`point.g`'s case with nothing zero (464.35's 6), so the first lane ran four
+of these through `peakv.sh` (7) before the rest, each under a 12 GB cap:
+`vm_n`, all nine products free to fall below the normals and nothing zero;
+`vm_v0v1n0n1n2`, one of the 21 where nothing is live; and their controls.
+
+`peakv.sh` printed:
+
+```text
+vm_n exit 0 6.57s peak 128276 KB
+c_vm_n_half exit 1 14.92s peak 154092 KB
+vm_v0v1n0n1n2 exit 0 0.01s peak 6612 KB
+c_vm_v0v1n0n1n2_half exit 1 0.17s peak 6876 KB
+```
+
+By the run directory's file times, `peakv.sh` ran at 17:09:39 UTC, and all
+176 of `vectorsub.py`'s scripts and `casesv.txt` were written again at
+17:13:49, after `vectorsub.py` last changed, at 17:09:17, and before
+`startvm.sh` started. The times alone cannot show that `peakv.sh` ran on the `vm_n.g` the 88 ran
+on, so the first lane's fourth run copied `peakv.sh` and its four scripts
+into `peak/` in the run directory and ran them there again at 17:34 UTC,
+`./peak/peakv.sh vm_n.g c_vm_n_half.g vm_v0v1n0n1n2.g
+c_vm_v0v1n0n1n2_half.g`. `samevm.py` finds the four in `peak/` the run
+directory's, and those the ones the text's `vectorsub.py` writes (7).
+
+`peakv.sh` printed again, in `peak/`:
+
+```text
+vm_n exit 0 6.58s peak 128404 KB
+c_vm_n_half exit 1 15.14s peak 153760 KB
+vm_v0v1n0n1n2 exit 0 0.01s peak 6556 KB
+c_vm_v0v1n0n1n2_half exit 1 0.17s peak 6760 KB
+```
+
+Each figure is within 2% of the first run's. `vm_n` proves in 6.58 s at a
+peak of 128 404 KB, where 464.35's `pm_n` takes 5.46 s and 89 188 KB, and
+464.19's `point.g` 49.18 s and 4 496 464 KB.
+
+`/usr/bin/time`'s `%x` prints 0 for a run a signal ends (464.35's 6), and no
+`.time` in the run directory or in `peak/` has the line `Command terminated`
+(`grep -l`). Gappa writes its results and warnings to standard error, so
+`peakv.sh` puts them in `<name>.time`, above the time line, and leaves
+`<name>.out` empty. That is why the second run went in `peak/`: in the run
+directory it would have emptied the `.out` files `tallyvm.py` reads.
+
+**6. What this leaves.** One row, filed from this write-up when it merges,
+from Q2825:
+
+- Run `square.g` with a component of `m` strictly between 0 and `2⁻¹⁰¹²`.
+  There `scaled_to_length_one_from_anywhere` promises one ulp, not the
+  nearest `f64` (`point.rs:338-341` at `c40cc82e`). `square.g` averages each
+  `hᵢ / gᵢ` over the `mᵢ²`: by the form, not run, one ulp loosens it to
+  about `4u` while `mᵢ` is a normal number, and below the normals no ratio
+  bounds it, so there `hᵢ` would be bounded absolutely. And say whether
+  `NORMAL_LENGTH_ROUNDOFF`'s doc (`plane.rs:126-128` at `c40cc82e`), which
+  says each component is the nearest `f64` to the exact ratio, needs that
+  condition. Not run, so no class (§360.5).
+
+And what is not a row: Q2826, a normal that does not come straight from a
+constructor, which `square.g`'s constructor `ε` before the turn leaves out;
+Q2831, `vector.g` with each component up to about `1 + 64u`, as a stored axis
+direction can have; Q2700, which moves these scripts into `proofs/gappa/`
+with the rest of 464's; and `field` on these hints, which 464.10 leaves for
+every script of 464.
+
+**7. The scripts.** `vectorsub.py` writes `vector.g`'s 88 cases, their
+controls and `casesv.txt`; `peakv.sh` runs the scripts it names as `one.sh`
+does, without Coq, in turn under a 12 GB cap, and prints each one's exit,
+time and peak memory; `startvm.sh` runs every case in `casesv.txt` through
+464.34's `runpz.sh`, each process under the same cap, writing `runvm.txt`;
+`tallyvm.py` counts that run; `squarezero.py` writes `square.g`'s 77 cases
+from 464.20's `square.g`, their controls and `casesq.txt`; `startsq.sh` is
+`startvm.sh` for those, writing `runsq.txt`; `tallysq.py` counts that run;
+and `samevm.py` checks this text against the files that ran.
+
+To run them again, save the scripts beside 464.13's `one.sh`, 464.34's
+`runpz.sh` and 464.20's `square.g`, run `python3 vectorsub.py` and `python3
+squarezero.py`, then start `./startvm.sh` with `setsid -f nohup` and wait on
+the pid it writes to `startvm.pid`, and then `./startsq.sh` the same way,
+with `startsq.pid`. Each `run*.txt` ends `done`, and `python3 tallyvm.py`
+and `python3 tallysq.py` count them. `./peakv.sh vm_n.g c_vm_n_half.g
+vm_v0v1n0n1n2.g c_vm_v0v1n0n1n2_half.g` runs 5's four, from a directory
+holding copies of them and of `peakv.sh`, for the reason 5 gives.
+
+The second lane ran `samevm.py` on this text from its tree's `target/`, with
+the run's directory, `python3 samevm.py <464 file> <run directory>`.
+
+`samevm.py`'s whole print:
+
+```
+vectorsub.py in the text is the file that ran: True
+peakv.sh in the text is the file that ran: True
+startvm.sh in the text is the file that ran: True
+tallyvm.py in the text is the file that ran: True
+squarezero.py in the text is the file that ran: True
+startsq.sh in the text is the file that ran: True
+tallysq.py in the text is the file that ran: True
+samevm.py in the text is the file that ran: True
+one.sh in the run directory is 464.13's: True
+runpz.sh in the run directory is 464.34's: True
+square.g in the run directory is 464.20's: True
+vector.g in the run directory is 464.20's: True
+pointsub.py in the run directory is 464.35's: True
+vectorsub.py run from the text prints what the text says: True
+squarezero.py run from the text prints what the text says: True
+vectorsub.py and squarezero.py run from the text write 332 files; differing from the ones that ran: none
+.g files in the run directory that neither writes: square.g, vector.g
+`peakv.sh` printed: is the last line of each .time in .: True
+`peakv.sh` printed again is the last line of each .time in peak: True
+peakv.sh and the four scripts in peak are the run directory's: True
+tallyvm.py prints what the text says: True
+tallysq.py prints what the text says: True
+```
+
+The two `.g` files that neither script writes are 464.20's own, as two
+lines of the print find: `square.g`, which `squarezero.py` reads, and
+`vector.g`, which `vectorsub.py` restates without reading it.
+
+`vectorsub.py`, whole, as it ran:
+
+```python
+"""Write 464.20's vector.g in 464.35's form: one script per zero set of its
+seven factors, each rounded product on a live path free to fall below the
+normals and each rounded sum on one free to cancel, and a control beside each.
+
+vector.g is 464.19's point.g with no shift and every component of the vector
+at most one, so this is 464.35's pointsub.py with n for its p, s0 gone and
+the vector's own shares. A rounded product on a live path is written
+q = P * (1 + m * s) + m * 2^-1022, m in [-u, u] and s, |P| / P, in [-1, 1],
+which mixedn.g and mixeds.g prove of every real P, and a rounded sum on one
+C * r, r free within u of 1, which sum.g proves of the sum of two doubles
+that is not zero and which holds of any r where C is 0. A zero factor is the
+double 0, and each product and sum it makes zero is written unrounded.
+
+out has one rounding fewer on each path than point.g's, since no shift is
+added, so the terms' shares of D are vector.g's: 10 |w| |v1| for the two
+through w, 12 for the four through k, and 1 for n0, each with 1 for the
+vector's component. D is vector.g's 93/5 q.q less four squares, plus 1,
+less the share of each term a zero factor took out, a zero v's 19/465
+square, and the 1 where n0 is zero.
+
+Each amount m * 2^-1022 reaches out multiplied by the factor f the sums and
+products after it multiply its product by, 2w for q01 as in pointsub.py, and
+by the ratios after it. Its share of G is |f| * Lo, Lo the smallest normal
+number 2^-1022 as a name, so each amount is within u of its share and G / Lo
+is pointsub.py's G / L. The goal is absolute, as vector.g's: out - Ex within
+20u, which the amounts, at most 9.93 u 2^-1022 together, barely touch.
+
+Where no term of Ex keeps all its factors and n0 is zero, out and Ex are
+both exactly 0: the script has no D, and its control asks for out - Ex in
+[2^-60, 1], which leaves out the 0, as 464.34's 4 does for its 21. Every
+other control asks for u / 2.
+
+The names are vm_<zeros>.g and c_vm_<zeros>_half.g.
+Run as: python3 vectorsub.py
+"""
+import itertools
+import math
+import os
+from fractions import Fraction
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+FACTORS = ("w", "v0", "v1", "v2", "n0", "n1", "n2")
+TURN = ("w", "v0", "v1", "v2")
+VECTOR = ("n0", "n1", "n2")
+GOAL = "out - Ex in [-20b-53, 20b-53]"
+HALF = "out - Ex in [-1b-54, 1b-54]"
+OFF_ZERO = "out - Ex in [1b-60, 1]"
+RATIO = "9007199254740991b-53, 9007199254740993b-53"
+
+# Each rounding of vector.g: its result, its argument, the argument's
+# definition, its ratio, and whether it is a product or a sum.
+OPS = (
+    ("q01", "P01", "v1 * n2", "rq01", "product"),
+    ("q02", "P02", "v2 * n1", "rq02", "product"),
+    ("q11", "P11", "v2 * n0", "rq11", "product"),
+    ("q12", "P12", "v0 * n2", "rq12", "product"),
+    ("q21", "P21", "v0 * n1", "rq21", "product"),
+    ("q22", "P22", "v1 * n0", "rq22", "product"),
+    ("c0", "C0", "q01 - q02", "rc0", "sum"),
+    ("c1", "C1", "q11 - q12", "rc1", "sum"),
+    ("c2", "C2", "q21 - q22", "rc2", "sum"),
+    ("k01", "K1", "v1 * t2", "rk01", "product"),
+    ("k02", "K2", "v2 * t1", "rk02", "product"),
+    ("k0", "KK", "k01 - k02", "rk0", "sum"),
+    ("m0", "M", "t0 * w", "rm", "product"),
+    ("a0", "A", "m0 + k0", "ra", "sum"),
+    ("out", "R", "a0 + n0", "rr", "sum"),
+)
+# t_i is c_i * 2, which rounds nothing (464.19's doubling.g).
+DOUBLED = {"t0": "c0", "t1": "c1", "t2": "c2"}
+
+# Each product's amount as it reaches out: its sign, and the part of the turn
+# its factor f is twice, or None where f is 1.
+AMOUNTS = {
+    "q01": ("", "w"), "q02": ("-", "w"),
+    "q21": ("", "v1"), "q22": ("-", "v1"),
+    "q11": ("-", "v2"), "q12": ("", "v2"),
+    "k01": ("", None), "k02": ("-", None), "m0": ("", None),
+}
+SQUARES = {"w": "Hw", "v1": "H1", "v2": "H2"}
+
+# The six terms of Ex with a product of the turn: the term, its factors, the
+# roundings it passes through in order, its share of D, and e / d as
+# vector.g writes it.
+TERMS = (
+    ("2 * w * v1 * n2", ("w", "v1", "n2"), ("q01", "c0", "m0", "a0", "out"),
+     "10 * |w| * |v1|", "(w / |w|) * (v1 / |v1|) * n2 * (W1 / 5)"),
+    ("-(2 * w * v2 * n1)", ("w", "v2", "n1"), ("q02", "c0", "m0", "a0", "out"),
+     "10 * |w| * |v2|", "-((w / |w|) * (v2 / |v2|) * n1 * (W2 / 5))"),
+    ("2 * v1 * v0 * n1", ("v1", "v0", "n1"), ("q21", "c2", "k01", "k0", "a0", "out"),
+     "12 * |v1| * |v0|", "(v1 / |v1|) * (v0 / |v0|) * n1 * (W3 / 6)"),
+    ("-(2 * v1 * v1 * n0)", ("v1", "n0"), ("q22", "c2", "k01", "k0", "a0", "out"),
+     "12 * |v1| * |v1|", "-((v1 / |v1|) * (v1 / |v1|) * n0 * (W4 / 6))"),
+    ("-(2 * v2 * v2 * n0)", ("v2", "n0"), ("q11", "c1", "k02", "k0", "a0", "out"),
+     "12 * |v2| * |v2|", "-((v2 / |v2|) * (v2 / |v2|) * n0 * (W5 / 6))"),
+    ("2 * v2 * v0 * n2", ("v2", "v0", "n2"), ("q12", "c1", "k02", "k0", "a0", "out"),
+     "12 * |v2| * |v0|", "(v2 / |v2|) * (v0 / |v0|) * n2 * (W6 / 6)"),
+)
+N0_PATH = ("out",)
+
+
+def cases():
+    """Every zero set but those with three or four parts of the turn zero,
+    which never reach Rodrigues' form or cannot keep q.q near one (464.34's 1)."""
+    for n in range(len(FACTORS) + 1):
+        for zero in itertools.combinations(FACTORS, n):
+            if sum(f in zero for f in TURN) >= 3:
+                continue
+            yield frozenset(zero), state_of(set(zero))
+
+
+def state_of(zero):
+    """Each rounding's result, rounded or zero: zero where a factor of a
+    product is zero, or both parts of a sum."""
+    state = {}
+
+    def is_zero(name):
+        name = DOUBLED.get(name, name)
+        if name in FACTORS:
+            return name in zero
+        return state[name] != "rounded"
+
+    for result, _, arg, _, kind in OPS:
+        a, _, b = arg.split(" ")
+        za, zb = is_zero(a), is_zero(b)
+        if kind == "product":
+            state[result] = "zero" if za or zb else "rounded"
+        else:
+            state[result] = "zero" if za and zb else "rounded"
+    return state
+
+
+def used(zero):
+    """The roundings on the path of a term that has no zero factor."""
+    paths = [t[2] for t in TERMS if not set(t[1]) & zero]
+    if "n0" not in zero:
+        paths.append(N0_PATH)
+    return {r for path in paths for r in path}
+
+
+def name_of(zero):
+    return "vm_" + ("".join(f for f in FACTORS if f in zero) or "n")
+
+
+def products(zero, state):
+    """The rounded products on a live path."""
+    live_ops = used(zero)
+    return [op for op in OPS if state[op[0]] == "rounded" and op[0] in live_ops and op[4] == "product"]
+
+
+def make(zero, state, goal=GOAL):
+    live_ops = used(zero)
+    rounded = [op for op in OPS if state[op[0]] == "rounded" and op[0] in live_ops]
+    live = [k for k, t in enumerate(TERMS) if not set(t[1]) & zero]
+    gone = [k for k in range(len(TERMS)) if k not in live]
+    n0_live = "n0" not in zero
+    nothing = not live and not n0_live
+    zeros = [f for f in FACTORS if f in zero]
+    unrounded = [op[1] for op in OPS if state[op[0]] != "rounded"]
+    rp = [op for op in rounded if op[4] == "product"]
+    rs = [op for op in rounded if op[4] == "sum"]
+    assert not live or rp, zero
+
+    def listed(names):
+        return ", ".join(names) if names else "none"
+
+    src = [
+        "# restates: crates/rcad-geom/src/isometry.rs apply_to_vector at c40cc82e",
+        "# restates: crates/rcad-geom/src/isometry.rs turned_by at c40cc82e",
+        "# restates: crates/rcad-geom/src/isometry.rs named_by at c40cc82e",
+        "# restates: crates/rcad-geom/src/plane.rs transformed at c40cc82e",
+        "# restates: Cargo.lock nalgebra at c40cc82e",
+        "# 464.20's vector.g, the turned vector's x, with zero factors " + listed(zeros) + ",",
+        "# and so zero " + listed(unrounded) + ", each rounded product on a live",
+        "# path normal, below the normals or 0, and each rounded sum on one free",
+        "# to cancel.",
+        "@rnd = float<ieee_64, ne>;",
+        "",
+        "# The quaternion (w, v) and the vector n, each an f64, a zero factor the",
+        "# double 0.",
+    ]
+
+    def inputs(names):
+        return " ".join(f"{n} = 0;" if n in zero else f"{n} = rnd({n}_);" for n in names)
+
+    src += [inputs(TURN), inputs(VECTOR), "",
+            "# What apply_to_vector computes, line for line, a zero written unrounded,",
+            "# since it rounds to itself (464.11's refl.g). A rounded product on a live",
+            "# path is written as what mixedn.g and mixeds.g prove of it, rnd(P) =",
+            "# P * (1 + m * s) + m * 2^-1022, m in [-u, u] and s, |P| / P, in [-1, 1],",
+            "# and a rounded sum on one as what sum.g proves of it, C * r."]
+    for op in OPS:
+        result, argname, arg, r, _ = op
+        if op in rp:
+            src.append(f"{argname} = {arg}; {r} = 1 + m{result} * s{result};"
+                       f" {result} = {argname} * {r} + m{result} * 1b-1022;")
+        elif op in rs:
+            src.append(f"{argname} = {arg}; {result} = {argname} * {r};")
+        else:
+            value = f"rnd({argname})" if state[result] == "rounded" else argname
+            src.append(f"{argname} = {arg}; {result} = {value};")
+        if result == "c2":
+            src.append("t0 = c0 * 2; t1 = c1 * 2; t2 = c2 * 2;")
+    src += ["", "# The same arithmetic without rounding.",
+            "Ex = 2 * w * (v1 * n2 - v2 * n1)",
+            "   + v1 * (2 * (v0 * n1 - v1 * n0)) - v2 * (2 * (v2 * n0 - v0 * n2))",
+            "   + n0;", ""]
+    ratio = {op[0]: op[3] for op in rounded}
+
+    def share(q):
+        return f"g{q}" if AMOUNTS[q][1] else "Lo"
+
+    def ratios_on(path):
+        return [ratio[r] for r in reversed(path) if r in ratio]
+
+    def chain(path):
+        rs_ = ratios_on(path)
+        return " * ".join(rs_) + " - 1" if rs_ else "0"
+
+    def after(result):
+        path = next(t[2] for k, t in enumerate(TERMS) if k in live and result in t[2])
+        return ratios_on(path[path.index(result) + 1:])
+
+    shares = [k + 1 for k in live] + ([7] if n0_live else [])
+    if not nothing:
+        src += ["# Each term of Ex as out carries it, less the term itself, through the",
+                "# roundings left on its path. A term with a zero factor is zero."]
+        src += [f"W{k + 1} = {chain(TERMS[k][2])};" for k in live]
+        if n0_live:
+            src.append(f"W7 = {chain(N0_PATH)};")
+        for k in live:
+            t = TERMS[k][0]
+            src.append(f"e{k + 1} = -({t[2:-1]} * W{k + 1});" if t.startswith("-(") else f"e{k + 1} = {t} * W{k + 1};")
+        if n0_live:
+            src.append("e7 = n0 * W7;")
+
+    amounts, hints = [], []
+    for op in rp:
+        q = op[0]
+        sign, x = AMOUNTS[q]
+        rest = after(q)
+        tail = " * (" + " * ".join(rest) + ")" if rest else ""
+        factor = f" * (2 * {x})" if x else ""
+        body = f"m{q} * 1b-1022{factor}{tail}"
+        amounts.append(f"A{q} = {sign}({body});" if sign else f"A{q} = {body};")
+        unit = f" * ({x} / |{x}|)" if x else ""
+        hbody = f"m{q} * (1b-1022 / Lo){unit}{tail}"
+        hints.append(f"A{q} / {share(q)} -> {sign}({hbody});" if sign else f"A{q} / {share(q)} -> {hbody};")
+    if amounts:
+        src += ["", "# What each rounded product's m * 2^-1022 comes to in out, through the",
+                "# sums and products after it and the roundings left on its path."]
+        src += amounts
+
+    if not nothing:
+        src += ["", "# Each live term's share of D, as vector.g's, with 1 for the vector's",
+                "# component."]
+        src += [f"d{k + 1} = {TERMS[k][3]};" for k in live]
+        if n0_live:
+            src.append("d7 = 1;")
+        src += ["D = " + " + ".join(f"d{k}" for k in shares) + ";"]
+    if rp:
+        src += ["", "# Each amount's share of G, |f| Lo, written Lo itself where f is 1: Gappa",
+                "# 1.8.0 aborts on a name defined as another name alone, as in g = Lo.",
+                "# E is out - Ex less the amounts, the terms' errors alone."]
+        src += [f"g{op[0]} = 2 * |{AMOUNTS[op[0]][1]}| * Lo;" for op in rp if AMOUNTS[op[0]][1]]
+        src += ["G = " + " + ".join(share(op[0]) for op in rp) + ";",
+                "Asum = " + " + ".join(f"A{op[0]}" for op in rp) + ";",
+                "E = out - Ex - Asum;"]
+    if not nothing:
+        src += ["",
+                "# q.q and the four squares D is written with below.",
+                "N4 = |w| * |w| + |v0| * |v0| + |v1| * |v1| + |v2| * |v2|;",
+                "X = |w| - 25/93 * (|v1| + |v2|);",
+                "Y = |v0| - 10/31 * (|v1| + |v2|);",
+                "Z = |v1| - |v2|;"]
+    else:
+        src += ["", "# q.q.", "N4 = |w| * |w| + |v0| * |v0| + |v1| * |v1| + |v2| * |v2|;"]
+
+    n = {x: sum(AMOUNTS[op[0]][1] == x for op in rp) for x in ("w", "v1", "v2")}
+    n_c = sum(AMOUNTS[op[0]][1] is None for op in rp)
+    s = sum(c * c for c in n.values())
+    lam = Fraction(math.sqrt(s)).limit_denominator(8) if s else None
+    if lam is not None:
+        src += ["", f"# G / Lo's linear part as squares, lam = {lam}."]
+        src += [f"{SQUARES[x]} = |{x}| - {Fraction(c) / lam};" for x, c in n.items() if c]
+    src.append("")
+
+    nzt = [f for f in TURN if f not in zero]
+    nzv = [f for f in VECTOR if f not in zero]
+    hyp = ["  # Every part of the turn is a finite f64.",
+           "     " + " /\\ ".join(f"|{f}| <= 1b1024" for f in nzt),
+           "  # No factor of a product is zero but " + listed(zeros) + ".",
+           "  /\\ " + " /\\ ".join(f"|{f}| >= 1b-1074" for f in nzt + nzv)]
+    if rs:
+        hyp += ["  # What sum.g proves of each rounded sum on a live path, the sum of two",
+                "  # doubles, or 0 where it cancels, which any ratio meets."]
+        hyp += ["  /\\ " + " /\\ ".join(f"{op[3]} in [{RATIO}]" for op in rs[k:k + 2]) for k in range(0, len(rs), 2)]
+    if rp:
+        hyp += ["  # What mixedn.g and mixeds.g prove of each rounded product on a live",
+                "  # path, normal or not, and |P| / P in [-1, 1] for any P not zero."]
+        hyp += ["  /\\ " + " /\\ ".join(f"m{op[0]} in [-1b-53, 1b-53]" for op in rp[k:k + 3]) for k in range(0, len(rp), 3)]
+        hyp += ["  /\\ " + " /\\ ".join(f"s{op[0]} in [-1, 1]" for op in rp[k:k + 3]) for k in range(0, len(rp), 3)]
+        hyp += ["  # Lo is the smallest normal number.", "  /\\ Lo in [1b-1022, 1b-1022]"]
+    if nzv:
+        hyp += ["  # Every component of the vector is at most one: a constructor's normal is",
+                "  # the nearest f64 to a unit vector's components.",
+                "  /\\ " + " /\\ ".join(f"{f} in [-1, 1]" for f in nzv)]
+    hyp += ["  # A stored turn has |q.q - 1| <= 6 epsilon (held_near_length_one), and",
+            "  # 6 epsilon is 12b-53.",
+            "  /\\ N4 in [9007199254740980b-53, 9007199254741004b-53]",
+            "  # x / |x| is in [-1, 1] for any x that is not zero.",
+            "  /\\ " + " /\\ ".join(f"{f} / |{f}| in [-1, 1]" for f in nzt)]
+    err = "E" if rp else "(out - Ex)"
+    queries = []
+    if not nothing:
+        queries.append(f"{err} / D in ? /\\ D in ?")
+    if rp:
+        queries.append("Asum / G in ? /\\ G / Lo in ?")
+    if goal == HALF and nothing:
+        goal = OFF_ZERO
+    concl = ["  " + " /\\ ".join(queries), f"  /\\ {goal}"] if queries else [f"  {goal}"]
+    src += ["{"] + hyp + ["->"] + concl + ["}", ""]
+    if rp:
+        src += ["# out - Ex is the terms' error and the amounts, each averaged on its own.",
+                "out - Ex -> E + Asum;",
+                "# The amounts, each a fraction of its own share of G; add_rr averages them.",
+                "Asum -> (Asum / G) * (G / Lo) * Lo;",
+                "Asum / G -> ((G + Asum) - G) / G;",
+                "G + Asum -> " + " + ".join(f"({share(op[0])} + A{op[0]})" for op in rp) + ";"]
+        src += [f"({share(op[0])} + A{op[0]}) - {share(op[0])} -> A{op[0]};" for op in rp]
+        src += hints
+    if not nothing:
+        src += ["# The terms' error is the sum of the live shares' errors, each a fraction",
+                "# of its own share of D; add_rr then averages them.",
+                f"{err.strip('()')} -> ({err} / D) * D;",
+                f"{err} / D -> ((D + {err}) - D) / D;",
+                f"D + {err} -> " + " + ".join(f"(d{k} + e{k})" for k in shares) + ";"]
+        src += [f"(d{k} + e{k}) - d{k} -> e{k};" for k in shares]
+        src += [f"e{k + 1} / d{k + 1} -> {TERMS[k][4]};" for k in live]
+        if n0_live:
+            src.append("e7 / d7 -> n0 * W7;")
+
+        kept = [v for v in ("v1", "v2") if v not in zero]
+        took = [TERMS[k][3] for k in gone] + [f"19/465 * |{v}| * |{v}|" for v in ("v1", "v2") if v in zero]
+        one = " + 1" if n0_live else ""
+        hint = ["D -> 93/5 * N4 - (93/5 * (X * X) + 93/5 * (Y * Y) + 305/93 * (Z * Z)"]
+        if kept:
+            hint.append("                 + 19/465 * (" + " + ".join(f"|{v}| * |{v}|" for v in kept) + "))" + one)
+        else:
+            hint[0] += ")" + one
+        if took:
+            hint.append("     - (" + " + ".join(took) + ")")
+        src += ["", "# D is vector.g's 93/5 q.q less four squares, plus 1 for n0, less the",
+                "# share of each term a zero factor took out, and a zero v's square."]
+        src += hint[:-1] + [hint[-1] + ";"]
+    if rp and lam is not None:
+        constant = sum(Fraction(c * c) / lam for c in n.values()) + n_c
+        squares = [f"{lam} * |v0| * |v0|"] + [
+            f"{lam} * ({SQUARES[x]} * {SQUARES[x]})" if c else f"{lam} * |{x}| * |{x}|" for x, c in n.items()]
+        src += ["", "# G / Lo is the amounts' shares, 2 n_w |w| + 2 n_1 |v1| + 2 n_2 |v2| + n_c,",
+                "# written as lam q.q, a constant and squares.",
+                f"G / Lo -> {lam} * N4 + {constant}",
+                "        - (" + " + ".join(squares) + ");"]
+    elif rp:
+        src += ["", "# G / Lo is the amounts' shares, n_c Lo.", f"G / Lo -> {n_c};"]
+    return "\n".join(src) + "\n"
+
+
+def main():
+    seen = []
+    for zero, state in cases():
+        name = name_of(zero)
+        assert name not in seen, name
+        seen.append(name)
+        open(name + ".g", "w").write(make(zero, state))
+        open("c_" + name + "_half.g", "w").write(make(zero, state, HALF))
+    open("casesv.txt", "w").write("\n".join(seen) + "\n")
+    print(len(seen), "cases,", sum(not products(z, s) for z, s in cases()), "with no rounded product on a live path,",
+          sum(not used(z) for z, s in cases()), "with nothing live")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+`vectorsub.py`'s whole print:
+
+```
+88 cases, 25 with no rounded product on a live path, 21 with nothing live
+```
+
+`peakv.sh`, whole, as it ran:
+
+```bash
+#!/bin/bash
+# Run each Gappa script named as one.sh does, without Coq, in turn, under a
+# 12 GB cap on address space, and print its exit, its time and its peak
+# memory: 464.35's capped.sh and peak.sh in one.
+# Run as: ./peakv.sh <name>.g [<name>.g ...]
+cd "$(dirname "$0")"
+ulimit -v ${CAP:-12000000}
+g=/nix/store/0ihij0570a325g02l4wnf0idk8vqxr9b-gappa-1.8.0/bin/gappa
+for f in "$@"; do
+  n=${f%.g}
+  /usr/bin/time -f "$n exit %x %es peak %M KB" timeout 600 "$g" -Eprecision=200 "$f" > "$n.out" 2> "$n.time"
+  tail -1 "$n.time"
+done
+```
+
+`startvm.sh`, whole, as it ran:
+
+```bash
+#!/bin/bash
+# Run every case in casesv.txt through runpz.sh, P at once (default 12), each
+# process capped at 12 GB of address space, writing runvm.txt, which ends
+# "done". 464.35's startpm.sh with vectorsub.py's names.
+cd "$(dirname "$0")"
+echo $$ > startvm.pid
+ulimit -v ${CAP:-12000000}
+P=${P:-12} ./runpz.sh < casesv.txt > runvm.txt 2>&1
+echo done >> runvm.txt
+```
+
+`tallyvm.py`, whole, as it ran:
+
+```python
+"""Count what runvm.txt and the files beside it say of each case in casesv.txt
+and its control: each case's exit, Coq's two exits, its proof's size, the
+bounds it printed on the terms' error over D and on D, and where a product is
+rounded on a live path on Asum / G and G / Lo, what those add to, each
+control's exit and its best on out - Ex in u, each hint Gappa said it had no
+need of, and every line of an .out, .bcoq or .coqc that is not a result, a
+divisor Gappa took to be nonzero, or such a hint. 464.35's tallypm.py with
+vectorsub.py's names and its absolute goal.
+
+Where D is one share, Gappa prints that share written out in its place, and
+where nothing is live the case prints no results and its control no best.
+Run as: python3 tallyvm.py"""
+import collections
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+U = 2.0 ** -53
+LO = 2.0 ** -1022
+cases = open("casesv.txt").read().split()
+log = open("runvm.txt").read().splitlines()
+assert log and log[-1] == "done", "runvm.txt does not end done"
+
+EXIT = re.compile(r"^(\S+) exit (\d+) ([\d.]+)s$")
+COQ = re.compile(r"^(\S+) coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$")
+exits, coqs, odd_log = {}, {}, []
+for line in log[:-1]:
+    if m := EXIT.match(line):
+        exits[m[1]] = (int(m[2]), float(m[3]))
+    elif m := COQ.match(line):
+        coqs[m[1]] = (int(m[2]), int(m[3]), float(m[4]), int(m[5]), int(m[6]))
+    else:
+        odd_log.append(line)
+
+WARNING = re.compile(r"^Warning: the expression .* has been assumed to be nonzero when checking a rewriting rule\.$")
+NO_NEED = re.compile(r"^Warning: no need for the rewriting at line (\d+) column (\d+)$")
+IF_ALL = "  if all the following properties can be proved"
+RESULT = re.compile(r"^  (.*) in \[(.*)\]$")
+BEST = re.compile(r"^  BND\(out - Ex\), best: \[(\S+), (\S+)\]$")
+DECIMAL = re.compile(r"\{(-?[\d.e+-]+),")
+
+
+def d_written(src):
+    """D as Gappa prints it: D, or the one share it is where it is one."""
+    m = re.search(r"^D = (.*);$", src, re.M)
+    if not m:
+        return None
+    if " + " in m[1]:
+        return "D"
+    return re.search(rf"^{m[1]} = (.*);$", src, re.M)[1]
+
+
+def odd_lines(path, control, nothing, src, d):
+    """Every line that is not a result, a divisor taken to be nonzero, a best
+    where one is due, or a hint Gappa said it had no need of while D is not
+    zero; and each such hint, as the text of its line in the script."""
+    allowed = [WARNING, RESULT] + ([BEST] if control and not nothing else [])
+    fixed = {"Results:"}
+    if control:
+        fixed.add("Error: no contradiction was found." if nothing else "Error: some properties were not satisfied:")
+    if not os.path.exists(path):
+        return [f"{path} missing"], []
+    lines, odd, needless = open(path).read().splitlines(), [], []
+    k = 0
+    while k < len(lines):
+        line = lines[k]
+        if m := NO_NEED.match(line):
+            hint = src.splitlines()[int(m[1]) - 1]
+            want = [IF_ALL, f"  {d} != 0 "]
+            if lines[k + 1:k + 3] != want:
+                odd.append(f"{path}: {line} / {lines[k + 1:k + 3]}")
+            needless.append(hint)
+            k += 3
+            continue
+        if line not in fixed and not any(p.match(line) for p in allowed):
+            odd.append(f"{path}: {line}")
+        k += 1
+    return odd, needless
+
+
+def high_end(interval):
+    """The upper end of a Gappa result interval, as a float: the part after
+    the comma that is outside every brace."""
+    depth = 0
+    for i, ch in enumerate(interval):
+        depth += {"{": 1, "}": -1}.get(ch, 0)
+        if ch == "," and depth == 0:
+            hi = interval[i + 1:].strip()
+            break
+    m = DECIMAL.search(hi)
+    return float(m[1]) if m else float(hi)
+
+
+def key_of(name, d):
+    over = (d, f"({d})")
+    if name == d:
+        return "d"
+    for top in ("E / ", "(out - Ex) / "):
+        if name.startswith(top) and name[len(top):] in over:
+            return "e"
+    return {"Asum / G": "a", "G / Lo": "g"}.get(name)
+
+
+problems, bests, got, times, sizes, needless_all, nothing_cases = [], {}, {}, [], [], collections.Counter(), []
+for n in cases:
+    c = "c_" + n + "_half"
+    src = open(n + ".g").read()
+    d = d_written(src)
+    nothing = d is None
+    if nothing:
+        nothing_cases.append(n)
+    if exits.get(n, (None,))[0] != 0:
+        problems.append(f"{n} exit {exits.get(n)}")
+    if exits.get(c, (None,))[0] != 1:
+        problems.append(f"{c} exit {exits.get(c)}")
+    k = coqs.get(n)
+    if not k or k[0] != 0 or k[1] != 0:
+        problems.append(f"{n} coq {k}")
+    else:
+        sizes.append((k[3], k[4], k[2], n))
+    times.append((exits.get(n, (0, 0.0))[1], n))
+    for path, control in ((n + ".out", False), (n + ".bcoq", False), (c + ".out", True)):
+        odd, needless = odd_lines(path, control, nothing, src, d)
+        problems += odd
+        needless_all.update(needless)
+    if os.path.exists(n + ".coqc") and open(n + ".coqc").read():
+        problems.append(f"{n}.coqc is not empty")
+    got[n] = {}
+    for line in open(n + ".out").read().splitlines():
+        if m := RESULT.match(line):
+            key = key_of(m[1], d)
+            if key is None:
+                problems.append(f"{n}.out has a result on {m[1]}")
+            else:
+                got[n][key] = high_end(m[2])
+    has_a = "Asum = " in src
+    want = set() if nothing else {"e", "d", "a", "g"} if has_a else {"e", "d"}
+    if set(got[n]) != want:
+        problems.append(f"{n}.out has {sorted(got[n])}, not {sorted(want)}")
+    best = [BEST.match(line) for line in open(c + ".out").read().splitlines()]
+    best = [m for m in best if m]
+    if len(best) != (0 if nothing else 1):
+        problems.append(f"{c} has {len(best)} best lines")
+    elif best:
+        bests[n] = float(best[0][2]) / U
+
+
+def terms(n):
+    """The terms' part of the bound on out - Ex, in u."""
+    r = got[n]
+    return r.get("e", 0) * r.get("d", 0) / U
+
+
+def amounts(n):
+    """The amounts' part of the bound on out - Ex, in u times 2^-1022."""
+    r = got[n]
+    return r.get("a", 0) * r.get("g", 0) / U
+
+
+print(len(cases), "cases,", len(exits), "exit lines,", len(coqs), "coq lines")
+print("lines of runvm.txt that are neither:", odd_log or "none")
+print("problems:", len(problems))
+for p in problems:
+    print("  " + p)
+proved = sum(exits.get(n, (None,))[0] == 0 for n in cases)
+failed = sum(exits.get("c_" + n + "_half", (None,))[0] == 1 for n in cases)
+print(f"cases that exit 0: {proved} of {len(cases)}; controls that exit 1: {failed} of {len(cases)}")
+print("gappa time per case: %.2f s (%s) to %.2f s (%s)" % (min(times) + max(times)))
+sizes.sort()
+print("coq: %d lines %d hints %.2f s (%s) to %d lines %d hints %.2f s (%s)" % (sizes[0] + sizes[-1]))
+TERM_FACTORS = ({"w", "v1", "n2"}, {"w", "v2", "n1"}, {"v1", "v0", "n1"}, {"v1", "n0"}, {"v2", "n0"},
+                {"v2", "v0", "n2"})
+
+
+def dead(n):
+    """Whether n0 is zero and each term of Ex has a zero factor, by the name."""
+    zero = set(re.findall(r"w|v\d|n\d", n[len("vm_"):]))
+    return "n0" in zero and all(t & zero for t in TERM_FACTORS)
+
+
+print("cases where nothing is live, so out and Ex are 0:", len(nothing_cases), "of", len(cases))
+print("  they are the cases where n0 is zero and every term has a zero factor:",
+      sorted(nothing_cases) == sorted(n for n in cases if dead(n)))
+with_a = [n for n in cases if "a" in got[n]]
+print("cases with a rounded product on a live path:", len(with_a), "of", len(cases))
+for key, what in (("e", "terms' error / D, upper end in u"), ("d", "D upper end"),
+                  ("a", "Asum / G, upper end in u"), ("g", "G / Lo upper end")):
+    scale = U if key in ("e", "a") else 1.0
+    print(what + ":", sorted(collections.Counter(round(got[n][key] / scale, 4)
+                                                 for n in cases if key in got[n]).items()))
+print("hints Gappa had no need of, while D is not zero, and how often:")
+for hint, k in sorted(needless_all.items()):
+    print(f"  {k}: {hint}")
+print("largest terms' part: %.4fu (%s), against vector.g's 20u" % max((terms(n), n) for n in cases))
+print("largest amounts' part: %.4fu * 2^-1022 (%s)" % max((amounts(n), n) for n in cases))
+print("control best on out - Ex, in u, and how many controls:")
+for b, k in sorted(collections.Counter(round(b, 2) for b in bests.values()).items()):
+    print(f"  {b}u: {k}", ", ".join(n for n in bests if round(bests[n], 2) == b) if k <= 12 else "")
+print("largest best: %.4fu (%s), against vector.g's 20u" % max((b, n) for n, b in bests.items()))
+print("each best at most its case's terms' part, and a little more:",
+      all(bests[n] <= (1 + 1e-4) * terms(n) for n in bests))
+close = [n for n in bests if abs(bests[n] - terms(n)) <= 1e-4 * terms(n)]
+print("bests within 0.01% of their case's terms' part:", len(close), "of", len(bests))
+print("the others, best and terms' part in u:",
+      ", ".join(f"{n} {bests[n]:.4f} {terms(n):.4f}" for n in bests if n not in close))
+```
+
+`squarezero.py`, whole, as it ran:
+
+```python
+"""Write 464.20's square.g in the zero branches: one script for each zero set
+of the exact unit vector m with at most two components zero, crossed with
+each zero set of the turn with at most two parts zero, and a control beside
+each.
+
+A zero m_i is the constructor's n_i = 0 exactly, so its m_i, g_i and h_i
+drop out of the averaging over the m_i^2, and M2 is the sum over the m_i
+left, still one. square.g puts no lower bound on a part of the turn, so a
+zero part is inside its hypotheses already; writing it as the double 0 shows
+it. Three or four parts zero never reach the turn's arithmetic or cannot
+keep q.q near one (464.34's 1). The hypothesis on d is vector.g's 20u, which
+464.36's 88 cases prove in every zero branch of the vector and the turn.
+
+Every source square.g restates differs from 4b642567 to c40cc82e in doc
+comments alone, or in held_near_length_one in the name of the test it
+calls, so each script restates c40cc82e.
+
+The names are sq_<zeros>.g and c_sq_<zeros>_half.g, <zeros> the zero
+factors, m's first, or n for none; casesq.txt lists them.
+Run as: python3 squarezero.py"""
+import itertools
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+M = ("m0", "m1", "m2")
+TURN = ("w", "v0", "v1", "v2")
+GOAL = "/\\ OO - 1 in [-128b-53, 128b-53]"
+HALF = "/\\ OO - 1 in [-1b-54, 1b-54]"
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+def kept(names, zero):
+    return [x for x in names if x not in zero]
+
+
+def make(square, zero):
+    zeros = [x for x in M + TURN if x in zero]
+    idx = [i for i in range(3) if f"m{i}" not in zero]
+    gone = [i for i in range(3) if f"m{i}" in zero]
+    assert square.count("4b642567") == 6
+    src = square.replace("4b642567", "c40cc82e")
+    src = sub(src, "@rnd = float<ieee_64, ne>;\n",
+              f"# 464.36: with zero factors {', '.join(zeros) or 'none'}, each the double 0.\n"
+              "@rnd = float<ieee_64, ne>;\n")
+    src = sub(src, "n0 = rnd(m0); n1 = rnd(m1); n2 = rnd(m2);",
+              " ".join(f"n{i} = 0;" if i in gone else f"n{i} = rnd(m{i});" for i in range(3)))
+    src = sub(src, "M2 = m0 * m0 + m1 * m1 + m2 * m2;", "M2 = " + " + ".join(f"m{i} * m{i}" for i in idx) + ";")
+    src = sub(src, "w = rnd(w_); v0 = rnd(v0_); v1 = rnd(v1_); v2 = rnd(v2_);",
+              " ".join(f"{x} = 0;" if x in zero else f"{x} = rnd({x}_);" for x in TURN))
+    src = sub(src, "g0 = m0 * m0; g1 = m1 * m1; g2 = m2 * m2;", " ".join(f"g{i} = m{i} * m{i};" for i in idx))
+    src = sub(src, "h0 = n0 * n0 - m0 * m0; h1 = n1 * n1 - m1 * m1; h2 = n2 * n2 - m2 * m2;",
+              " ".join(f"h{i} = n{i} * n{i} - m{i} * m{i};" for i in idx))
+    src = sub(src, "  /\\ m0 in [-1, 1] /\\ m1 in [-1, 1] /\\ m2 in [-1, 1]\n",
+              "  /\\ " + " /\\ ".join(f"m{i} in [-1, 1]" for i in idx) + "\n")
+    src = sub(src, "  # (scaled_to_length_one_from_anywhere's doc), and none is zero.\n"
+                   "  /\\ |m0| >= 1b-1012 /\\ |m1| >= 1b-1012 /\\ |m2| >= 1b-1012\n",
+              "  # (scaled_to_length_one_from_anywhere's doc), and none is zero but "
+              + (", ".join(f"m{i}" for i in gone) or "none") + ".\n"
+              "  /\\ " + " /\\ ".join(f"|m{i}| >= 1b-1012" for i in idx) + "\n")
+    src = sub(src, "  /\\ |w| <= 1b1024 /\\ |v0| <= 1b1024 /\\ |v1| <= 1b1024 /\\ |v2| <= 1b1024\n",
+              "  /\\ " + " /\\ ".join(f"|{x}| <= 1b1024" for x in kept(TURN, zero)) + "\n")
+    src = sub(src, "M2 + (NN - M2) -> (g0 + h0) + (g1 + h1) + (g2 + h2);",
+              "M2 + (NN - M2) -> " + " + ".join(f"(g{i} + h{i})" for i in idx) + ";")
+    for i in gone:
+        for line in (f"(g{i} + h{i}) - g{i} -> h{i};\n", f"h{i} / g{i} -> (n{i} / m{i}) * (n{i} / m{i}) - 1;\n",
+                     f"n{i} / m{i} -> 1 + (n{i} - m{i}) / m{i};\n"):
+            src = sub(src, line, "")
+    return src
+
+
+def name_of(zero):
+    return "sq_" + ("".join(x for x in M + TURN if x in zero) or "n")
+
+
+def main():
+    square = open("square.g").read()
+    seen = []
+    for k in range(3):
+        for mz in itertools.combinations(M, k):
+            for j in range(3):
+                for tz in itertools.combinations(TURN, j):
+                    zero = set(mz) | set(tz)
+                    name = name_of(zero)
+                    src = make(square, zero)
+                    open(name + ".g", "w").write(src)
+                    open("c_" + name + "_half.g", "w").write(sub(src, GOAL, HALF))
+                    seen.append(name)
+    assert len(set(seen)) == len(seen)
+    open("casesq.txt", "w").write("\n".join(seen) + "\n")
+    print(len(seen), "cases")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+`squarezero.py`'s whole print:
+
+```
+77 cases
+```
+
+`startsq.sh`, whole, as it ran:
+
+```bash
+#!/bin/bash
+# Run every case in casesq.txt through runpz.sh, P at once (default 12), each
+# process capped at 12 GB of address space, writing runsq.txt, which ends
+# "done". startvm.sh with squarezero.py's names.
+cd "$(dirname "$0")"
+echo $$ > startsq.pid
+ulimit -v ${CAP:-12000000}
+P=${P:-12} ./runpz.sh < casesq.txt > runsq.txt 2>&1
+echo done >> runsq.txt
+```
+
+`tallysq.py`, whole, as it ran:
+
+```python
+"""Count what runsq.txt and the files beside it say of each case in casesq.txt
+and its control: each case's exit, Coq's two exits, its proof's size, the
+bounds it printed on square.g's five parts, what the four that make up OO - 1
+add to, each control's exit and its best on OO - 1 in u, and every line of an
+.out, .bcoq or .coqc that is not a result or a divisor Gappa took to be
+nonzero, and each such divisor that names a component of m the case has zero.
+tallyvm.py with squarezero.py's names and square.g's results.
+
+Each bound is read from the exact number Gappa prints before its decimal.
+Run as: python3 tallysq.py"""
+import collections
+import os
+import re
+from fractions import Fraction
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+U = Fraction(1, 2 ** 53)
+cases = open("casesq.txt").read().split()
+log = open("runsq.txt").read().splitlines()
+assert log and log[-1] == "done", "runsq.txt does not end done"
+
+EXIT = re.compile(r"^(\S+) exit (\d+) ([\d.]+)s$")
+COQ = re.compile(r"^(\S+) coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$")
+exits, coqs, odd_log = {}, {}, []
+for line in log[:-1]:
+    if m := EXIT.match(line):
+        exits[m[1]] = (int(m[2]), float(m[3]))
+    elif m := COQ.match(line):
+        coqs[m[1]] = (int(m[2]), int(m[3]), float(m[4]), int(m[5]), int(m[6]))
+    else:
+        odd_log.append(line)
+
+WARNING = re.compile(r"^Warning: the expression (.*) has been assumed to be nonzero when checking a rewriting rule\.$")
+RESULT = re.compile(r"^  (.*) in \[(.*)\]$")
+BEST = re.compile(r"^  BND\(OO - 1\), best: \[(\S+), (\S+)\]$")
+EXACT = re.compile(r"^(-?\d+)(?:b(-?\d+))?(?: \{.*\})?$")
+PARTS = ("NN - 1", "VN", "4 * (N4 - 1) * VN", "F2", "DD")
+SUMMED = ("NN - 1", "4 * (N4 - 1) * VN", "F2", "DD")
+SCALE = {"NN - 1": U, "VN": Fraction(1), "4 * (N4 - 1) * VN": U, "F2": U, "DD": U * U}
+UNIT = {"NN - 1": "u", "VN": "", "4 * (N4 - 1) * VN": "u", "F2": "u", "DD": "u^2"}
+
+
+def m_zeros(n):
+    return "".join(re.findall(r"m\d", n[len("sq_"):])) or "none"
+
+
+def exact(text):
+    """The exact number Gappa prints, mantissa b exponent, before its decimal."""
+    m = EXACT.match(text.strip())
+    return Fraction(int(m[1])) * Fraction(2) ** int(m[2] or 0)
+
+
+def ends(interval):
+    """A result interval's two ends, split at the comma outside every brace."""
+    depth = 0
+    for i, ch in enumerate(interval):
+        depth += {"{": 1, "}": -1}.get(ch, 0)
+        if ch == "," and depth == 0:
+            return exact(interval[:i]), exact(interval[i + 1:])
+    raise AssertionError(interval)
+
+
+def odd_lines(path, control, live_m):
+    """Every line that is not a result, a best where one is due, or a divisor
+    taken to be nonzero that names only components of m the case keeps."""
+    fixed = {"Results:"} | ({"Error: some properties were not satisfied:"} if control else set())
+    allowed = [RESULT] + ([BEST] if control else [])
+    if not os.path.exists(path):
+        return [f"{path} missing"]
+    odd = []
+    for line in open(path).read().splitlines():
+        if m := WARNING.match(line):
+            if not set(re.findall(r"[A-Za-z_]\w*", m[1])) <= live_m:
+                odd.append(f"{path}: {line}")
+        elif line not in fixed and not any(p.match(line) for p in allowed):
+            odd.append(f"{path}: {line}")
+    return odd
+
+
+def results(path):
+    return {m[1]: ends(m[2]) for line in open(path).read().splitlines() if (m := RESULT.match(line))}
+
+
+problems, bests, got, times, sizes, same_bcoq = [], {}, {}, [], [], 0
+for n in cases:
+    c = "c_" + n + "_half"
+    live_m = {f"m{i}" for i in range(3)} - set(re.findall(r"m\d", n[len("sq_"):]))
+    if exits.get(n, (None,))[0] != 0:
+        problems.append(f"{n} exit {exits.get(n)}")
+    if exits.get(c, (None,))[0] != 1:
+        problems.append(f"{c} exit {exits.get(c)}")
+    k = coqs.get(n)
+    if not k or k[0] != 0 or k[1] != 0:
+        problems.append(f"{n} coq {k}")
+    else:
+        sizes.append((k[3], k[4], k[2], n))
+    times.append((exits.get(n, (0, 0.0))[1], n))
+    for path, control in ((n + ".out", False), (n + ".bcoq", False), (c + ".out", True)):
+        problems += odd_lines(path, control, live_m)
+    if not os.path.exists(n + ".coqc") or open(n + ".coqc").read():
+        problems.append(f"{n}.coqc is missing or not empty")
+    got[n] = results(n + ".out")
+    if sorted(got[n]) != sorted(PARTS):
+        problems.append(f"{n}.out has {sorted(got[n])}, not {sorted(PARTS)}")
+    same_bcoq += results(n + ".bcoq") == got[n]
+    best = [m for line in open(c + ".out").read().splitlines() if (m := BEST.match(line))]
+    if len(best) != 1:
+        problems.append(f"{c} has {len(best)} best lines")
+    else:
+        bests[n] = float(best[0][2]) / float(U)
+
+
+def added(n):
+    """The four parts' largest sizes added, in u: what the proof of OO - 1 adds."""
+    return float(sum(max(abs(lo), abs(hi)) for lo, hi in (got[n][p] for p in SUMMED)) / U)
+
+
+def listed(names):
+    """The cases by name, or where there are more than 12, the zero sets of m
+    they come from."""
+    if len(names) <= 12:
+        return ", ".join(names)
+    zero_sets = sorted(set(map(m_zeros, names)), key=lambda z: (z != "none", len(z), z))
+    return "m zero " + ", ".join(zero_sets)
+
+
+def largest(value):
+    """The largest value over the cases, and the cases that reach it."""
+    top = max(value(n) for n in cases)
+    at = [n for n in cases if value(n) == top]
+    return top, at[0], len(at) - 1
+
+
+print(len(cases), "cases,", len(exits), "exit lines,", len(coqs), "coq lines")
+print("lines of runsq.txt that are neither:", odd_log or "none")
+print("problems:", len(problems))
+for p in problems:
+    print("  " + p)
+proved = sum(exits.get(n, (None,))[0] == 0 for n in cases)
+failed = sum(exits.get("c_" + n + "_half", (None,))[0] == 1 for n in cases)
+print(f"cases that exit 0: {proved} of {len(cases)}; controls that exit 1: {failed} of {len(cases)}")
+print("gappa time per case: %.2f s (%s) to %.2f s (%s)" % (min(times) + max(times)))
+sizes.sort()
+print("coq: %d lines %d hints %.2f s (%s) to %d lines %d hints %.2f s (%s)" % (sizes[0] + sizes[-1]))
+print("cases whose .bcoq prints the same results as their .out:", same_bcoq, "of", len(cases))
+print("cases by the components of m that are zero:",
+      ", ".join(f"{z} {k}" for z, k in collections.Counter(map(m_zeros, cases)).items()))
+print("each part's bound, and the cases it is in:")
+for p in PARTS:
+    print(f"  {p}, in {UNIT[p]}:" if UNIT[p] else f"  {p}:")
+    by = collections.defaultdict(list)
+    for n in cases:
+        lo, hi = got[n][p]
+        by[(round(float(lo / SCALE[p]), 4), round(float(hi / SCALE[p]), 4))].append(n)
+    for (lo, hi), names in sorted(by.items(), key=lambda kv: -len(kv[1])):
+        print(f"    [{lo}, {hi}]: {len(names)}, {listed(names)}")
+print("largest of the four parts added: %.4fu (%s and %d more), against NORMAL_LENGTH_ROUNDOFF's 128u"
+      % largest(added))
+print("control best on OO - 1, in u, and how many controls:")
+for b, k in sorted(collections.Counter(round(b, 2) for b in bests.values()).items()):
+    print(f"  {b}u: {k},", listed([n for n in bests if round(bests[n], 2) == b]))
+print("largest best: %.4fu (%s and %d more), against NORMAL_LENGTH_ROUNDOFF's 128u" % largest(bests.get))
+print("each best within 0.01% of its case's four parts added:",
+      all(abs(bests[n] - added(n)) <= 1e-4 * added(n) for n in bests))
+```
+
+`samevm.py`, whole, as it ran:
+
+```python
+"""Check 464.36's text against the files that ran: each script it holds whole
+is byte for byte the file in the run's directory; the run's one.sh, runpz.sh,
+square.g, vector.g and pointsub.py are 464.13's, 464.34's, 464.20's and
+464.35's blocks; vectorsub.py and squarezero.py, run again from the text
+beside 464.20's square.g, print what the text says and write the scripts that
+ran; peakv.sh printed what the text says, both times; and tallyvm.py and
+tallysq.py print what the text says.
+Run as: python3 samevm.py <464 file> <run directory>"""
+import os
+import re
+import subprocess
+import sys
+import tempfile
+
+section_file, run_dir = sys.argv[1:3]
+text = open(section_file).read()
+
+
+def blocks_of(number):
+    """Each block of subsection 464.<number>, with its caption: the last
+    paragraph before its opening fence, across the blank line between them."""
+    start = text.index(f"\n### 464.{number} ")
+    end = text.find("\n### ", start + 1)
+    blocks = []
+    caption, para, inside, body, fresh = None, [], False, [], True
+    for line in text[start:end if end >= 0 else len(text)].splitlines():
+        if line.startswith("```"):
+            if inside:
+                blocks.append((caption, "\n".join(body) + "\n"))
+                inside, body = False, []
+            else:
+                caption, para, inside = " ".join(para), [], True
+            fresh = True
+        elif inside:
+            body.append(line)
+        elif line.strip():
+            if fresh:
+                para, fresh = [], False
+            para.append(line)
+        else:
+            fresh = True
+    return blocks
+
+
+def block(number, caption):
+    """The one block of 464.<number> whose caption starts with the words given."""
+    found = [b for c, b in blocks_of(number) if c.startswith(caption)]
+    assert len(found) == 1, (number, caption, len(found))
+    return found[0]
+
+
+def run(*args, **kwargs):
+    return subprocess.run([sys.executable, *args], capture_output=True, text=True, check=True, **kwargs).stdout
+
+
+def read(*parts):
+    return open(os.path.join(*parts)).read()
+
+
+WHOLE = re.compile(r"^`([^`]+)`, whole, as it ran:$")
+PRINT = re.compile(r"^`([^`]+)`'s whole print")
+blocks = blocks_of(36)
+wholes = {m[1]: b for c, b in blocks if (m := WHOLE.match(c))}
+prints = {m[1]: b for c, b in blocks if (m := PRINT.match(c))}
+for name, body in wholes.items():
+    path = os.path.abspath(__file__) if name == "samevm.py" else os.path.join(run_dir, name)
+    print(f"{name} in the text is the file that ran: {read(path) == body}")
+
+for name, number, caption in (("one.sh", 13, "`one.sh`, whole:"), ("runpz.sh", 34, "`runpz.sh`, whole,"),
+                              ("square.g", 20, "`square.g`:"), ("vector.g", 20, "`vector.g`:"),
+                              ("pointsub.py", 35, "`pointsub.py`, whole, as it ran:")):
+    print(f"{name} in the run directory is 464.{number}'s: {read(run_dir, name) == block(number, caption)}")
+
+work = tempfile.mkdtemp()
+open(os.path.join(work, "square.g"), "w").write(block(20, "`square.g`:"))
+for name in ("vectorsub.py", "squarezero.py"):
+    open(os.path.join(work, name), "w").write(wholes[name])
+    said = run(os.path.join(work, name)) == prints[name]
+    print(f"{name} run from the text prints what the text says: {said}")
+written = sorted(f for f in os.listdir(work) if (f.endswith(".g") and f != "square.g") or f.startswith("cases"))
+differ = [f for f in written if read(work, f) != read(run_dir, f)]
+print(f"vectorsub.py and squarezero.py run from the text write {len(written)} files; "
+      f"differing from the ones that ran: {differ or 'none'}")
+others = sorted(set(f for f in os.listdir(run_dir) if f.endswith(".g")) - set(written))
+print(".g files in the run directory that neither writes:", ", ".join(others) or "none")
+
+PEAK = ("vm_n", "c_vm_n_half", "vm_v0v1n0n1n2", "c_vm_v0v1n0n1n2_half")
+for where, caption in ((run_dir, "`peakv.sh` printed:"), (os.path.join(run_dir, "peak"), "`peakv.sh` printed again")):
+    lines = "".join(read(where, n + ".time").splitlines(keepends=True)[-1] for n in PEAK)
+    same = lines == block(36, caption)
+    print(f"{caption} is the last line of each .time in {os.path.relpath(where, run_dir)}: {same}")
+same = all(read(run_dir, "peak", f) == read(run_dir, f) for f in [n + ".g" for n in PEAK] + ["peakv.sh"])
+print("peakv.sh and the four scripts in peak are the run directory's:", same)
+
+for name in ("tallyvm.py", "tallysq.py"):
+    print(f"{name} prints what the text says: {run(os.path.join(run_dir, name)) == prints[name]}")
 ```
