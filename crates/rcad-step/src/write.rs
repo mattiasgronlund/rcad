@@ -1725,6 +1725,9 @@ enum Shape {
 /// curve's own plane, so it reads the curve's centre and axis back but never
 /// its sizes.
 ///
+/// A centre that is not finite is the same limit: the plane meets the pipe's
+/// axis further along it than any `f64` holds, so there is none to give.
+///
 /// **A long size past `f64::MAX` is a limit, not a gap** (`docs/decisions.md`
 /// §16.10), and it takes a plane within about `r / f64::MAX` of running along
 /// the pipe. `add_bar_cut_off_by` builds a bar of radius 2 whose caps lean
@@ -1736,6 +1739,9 @@ fn where_a_plane_crosses_a_pipe(flat: &Plane, pipe: &Cylinder) -> Option<Crossin
     let along = pipe.axis().direction();
     let facing = flat.normal().dot(along);
     let centre = where_the_walk_centres_a_circle(flat, pipe)?;
+    if !centre.coordinates().iter().all(|c| c.is_finite()) {
+        return None;
+    }
     let radius = pipe.radius();
     let across = flat.normal().cross(along);
     if across == Vector::zero() {
