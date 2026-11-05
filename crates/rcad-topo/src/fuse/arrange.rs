@@ -2992,27 +2992,25 @@ impl<'f> Arrangement<'f> {
         ];
         let asked = three_planes_faced_the_one_way(surfaces);
         let asked = [&asked[0], &asked[1], &asked[2]];
+        let MeetOfThree::At(boxed) = &meet else {
+            return;
+        };
+        let places: SmallVec<[PredicatePoint; 2]> =
+            boxed.iter().copied().map(as_exact_as_it_is).collect();
         // The tighter box is read here by a fold into a corner on both
-        // crossings and by nothing else; the order along a crossing
-        // narrows a node's box itself, only where it asks
+        // crossings, and by a picker that cannot tell of a place's own
+        // box, and only where one of them asks; the order along a
+        // crossing narrows a node's box itself, only where it asks
         // (`Arrangement::narrowed_box_of`). Working it out for every
         // meet of three planes was 11 of 22 samples taken in placing
         // the meets of a cut through the 1x39 pin header (§200.1).
-        let tight = if !on_both.is_empty() {
-            meet.boxed_tight(asked)
-        } else {
-            meet.clone()
+        let narrowed = || -> SmallVec<[PredicatePoint; 2]> {
+            let MeetOfThree::At(tight) = meet.boxed_tight(asked) else {
+                unreachable!("a meet at points boxed tighter is still a meet at those points")
+            };
+            tight.into_iter().map(as_exact_as_it_is).collect()
         };
-        let MeetOfThree::At(places) = meet else {
-            return;
-        };
-        let MeetOfThree::At(tight) = tight else {
-            unreachable!("a meet at points boxed tighter is still a meet at those points")
-        };
-        let places: SmallVec<[PredicatePoint; 2]> =
-            places.into_iter().map(as_exact_as_it_is).collect();
-        let tight: SmallVec<[PredicatePoint; 2]> =
-            tight.into_iter().map(as_exact_as_it_is).collect();
+        let mut tight: Option<SmallVec<[PredicatePoint; 2]>> = None;
         for (which, &place) in places.iter().enumerate() {
             // Being *on* both surfaces is what the meet just worked out,
             // and asking a predicate to confirm it would be a second
@@ -3021,15 +3019,26 @@ impl<'f> Arrangement<'f> {
             // What is still open is which curve of each pair it is on,
             // and only a pair naming more than one has anything to say.
             let two = places.len() == 2;
-            if !self.nothing_rules_the_meet_out(first, second, (which, two), place)
-                || !self.nothing_rules_the_meet_out(second, first, (which, two), place)
+            let mut tight_box = || tight.get_or_insert_with(&narrowed)[which];
+            if !self.nothing_rules_the_meet_out(first, second, (which, two), place, &mut tight_box)
+                || !self.nothing_rules_the_meet_out(
+                    second,
+                    first,
+                    (which, two),
+                    place,
+                    &mut tight_box,
+                )
             {
                 continue;
             }
             let mut sorted = surfaces;
             sorted.sort_by_key(name_of_surface_bits);
-            let folded =
-                self.the_corner_that_is_this_place(on_both, first, second, which, &places, &tight);
+            let folded = if on_both.is_empty() {
+                None
+            } else {
+                let tight = tight.get_or_insert_with(&narrowed);
+                self.the_corner_that_is_this_place(on_both, first, second, which, &places, tight)
+            };
             let which = u8::try_from(which).expect("three surfaces meet at most twice");
             if let Some(corner) = folded {
                 self.nodes[corner].stands_for_too((sorted, which));
@@ -3063,12 +3072,28 @@ impl<'f> Arrangement<'f> {
     /// straddle the picker, and each meet was kept on both lines: two nodes
     /// for one place, a rounding apart, and nothing could put them in order
     /// round the circle the bar's floor cuts the pipe in (Q2505).
+    ///
+    /// **Where a picker cannot tell of the place's own box, it is asked of
+    /// `tight()`**, the tightest box known to hold the place
+    /// ([`MeetOfThree::boxed_tight`]). Both boxes hold the meet, so a picker
+    /// that reads the narrowed one wholly on the wrong side rules the meet out
+    /// as surely as one that reads the own box there. The pitch cones of a
+    /// pair of mitre gears, the second turned a quarter by a rotation that
+    /// stores its axis `2⁻⁵²` off `x`, cross in four half rulings out of their
+    /// apex, picked by the signs of `y` and `z`. On the first one's side, each
+    /// meet of a cap and the two cones near `(1, ±2.1e−8, 1)` has its own box
+    /// `3.65e−8` wide along `y` reaching `y = 0`, so neither picker of `y`
+    /// ruled it out, each half got a node at both meets, `4.2e−8` apart, the
+    /// fold joined the two into one, and every fuse with the first frustum
+    /// first was refused `CannotTellTheCellsOfAFaceApart` on that side. The
+    /// narrowed box is one `f64` along `y`, on one side of `y = 0` (Q3146).
     fn nothing_rules_the_meet_out(
         &self,
         crossing: usize,
         other: usize,
         (which, two): (usize, bool),
         place: PredicatePoint,
+        tight: &mut impl FnMut() -> PredicatePoint,
     ) -> bool {
         let on = &self.crossings[crossing];
         let held = two
@@ -3081,7 +3106,17 @@ impl<'f> Arrangement<'f> {
                 )
             })
             .flatten();
-        held.unwrap_or_else(|| nothing_rules_the_point_out(on.picked_by(), place))
+        held.unwrap_or_else(|| {
+            let mut undecided = false;
+            for picker in on.picked_by() {
+                match picker.side_of_point(place) {
+                    Decision::Neg => return false,
+                    Decision::Undecidable { .. } => undecided = true,
+                    Decision::Pos | Decision::Zero | _ => (),
+                }
+            }
+            !undecided || nothing_rules_the_point_out(on.picked_by(), tight())
+        })
     }
 
     /// The nodes where two crossings of one pair meet: where two half
@@ -4075,11 +4110,14 @@ impl<'f> Arrangement<'f> {
     /// included, but whether two places are proved apart, which reads `tight`:
     /// wired in as the node's own box, the narrowed one moved 13 tests, most of
     /// them to a refusal or to no solid, where asked only here it moves one,
-    /// to the right answer (§345). The one other question that reads a
-    /// narrowed box is the order along a crossing, where the node's own box
-    /// cannot say, and it narrows the node's box itself
-    /// ([`Arrangement::narrowed_box_of`]). Narrowing a curved meet's box here
-    /// changed no fold over the whole workspace's tests when Q209 measured it.
+    /// to the right answer (§345). The two other questions that read a
+    /// narrowed box are which curve of a pair a meet is on, where a picker
+    /// cannot tell of the meet's own box
+    /// ([`Arrangement::nothing_rules_the_meet_out`], Q3146), and the order
+    /// along a crossing, where the node's own box cannot say, which narrows the
+    /// node's box itself ([`Arrangement::narrowed_box_of`]). Narrowing a curved
+    /// meet's box here changed no fold over the whole workspace's tests when
+    /// Q209 measured it.
     ///
     /// **Where the three are planes `bake` solved the corner among, the room is
     /// `bake`'s own**: the room `validate` grants a corner off a plane plus the
