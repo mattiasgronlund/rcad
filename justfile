@@ -196,8 +196,8 @@ slow_tests := "rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_corner
     rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_turned_corner_up_cube_centred_two_and_a_half_above_a_steep_pointed_cones_apex_answers_right \
     rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_corner_up_cube_centred_three_and_a_half_above_a_steep_pointed_cones_apex_answers_right \
     rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_turned_corner_up_cube_centred_three_and_a_half_above_a_steep_pointed_cones_apex_answers_right \
-    rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_slab_fourteen_deep_from_below_the_apex_across_a_steep_pointed_cone_answers_right_or_refuses \
-    rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_slab_fourteen_deep_from_the_apex_up_across_a_steep_pointed_cone_answers_right_or_refuses \
+    rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_slab_fourteen_deep_from_below_the_apex_across_a_steep_pointed_cone_answers_every_rule_right \
+    rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_slab_fourteen_deep_from_the_apex_up_across_a_steep_pointed_cone_answers_every_rule_right \
     rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_block_leaned_a_quarter_across_a_unit_pointed_cone_answers_right_or_refuses \
     rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_block_leaned_three_eighths_across_a_unit_pointed_cone_answers_right_or_refuses \
     rcad-topo::merged/a_plane_cut_along_a_cones_other_nappe::a_unit_pointed_cone_with_a_lean_of_four_answers_right_away_from_the_range_refusals \
