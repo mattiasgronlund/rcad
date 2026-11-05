@@ -65,11 +65,6 @@ The reading is yours whatever it printed:
 - the section's claims, under §16.10 (step 5);
 - each number in `number_mismatches`, and each it did not run: read the print
   and the lane's claim, then keep it as a mismatch or drop it;
-- each number in `commands_that_cannot_run`: the lane's own command is the
-  fault (`bash -n` refuses its text, its first word is no command, or it holds
-  a literal `...` path), and `verify-lane` did not run it. Go straight to
-  checking that number by hand, and say in the report that the command was
-  wrong;
 - a revert by hand, when it says a source path holds test code the branch
   changed (step 7);
 - for a lane marked `sameBehaviour`, the mutation and the lane's argument
@@ -111,7 +106,7 @@ back leaves its own tree locked, holding a slot, until someone finds it by hand
    Before step 2's checkout, run `git checkout <base> -- docs/queue.md` if
    unsure the tree still holds the base's copy of the queue. Run `mise exec --
    just queue show <id>` once per id in the row, or each id of a bundle, and
-   build the union of each row's write set the way `writeSetOf` in `lanes.js` builds the write set above, and compare the two. A row's write set is its column, **unless** the same `show` prints a line under the row naming a newer set: `narrowed to <set>, taken with <...>`, or `` write set set to <set> by `writes`, <column> in docs/queue.md ``. Then read that printed set instead, as `prep.md` does, since a `writes` ran after the column was written (§230.3, Q3069). Judge `files_outside_write_set` against that same set, so a file the newer set holds is not reported outside.
+   build the union of each row's write set the way `writeSetOf` in `lanes.js` builds the write set above, and compare the two. A row's write set is the set its `show` prints on the `write set in force:` line, and `files_outside_write_set` is judged against that union.
    The write set above is the one the brief gave you.
    List every file where they disagree in `write_set_mismatch`; it is empty when the two match exactly (§396).
 2. `git checkout --detach <branch>`.

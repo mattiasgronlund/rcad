@@ -9,7 +9,9 @@ reaches that tier, then `verifier.md` step 7's revert of the source paths, the
 test run and the restore, and last the lane's numbers. For a lane marked
 `sameBehaviour` the revert's tests must pass rather than fail (§399). It ends
 with one line of JSON holding every `verdictSchema` field it could fill, `skipped` for what it
-skipped and why, and `left_to_you` for what it could not decide.
+skipped and why, `left_to_you` for what it could not decide, and, beside a
+`commands_that_cannot_run` that is not empty, `about_commands_that_cannot_run`
+for what the verifier does with such a number (§479.3).
 
 **One run, detached, that the verifier waits on** (§385.2). The harness ends a
 Bash call at 600 s, and a cold gate alone can take nine minutes, before the
@@ -65,6 +67,10 @@ RECORDS = {
     "number": (3, 3),
 }
 REQUIRED = ("base", "branch", "lane-tree", "write-set")
+ABOUT_COMMANDS_THAT_CANNOT_RUN = (
+    "each number here is one whose own command is the lane's fault: bash -n refuses its text, its first word is "
+    "no command, or it holds a literal `...` path, and verify-lane did not run it. Go straight to it: check that "
+    "number by hand, and say in your report, under commands_that_cannot_run, that the lane's command was wrong")
 USAGE = ("usage: just verify-lane <input file>, then just verify-lane wait for as long as its last line "
          "says it is still running")
 
@@ -610,9 +616,12 @@ def numbers(run, lane_numbers, report):
 
     A value the print does not hold goes in `number_mismatches` for the
     verifier to read. A command that writes to the repository or the queue is
-    not run at all. A command whose text matches an earlier one in this run at
-    the same clean-tree HEAD, including the run's own `gate-lane`, reads that
-    print instead of running again (§385.3).
+    not run at all. A command that cannot run goes in
+    `commands_that_cannot_run`, with `about_commands_that_cannot_run` beside
+    it saying what the verifier does with one, on the runs that have one
+    rather than in `verifier.md` (§479.3). A command whose text matches an
+    earlier one in this run at the same clean-tree HEAD, including the run's
+    own `gate-lane`, reads that print instead of running again (§385.3).
     """
     report["number_mismatches"] = []
     report["commands_that_cannot_run"] = []
@@ -649,6 +658,8 @@ def numbers(run, lane_numbers, report):
         tail(plain, 5)
         report["number_mismatches"].append(
             f"{what}: '{value}' is not in what `{command}` printed (exit {rc}); its last line: {last_line(plain)}")
+    if report["commands_that_cannot_run"]:
+        report["about_commands_that_cannot_run"] = ABOUT_COMMANDS_THAT_CANNOT_RUN
 
 
 def cannot_run(run, command):
