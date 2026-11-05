@@ -5123,7 +5123,7 @@ check-lanes-workflow:
     relay_rule='**When "Lane budget passed" comes and your row is not done, hand over** (§416).'
     relay_detach='2. Run `git switch --detach`, so the lane after you can check your branch out.'
     relay_hold_own="own the row's current hold, not the taken set above (§424)"
-    relay_hold_check='Where it prints a row "narrowed to" a set, that narrowed set, not the taken set above, is what you own until you narrow or widen it again'
+    relay_hold_check='The set on its "write set in force:" line, not the taken set above, is what you own until you narrow or widen it again'
     relay_hold_widen='if the widen is refused, stop and report it as blocked, naming the entry and the hold the refusal quotes.'
     hold_rule='**A lane edits nothing outside its current hold.** Widen it first, and'
     hold_refused='report it as blocked when the widen is refused, naming the entry and the'
