@@ -4672,8 +4672,9 @@ check-skills-selftest:
 # a name already taken, and the lane is told to stop as blocked.
 #
 # **It reads the source, not the prompt a lane is sent.** rscene holds its
-# workflow with a node harness that renders every prompt; this repo pins no node,
-# and the line is literal text in a template string. Three arms, each of which
+# workflow with a node harness that renders every prompt; this repo pins node
+# only to check that the file parses (Q3190), and the line is literal text in a
+# template string. Three arms, each of which
 # alone would let the reset back in: the `switch -c` line is there exactly once;
 # every line naming `checkout -B` or `switch -C` is the one warning against them;
 # and the lane is told what to do when the switch refuses — without that, the
@@ -5791,6 +5792,20 @@ check-lanes-workflow:
         return 0
     }
     scan "$file" "$agents" "$claude" "$recipes" "$script" || exit 1
+    parses() {
+        sed 's/^export const meta/const meta/' "$1" > "$dir/parse.js"
+        mise exec -- node -e 'const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor; new AsyncFunction(require("fs").readFileSync(process.argv[1], "utf8"))' "$dir/parse.js" 2> "$dir/parse.err"
+    }
+    if ! parses "$file"; then
+        echo "$file does not parse as a workflow body: $(head -n 5 "$dir/parse.err"); the text arms above pass a file that no longer loads (Q3190, §266)"
+        exit 1
+    fi
+    mkdir "$dir/unparsable"
+    sed "s/the row\\\\'s write set/the row's write set/" "$file" > "$dir/unparsable/lanes.js"
+    if cmp -s "$file" "$dir/unparsable/lanes.js" || parses "$dir/unparsable/lanes.js"; then
+        echo "putting the unescaped apostrophe back into the prep schema's write_set description left a lanes.js that still parses, or changed nothing, so the parse arm proves nothing (Q3190)"
+        exit 1
+    fi
     swap() {
         S="$2" R="$3" awk '{ i = index($0, ENVIRON["S"]); if (i) $0 = substr($0, 1, i - 1) ENVIRON["R"] substr($0, i + length(ENVIRON["S"])); print }' "$1"
     }

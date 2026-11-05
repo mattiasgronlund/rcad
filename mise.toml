@@ -17,6 +17,9 @@ lockfile = true
 "aqua:jqlang/jq" = "1.7"
 "cargo:kache" = "0.27"
 "cargo:taplo-cli" = "0.10"
+# `check-lanes-workflow` builds `.claude/workflows/lanes.js` into a function to
+# see that it parses; a file that reads fine as text can still not load (Q3190).
+node = "26.10.0"
 
 # kache is a content-addressed build cache. Cargo picks it up as a compiler
 # wrapper, so a crate whose inputs have been compiled before is fetched instead
