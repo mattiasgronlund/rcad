@@ -14046,7 +14046,9 @@ from Q2690:
 And what is not a row: the hypotheses 464.19 already leaves, the nine
 products below the normals (Q2802) and the route through
 `From<na::Isometry3<f64>>` (Q2803), which `vector.g` shares with `point.g`;
-Q2700, which moves these scripts into `proofs/gappa/` with 464.19's.
+Q2700, which moves these scripts into `proofs/gappa/` with 464.19's. Q2802 ran
+`point.g` alone, in 464.35, and files `vector.g` in its form as a row (464.35's
+7).
 
 ### 464.21 CORNER_AFTER_MOVING_ROUNDOFF
 
@@ -15241,7 +15243,9 @@ from Q2691:
 And what is not a row: the zero branches (Q2801, Q2825), the products below
 normal (Q2802) and the route through `From<na::Isometry3<f64>>` (Q2803), which
 these scripts share with `point.g` and `vector.g`; and Q2700, which moves these
-scripts into `proofs/gappa/` with the rest of 464's.
+scripts into `proofs/gappa/` with the rest of 464's. Q2802 ran `point.g` alone,
+in 464.35, where a product below the normals lets a slip reach `34.73u`, and
+files the pipe with that slip as a row (464.35's 7).
 
 ### 464.22 EVALUATION_ROUNDOFF's one stage
 
@@ -23849,7 +23853,9 @@ answer to look for.
   been run." By 3 the first two are run and prove. It is a comment that
   claims less than is proved, not a wrong answer, so it has no class.
 - Not a row: Q2802 runs `point.g` with the products below the normals, which
-  every case here keeps normal where they reach `out`. Q2825 runs 464.20's
+  every case here keeps normal where they reach `out`. Done, in 464.35: the
+  same 88 zero sets prove the `36u` with each such product free to fall below
+  the normals and `L` normal, reaching `34.73u`. Q2825 runs 464.20's
   `vector.g` and `square.g` in the zero branches, and `vector.g` is
   `point.g` with no shift, so 1 and 2 are its split with `s₀` gone. Q2700
   moves into `proofs/gappa/` each script a row of 464 appended, these among
