@@ -1590,8 +1590,8 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_cross_in_corners_
 /// cap sees three meets of the two caps and the two cones round
 /// `(1 − ε, y₀, 1)`, within `1.2e−24` of one another, and each far cap the same
 /// twice as far out: the coincidence such a policy merges (§17.4). **The policy
-/// takes each pair of them along a cap's rim as one point, and every fuse is
-/// refused further on.**
+/// takes each pair of them along a cap's rim as one point, three of the six
+/// fuses answer, and the other three are refused further on.**
 ///
 /// At `d6ba161f` every fuse was refused on the order along a crossing round
 /// a cap's rim: the meet of that cap and both cones, whose own box is
@@ -1623,10 +1623,32 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_cross_in_corners_
 /// read that as nought, and the fold left a cell across its own arc (Q3139's
 /// trace). The start of such a loop is named now (Q3145).
 ///
-/// **Every fuse is refused**: with the upright frustum first
-/// `CannotTellTheCellsOfAFaceApart` on its side, the upright cone, and with the
-/// lying one first `TwoCurvesTouchWithoutCrossing` on its side, the lying cone
-/// (Q3146).
+/// With the lying frustum first, each fuse was then refused
+/// `TwoCurvesTouchWithoutCrossing` on the lying cone. The two cones cross in
+/// four half rulings out of the apex they share, and the two with `z < 0` run
+/// on the lying cone's far nappe. The corner of the lying cone's seam on its
+/// near cap, `(1, 0, −1)`, is within a rounding of the upright cone and its box
+/// straddles `y = 0`, so both of those halves were taken through it. A corner
+/// is off such a half now where either cone's axis reads the corner and the
+/// half's way out of the apex on opposite sides of the apex (Q3146).
+///
+/// With the upright frustum first, each fuse was refused
+/// `CannotTellTheCellsOfAFaceApart` on the upright cone. On it, each meet of a
+/// cap and the two cones near `(1, ±2.1e−8, 1)` has its own box `3.65e−8` wide
+/// along `y`, reaching `y = 0`, so neither half ruling's picker, `y` above
+/// nothing or below it, ruled it out. Each half got a node at both meets, and
+/// the fold joined the two, `4.2e−8` apart, into one. Where a picker cannot
+/// tell of a meet's own box, it is asked now of the narrowed box, which rules
+/// the meet off the other half (Q3146).
+///
+/// **The intersection and the upright frustum less the lying one answer**,
+/// each way round for the intersection: one solid of six faces that measures
+/// nothing within what the mesh may miss, and two solids, the frustum less
+/// the sliver the two share, `7π/3` within what the mesh may miss, and a chip
+/// of three faces, the upright cone, its far cap and the lying frustum's far
+/// cap. **The union both ways and the lying frustum less the upright one are
+/// refused `ACurvedFaceGoesRightRoundWithNoSeam` on the lying cone**, by the
+/// mesh of the answer.
 #[test]
 fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_on_each_cap_as_one_point_under_a_tolerant_policy()
  {
@@ -1644,32 +1666,7 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_
         let said = model
             .fuse(&arguments, &tools, rule, &policy, &mut log)
             .map(|answer| answer.solids().to_vec());
-        let what = format!("{rule:?} (first first: {first_first}): {said:?}");
-        let (face, axis) = if first_first {
-            let Err(rcad_topo::Error::CannotTellTheCellsOfAFaceApart { face }) = said else {
-                panic!("{what}");
-            };
-            (face, Vector::new(0.0, 0.0, 1.0))
-        } else {
-            let Err(rcad_topo::Error::TwoCurvesTouchWithoutCrossing { face }) = said else {
-                panic!("{what}");
-            };
-            (face, Vector::new(1.0, 0.0, f64::EPSILON))
-        };
-        let surface = model
-            .solids()
-            .flat_map(|solid| solid.faces())
-            .find(|placed| placed.key() == face)
-            .expect("the refusal names a face of one of the two frustums")
-            .surface();
-        let Surface::Cone(side) = surface else {
-            panic!("{what}: refused on {surface:?}");
-        };
-        assert_eq!(
-            side.axis().direction(),
-            axis,
-            "{what}: refused on {surface:?}"
-        );
+        let what = format!("{rule:?} (first first: {first_first})");
         if first_first {
             let narrowed: Vec<&Record> = log
                 .records()
@@ -1692,6 +1689,37 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_
                 assert!(record.enclosure() <= 3.2e-16, "{what}: {record:#?}");
             }
         }
+        let (faces, volume): (&[usize], f64) = match (rule, first_first) {
+            (Rule::Intersection, _) => (&[6], 0.0),
+            (Rule::Difference, true) => (&[7, 3], 7.0 * PI / 3.0),
+            (Rule::Union | Rule::Difference, _) => {
+                let Err(rcad_topo::Error::ACurvedFaceGoesRightRoundWithNoSeam { face }) = said
+                else {
+                    panic!("{what}: {said:?}");
+                };
+                let surface = model
+                    .solids()
+                    .flat_map(|solid| solid.faces())
+                    .find(|placed| placed.key() == face)
+                    .expect("the refusal names a face of one of the two frustums")
+                    .surface();
+                let Surface::Cone(side) = surface else {
+                    panic!("{what}: refused on {surface:?}");
+                };
+                assert_eq!(
+                    side.axis().direction(),
+                    Vector::new(1.0, 0.0, f64::EPSILON),
+                    "{what}: refused on {surface:?}"
+                );
+                continue;
+            }
+            (other, _) => panic!("{other:?} is not one of the six"),
+        };
+        let (_, measured, error) = measures_under(&mut model, said, faces, &what, &policy);
+        assert!(
+            (measured - volume).abs() <= error,
+            "{what}: measured {measured} and the mesh may miss by {error}"
+        );
     }
 }
 
