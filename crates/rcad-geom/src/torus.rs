@@ -296,7 +296,11 @@ impl Torus {
 /// The `w·w` in front only scales a positive number by a positive number.
 ///
 /// A point with exact `f64` coordinates always gets a certified answer, as long
-/// as no product overflows or falls into the subnormals. A constructed point is
+/// as no product overflows or falls into the subnormals, and as long as the
+/// tube is not so much thinner than the ring that `x·x + R² − r²` is too wide
+/// for the exact level to square: the middle of a tube `2⁻⁵⁴⁰` of its ring is
+/// refused at every scale tried, though it is inside (`docs/decisions.md`
+/// §464.33's 4). A constructed point is
 /// only known to lie inside a box, so when that box straddles the skin the
 /// answer is [`Decision::Undecidable`] (`docs/decisions.md` §2.5).
 ///
@@ -344,9 +348,19 @@ impl Predicate for HowFarFromTheRing {
         let halves = cross_product_halves(from_centre, direction);
         let sideways = halves.map(|(left, right)| left - right);
 
-        // The bound below is a fraction of the permanent, which only bounds
-        // anything while every product keeps its relative accuracy. One of them
-        // in the subnormals and this level certifies a wrong sign.
+        // The bound below is a fraction of the permanent. The checks on a
+        // direction component's square carry a right sign on numbers this
+        // level can be handed. With one below the normals and the direction
+        // far from length one, `w·w` rounds to zero, the whole `w·w·bulge²`
+        // term goes with it, and so does its share of the permanent, and this
+        // level certifies a wrong sign: the direction `(2⁻⁵⁴⁰, 0, 0)`, the
+        // ring `2³¹`, the tube `2³⁰` and the point `(0, 3·2³¹, 0)`, which is
+        // outside, come out `Neg` without its check (`docs/decisions.md`
+        // §464.33). No `Torus` holds such a direction, by the doc on
+        // `Torus::basis`. With a unit direction, seven inputs that each fail
+        // one to three checks get no wrong sign without them, but whether a
+        // product below the normals can break the bound there has not been
+        // run in Gappa.
         let stays_accurate = (0..3).all(|axis| {
             product_is_normal(from_centre[axis], from_centre[axis])
                 && product_is_normal(direction[axis], direction[axis])
@@ -536,6 +550,12 @@ fn cross_product_halves<T: Copy + core::ops::Mul<Output = T>>(
 /// so a component that cancels to zero lets its reach square fall below the
 /// normals or round to zero, and where all three cancel, `4R²` times their sum
 /// can too. The bound on the sum holds in each of those (§464.17's 6).
+///
+/// The checks on the direction's squares are not idle. With the direction far
+/// from length one, a direction component's square below the normals takes
+/// `w·w` and the whole `w·w·bulge²` term with it, and level 1 then certifies a
+/// wrong sign without its check (§464.33). Every [`Torus`]'s direction is near length one, and
+/// whether any check is needed there has not been run in Gappa.
 const SIDE_OF_TORUS_ERROR_BOUND: f64 = {
     let epsilon = f64::EPSILON / 2.0;
     (18.0 + 220.0 * epsilon) * epsilon
