@@ -77,14 +77,17 @@ impl Isometry {
     ///
     /// Gappa proves the 18 (`docs/decisions.md` §464.19): each coordinate lands
     /// within `18 · f64::EPSILON · L` while the turn's `q·q`, worked out
-    /// exactly, is within `6 · f64::EPSILON` of one, the nine products are
-    /// normal numbers, no factor is zero and no sum cancels to zero. The count
+    /// exactly, is within `6 · f64::EPSILON` of one and the products on a live
+    /// path are normal numbers. The same holds in every zero branch
+    /// (`docs/decisions.md` §464.34): each of `w`, `v` and `p` zero, and each
+    /// sum cancelling to zero, still lands within the 18, and none goes past
+    /// `24.80·u·L`. The count
     /// above charges each stage at its own worst case, and those cannot all
     /// happen at once: `|w| = 1` forces `v = 0`, and so `k = 0`. Charged
     /// together, the proof reaches `24.80·u·L`, which leaves `11.2·u·L` of room
     /// where the count left `0.22·u·L`. A turn of a cube is one addition per
-    /// coordinate, within `2u·L`. The zero factors, the sums that cancel and
-    /// the products below the normals have not been run.
+    /// coordinate, within `2u·L`. Only the products below the normals have not
+    /// been run.
     ///
     /// **A turn further than `6 · f64::EPSILON` from length one is outside the
     /// proof, and can go past the 18**: one four times as long as one put 40
