@@ -108,6 +108,12 @@ back leaves its own tree locked, holding a slot, until someone finds it by hand
    just queue show <id>` once per id in the row, or each id of a bundle, and
    build the union of each row's write set the way `writeSetOf` in `lanes.js` builds the write set above, and compare the two. A row's write set is the set its `show` prints on the `write set in force:` line, and `files_outside_write_set` is judged against that union.
    The write set above is the one the brief gave you.
+   When a `show` prints a line `narrowed to <set>, taken with <set>`, the lane
+   narrowed its own hold: compare the brief's write set with the `taken with`
+   set for that row, not with the `write set in force:` line, which is the
+   narrowed set and would list every file the lane narrowed away as a mismatch.
+   `files_outside_write_set` is still judged against the set in force. A row
+   widened by `just queue writes` has no such line, and keeps the rule above.
    List every file where they disagree in `write_set_mismatch`; it is empty when the two match exactly (§396).
 2. `git checkout --detach <branch>`.
 3. `mise exec -- just gate-lane` on the branch tip, including any docs commit —
