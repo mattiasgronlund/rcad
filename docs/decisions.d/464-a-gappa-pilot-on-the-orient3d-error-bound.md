@@ -23377,19 +23377,21 @@ terminal. The thirteen blocks are the eight scripts and five prints:
 Q2787 asks whether `HowFarFromTheRing::on_floats` in
 `crates/rcad-geom/src/torus.rs` needs its `product_is_normal` checks, by
 running 464.17's `torsplit.py` with one, two and three of the checked products
-below the normals, as 464.14's 6 ran the sphere's squares. Its first lane, on
-2026-11-05 at `d8bd2284`, ran the probe of 2 and wrote this much. `torsplit.py`
-has not been run with any product below the normals, and the comment at
-`torus.rs:347-349` is not yet restated (4).
+below the normals, as 464.14's 6 ran the sphere's squares. Two lanes on
+2026-11-05 at `d8bd2284`: the first ran the probe of 2 and wrote 1 to 3, and
+the second ran it again, ran 4 and restated the comments (5). `torsplit.py`
+has not been run with any product below the normals, which is a row (6), so
+this does not do what the row asked in full.
 
-One of the twenty checks carries a right sign on numbers `on_floats` can be
-handed: a direction component with itself. With it taken out and a direction
-far from length one, level 1 certifies `Neg` for a point outside (2). No
-`Torus` holds such a direction, by the doc on `Torus::basis`
+The checks on a direction component with itself, 3 to 5 of the twenty, carry a
+right sign on numbers `on_floats` can be handed. With check 3 taken out and a
+direction far from length one, level 1 certifies `Neg` for a point outside (2).
+No `Torus` holds such a direction, by the doc on `Torus::basis`
 (`torus.rs:168-175`), which names each route an axis gets its direction by, as
 464.29's 3 does for the cylinder. With a direction of length one, the seven
 inputs of 2 that each fail one to three checks are answered the same with the
-failing checks taken out as with them in, and the same as in exact rationals.
+failing checks taken out as with them in, and each answer is the sign in exact
+rationals but U3's, which every level refuses, checks or none (4).
 
 **1. The checks.** At `d8bd2284`, `stays_accurate` (`torus.rs:350-359`) and
 the check after it (`torus.rs:373-375`) are twenty `product_is_normal` calls.
@@ -23504,7 +23506,7 @@ PROBE U7, 4R squared times across below the normals, failing checks left out [19
 PROBE U7, 4R squared times across below the normals: side_of Pos
 ```
 
-`truth2787.py` (not yet appended here) works each value out in exact rationals
+`truth2787.py` (7) works each value out in exact rationals
 from the printed bits, `(w·w)(x·x + R² − r²)² − 4R²|x × w|²` with the centre
 at `0`, and `python3 -I truth2787.py` printed:
 
@@ -23554,18 +23556,117 @@ one. A direction component's square loses `2⁻¹⁰⁷⁵` of a `w·w` near one
 95u²` that 464.17 proved for `y` and the code's `18u + 224u²`. None of this
 has been run in Gappa, so it is no claim.
 
-**4. What this leaves.** Unfinished, for the lane after this one:
+**4. U3, which every level refuses.** The second lane put the probe patch of
+2 back, added these lines at the end of `probe_q2787`, after the loop, and ran
+it again:
 
-- Restate the comment at `torus.rs:347-349` by 2 and 3, as 464.29's 5 did for
-  the cylinder: one check, a direction component's square, carries a right
-  sign with a direction far from length one, input A; no `Torus` holds such a
-  direction; with the direction near length one it has not been run in Gappa.
-  The doc on `SIDE_OF_TORUS_ERROR_BOUND` (`torus.rs:528-538`) ends with a
-  paragraph on the checks that should say the same, citing this subsection.
-- Run `torsplit.py` with one, two and three of the twenty products below the
-  normals under a hypothesis that `w·w` is near one, or file it as a row, as
-  464.29's 6 did.
-- U3 is a refusal of a point with a sign, at a tube `2⁻⁵⁴⁰` of its ring, far
-  outside §3.5's envelope; whether to file it `refuses/D`, and which step of
-  `exactly` gives up, is not traced.
-- Append `truth2787.py` here, whole.
+```rust
+        println!(
+            "PROBE U3 Exact::product_of(tube, tube) is_none {}",
+            crate::exact::Exact::product_of(p(-540), p(-540)).is_none()
+        );
+        for (what, scale) in [("U3 as built", 0), ("U3 times 2^100", 100), ("U3 times 2^3", 3), ("U3 times 2^2", 2)] {
+            let s = p(scale);
+            let torus = Torus::new(Axis::z(), s, p(-540) * s).unwrap();
+            let point = PredicatePoint::from([s, 0.0, 0.0]);
+            let pred = HowFarFromTheRing { torus, point };
+            println!("PROBE {what}: Torus::new side_of {:?}, decide {:?}, exactly {:?}", torus.side_of(point), decide(&pred), pred.exactly());
+        }
+        let ordinary = Torus::new(Axis::z(), 1.0, 0.5).unwrap();
+        println!("PROBE U3 made ordinary, tube 0.5: side_of {:?}", ordinary.side_of(PredicatePoint::from([1.0, 0.0, 0.0])));
+```
+
+The lines of 2 came out the same, and after them:
+
+```text
+PROBE U3 Exact::product_of(tube, tube) is_none true
+PROBE U3 as built: Torus::new side_of Undecidable { enclosure: 8.881784197001252e-16 }, decide (Undecidable { enclosure: 8.881784197001252e-16 }, Interval), exactly None
+PROBE U3 times 2^100: Torus::new side_of Undecidable { enclosure: 2.2934986159900715e105 }, decide (Undecidable { enclosure: 2.2934986159900715e105 }, Interval), exactly None
+PROBE U3 times 2^3: Torus::new side_of Undecidable { enclosure: 3.637978807091713e-12 }, decide (Undecidable { enclosure: 3.637978807091713e-12 }, Interval), exactly None
+PROBE U3 times 2^2: Torus::new side_of Undecidable { enclosure: 2.2737367544323206e-13 }, decide (Undecidable { enclosure: 2.2737367544323206e-13 }, Interval), exactly None
+PROBE U3 made ordinary, tube 0.5: side_of Neg
+```
+
+So `Torus::new` builds U3, and the public `side_of` refuses it. On the centre
+circle `x·x = R²` and `|x × w|² = R²`, so the value is `(2R² − r²)² − 4R⁴ =
+r²(r² − 4R²)`, `Neg` for every tube narrower than twice its ring; with the
+tube `0.5` it comes out `Neg`. As built, `exactly` gives up at
+`Exact::product_of(tube, tube)`, `r² = 2⁻¹⁰⁸⁰` being under the smallest
+subnormal. At `2³`, where `r²` is the smallest subnormal itself, at `2²` just
+under it, and at `2¹⁰⁰`, it still gives up. Where, at those scales, is not
+traced; the doc on `Exact::square_minus` says it refuses a number wider than
+its window at any scale, and `x·x + R² − r²` holds `2R²` and `−r²`, which are
+`2¹⁰⁸¹` apart at every scale. That is by hand, as is the claim that no slide by
+a power of two reaches U3; it is not Q2518's ball, where the whole question is
+small. The sign exists, so this is a gap and not a limit (§16.10). The tube is
+`2⁻⁵⁴⁰` of the ring, about `1/3.6e162`, far outside §3.5's `1e11`: a
+`refuses/D`, and a row (6). The doc on `Torus`'s `side_of` said every point
+with exact coordinates is decided while no product overflows or falls into
+the subnormals, and at `2¹⁰⁰` none of the value's own products does; the doc
+now names U3 (5).
+
+**5. What `torus.rs` said, and says now.** At `d8bd2284` the comment above
+`stays_accurate` (`torus.rs:347-349`) said: "The bound below is a fraction of
+the permanent, which only bounds anything while every product keeps its
+relative accuracy. One of them in the subnormals and this level certifies a
+wrong sign." By 2 that is true of the checks on a direction component's
+square, and only with a direction no `Torus` holds, and it is not shown of the
+rest. The comment now says which checks, gives input A, says no `Torus` holds
+such a direction, says that seven inputs with a unit direction get no wrong
+sign without the checks they fail, and says that a direction near length one
+has not been run in Gappa. The doc on `SIDE_OF_TORUS_ERROR_BOUND` ends with a
+paragraph saying the same, citing this subsection, and the doc on `side_of`
+(`torus.rs:298-299`) now names U3 beside the products below the normals. Every
+check stays. Comment only: lines that run 0.
+
+**6. What this leaves.**
+
+- A row: run `torsplit.py` with one, two and three of the twenty checked
+  products below the normals or rounding to zero, under a hypothesis that the
+  computed `w·w` lies in `[1/2, 2]`, as 464.27 ran plane's and Q2881 asks of
+  the cylinder's `cylsplit.py`. By 2 the hypothesis is needed for the
+  direction squares. 3 names the factor each loss is carried by on its way to
+  `y` and the term of the permanent that holds the same factor. Then restate
+  the comment and the doc again by what it shows.
+- A row, `refuses/D`: U3 of 4, through `Torus::new` and `side_of`.
+- Not a row: Q2767 asks whether the doc on `product_is_normal` is right that a
+  product below the normals can make a filter certify a wrong sign. 2's A is
+  one, on `on_floats` with check 3 taken out and a direction no `Torus` holds.
+
+**7. The script.** `truth2787.py`, whole, as `python3 -I truth2787.py` ran it:
+
+```python
+"""The sign of each probe input of Q2787 in exact rationals, from the bits the
+probe printed: (w.w)(x.x + R^2 - r^2)^2 - 4 R^2 |x x w|^2, x = point - centre,
+the centre being 0 in every input."""
+import struct
+from fractions import Fraction
+
+
+def f(bits):
+    return Fraction(struct.unpack("<d", struct.pack("<Q", int(bits, 16)))[0])
+
+
+inputs = [
+    ("A, direction squares below the normals", "41e0000000000000", "41d0000000000000", "1e30000000000000 0 0", "0 41f8000000000000 0"),
+    ("C, A made ordinary", "3ff0000000000000", "3fe0000000000000", "3ff0000000000000 0 0", "0 4008000000000000 0"),
+    ("U1, a difference squared to nothing", "3ff0000000000000", "3fe0000000000000", "0 0 3ff0000000000000", "1e30000000000000 3ff3333333333333 0"),
+    ("U2, a unit direction component squared to nothing", "3ff0000000000000", "3fe0000000000000", "3ff0000000000000 1e30000000000000 0", "0 3ff3333333333333 0"),
+    ("U3, the tube squared to nothing", "3ff0000000000000", "1e30000000000000", "0 0 3ff0000000000000", "3ff0000000000000 0 0"),
+    ("U4, both radii squared below the normals", "1f70000000000000", "1f60000000000000", "0 0 3ff0000000000000", "3ff0000000000000 0 0"),
+    ("U5, a half below the normals", "3ff0000000000000", "3fe0000000000000", "0 0 3ff0000000000000", "100000000000 3ff3333333333333 0"),
+    ("U6, bulge squared below the normals", "30f0000000000000", "30efffffffffffff", "0 0 3ff0000000000000", "0 0 0"),
+    ("U7, 4R squared times across below the normals", "2060000000000000", "2050000000000000", "0 0 3ff0000000000000", "3f00000000000000 0 0"),
+]
+
+for what, ring, tube, direction, point in inputs:
+    R, r = f(ring), f(tube)
+    w = [f(b) for b in direction.split()]
+    x = [f(b) for b in point.split()]
+    ww = sum(c * c for c in w)
+    xx = sum(c * c for c in x)
+    cross = [x[1] * w[2] - x[2] * w[1], x[2] * w[0] - x[0] * w[2], x[0] * w[1] - x[1] * w[0]]
+    value = ww * (xx + R * R - r * r) ** 2 - 4 * R * R * sum(c * c for c in cross)
+    sign = "Pos" if value > 0 else "Neg" if value < 0 else "Zero"
+    print(f"{what}: {sign}, value {float(value)!r}")
+```
