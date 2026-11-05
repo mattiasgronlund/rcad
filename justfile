@@ -21677,6 +21677,13 @@ check-queue-api-selftest:
         && fail "show still said the held row was narrowed, though writes moved what it was taken with too"
     grep -qxF 'write set set to docs/decisions.d/ by `writes`, - in docs/queue.md' <<<"$got" \
         || fail "show did not print the held row's write set against the stale docs/queue.md column (§230.3, Q2975)"
+    # Q3166 (§479.3): one line naming the set in force, so prep, a verifier
+    # and a relay copy it and never choose between the column and the line
+    # under it.
+    [ "$(grep -c '^write set in force: ' <<<"$got")" = 1 ] \
+        || fail "show did not print exactly one write set in force line for the held row writes widened: $got"
+    grep -qxF 'write set in force: docs/decisions.d/' <<<"$got" \
+        || fail "show did not name the set writes gave the held row as the write set in force (Q3166)"
 
     # Q2670: writes on a held row moves the set it was taken with, not only
     # the write set itself, so a later narrow can reach what writes just
@@ -21685,6 +21692,11 @@ check-queue-api-selftest:
         || fail "narrow was refused an entry writes had just moved the held row's taken set onto"
     grep -qxF "$held_wrong: narrowed from docs/decisions.d/ to docs/decisions.d/230-one-queue.md, taken with docs/decisions.d/" <<<"$got" \
         || fail "narrow did not report narrowing onto the entry writes granted"
+    got=$(q "$writes_wt" show "$held_wrong" 2>&1) || fail "show failed on a narrowed hold"
+    grep -qxF "narrowed to docs/decisions.d/230-one-queue.md, taken with docs/decisions.d/" <<<"$got" \
+        || fail "show did not say what the held row was narrowed to"
+    grep -qxF 'write set in force: docs/decisions.d/230-one-queue.md' <<<"$got" \
+        || fail "show did not name the narrowed hold as the write set in force (Q3166): $got"
     got=$(q "$writes_wt" narrow "$held_wrong" docs/decisions.d/ 2>&1) \
         || fail "narrow back to the full directory was refused"
 
@@ -21706,6 +21718,11 @@ check-queue-api-selftest:
         && fail "writes accepted a write set a row already carries"
     grep -qF "write set is docs/decisions.d/230-one-queue.md already" <<<"$got" \
         || fail "writes did not refuse a write set a row already carries"
+    got=$(q "$writes_wt" show "$beside_filed" 2>&1) || fail "show failed on a row no writes ever moved"
+    grep -qxF 'write set in force: docs/decisions.d/230-one-queue.md' <<<"$got" \
+        || fail "show did not name the column of a row with no hold and no writes as the write set in force (Q3166): $got"
+    grep -qF 'write set set to' <<<"$got" \
+        && fail "show said writes moved the write set of a row no writes ever moved"
 
     # Q2670: a writes run ahead of a row's first take is no longer undone by
     # it. take_step used to read row.write_set, the docs/queue.md column,
@@ -21719,6 +21736,8 @@ check-queue-api-selftest:
     got=$(q "$writes_wt" show "$fresh_write" 2>&1) || fail "show failed after writes set the fresh-write row's write set"
     grep -qxF 'write set set to docs/q2670-fresh.md by `writes`, - in docs/queue.md' <<<"$got" \
         || fail "show did not say what writes set ahead of the take"
+    grep -qxF 'write set in force: docs/q2670-fresh.md' <<<"$got" \
+        || fail "show did not name the set writes gave a row with no hold as the write set in force (Q3166): $got"
     got=$(q "$writes_wt" take "$fresh_write" lane-fresh-write 2>&1) \
         || fail "take of the fresh-write row was refused"
     got=$(awk -F '\t' -v id="$fresh_write" '$1 == "take" && $2 == id { print $6 }' "$claims_file")
@@ -21729,6 +21748,8 @@ check-queue-api-selftest:
         && fail "show said the freshly taken row was narrowed, though its write set is what it was taken with"
     grep -qxF 'write set set to docs/q2670-fresh.md by `writes`, - in docs/queue.md' <<<"$got" \
         || fail "show did not print the taken row's write set against the stale docs/queue.md column (§230.3, Q2975)"
+    grep -qxF 'write set in force: docs/q2670-fresh.md' <<<"$got" \
+        || fail "show did not name the hold a writes-given set was taken with as the write set in force (Q3166): $got"
 
     # Q3162 (§479): `add` and `writes` print the pointer to
     # docs/where-a-rule-goes.md on stderr when a write set names an agent file,
@@ -24581,6 +24602,13 @@ check-verify-lane-selftest:
     says commands_that_cannot_run "a count whose text bash refuses: the lane's command cannot run (bash -n refuses it"
     says commands_that_cannot_run "its first word \`no-such-program-q2996\` is no command"
     says commands_that_cannot_run 'its text holds a literal `...` path'
+    # Q3166 (§479.3): what to do with such a number is printed beside the
+    # key, on the runs that have one, and not kept in verifier.md.
+    says about_commands_that_cannot_run "verify-lane did not run it"
+    says about_commands_that_cannot_run "check that number by hand, and say in your report"
+    says about_commands_that_cannot_run "that the lane's command was wrong"
+    [ "$(python3 -c 'import json, sys; print(list(json.loads(sys.argv[1])).index("about_commands_that_cannot_run") - list(json.loads(sys.argv[1])).index("commands_that_cannot_run"))' "$json")" = 1 ] \
+        || fail "about_commands_that_cannot_run does not come right after commands_that_cannot_run in the JSON: $json"
     says left_to_you 'a count whose command writes: not run'
     says left_to_you 'a count whose command pins a row: not run'
     back_at_the_tip
@@ -24595,6 +24623,8 @@ check-verify-lane-selftest:
     [ "$(field tests_fail_without_fix)" = "(absent)" ] \
         || fail "a revert that took the test out gave tests_fail_without_fix $(field tests_fail_without_fix); no test ran, and that is no failure (Q231)"
     says left_to_you 'new_test ran no test'
+    [ "$(field commands_that_cannot_run) $(field about_commands_that_cannot_run)" = "[] (absent)" ] \
+        || fail "a run with no number gave commands_that_cannot_run $(field commands_that_cannot_run) and about_commands_that_cannot_run $(field about_commands_that_cannot_run); the note is printed only beside a key that is not empty (Q3166)"
     back_at_the_tip
 
     fixture passes-reverted
