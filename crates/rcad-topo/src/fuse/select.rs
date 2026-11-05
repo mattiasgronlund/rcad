@@ -379,7 +379,8 @@ pub(crate) fn choose(
                     by_a_step_towards_a_corner_of_the_box_round_it(
                         model, &solids, against, piece, policy, log,
                     )
-                });
+                })
+                .or_else(|| by_a_plane_a_side_runs_along(&solids, against, piece));
             placed.ok_or_else(|| match unfollowed {
                 Some(face) => Error::AFaceTrimmedByACurveThisCannotFollow { face },
                 None => gave_up(unplaced, &corners.concat(), Measures::Length, log),
@@ -2829,6 +2830,121 @@ const TOWARDS_THE_CORNERS_OF_A_BOX: [[f64; 3]; 8] = [
     [-1.0, -1.0, 1.0],
     [-1.0, -1.0, -1.0],
 ];
+
+/// The last rule: a piece placed outside each solid by a plane one of its
+/// sides runs along, where the whole solid lies on the other side of that
+/// plane from the piece's material beside the side, or on it
+/// (`docs/decisions.md` §35.6, Q3168). Outside every solid of the group is
+/// outside, and anything else is `None`.
+///
+/// **Why a plane a side runs along can place a piece.** Take a side of the
+/// piece `P` carried by a plane `σ` that crosses `P`'s surface there and
+/// does not touch it ([`crosses_wherever_they_meet`]). Beside that side `P`'s
+/// inside lies strictly on the side of `σ` its [`FaceMeet::material_side`]
+/// names (§36.6). The solid `S` is bounded, so it lies in the hull of its
+/// skin, and with every face of `S` on the other closed side of `σ`, so is
+/// all of `S`. The points of `P`'s inside beside the side are then off `S`
+/// and off its skin. `P` was cut by every surface of `S`, so its inside lies
+/// all inside `S`, all outside it, or all on its skin (§17.4), and it is all
+/// outside.
+///
+/// A face of `S` lies on that closed side when it is on `σ`, facing either
+/// way, or when it is one input face of a cone with an edge right round where
+/// `σ` crosses the cone ([`lies_on_one_side_of`]).
+///
+/// The pieces this was built for are two specks of two pointed cones of slope
+/// a half, both eight high, the second turned 0.3 about `x` through
+/// `(0, 0, 4)`. Where both caps' rims nearly meet, the two caps' planes and
+/// the two cones meet in four points within `4.3e-16` of each other. A speck
+/// of the leaning cap a rounding across has its sides along the leaning cone,
+/// along `z = 8` with its material above, and along the upright cone; a speck
+/// of the leaning cone's wall at the other such place has its sides along the
+/// leaning cap's plane, along `z = 8` with its material above, and along the
+/// upright cone. No face of the upright cone shares the side along `z = 8` or
+/// the one along its wall, and no point found inside either speck was placed.
+/// The upright cone is its cap on `z = 8` and its wall below its rim, so each
+/// speck is outside it (`tests/a_funnel_with_a_leaning_spout.rs`).
+///
+/// Nothing here asks the policy: every plane is compared bit for bit and the
+/// side of a plane an apex is on is exact, so nothing goes into the log.
+/// Tried after every other rule, so a piece any of them placed is placed as
+/// before.
+fn by_a_plane_a_side_runs_along(
+    solids: &[&BakedSolid],
+    against: &[usize],
+    piece: &Piece,
+) -> Option<Placement> {
+    let planes_its_sides_cross: Vec<(Plane, bool)> = piece
+        .wires
+        .iter()
+        .flatten()
+        .filter_map(|side| {
+            let along = *side.carried_by[1].as_plane()?;
+            let material_in_front = side.material_side == Decision::Pos;
+            crosses_wherever_they_meet(&piece.surface, &along).then_some((along, material_in_front))
+        })
+        .collect();
+    against
+        .iter()
+        .all(|&index| {
+            planes_its_sides_cross
+                .iter()
+                .any(|&(along, material_in_front)| {
+                    solids[index]
+                        .faces
+                        .iter()
+                        .all(|face| lies_on_one_side_of(face, along, material_in_front))
+                })
+        })
+        .then_some(Placement::Outside)
+}
+
+/// Whether `plane`, which carries a side of a piece on `surface`, crosses
+/// `surface` wherever the two meet and touches it nowhere.
+///
+/// Two planes that carry a side between them are not one plane, so they cross
+/// in a line. Every plane that touches a cone holds a straight line of it, and
+/// so its apex: a plane strictly off the apex crosses it wherever they meet.
+/// Any other surface, or a plane through the apex, is left out.
+fn crosses_wherever_they_meet(surface: &Surface, plane: &Plane) -> bool {
+    match surface {
+        Surface::Plane(_) => true,
+        Surface::Cone(cone) => matches!(
+            plane.side_of_point(PredicatePoint::from(cone.apex().coordinates())),
+            Decision::Pos | Decision::Neg
+        ),
+        Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Torus(_) | _ => false,
+    }
+}
+
+/// Whether all of `face` lies on the closed side of `plane` that `behind`
+/// names, its negative side when it is `true`: because the face is on
+/// `plane`, facing either way, or because it is one input face of a cone with
+/// an edge right round where `plane` crosses the cone.
+///
+/// **A cone's face.** A plane crosses a cone, both nappes, in a closed curve
+/// only where it crosses one nappe in an ellipse, and then it crosses the cone
+/// nowhere else. An edge right round that ellipse is all of it, so the face's
+/// inside, which misses its edges, misses the plane. One input face is in one
+/// piece, so its inside lies on one side of the plane, the side
+/// [`BakedEdge::inside_across`] says. This is the argument
+/// `the_sides_of_planes_it_lies_in` in `fuse/bake.rs` makes for a pipe's face.
+fn lies_on_one_side_of(face: &BakedFace, plane: Plane, behind: bool) -> bool {
+    if let Some(own) = face.surface.as_plane() {
+        return is_one_plane_either_way(*own, plane);
+    }
+    let Surface::Cone(_) = face.surface else {
+        return false;
+    };
+    face.keys.len() == 1
+        && face.wires.iter().flatten().any(|edge| {
+            let Some(across) = edge.across.as_plane() else {
+                return false;
+            };
+            (*across == plane && edge.inside_across == Some(behind))
+                || (*across == plane.reversed() && edge.inside_across == Some(!behind))
+        })
+}
 
 /// Whether one piece of a face holds a point on its surface, or `None` when
 /// nothing here can say.
