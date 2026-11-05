@@ -1725,6 +1725,9 @@ enum Shape {
 /// curve's own plane, so it reads the curve's centre and axis back but never
 /// its sizes.
 ///
+/// A centre that is not finite is the same limit: the plane meets the pipe's
+/// axis further along it than any `f64` holds, so there is none to give.
+///
 /// **A long size past `f64::MAX` is a limit, not a gap** (`docs/decisions.md`
 /// §16.10), and it takes a plane within about `r / f64::MAX` of running along
 /// the pipe. `add_bar_cut_off_by` builds a bar of radius 2 whose caps lean
@@ -1736,6 +1739,9 @@ fn where_a_plane_crosses_a_pipe(flat: &Plane, pipe: &Cylinder) -> Option<Crossin
     let along = pipe.axis().direction();
     let facing = flat.normal().dot(along);
     let centre = where_the_walk_centres_a_circle(flat, pipe)?;
+    if !centre.coordinates().iter().all(|c| c.is_finite()) {
+        return None;
+    }
     let radius = pipe.radius();
     let across = flat.normal().cross(along);
     if across == Vector::zero() {
@@ -2727,6 +2733,28 @@ mod plane_round_trip_tests {
     };
     use crate::geometry::plane_through;
     use crate::{Import, StepFile};
+
+    /// A plane 1e304 up meets a pipe that runs almost level, 1e304 times
+    /// further along it than any number holds, so there is no centre to give
+    /// (`crash-9781a4ce`, Q1480).
+    #[test]
+    fn a_plane_that_meets_a_pipe_further_along_than_a_number_holds_gives_no_circle() {
+        let flat = Plane::from_point_and_normal(
+            Point::new(0.0, 0.0, 3.840_286_848_163_440_7e304),
+            Vector::new(0.0, 0.0, 1.0),
+        )
+        .expect("the z axis is a unit normal");
+        let pipe = Cylinder::new(
+            Axis::new(
+                Point::new(-7.0, -4.0, -12.0),
+                Vector::new(0.0, 1.0, 2.180_033_788_163_451_5e-139),
+            )
+            .expect("a direction with a length"),
+            1.0,
+        )
+        .expect("a radius");
+        assert!(where_a_plane_crosses_a_pipe(&flat, &pipe).is_none());
+    }
 
     /// The point `Writing::surface` used to write, the foot of the
     /// perpendicular, read back through the reader's own function, misses the
