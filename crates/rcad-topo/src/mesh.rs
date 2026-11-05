@@ -7821,11 +7821,25 @@ fn how_far_round(around: &WalkedLoop) -> f64 {
 /// [`how_far_the_second_coordinate_wraps`] on a pipe, a cone or a ball.
 /// `every_surface_but_a_torus_crosses_its_two_coordinates_out_of_the_material`
 /// in `rcad-geom` is the measurement, over all five surfaces.
+///
+/// **The sum is taken about the loop's first corner, not the chart's origin.**
+/// The area is the same either way, but the rounding is not: about the origin
+/// each term is as big as the corners' own numbers, and a loop much smaller
+/// than they are drowns in their rounding. The sliver a union of two cones
+/// keeps beyond a cap, `4.2e−8` by `4.4e−16` at `(π/2, 2)`, holds `9.4e−24`,
+/// and about the origin, where each term is about `π` and rounded by
+/// `4.4e−16`, it came out `0` (Q3196). About a corner, the steps between
+/// corners that close are exact, and so is every term but for its one
+/// rounding.
 fn how_much_of_the_chart_this_loop_encloses(around: &WalkedLoop) -> f64 {
     let corners = &around.corners;
+    let Some(&[u0, v0]) = corners.first() else {
+        return 0.0;
+    };
     let mut twice_the_area = 0.0;
     for step in 0..corners.len() {
         let (here, next) = (corners[step], corners[(step + 1) % corners.len()]);
+        let (here, next) = ([here[0] - u0, here[1] - v0], [next[0] - u0, next[1] - v0]);
         twice_the_area += here[0] * next[1] - next[0] * here[1];
     }
     twice_the_area / 2.0
@@ -13632,5 +13646,41 @@ mod tests {
             }
         }
         assert!(folded.is_empty(), "{folded:#?}");
+    }
+
+    /// Row Q3196. A loop `4.2e−8` wide and `4.4e−16` tall, a quarter turn and
+    /// two units up the chart from its origin, has the face's material inside
+    /// it, and says so.
+    ///
+    /// It is the sliver of the lying cone of
+    /// `the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation` in
+    /// `tests/two_curves_of_one_pair_that_meet.rs` that the union keeps beyond
+    /// the upright frustum's far cap, at `(2, 0, 2)`, walked anticlockwise.
+    /// Read about the chart's origin, each term of the sum was about `π` and
+    /// rounded by `4.4e−16`, and the `9.4e−24` the loop holds came out `0`: a
+    /// hole with the material outside it, on a surface that pinches. So it was
+    /// taken for a ball less a disc, and the cone could not be opened that way
+    /// (`ACurvedFaceGoesRightRoundWithNoSeam`).
+    #[test]
+    fn a_sliver_a_long_way_from_the_charts_origin_still_holds_the_face() {
+        let corners = vec![
+            [1.570796347868321, 2.0],
+            [1.5707963267948963, 2.0],
+            [1.5707963057214724, 2.0],
+            [core::f64::consts::FRAC_PI_2, 1.9999999999999996],
+        ];
+        let width = corners[0][0] - corners[2][0];
+        let height = corners[0][1] - corners[3][1];
+        let sliver = WalkedLoop {
+            corners,
+            points: vec![0, 1, 2, 3],
+            ..WalkedLoop::a_stretch(0)
+        };
+        let enclosed = how_much_of_the_chart_this_loop_encloses(&sliver);
+        let held = width * height / 2.0;
+        assert!(
+            (enclosed - held).abs() <= 1e-12 * held,
+            "the sliver holds {held} and was read as {enclosed}"
+        );
     }
 }
