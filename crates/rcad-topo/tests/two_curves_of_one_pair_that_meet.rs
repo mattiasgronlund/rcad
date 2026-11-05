@@ -1599,72 +1599,89 @@ fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_cross_in_corners_
 /// away. Narrowed ([`rcad_geom::MeetOfThree::boxed_tight`]), the two boxes
 /// are one `f64` along `y` each and share an end, but the policy was asked of
 /// the step between the own boxes (Q2946). It is asked now how far apart a
-/// point of one narrowed box may be from a point of the other, at most
-/// `2.3e−16`.
+/// point of one narrowed box may be from a point of the other: with the
+/// upright frustum first, at most `3.2e−16`, round a far cap.
 ///
-/// With the upright frustum first, each fuse is then refused on which way the
-/// crossing of the two cones runs out of the apex they share. They cross in
-/// the half rulings out of it through `A` and its mirror below `y = 0`, which
-/// lie either side of the flat surface `y = 0` that tells them apart, and the
-/// enclosure of the way out of each reaches that surface. With the lying
-/// frustum first, each is refused `CannotTellTheCellsOfAFaceApart`.
+/// With the upright frustum first, each fuse was then refused on which way the
+/// crossing of the two cones runs out of the apex they share (Q3004). They
+/// cross in the half rulings out of it through `A` and its mirror below
+/// `y = 0`, which lie either side of the flat surface `y = 0` that tells them
+/// apart, and the enclosure of the way out of each reached that surface: the
+/// root that parts the two rulings was taken of `−E·‖w₁‖²` worked out on the
+/// enclosure of the flat surface `n₋` they lie on, which is about `4ε`, and
+/// that enclosure reached below nothing. It is taken now of the enclosure
+/// `rcad-geom` parts them by, built on the exact numbers `E`'s sign is read off
+/// (Q3144), and the way out of each half is read on its own side of `y = 0`.
+///
+/// **Every fuse is refused `CannotTellTheCellsOfAFaceApart`**: with the upright
+/// frustum first on its side, the upright cone, and with the lying one first on
+/// the lying frustum's near cap, `x + ε·z = 1`.
 #[test]
 fn the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation_take_the_corners_on_each_cap_as_one_point_under_a_tolerant_policy()
  {
     let policy = Policy::tolerant(100.0);
     for (rule, first_first) in six_fuses() {
         let mut model = a_model();
-        let said = fuse_under(
-            &mut model,
-            the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation,
-            rule,
-            first_first,
-            &policy,
-        );
-        let what = format!("{rule:?} (first first: {first_first})");
-        if !first_first {
-            assert!(
-                matches!(
-                    said,
-                    Err(rcad_topo::Error::CannotTellTheCellsOfAFaceApart { .. })
-                ),
-                "{what}: {said:?}"
-            );
-            continue;
-        }
-        let Err(rcad_topo::Error::Undecidable { records }) = &said else {
-            panic!("{what}: should be refused Undecidable, and said {said:?}");
+        let [first, second] =
+            the_pitch_cones_of_a_pair_of_mitre_gears_turned_by_rotation(&mut model);
+        let (arguments, tools) = if first_first {
+            ([first], [second])
+        } else {
+            ([second], [first])
         };
-        let (taken, refused): (Vec<&Record>, Vec<&Record>) = records
-            .records()
-            .iter()
-            .partition(|record| record.approximation().is_some());
-        assert!(!taken.is_empty(), "{what}: {records:#?}");
-        for record in taken {
+        let mut log = ProvenanceLog::new();
+        let said = model
+            .fuse(&arguments, &tools, rule, &policy, &mut log)
+            .map(|answer| answer.solids().to_vec());
+        let what = format!("{rule:?} (first first: {first_first}): {said:?}");
+        let Err(rcad_topo::Error::CannotTellTheCellsOfAFaceApart { face }) = said else {
+            panic!("{what}");
+        };
+        let surface = model
+            .solids()
+            .flat_map(|solid| solid.faces())
+            .find(|placed| placed.key() == face)
+            .expect("the refusal names a face of one of the two frustums")
+            .surface();
+        if first_first {
+            let Surface::Cone(side) = surface else {
+                panic!("{what}: refused on {surface:?}");
+            };
             assert_eq!(
-                record.predicate(),
-                "order along a crossing",
-                "{what}: {record:#?}"
+                side.axis().direction(),
+                Vector::new(0.0, 0.0, 1.0),
+                "{what}: refused on {surface:?}"
             );
-            assert_eq!(record.outcome(), Decision::Zero, "{what}: {record:#?}");
-            assert!(record.enclosure() <= 2.3e-16, "{what}: {record:#?}");
+            let narrowed: Vec<&Record> = log
+                .records()
+                .iter()
+                .filter(|record| {
+                    record.approximation().is_some()
+                        && record.inputs().iter().all(|input| {
+                            input.enclosure().iter().all(|along| along.width() < 1e-15)
+                        })
+                })
+                .collect();
+            assert!(!narrowed.is_empty(), "{what}: {log:#?}");
+            for record in narrowed {
+                assert_eq!(
+                    record.predicate(),
+                    "order along a crossing",
+                    "{what}: {record:#?}"
+                );
+                assert_eq!(record.outcome(), Decision::Zero, "{what}: {record:#?}");
+                assert!(record.enclosure() <= 3.2e-16, "{what}: {record:#?}");
+            }
+        } else {
+            let Surface::Plane(near) = surface else {
+                panic!("{what}: refused on {surface:?}");
+            };
+            assert_eq!(
+                (near.normal(), near.offset()),
+                (-Vector::new(1.0, 0.0, f64::EPSILON), -1.0),
+                "{what}: refused on {surface:?}"
+            );
         }
-        let [refused] = refused[..] else {
-            panic!("{what}: should be refused on one question: {refused:#?}");
-        };
-        assert_eq!(
-            refused.predicate(),
-            "which way a crossing runs",
-            "{what}: {refused:#?}"
-        );
-        let [apex] = refused.inputs() else {
-            panic!("{what}: should be asked of the apex alone: {refused:#?}");
-        };
-        assert_eq!(
-            how_far_a_box_reaches_from(*apex, [0.0, 0.0, 0.0]),
-            0.0,
-            "{what}: {refused:#?}"
-        );
     }
 }
 

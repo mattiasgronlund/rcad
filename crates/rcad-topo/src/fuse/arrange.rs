@@ -22928,8 +22928,18 @@ fn the_way_a_half_ruling_two_cones_share_leaves_the_apex(
 /// cut out of the cone that sorts first, square to `n± = a₁·w₁ ± a₂·w₂` for
 /// `a₁ = √((1 + s₁²)‖w₂‖²)` and `a₂ = √((1 + s₂²)‖w₁‖²)`, and so does this,
 /// with the same enclosure of each: [`the_way_a_half_ruling_leaves_the_apex`]
-/// with both normals, and with how each surface meets the cones as `rcad-geom`
-/// worked it out exactly when it named the halves.
+/// with both normals, with how each surface meets the cones as `rcad-geom`
+/// worked it out exactly when it named the halves, and with the enclosure of
+/// `−E·‖w₁‖²` it parted the two rulings of each by.
+///
+/// **That enclosure is `rcad-geom`'s and not one worked out here on `n±`**,
+/// because where the two cones are a rounding off touching, `−E·‖w₁‖²` is a
+/// few roundings and the one worked out on `n±` reaches below nothing. Its
+/// root then reached down to nothing, each way out on that surface reached
+/// the surface parting its two halves, and none could be read in its corner:
+/// every fuse of the pitch cones of a pair of mitre gears turned into place by
+/// a rotation was refused at their apex (Q3004). `rcad-geom`'s is built on the
+/// exact numbers the sign is read off, and is a few roundings of itself wide.
 fn a_half_ruling_two_cones_share(
     one: &Cone,
     other: &Cone,
@@ -22953,14 +22963,18 @@ fn a_half_ruling_two_cones_share(
             by_the_first * along_the_first[axis] + by_the_second * along_the_second[axis]
         })
     });
-    let [plus_meets, minus_meets] =
+    let [(plus_meets, plus_spread), (minus_meets, minus_spread)] =
         how_the_flat_surfaces_where_two_cones_cross_meet_them(one, other);
-    let surfaces = [(plus, plus_meets), (minus, minus_meets)];
+    let surfaces = [
+        (plus, plus_meets, plus_spread),
+        (minus, minus_meets, minus_spread),
+    ];
     let (way, on) =
         the_way_and_the_surface_a_half_ruling_leaves_the_apex_on(&surfaces, first, corner)?;
+    let (normal, meets, _) = surfaces[on];
     Some(AHalfRulingTwoConesShare {
         way,
-        on: surfaces[on],
+        on: (normal, meets),
         off: surfaces[1 - on].0,
         asked_first_is_first,
     })
@@ -23005,7 +23019,8 @@ fn a_half_ruling_two_cones_share(
 /// **Every enclosure here is interval `+ − ×` on the stored numbers, and the
 /// one root is [`root_enclosing`], the same copy `rcad-geom` rounds its own
 /// cone-apex root with** (Q1234; this used to carry its own, always a step
-/// looser).
+/// looser). Two cones on one apex take that root of `rcad-geom`'s enclosure of
+/// `−E·‖w‖²` instead, built on exact numbers (Q3144).
 ///
 /// # Panics
 ///
@@ -23016,23 +23031,51 @@ fn the_way_a_half_ruling_leaves_the_apex(
     cone: &Cone,
     corner: &[&rcad_geom::HalfSpace],
 ) -> Option<[Interval; 3]> {
-    the_way_and_the_surface_a_half_ruling_leaves_the_apex_on(normals, cone, corner)
+    let surfaces = normals
+        .iter()
+        .map(|&(normal, meets)| {
+            (
+                normal,
+                meets,
+                how_far_apart_two_rulings_through_a_cones_apex_spread(normal, cone),
+            )
+        })
+        .collect::<SmallVec<[_; 2]>>();
+    the_way_and_the_surface_a_half_ruling_leaves_the_apex_on(&surfaces, cone, corner)
         .map(|(way, _)| way)
 }
 
-/// [`the_way_a_half_ruling_leaves_the_apex`], and which of `normals` is the
-/// flat surface that way was worked out on, by its place there.
+/// `−E·‖w‖²`, for `E = (n·w)² − slope²·‖n × w‖²`, as an enclosure worked out
+/// on `normal`, the enclosure of `n`: above nothing where the flat surface
+/// through the cone's apex square to `n` cuts it in two rulings.
+fn how_far_apart_two_rulings_through_a_cones_apex_spread(
+    normal: [Interval; 3],
+    cone: &Cone,
+) -> Interval {
+    let along = cone.axis().direction().components().map(Interval::exactly);
+    let up = dot_of(normal, along);
+    let across = cross_of_intervals(normal, along);
+    let slope = Interval::exactly(cone.slope());
+    let leaning = up * up - slope * slope * dot_of(across, across);
+    -(leaning * dot_of(along, along))
+}
+
+/// [`the_way_a_half_ruling_leaves_the_apex`], with each flat surface's
+/// enclosure of `−E·‖w‖²` handed in after how it meets the cone, and which of
+/// `surfaces` the way was worked out on, by its place there. That enclosure
+/// need not be worked out on the surface's normal, only enclose `−E·‖w‖²` for
+/// the true normal the first encloses, as `rcad-geom`'s for two cones on one
+/// apex does ([`a_half_ruling_two_cones_share`]).
 fn the_way_and_the_surface_a_half_ruling_leaves_the_apex_on(
-    normals: &[([Interval; 3], Decision)],
+    surfaces: &[([Interval; 3], Decision, Interval)],
     cone: &Cone,
     corner: &[&rcad_geom::HalfSpace],
 ) -> Option<([Interval; 3], usize)> {
     let along = cone.axis().direction().components().map(Interval::exactly);
     let squared_axis = dot_of(along, along);
-    let slope = Interval::exactly(cone.slope());
     let both_ways = |way: [Interval; 3]| [way, way.map(|component| -component)];
     let mut ways = SmallVec::<[([Interval; 3], usize); 8]>::new();
-    for (on, &(normal, meets)) in normals.iter().enumerate() {
+    for (on, &(normal, meets, under_the_root)) in surfaces.iter().enumerate() {
         let up = dot_of(normal, along);
         let across = cross_of_intervals(normal, along);
         let squared_normal = dot_of(normal, normal);
@@ -23041,8 +23084,7 @@ fn the_way_and_the_surface_a_half_ruling_leaves_the_apex_on(
         });
         match meets {
             Decision::Pos => {
-                let leaning = up * up - slope * slope * dot_of(across, across);
-                let spread = root_enclosing(-(leaning * squared_axis));
+                let spread = root_enclosing(under_the_root);
                 for side in [spread, -spread] {
                     ways.extend(
                         both_ways(core::array::from_fn(|axis| {
@@ -24499,6 +24541,72 @@ mod tests {
             .iter()
             .all(|part| part.lo() <= 0.0 && 0.0 <= part.hi())
             && (way[0] * half[0] + way[1] * half[1] + way[2] * half[2]).sign() == Decision::Pos
+    }
+
+    /// The pitch cones of a pair of mitre gears, slope one about `z` and about
+    /// `x`, touch along `(±1, 0, ±1)`. With the second turned onto `x` by a
+    /// rotation rather than a quarter turn, its axis is stored `(1, 0, 2⁻⁵²)`,
+    /// a rounding off square, and they cross instead, in the two rulings the
+    /// flat surface `n₋` cuts, a hair either side of `y = 0`. Each of the four
+    /// halves `rcad-geom` names leaves the apex one way, read in its own corner
+    /// (Q3144).
+    ///
+    /// `−E·‖w₁‖²` of `n₋` is a few roundings, and its enclosure worked out on
+    /// `n₋`'s own reached below nothing, so the root that parts the two rulings
+    /// reached down to nothing and every way out on `n₋` reached `y = 0`. The
+    /// one `rcad-geom` parts them by is above nothing.
+    #[test]
+    fn each_half_of_two_cones_a_rounding_off_touching_leaves_the_apex_one_way() {
+        use rcad_geom::{
+            EdgeRun, Picker, SurfaceMeet, how_the_flat_surfaces_where_two_cones_cross_meet_them,
+            intersect,
+        };
+
+        use super::the_way_a_half_ruling_two_cones_share_leaves_the_apex;
+
+        let upright = Cone::new(Axis::z(), 1.0).expect("a slope above zero");
+        let turn =
+            Isometry::rotation(&Axis::y(), core::f64::consts::FRAC_PI_2).expect("a finite turn");
+        let Surface::Cone(lying) = Surface::Cone(upright).transformed(&turn) else {
+            unreachable!("a movement keeps a cone a cone");
+        };
+        assert_eq!(
+            lying.axis().direction(),
+            Vector::new(1.0, 0.0, f64::EPSILON)
+        );
+        let [(plus, _), (minus, parted_by)] =
+            how_the_flat_surfaces_where_two_cones_cross_meet_them(&upright, &lying);
+        assert_eq!([plus, minus], [Decision::Neg, Decision::Pos]);
+        assert!(parted_by.lo() > 0.0, "{parted_by:?}");
+        let met = intersect(
+            &Surface::Cone(upright),
+            &Surface::Cone(lying),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        let Ok(SurfaceMeet::Curves(runs)) = &met else {
+            panic!("the halves of where they cross are named: {met:?}");
+        };
+        assert_eq!(runs.len(), 4, "the four halves of two rulings: {runs:?}");
+        for named in runs {
+            let EdgeRun::PartOfWhereItCrosses { picked_by, .. } = named.run() else {
+                panic!("a half ruling is part of where the cones cross: {named:?}");
+            };
+            let corner: Vec<&HalfSpace> = picked_by
+                .iter()
+                .map(|picker| {
+                    let Picker::InFrontOf(flat) = picker else {
+                        panic!("a half ruling is picked by flat surfaces: {picker:?}");
+                    };
+                    flat
+                })
+                .collect();
+            assert!(
+                the_way_a_half_ruling_two_cones_share_leaves_the_apex(&upright, &lying, &corner)
+                    .is_some(),
+                "{named:?} leaves the apex one way"
+            );
+        }
     }
 
     /// A hint that puts a pair the wrong way round comes back the right way
