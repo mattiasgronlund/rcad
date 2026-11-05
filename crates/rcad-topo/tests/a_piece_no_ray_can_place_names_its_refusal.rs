@@ -982,6 +982,30 @@ fn a_quarter_of_a_tube_over_a_block_a_bend_grows_out_of_is_refused_for_the_block
 /// Every rule both ways round is refused `CannotTellTheCellsOfAFaceApart`, the
 /// bar touching nothing too, so a pipe a hair off a pipe face of this solid is
 /// refused before any piece is placed.
+///
+/// **Traced (Q1579): all 54 are the same refusal, on a face the bar never
+/// reaches.** It is the joined solid's flat face on `z = 0`, normal `−z`: the
+/// quarter of the ring's underside, corners `(3, 0)`, `(5, 0)`, `(0, 5)`,
+/// `(0, 3)`, its two curved sides on the ring's torus and its two straight
+/// ones on `y = 0` and `x = 0`. The face is cut by the joined solid's own
+/// pipe of radius 2, a whole circle on `z = 0` that touches nothing of the
+/// face, so the arrangement has two lumps, the rim and that circle. The
+/// circle's walk agrees with both walks of the rim about every closed curve,
+/// `which_of_them_holds` finds nothing, and its winding was never counted
+/// (`winding_of_cycle` is `None`), so
+/// `Arrangement::the_walk_of_each_other_lump_each_walk_faces` refuses at its
+/// `None` arm.
+/// **Why the winding is never counted:** the count of how often the rim winds
+/// round a point of the flat face is `None` at every point tried, the circle's
+/// four nodes and the points of its inside alike, even a point off the lines
+/// of the straight sides. The cause is `Picture::sees_a_round_curve_where_it_is_cut_by`,
+/// which says no to a torus on a flat face, so `how_often_a_side_and_its_chord_wind_round`
+/// returns `None` for the rim's two torus sides. A fix reads the torus's
+/// circles on a plane square to its axis (inside the circle of radius `R + r`
+/// or of radius `R − r` as the side's start lies), or counts the walk some
+/// other way. Trying more points inside the pipe's circle changes nothing.
+/// The bar of 0.5 is refused too, because the radius-2 circle is the joined
+/// solid's, not the bar's.
 #[test]
 fn half_a_ring_joined_to_a_quarter_of_a_tube_is_refused_with_a_bar_in_it_or_a_tube_round_it() {
     let a_rounding_at_2 = 4.440_892_098_500_626e-16;
