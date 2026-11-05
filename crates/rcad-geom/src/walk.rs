@@ -1458,7 +1458,10 @@ fn a_quartic_picked_up_at(
 ///
 /// [`Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces`] when settling
 /// the seed, or a closed run's corner, lands detectably off one of the two
-/// surfaces ([`settled_with_a_bound`], [`where_on_the_crossing_this_corner_can_be`]).
+/// surfaces ([`settled_with_a_bound`], [`where_on_the_crossing_this_corner_can_be`]),
+/// and for an open run's corner too, asked before the march, since the bound
+/// on how far off the crossing it can be settles it first
+/// ([`how_far_off_the_crossing_a_corner_can_be`]).
 ///
 /// The marcher's two refusals.
 fn follow_the_quartic(
@@ -1551,6 +1554,10 @@ fn follow_the_quartic(
 /// [`Error::CannotPlaceAPointThatCloseToACrossing`] and
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] for a corner, as
 /// [`follow_the_quartic`] has them, and the first also for the walk's bound.
+///
+/// [`Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces`] when a corner
+/// settles detectably off one of the two surfaces, asked before the march
+/// ([`how_far_off_the_crossing_a_corner_can_be`]).
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] when the two corners lean
 /// as one straight line does, or a point is decided behind one of the
@@ -1924,8 +1931,11 @@ fn how_far_round_the_ruled_cone(cone: &Cone, middle: Vector, at: Point) -> f64 {
 /// What [`settled_with_a_bound_where_they_bend`] refuses:
 /// [`Error::CannotFollowACrossingWhereItsSurfacesAreTangent`] at a corner where
 /// the two surfaces are tangent, or too nearly so for their bend to leave a
-/// bound, and [`Error::CannotWorkOutHowBigACrossingIs`] when settling one lands
-/// somewhere that is not a point. A tangent corner that is an exact point both
+/// bound, [`Error::CannotWorkOutHowBigACrossingIs`] when settling one lands
+/// somewhere that is not a point, and
+/// [`Error::ACrossingTooSmallForAnyPointToSitOnBothItsSurfaces`] when settling
+/// one lands detectably off one of the two surfaces, which it refuses before it
+/// reaches the bound. A tangent corner that is an exact point both
 /// surfaces are proved to pass through is on the crossing, so it is no distance
 /// off it and is not refused: two loops of a ball and a pipe that meet where
 /// the two touch have their runs cornered there
