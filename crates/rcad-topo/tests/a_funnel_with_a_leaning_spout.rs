@@ -28,15 +28,17 @@
 //! it orders two of the four points along a branch that reaches each cone's
 //! wall there by an exact sign too. Since row Q3168 it places two specks of
 //! the leaning solid a rounding across by a flat surface one of their sides
-//! runs along, but every fuse of the pair is still refused, now after every
-//! piece is placed: five for an answer too fine to compute in beside its
-//! coordinates, and one meshing the answer. Row Q3191 showed the true answer
-//! is that fine too, with two corners `4.15e-16` apart, so the five are a
-//! limit.
+//! runs along, but five fuses of the pair are still refused, now after every
+//! piece is placed, for an answer too fine to compute in beside its
+//! coordinates. Row Q3191 showed the true answer is that fine too, with two
+//! corners `4.15e-16` apart, so the five are a limit. The sixth, the upright
+//! cone less the leaning one, was refused meshing the answer until row Q3206.
 //! With the leaning one ten high the caps' rims are apart. Every fuse of that
 //! pair was refused marching along that branch until row Q3134, which walks a
 //! run between two corners on a branch one straight line of a cone at a time,
-//! and every fuse is still refused, now meshing the answer.
+//! and then refused meshing the answer. Since row Q3172 the unions and the
+//! intersections answer, and since row Q3206, which drops a walked point where
+//! the line through them turns back on itself, the differences do too.
 //!
 //! A third shape came with row Q2818: two pointed cones of different slopes,
 //! the narrower leaning off the wider, which cross in a loop and two branches
@@ -182,34 +184,38 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 /// the plane `z = 8` one of its sides runs along, since the whole upright cone
 /// is below that plane or on it.
 ///
-/// **Every fuse is still refused**, under every rule both ways round, now
-/// after every piece is placed. The union both ways round, the intersection
-/// both ways round and the leaning cone less the upright one are refused
-/// because the answer's coordinates span `2⁵⁵` times its smallest feature, and
-/// since row Q3191 **that is a limit** (`docs/decisions.md` §437.6 case 1,
-/// §43.6). Where both caps' rims nearly meet, the upright cap's rim runs
-/// through the leaning solid for about `4.15e-16`, so every answer of the
-/// stored numbers has two corners that close together beside its coordinate
-/// of 8, a spread past `2⁵⁴`, where a feature written into the coordinates is
-/// gone.
+/// **Five fuses are refused**, under every rule both ways round, now after
+/// every piece is placed. The union both ways round, the intersection both
+/// ways round and the leaning cone less the upright one are refused because
+/// the answer's coordinates span `2⁵⁵` times its smallest feature, and since
+/// row Q3191 **that is a limit** (`docs/decisions.md` §437.6 case 1, §43.6).
+/// Where both caps' rims nearly meet, the upright cap's rim runs through the
+/// leaning solid for about `4.15e-16`, so every answer of the stored numbers
+/// has two corners that close together beside its coordinate of 8, a spread
+/// past `2⁵⁴`, where a feature written into the coordinates is gone.
 /// [`the_upright_rim_runs_through_the_leaning_cone_for_4e_16_where_both_rims_nearly_meet`]
-/// works that out exactly. The upright cone less the leaning one passes the
-/// range check and is refused meshing the answer, because a face's boundary
-/// crosses itself, though its true answer has both corners too. Placed inside
-/// instead, as a probe, the two specks leave every fuse refused at a span of
-/// `2⁵³`, so they are not the answer's only feature that small.
+/// works that out exactly. Placed inside instead, as a probe, the two specks
+/// leave every fuse refused at a span of `2⁵³`, so they are not the answer's
+/// only feature that small.
+///
+/// The upright cone less the leaning one passes the range check, though its
+/// true answer has both corners too. Until row Q3206 it was refused meshing
+/// the answer, because a face's boundary crossed itself at corner 187, as each
+/// difference of the pair with the leaning one ten high was where the points
+/// the walk put along the loop zigzag
+/// ([`two_pointed_cones_eight_and_ten_high_one_leaning_off_the_other_answer_every_fuse`]).
+/// Since Q3206 the mesh drops a walked point where the line through them turns
+/// back by no more than the walk says a point may sit off the curve, and **the
+/// upright cone less the leaning one answers**.
 #[test]
-fn two_pointed_cones_one_leaning_off_the_other_are_refused_too_wide_a_range_or_meshing_the_answer()
-{
+fn two_pointed_cones_one_leaning_off_the_other_are_refused_too_wide_a_range_but_the_upright_less_the_leaning_answers()
+ {
     assert_eq!(
         every_fuse_of(two_pointed_cones).refusals(),
         [
             [Some(TOO_WIDE_A_RANGE); 2],
             [Some(TOO_WIDE_A_RANGE); 2],
-            [
-                Some(THE_BOUNDARY_CROSSES_ITSELF_AT_CORNER_187),
-                Some(TOO_WIDE_A_RANGE)
-            ],
+            [None, Some(TOO_WIDE_A_RANGE)],
         ]
     );
 }
@@ -217,10 +223,6 @@ fn two_pointed_cones_one_leaning_off_the_other_are_refused_too_wide_a_range_or_m
 /// What a fuse is refused with where the answer's coordinates span too wide a
 /// range beside its smallest feature to compute in.
 const TOO_WIDE_A_RANGE: &str = "the model is broken: coordinates span a range of 3.602879701896397e16, which is too wide to compute in";
-
-/// What the upright cone less the leaning one is refused with where a face of
-/// the answer, drawn, crosses itself.
-const THE_BOUNDARY_CROSSES_ITSELF_AT_CORNER_187: &str = "a face of this solid could not be cut into triangles: the boundary crosses itself, at the side leaving corner 187";
 
 /// **Every answer of the two pointed cones above has two corners about
 /// `4.15e-16` apart**, where both caps' rims nearly meet, so no answer of them
@@ -436,8 +438,22 @@ fn the_upright_rim_runs_through_the_leaning_cone_for_4e_16_where_both_rims_nearl
 /// curved face is bounded by one curve right round it, the union the other way
 /// round because a face's boundary crosses itself, and the intersection both
 /// ways round and the leaning cone less the upright one because a curved face
-/// with a hole goes too far round. **Every fuse is to answer**, under every
-/// rule both ways round.
+/// with a hole goes too far round. Since Q3172 the unions and the
+/// intersections answer: `how_often_an_arc_crosses` in `fuse/arrange.rs`
+/// counts a cone's arc round an axis only where the cone shares that axis, and
+/// `whether_past_the_pickers_of_a_loop_and_two_branches` reads which side of
+/// the loop a point is past the two flat surfaces that pick the loop out.
+///
+/// Each difference was then refused because a face's boundary crossed itself,
+/// where the loop passes the far branch about `3e-8` apart near
+/// `(±1.5954, 0.1209, 3.2)`: the upright cone less the leaning one on the
+/// upright cone's wall, which holds the loop as a hole, and the leaning cone
+/// less the upright one on the leaning cone's piece round its apex, which the
+/// loop bounds. The walk closes in on the loop's turn there, and the points it
+/// puts along the loop zigzag by up to `3e-7`, inside the `3.6e-7` it says a
+/// point may sit off the curve. Since row Q3206 the mesh drops a walked point
+/// where the line through them turns back by no more than that, and **every
+/// fuse answers**, under every rule both ways round.
 #[test]
 fn two_pointed_cones_eight_and_ten_high_one_leaning_off_the_other_answer_every_fuse() {
     assert_eq!(
