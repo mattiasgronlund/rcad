@@ -12328,7 +12328,44 @@ impl<'f> Arrangement<'f> {
                 continue;
             }
             let (mine, theirs) = self.piece_around(which, &lump, log)?;
+            if std::env::var_os("PROBE_DUMP").is_some() {
+                eprintln!("PROBE piece_around lump {which}: {mine} with {theirs}");
+            }
             same.join(mine, theirs);
+        }
+        if std::env::var_os("PROBE_DUMP").is_some() && matches!(self.surface, Surface::Cone(_)) {
+            eprintln!(
+                "PROBE CELLS face {:?} surface {:?}",
+                self.face.keys, self.surface
+            );
+            for (index, crossing) in self.crossings.iter().enumerate() {
+                eprintln!(
+                    "  crossing {index} full {} partner {:?} run {:?}",
+                    self.drawn_in_full[index], crossing.partner, crossing.run
+                );
+            }
+            for cycle in 0..self.cycles.len() {
+                eprintln!(
+                    "  cycle {cycle} lump {} winding {:?} leader {} sides {:?} facing {:?}",
+                    lump[cycle],
+                    self.winding_of_cycle[cycle],
+                    same.leader(cycle),
+                    sides[cycle],
+                    facing[cycle]
+                );
+                for &half_edge in &self.cycles[cycle] {
+                    let arc = &self.arcs[half_edge / 2];
+                    let from = &self.nodes[self.from(half_edge)];
+                    eprintln!(
+                        "    he {half_edge} crossing {} boundary {} from node {} {:?} vertex {:?}",
+                        arc.crossing,
+                        arc.boundary.is_some(),
+                        self.from(half_edge),
+                        from.point,
+                        from.vertex
+                    );
+                }
+            }
         }
         self.make_the_cells(&same, &lump)
     }
@@ -12616,6 +12653,35 @@ impl<'f> Arrangement<'f> {
                         .which_of_them_holds(walk, &candidates)
                         .or_else(|| self.the_one_on_its_side_of_every_cut(walk, &candidates, cuts)),
                 };
+                if std::env::var_os("PROBE_DUMP").is_some()
+                    && matches!(self.surface, Surface::Cone(_))
+                {
+                    let holds = if candidates.len() > 1 {
+                        self.which_of_them_holds(walk, &candidates)
+                    } else {
+                        None
+                    };
+                    let round = self.how_often_each_goes_round_the_axis(
+                        &core::iter::once(walk)
+                            .chain(candidates.iter().copied())
+                            .collect::<Vec<_>>(),
+                    );
+                    let cut_sides: Vec<(Option<Decision>, Vec<Option<Decision>>)> = cuts
+                        .iter()
+                        .map(|cut| {
+                            (
+                                self.side_of_a_cut(walk, cut),
+                                candidates
+                                    .iter()
+                                    .map(|&other| self.side_of_a_cut(other, cut))
+                                    .collect(),
+                            )
+                        })
+                        .collect();
+                    eprintln!(
+                        "PROBE facing walk {walk} lump {which} candidates {candidates:?} holds {holds:?} round {round:?} cut sides {cut_sides:?} chosen {chosen:?} cuts {cuts:?}"
+                    );
+                }
                 match chosen {
                     Some(chosen) => facing[walk].push(chosen),
                     None if self.winding_of_cycle[walk] == Some(0) => (),
