@@ -10098,6 +10098,17 @@ fn what_lies_past_the_picker(
 /// on both sides of it is a model whose topology and geometry disagree — which
 /// arrives from a file and not from a builder (§16.11).
 ///
+/// **Only where every curve the two surfaces cross in is an edge of the face.**
+/// A thin pipe from a fat one's axis crosses the fat wall in two loops, and
+/// the fat wall in their union runs along the thin pipe's own loop alone: a
+/// corner inside the other loop is inside the thin pipe and sound. A pin of
+/// `0.5` leaning along `(−0.6, 0, 0.8)` from `(0, 0, 4)` on the axis of a bar
+/// of `2` from `z = 1.5` leaves the bar's seam corner `(2, 0, 1.5)` there, and
+/// asked with no half-space this refuses the union (Q2673).
+/// [`what_a_curved_face_holds`] reads such a corner past
+/// [`the_picker_this_face_is_read_past`] instead, through
+/// [`the_side_this_face_lies_on_reading_past`].
+///
 /// `Ok(None)` when no corner is off `partner` at all. That is not a broken model
 /// — a disk cut out of a ball has its one corner on the pipe that cut it — it is
 /// a face this cannot read the side of, and the caller says so.
