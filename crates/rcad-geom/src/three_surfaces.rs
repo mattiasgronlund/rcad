@@ -357,7 +357,10 @@ impl MeetOfThree {
     /// it folds the meet into the corner (§345), and, since Q866, for a meet of
     /// three planes as well as one with a curved surface in it, which of two
     /// points comes first along a crossing where the meet's own box cannot say
-    /// (Q209). That question is worked out only when the order asks it, from
+    /// (Q209). It reads the narrowed box a third time where a picker cannot
+    /// tell of a meet's own box whether the meet is ruled out of a half
+    /// ruling (`Arrangement::nothing_rules_the_meet_out`, Q3146). That
+    /// narrowed box is worked out only when one of these asks it, from
     /// the node's own box and the three surfaces it was solved from, rather
     /// than kept on the node (§401.4).
     ///
