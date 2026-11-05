@@ -1360,6 +1360,28 @@ impl BuildingAMesh {
             ends.iter()
                 .all(|end| point.coordinates() != end.coordinates())
         });
+        // **A point where the walk turns back on itself, by no more than the
+        // walk says a point may sit off the curve, is dropped**, and what that
+        // moves the line is charged. Such a point is one the walk could not
+        // tell from its neighbours; a point where the line turns back by more
+        // is kept, since the curve itself may bend that sharply between two
+        // steps, and so is the last point between the ends, so a curved edge
+        // stays curved. Where two branches of a crossing pass a rounding
+        // apart, the walk closes in on the place in steps it halves down to
+        // `1e−7`, and its points there zigzag by up to `3e−7`, inside the
+        // `3.6e−7` the walk owns to. The upright cone of slope a half and
+        // height 8 less one 10 high turned 0.3 about `x` through `(0, 0, 4)`
+        // has such a place where the loop the two cones cross in turns a right
+        // angle, and the face holding it as a hole was refused because its
+        // boundary crossed itself there; so was the face it bounds the other
+        // way round (`a_funnel_with_a_leaning_spout.rs`, Q3206). Across the
+        // six fuses of that pair, 59 walks dropped points, and the most any of
+        // them moved its line was `0.69` of what that walk owns to.
+        let turned_back = without_the_points_where_it_turns_back(
+            &mut points,
+            ends,
+            along_it.deviation().magnitude(),
+        );
         // **A straight edge lying across a flat face of the same solid gets a
         // point in its middle**, or that face draws its side a second time. The
         // wedge less the frustum it rests on keeps its slanted face whole and
@@ -1484,7 +1506,7 @@ impl BuildingAMesh {
         let moving = how_far_moving_this_face_rounds(face, &self.along_each_edge);
         self.worst = self
             .worst
-            .max(along_it.deviation().magnitude() + moved + halved + moving);
+            .max(along_it.deviation().magnitude() + turned_back + moved + halved + moving);
         Ok(points
             .into_iter()
             .map(|along| self.remember_made_on(face, &there, along))
@@ -9128,6 +9150,79 @@ fn a_flat_face_off_it_holds_both_its_ends(solid: SolidView<'_>, edge: EdgeView<'
                 .iter()
                 .all(|&end| coedges().any(|coedge| coedge.start().key() == end))
     })
+}
+
+/// `points`, walked along one edge between `ends`, with each point dropped
+/// where the line through the ends and them turns back on itself, so long as
+/// dropping it moves the line no more than `within`; and how far dropping them
+/// moved it.
+///
+/// The line turns back at a point where the side leaving it heads more than a
+/// quarter turn away from the side reaching it. Each point is dropped once the
+/// next is read, and the point before it is read again against the side that
+/// is left, so a run of points that zigzag goes as far as it has to. Dropping
+/// the points between two that stay moves the line from the old sides between
+/// those two onto the one straight side joining them, and the farthest any
+/// dropped point lies from that side is the farthest the line moves.
+///
+/// **The last point between the two ends is never dropped**, however far
+/// off the curve the walk says a point may sit, so a curved edge stays
+/// curved. Drawn straight, it can lie along another edge of the same loop
+/// between the same two corners, and the loop is then two corners and nothing
+/// to cut. A bar dipping a hair through a block's top cuts the top in an arc
+/// that runs out `2` from the bar's end and back, its two ends `6e−8` apart,
+/// and the walk puts one point at its tip and owns to `256` off the curve
+/// under `tolerant`. Dropped, every tolerant fuse of the two was refused, a
+/// loop of the answer being two corners
+/// (`a_bar_turned_twice_with_its_seam_underneath_dips_through_a_blocks_top`
+/// in `a_bar_lying_along_a_plane_or_a_bar.rs`, and the same bar along the
+/// block's floor).
+fn without_the_points_where_it_turns_back(
+    points: &mut Vec<Point>,
+    ends: [Point; 2],
+    within: f64,
+) -> f64 {
+    let line: Vec<Point> = core::iter::once(ends[0])
+        .chain(points.iter().copied())
+        .chain(core::iter::once(ends[1]))
+        .collect();
+    let the_far_end = line.len() - 1;
+    let how_far_dropping_moves_it = |from: usize, to: usize| {
+        line[from + 1..to]
+            .iter()
+            .map(|&dropped| how_far_from_the_side(dropped, [line[from], line[to]]))
+            .fold(0.0, f64::max)
+    };
+    let mut kept: Vec<usize> = Vec::with_capacity(line.len());
+    for next in 0..line.len() {
+        while let [.., before, last] = kept[..]
+            && (before, next) != (0, the_far_end)
+            && (line[last] - line[before]).dot(line[next] - line[last]) < 0.0
+            && how_far_dropping_moves_it(before, next) <= within
+        {
+            kept.pop();
+        }
+        kept.push(next);
+    }
+    let moved = kept
+        .windows(2)
+        .map(|pair| how_far_dropping_moves_it(pair[0], pair[1]))
+        .fold(0.0, f64::max);
+    *points = kept[1..kept.len() - 1].iter().map(|&at| line[at]).collect();
+    moved
+}
+
+/// How far `point` is from the nearest point of the straight side between
+/// `ends`.
+fn how_far_from_the_side(point: Point, ends: [Point; 2]) -> f64 {
+    let along = ends[1] - ends[0];
+    let squared = along.dot(along);
+    let part = if squared == 0.0 {
+        0.0
+    } else {
+        ((point - ends[0]).dot(along) / squared).clamp(0.0, 1.0)
+    };
+    point.distance_to(ends[0] + along * part)
 }
 
 /// A face's surface as the arena holds it, with where that face is placed kept
