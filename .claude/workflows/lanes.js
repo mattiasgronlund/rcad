@@ -871,7 +871,7 @@ ${readOnlyBudget()}`
 function RELAY(lane, before, n) {
   const branch = branchOf(lane)
   const ids = lane.queueId.split(',')
-  return `Queue ${rowsOf(lane)}. Your write set was taken as ${lane.writeSet.join(', ')}, but a lane before you may have narrowed the hold down from it, and the fill may since have given a freed entry to another row: own the row's current hold, not the taken set above (§424). Before you edit anything, run ${ids.map((id) => `mise exec -- just queue show ${id}`).join(', then ')}. Where it prints a row "narrowed to" a set, that narrowed set, not the taken set above, is what you own until you narrow or widen it again; where it prints no such line, you own the taken set above. Never edit outside your current hold: widen it first with \`mise exec -- just queue narrow <id> <write set>\`, and if the widen is refused, stop and report it as blocked, naming the entry and the hold the refusal quotes.
+  return `Queue ${rowsOf(lane)}. Your write set was taken as ${lane.writeSet.join(', ')}, but a lane before you may have narrowed the hold down from it, and the fill may since have given a freed entry to another row: own the row's current hold, not the taken set above (§424). Before you edit anything, run ${ids.map((id) => `mise exec -- just queue show ${id}`).join(', then ')}. The set on its "write set in force:" line, not the taken set above, is what you own until you narrow or widen it again; it names the hold's set whether a narrow or a writes moved it. Never edit outside your current hold: widen it first with \`mise exec -- just queue narrow <id> <write set>\`, and if the widen is refused, stop and report it as blocked, naming the entry and the hold the refusal quotes.
 Your branch: ${branch}, which you carry on: you are relay ${n} of at most ${MAX_RELAYS} (§416).
 
 A lane before you did part of this row, passed its context budget, committed its work to ${branch} at ${before.landed_sha} and handed it to you. Its handoff, which is where you start:
@@ -1080,7 +1080,7 @@ function prepSchema() {
           properties: {
             id: { type: 'string', description: 'the row\'s id, as Q840' },
             model: { type: 'string', description: 'the row\'s model column, exactly as printed' },
-            write_set: { type: 'string', description: 'the row\'s write set: the write-set column, exactly as printed, unless a `writes` ran after the column was written, in which case the set that printed line names instead (§230.3); paths joined by commas, or - for none' },
+            write_set: { type: 'string', description: 'the row\'s write set: the write-set column, exactly as printed, unless a `writes` ran after the column was written, in which case the set on just queue show\'s `write set in force:` line instead (§230.3); paths joined by commas, or - for none' },
             line: { type: 'string', description: 'the row\'s whole line, exactly as printed; it is the lane\'s brief' },
           },
         },
