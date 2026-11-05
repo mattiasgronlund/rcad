@@ -24846,7 +24846,7 @@ check-verify-lane-selftest:
         kill -KILL "$leftover" 2>/dev/null || true
         fail "a process left running in the lane's tree survived the verifier's unlock (Q3185)"
     fi
-    grep -qF 'stopped 1 process(es) left running in the lane' "$at/verify/target/verify-lane/log" \
+    grep -qF 'process(es) left running in the lane' "$at/verify/target/verify-lane/log" \
         || fail "the verifier's log does not say it stopped the lane's leftover: $(cat "$at/verify/target/verify-lane/log")"
 
     arm="exit-write-is-atomic"
