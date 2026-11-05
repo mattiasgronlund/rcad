@@ -36,7 +36,9 @@ anywhere, and 464.28 is Q2771, on the side of rcad-geom's cylinder with a zero
 factor. 464.29 is Q2773, on that cylinder with a checked product below the
 normals. 464.30 is Q2781, on the side of rcad-geom's cone with a zero factor.
 464.31 is Q2782, on that cone with a checked product below the normals, and
-464.32 is Q2786, on the side of rcad-geom's torus with a zero factor.*
+464.32 is Q2786, on the side of rcad-geom's torus with a zero factor. 464.33
+is Q2787, on that torus with a checked product below the normals, and 464.34
+is Q2801, on `Isometry::POINT_ROUNDOFF` in the zero branches.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -70,6 +72,8 @@ normals. 464.30 is Q2781, on the side of rcad-geom's cone with a zero factor.
   464.30  The side of rcad-geom's cone with a zero factor
   464.31  The side of rcad-geom's cone with a checked product below the normals
   464.32  The side of rcad-geom's torus with a zero factor
+  464.33  The side of rcad-geom's torus with a checked product below the normals
+  464.34  Isometry::POINT_ROUNDOFF in the zero branches
 
 ### 464.1 The bugs a bound prover is for
 
@@ -12536,9 +12540,10 @@ no factor is zero, no sum cancels to zero, the nine products of the
 arithmetic are normal numbers, and the turn's `q·q` is within `6ε` of one. The
 proof reaches `24.80u · L` where the doc counts `35.78u · L` (3, 4). A turn of
 a cube is one addition per coordinate, which `shiftball.g` already proved
-(6). The zero branches and the products below the normals are not run (10),
-and one public route to a movement does not hold its turn near length one
-(5). Coq checks the proof, modulo its hints (8).
+(6). The products below the normals are not run (10), the zero branches are
+run in 464.34 and reach the same `24.80u`, and one public route to a movement
+does not hold its turn near length one (5). Coq checks the proof, modulo its
+hints (8).
 
 Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
 464.13's `one.sh`, unchanged, against `isometry.rs` at `ba0a654e` and
@@ -12634,7 +12639,7 @@ the constant the count was for.
 
 - every input a finite `f64`;
 - no factor of a product zero, and no sum cancelling to zero: the zero
-  branches, which 10 leaves;
+  branches, which 10 leaves and 464.34 runs;
 - the nine products normal, which `apply_to_point` does not check, and
   464.5's lemma for each. The doc says its count holds only while nothing
   falls into the subnormals, and so far so does this (10);
@@ -13197,7 +13202,8 @@ each from Q2689:
   coordinate axis stores two of `v` as zero and a point on a coordinate
   plane has a zero coordinate, and each sum that may cancel to zero, as 464.11
   and 464.18 ran the plane's. These are common inputs. Not run, so no class
-  (§360.5).
+  (§360.5). Done, in 464.34: each of the 436 cases proves the code's `36u`,
+  reaching `24.80u`, under the other hypotheses of 5.
 - Run `point.g` with one or more of the nine products below the normals and
   `L` normal, as 464.8's `planecases.py` split the plane's, and say whether
   `POINT_ROUNDOFF` needs the products normal or only `L`, as `nearest.g` found
@@ -23670,3 +23676,901 @@ for what, ring, tube, direction, point in inputs:
     sign = "Pos" if value > 0 else "Neg" if value < 0 else "Zero"
     print(f"{what}: {sign}, value {float(value)!r}")
 ```
+
+### 464.34 Isometry::POINT_ROUNDOFF in the zero branches
+
+Q2801 ran 464.19's `point.g` where a factor is zero or a sum cancels to zero,
+in four lanes on 2026-11-05. The first wrote `pointzero.py` and `runpz.sh` and
+tried them on a few cases. The second split one more sum, wrote `start.sh`,
+`tallypz.py` and `samepz.py`, and ran every case, and 164 did not prove. The
+third found why, changed the generator, and ran every case again. The fourth
+wrote this.
+
+`POINT_ROUNDOFF`'s `18ε · L` holds in every zero branch. Each of the 436 cases
+proves the moved point's `x` within the code's `36u · L` of where the
+movement's own numbers, worked without rounding, put it, and none goes past
+`24.80u · L`, which is what `point.g` reaches with nothing zero (3). `y` and
+`z` are `x` with the indices turned, and the same cases cover them (2). Coq
+checks each proof, modulo its hints (3), and each of the 436 controls fails
+(4). That is under 464.19's other hypotheses: the turn's `q·q` within `6ε` of
+one, and each product whose factors are not zero a normal number where it
+reaches `out`, which is Q2802's to run. The doc on the constant says these
+branches have not been run, which is a row (6).
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, unchanged, against `isometry.rs` at `c0859e3f` and
+nalgebra 0.35.0. At `c0859e3f`, `apply_to_point`, `turned_by`,
+`TurnOfACube::named_by` and `TurnOfACube::turned` (`isometry.rs:324-329`,
+`578-583`, `608-629` and `697-704`) have the same bodies as at `ba0a654e`,
+where 464.19 read them, so `point.g`'s arithmetic is still the code's. `u` is
+`2⁻⁵³` and `ε` is `f64::EPSILON = 2u`.
+
+**1. Which zeros get through.** `apply_to_point` checks none of its numbers,
+and `turned_by` sends every turn to Rodrigues' form but one that `named_by`
+names a turn of a cube (464.19's 2 and 6). So a zero reaches `point.g`'s
+arithmetic in any of these:
+
+- A part of the turn, `w`, `v₀`, `v₁` or `v₂`. `Isometry::rotation`
+  (`isometry.rs:174-189`) builds its turn with nalgebra's `from_axis_angle`
+  (`src/geometry/quaternion_construction.rs:265-273`), which stores the axis
+  direction times `sin(θ/2)`, so a turn about a coordinate axis stores two of
+  `v` as 0. `named_by` takes one, two or four nonzero parts, all of one size,
+  as a turn of a cube, which rounds nothing (464.19's 6). So three parts zero
+  never reach Rodrigues' form, and four cannot be zero with `q·q` within `6ε`
+  of one. Two zero reach it when the other two differ in size, as in a turn of
+  30° about `z`.
+- A coordinate of the point, `p₀`, `p₁` or `p₂`, as on a point on a
+  coordinate plane.
+- The shift's `s₀`. It is no factor of a product, and `point.g` already lets
+  it be 0.
+- A sum that cancels: `C0`, `C1` and `C2`, the cross product `c`; `KK`, `k₀`;
+  `A`, `t₀w + k₀`; `R`, that and `p₀`; and `O`, that and `s₀`. Each adds two
+  doubles, which may be equal and opposite. `O` is 0 when the moved point
+  lands on the plane `x = 0`.
+
+A product whose factors are both nonzero can still round to zero, below the
+normals. That is Q2802's: every case here keeps 464.19's hypothesis that such
+a product, where it reaches `out`, is normal.
+
+**2. The cases.** `pointzero.py` (7) writes one script per case,
+`pz_<zeros>[_x<sums>].g`, `<zeros>` the zero factors or `n` for none and
+`<sums>` the sums that cancel, and a control beside each (4).
+
+- The zero sets. Of the 128 sets of the seven factors `w`, `v₀`, `v₁`, `v₂`,
+  `p₀`, `p₁` and `p₂`, the 40 that hold three or four of the turn's parts are
+  left out (1), which leaves 88.
+- The sums. A sum on the path of a term of `Ex` that keeps all its factors is
+  split into rounded and cancelling, where both its parts can be nonzero. A
+  sum with both parts zero is zero. One with one part zero is the other part
+  and not zero, but for `O = r0 + s0` with `r0` zero, which is `s0` and may be
+  0: it is split too, and named as if it cancelled. A sum on no such path is
+  multiplied by zero before it reaches `out`, so is not split.
+
+That makes 436 cases: 42 with nothing zero, `pz_n` and each choice of sums
+cancelling, and 2 to 16 for each of the other 87 zero sets. `y` and `z` are
+`x` with every index turned (464.19's `turn.py`), and the 88 zero sets are
+closed under that turn, so the cases for `x` are the cases for `y` and `z`.
+In 25 zero sets no term through the turn keeps all its factors, so only `p₀`
+and `s₀` are left and `D` is `3L`: 50 cases. In 21 of them `p₀` is zero and
+`O` cancels, so `s₀` is 0, and `out` and `Ex` are both exactly 0. `pz_n.g` is
+464.19's `point.g` but for its layout and comments, its `@FIX` hypotheses and
+its queries, which `samepz.py` (7) checks.
+
+How a zero is written. A zero factor is the double 0. A product with a zero
+factor, a sum with both parts zero and a sum that cancels are each exactly
+zero and round to themselves (464.11's `refl.g`), so each is written
+unrounded, without its ratio, its hypotheses or its hint, and a cancelling
+sum is put in `[0, 0]`. A sum with one part zero stays rounded, as `point.g`
+has it: it rounds nothing, and charging it `u` costs only room. Each rounded
+sum adds two doubles, so is a multiple of `2⁻¹⁰⁷⁴`, and says so with `@FIX`,
+since Gappa does not see that where one part is a zero written unrounded. A
+term of `Ex` with a zero factor is zero and drops out with its share of `D`,
+and the hint on `D / L` is `point.g`'s less those shares. Gappa bounds `|v| ·
+|v|` for no `v` that is the double 0, so a zero `v₁` or `v₂` has its `1/545`
+square taken out with those shares too, written `1/545 * |v| * |v|`, which
+Gappa reads as the product of `1/545 * |v|` and `|v|` and bounds as 0 (7).
+
+**3. What they print.** `start.sh` (7) ran the 436 cases, each with `gappa
+-Bcoq` and `coqc`, and their 436 controls, 14 at once, from 14:03 to 14:20
+UTC by its files' times. `tallypz.py` (7) counts them, and its whole print is
+in 7:
+
+- Each of the 436 exits 0 at the code's `36u`, in 0.21 s (`pz_v1v2p0p1_xo`)
+  to 164.14 s (`pz_n_xc0`).
+- `(out − Ex) / D` is within `u`, and a little more, in 103 cases, as in
+  `point.g`; within `0.16u` to `0.99u` in 312; and in `[0, 0]` in the 21
+  where `out` and `Ex` are both 0.
+- The upper end of `D / L` is 3 in the 50 cases where `D` is `3L`, and 24.8
+  in the other 386. That 24.8 is `point.g`'s own: the hint takes the zeros'
+  shares out and Gappa bounds each below by 0, so it does not find the
+  smaller largest `D / L` of a turn with a part zero.
+- So `(out − Ex) / L` is within `24.80u` in every case, the largest
+  `24.7999u` (`pz_wv2p2_xc2`), against the goal's `36u`. No zero branch goes
+  past `point.g`'s `24.80u`.
+- `gappa -Bcoq` and `coqc` exit 0 on all 436: 657 lines with 7 hints
+  (`pz_v1v2p0p1p2`, 4.20 s) to 8130 lines with 34 hints (`pz_n`, 104.60 s),
+  where `point.v` came to 8257, 8158 and 8205 lines with 34 (464.19's 8).
+- No `.out`, `.bcoq` or `.coqc` of the 436 has a line other than its results
+  and warnings that a divisor has been assumed to be nonzero. So no hint was
+  reported as not an identity, and each `.coqc` is empty.
+
+Gappa does not write the same proof each run (464.4), so the sizes and times
+are this run's. Each proof stands on its hints and on the divisors Gappa took
+to be nonzero, as 464.19's 8 says of its own. `field` has not been run on
+these hints (464.10).
+
+**4. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3), so each case has a control that must fail, and each
+of the 436 exits 1.
+
+- 415 ask for `(out − Ex) / L` within `u / 2`, `1b-54`. Gappa's best for a
+  goal it does not prove can change from one run to the next (464.26), so
+  these are this run's, each a bound Gappa found on the size of `(out − Ex) /
+  L` and not an exact value: `u` in 25 controls; `3u` in 4, `pz_v1v2`,
+  `pz_v1v2p1`, `pz_v1v2p2` and `pz_v1v2p1p2`, a turn about the `x` axis, where
+  `x` is `rnd(p₀ + s₀)`; `24.80u` in 99; and `4.05u` to `24.58u` in the other
+  287. A one-off script, not kept, compared each with its case's upper end of
+  `(out − Ex) / D` times its upper end of `D / L`, and found each within
+  0.007% of it.
+- The 21 where `out` and `Ex` are both 0 hold `(out − Ex) / L` in `[0, 0]`,
+  so a control at `u / 2` proves there, as these 21 did in the second lane's
+  run (7). Their control asks for `(out − Ex) / L` in `[2⁻⁶⁰, 1]`, `1b-60`,
+  which leaves out the 0 they hold, and Gappa prints `Error: no contradiction
+  was found.`
+
+So none of the 436 proofs came from a contradiction in its hypotheses.
+
+**5. The shapes.** None of these cases was run as Rust input. By hand, not
+run: `Isometry::rotation` about the `z` axis through the origin by 30° stores
+the turn `(cos 15°, 0, 0, sin 15°)` and a zero shift, so `v₀` and `v₁` are 0,
+and the point `(3, 4, 0)`, on the plane `z = 0`, has `p₂` zero. Its `x` is
+`pz_v0v1p2`, with no sum cancelling. Its `y` and `z`, in `x`'s names, are
+`pz_v0v2p1` and `pz_v1v2p0_xo`, the second one of the 21: `z` is `0 + 0`
+exactly. A part turned about a coordinate axis and a sketch on a coordinate
+plane are shapes designers make. Every case proves, so there is no wrong
+answer to look for.
+
+**6. What this leaves.**
+
+- A row, filed from this write-up when it merges: the doc on
+  `POINT_ROUNDOFF` (`isometry.rs:77-87` at `c0859e3f`) says Gappa proves the
+  18 while "no factor is zero and no sum cancels to zero", and that "The zero
+  factors, the sums that cancel and the products below the normals have not
+  been run." By 3 the first two are run and prove. It is a comment that
+  claims less than is proved, not a wrong answer, so it has no class.
+- Not a row: Q2802 runs `point.g` with the products below the normals, which
+  every case here keeps normal where they reach `out`. Q2825 runs 464.20's
+  `vector.g` and `square.g` in the zero branches, and `vector.g` is
+  `point.g` with no shift, so 1 and 2 are its split with `s₀` gone. Q2700
+  moves into `proofs/gappa/` each script a row of 464 appended, these among
+  them.
+
+**7. The scripts.** `pointzero.py` writes the cases, their controls and
+`cases.txt`; `runpz.sh` runs each case named on its input through `one.sh`
+with `coq`, and its control without; `start.sh` runs every case in
+`cases.txt` through `runpz.sh`; `tallypz.py` counts the run; and `samepz.py`
+checks this text against the files that ran. To run them again, save the
+five beside 464.13's `one.sh` and run `python3 pointzero.py`, then start
+`./start.sh` with `setsid -f nohup` and wait on the pid it writes to
+`start.pid`. Its `runpz.txt` ends `done`, and `python3 tallypz.py` counts it.
+
+The generator had three forms, and every case was run on the last two:
+
+- The first lane's form wrote a sum with one part zero unrounded, as exact,
+  and had no `@FIX`. In a trial, `pz_v1v2` exited 1 with `(out − Ex) / (3 ·
+  L)` only within `±0.166667`: `R = a0 + p0` had `a0` an unrounded zero, so
+  Gappa did not know `R` is a multiple of `2⁻¹⁰⁷⁴` and could not bound
+  `rnd(R)`'s relative error below the normals. A probe showed `@FIX(S, -1074)`
+  lets Gappa bound `rnd(S) −/ S` within `u` for `S = x · y + x`, `|S| ≥
+  2⁻¹⁰⁷⁴`, and without it Gappa fails. `pz_w` and `pz_n_xc0` exited 1 too,
+  with `(out − Ex) / D` only within about `±2·10⁶³³`. The second form keeps
+  such a sum rounded and states `@FIX` on each rounded sum, and on it `pz_n`,
+  `pz_v1v2`, `pz_w`, `pz_n_xc0` and `pz_wv0p1` each proved, with `gappa
+  -Bcoq` and `coqc`. Which of the two changes each of them needed was not run.
+- The second lane also split `O = r0 + s0` with `r0` zero. The form before let
+  `|O| ≥ 2⁻¹⁰⁷⁴` leave out `s0 = 0` there, and no script covered it. That made
+  436 cases, 90 more. In its run of all 436, 272 proved and 164 did not, each
+  a case with exactly one of `v₁` and `v₂` zero, with `(out − Ex) / D` within
+  `u` but `D / L` unbounded (`pz_v1`: about `1.29·10⁶¹⁸`). The 20 such cases
+  that proved were those with no term through the turn left. 21 controls
+  proved: the 21 of 4.
+- The third lane found why the 164 failed. `pz_v1.g` with more goals prints
+  `|v1|` in `[0, 0]`, but finds no path to a bound on `|v1| * |v1|`, and puts
+  `|v1| * |v1| + |v2| * |v2|` only in `[−1.5411·10⁶²¹, 11881]`, so the hint's
+  `1/545 * (|v1| * |v1| + |v2| * |v2|)` had no lower bound, and `D / L` none
+  above. In the same run `12 * |w| * |v1| + 14 * |v1| * |v0| + 14 * |v1| *
+  |v1|` is in `[0, 0]`: Gappa reads `14 * |v1| * |v1|` as `(14 * |v1|) *
+  |v1|`, a product, which it bounds. So the third form takes a zero `v`'s
+  `1/545` square out with the gone shares, as 2 says, and `pz_v1.g` then
+  proves with `D / L` in `[3, 24.8]`. Writing only `1/545 * (|v2| * |v2|)`
+  proves too, but Gappa prints `not trivially equal` with the difference `(−L
+  · |v1|²) / (545 · L)`, so it was not taken. The third form also gives the
+  21 their control of 4. `tallypz.py` as the second lane wrote it read a
+  control's best only on `(out - Ex) / L`, and stopped at `c_pz_n_xo_half`,
+  which prints `BND((r0 + s0 - Ex) / L)`; the form below reads it on any `(…
+  − Ex) / L`. A trial of the third form on `pz_n`, `pz_v1`, `pz_v2`,
+  `pz_v1_xc1ro`, `pz_wv1`, `pz_v0v2_xao`, `pz_v2p1`, `pz_v1v2`,
+  `pz_p0p1p2_xo` and `pz_wv0p0_xo` found each proved, with Coq, and each
+  control failed, and then 3 ran every case.
+
+`pointzero.py`, whole:
+
+```python
+"""Write 464.19's point.g in its zero branches, one script per case and a
+control at u / 2 beside each.
+
+point.g took every factor of its nine products to be nonzero and none of its
+seven sums to cancel. Here each of those may be zero:
+
+- a factor, one of w, v0, v1, v2, p0, p1, p2, written as the double 0. A turn
+  about a coordinate axis stores two of v as 0, a half turn stores w as 0,
+  and a point on a coordinate plane has a p_i of 0. s0 is no factor, and
+  point.g already lets it be 0.
+- a sum, one of C0, C1, C2, KK, A, R, O, whose two parts are not zero: it is
+  either rounded, and then at least 2^-1074 as point.g has it, or it cancels
+  to zero, which rounds to itself (464.11's diffzero.g). A sum with one part
+  zero is the other part, or its negative, and is not zero; one with both
+  parts zero is zero. The one part that can be zero without being a factor
+  or a zero rounding is s0, so O = r0 + s0 with r0 zero is s0, and is split
+  the same way: rounded, s0 not 0, or zero, s0 = 0, named as if it cancelled.
+
+A product with a zero factor, a sum with both parts zero and a sum that
+cancels are each zero and round to themselves (464.11's refl.g), so each is
+written unrounded, and its ratio, its hypotheses and its ratio hint go; a
+cancelling sum is put in [0, 0]. Every other rounding stays as point.g has
+it, a sum with one part zero included: it rounds nothing, and charging it u
+costs only room. Each rounded sum adds two doubles, so is a multiple of
+2^-1074, and is said to be with @FIX: Gappa sees that itself where both parts
+are rounded, and not where a part is a zero written unrounded. Each term of Ex
+is carried through the roundings left on its path, so its W is their product
+less one. A term with a zero factor is zero and drops out of the split, with
+its share of D.
+
+A rounding on no path of a term without a zero factor is multiplied by zero
+before it reaches out. It stays rounded, with no hypothesis, and a sum there
+is not split into rounded and cancelling, since the two scripts would be the
+same.
+
+D / L is hinted as point.g's quadratic less the share of each term a zero
+factor took out. Gappa bounds |v| * |v| for no v that is the double 0, so a
+zero v1 or v2 has its 1/545 square taken out with those shares, written
+1/545 * |v| * |v|, which Gappa reads as (1/545 * |v|) * |v| and bounds as 0.
+
+Where no term is live, p0 is zero and s0 is 0, out and Ex are both 0, so a
+control at u / 2 holds. Its control asks for (out - Ex) / L in [2^-60, 1]
+instead, which leaves out 0.
+
+named_by (isometry.rs) takes a turn with one nonzero part, or two or four of
+one size, as a turn of a cube, which is 464.19's 6 and not this arithmetic. So
+a zero set holding three of w, v0, v1, v2 is left out, and all four cannot be
+zero with q.q within 6 epsilon of one. A zero set holding two keeps the two
+others unequal in size, which these scripts do not use. The moved point's y
+and z are x with the indices turned (turn.py), and the zero sets left are
+closed under that turn, so x in each of them is y and z in each too.
+
+The names are pz_<zeros>[_x<sums>].g, <zeros> the zero factors or n for none
+and <sums> the sums that cancel, and c_pz_<...>_half.g at u / 2.
+Run as: python3 pointzero.py
+"""
+import itertools
+import os
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
+FACTORS = ("w", "v0", "v1", "v2", "p0", "p1", "p2")
+TURN = ("w", "v0", "v1", "v2")
+GOAL = "(out - Ex) / L in [-36b-53, 36b-53]"
+HALF = "(out - Ex) / L in [-1b-54, 1b-54]"
+ZERO = "(out - Ex) / L in [1b-60, 1]"
+LEMMA = "in [-4503599627370497b-105, 4503599627370497b-105]"
+
+# Each rounding of point.g: its result, its argument, the argument's
+# definition, its ratio, and whether it is a product or a sum.
+OPS = (
+    ("q01", "P01", "v1 * p2", "rq01", "product"),
+    ("q02", "P02", "v2 * p1", "rq02", "product"),
+    ("q11", "P11", "v2 * p0", "rq11", "product"),
+    ("q12", "P12", "v0 * p2", "rq12", "product"),
+    ("q21", "P21", "v0 * p1", "rq21", "product"),
+    ("q22", "P22", "v1 * p0", "rq22", "product"),
+    ("c0", "C0", "q01 - q02", "rc0", "sum"),
+    ("c1", "C1", "q11 - q12", "rc1", "sum"),
+    ("c2", "C2", "q21 - q22", "rc2", "sum"),
+    ("k01", "K1", "v1 * t2", "rk01", "product"),
+    ("k02", "K2", "v2 * t1", "rk02", "product"),
+    ("k0", "KK", "k01 - k02", "rk0", "sum"),
+    ("m0", "M", "t0 * w", "rm", "product"),
+    ("a0", "A", "m0 + k0", "ra", "sum"),
+    ("r0", "R", "a0 + p0", "rr", "sum"),
+    ("out", "O", "r0 + s0", "ro", "sum"),
+)
+# t_i is c_i * 2, which rounds nothing (464.19's doubling.g).
+DOUBLED = {"t0": "c0", "t1": "c1", "t2": "c2"}
+
+# The six terms of Ex with a product of the turn: the term, its factors, the
+# roundings it passes through in order, its share of D, and e / d as point.g
+# writes it.
+TERMS = (
+    ("2 * w * v1 * p2", ("w", "v1", "p2"), ("q01", "c0", "m0", "a0", "r0", "out"),
+     "12 * |w| * |v1|", "(w / |w|) * (v1 / |v1|) * (p2 / L) * (W1 / 6)"),
+    ("-(2 * w * v2 * p1)", ("w", "v2", "p1"), ("q02", "c0", "m0", "a0", "r0", "out"),
+     "12 * |w| * |v2|", "-((w / |w|) * (v2 / |v2|) * (p1 / L) * (W2 / 6))"),
+    ("2 * v1 * v0 * p1", ("v1", "v0", "p1"), ("q21", "c2", "k01", "k0", "a0", "r0", "out"),
+     "14 * |v1| * |v0|", "(v1 / |v1|) * (v0 / |v0|) * (p1 / L) * (W3 / 7)"),
+    ("-(2 * v1 * v1 * p0)", ("v1", "p0"), ("q22", "c2", "k01", "k0", "a0", "r0", "out"),
+     "14 * |v1| * |v1|", "-((v1 / |v1|) * (v1 / |v1|) * (p0 / L) * (W4 / 7))"),
+    ("-(2 * v2 * v2 * p0)", ("v2", "p0"), ("q11", "c1", "k02", "k0", "a0", "r0", "out"),
+     "14 * |v2| * |v2|", "-((v2 / |v2|) * (v2 / |v2|) * (p0 / L) * (W5 / 7))"),
+    ("2 * v2 * v0 * p2", ("v2", "v0", "p2"), ("q12", "c1", "k02", "k0", "a0", "r0", "out"),
+     "14 * |v2| * |v0|", "(v2 / |v2|) * (v0 / |v0|) * (p2 / L) * (W6 / 7)"),
+)
+P0_PATH = ("r0", "out")
+S0_PATH = ("out",)
+
+
+def cases():
+    """Every zero set and every choice of which sums on a live path cancel."""
+    for n in range(len(FACTORS) + 1):
+        for zero in itertools.combinations(FACTORS, n):
+            if sum(f in zero for f in TURN) >= 3:
+                continue
+            yield from branches(set(zero), 0, {})
+
+
+def used(zero):
+    """The roundings on the path of a term that has no zero factor."""
+    paths = [t[2] for t in TERMS if not set(t[1]) & zero] + [S0_PATH]
+    if "p0" not in zero:
+        paths.append(P0_PATH)
+    return {r for path in paths for r in path}
+
+
+def branches(zero, i, state):
+    """state maps each rounding's result to rounded, zero or cancels."""
+    if i == len(OPS):
+        yield frozenset(zero), dict(state)
+        return
+    result, _, arg, _, kind = OPS[i]
+    a, _, b = arg.split(" ")
+
+    def is_zero(name):
+        name = DOUBLED.get(name, name)
+        if name in FACTORS:
+            return name in zero
+        if name == "s0":
+            return False
+        return state[name] != "rounded"
+
+    za, zb = is_zero(a), is_zero(b)
+    if kind == "product":
+        choices = ("zero",) if za or zb else ("rounded",)
+    elif za and zb:
+        choices = ("zero",)
+    elif result not in used(zero) or (za or zb) and b != "s0":
+        choices = ("rounded",)
+    else:
+        choices = ("rounded", "cancels")
+    for s in choices:
+        state[result] = s
+        yield from branches(zero, i + 1, state)
+    del state[result]
+
+
+def name_of(zero, state):
+    zeros = "".join(f for f in FACTORS if f in zero) or "n"
+    cancels = "".join(op[1].lower() for op in OPS if state[op[0]] == "cancels")
+    return "pz_" + zeros + ("_x" + cancels if cancels else "")
+
+
+def make(zero, state, goal=GOAL):
+    live_ops = used(zero)
+    rounded = [op for op in OPS if state[op[0]] == "rounded" and op[0] in live_ops]
+    live = [k for k, t in enumerate(TERMS) if not set(t[1]) & zero]
+    gone = [k for k in range(len(TERMS)) if k not in live]
+    p0_live = "p0" not in zero
+    zeros = [f for f in FACTORS if f in zero]
+    cancels = [op[1] for op in OPS if state[op[0]] == "cancels"]
+    unrounded = [op[1] for op in OPS if state[op[0]] != "rounded"]
+
+    def listed(names):
+        return ", ".join(names) if names else "none"
+
+    src = [
+        "# restates: crates/rcad-geom/src/isometry.rs apply_to_point at c0859e3f",
+        "# restates: crates/rcad-geom/src/isometry.rs turned_by at c0859e3f",
+        "# restates: crates/rcad-geom/src/isometry.rs POINT_ROUNDOFF at c0859e3f",
+        "# restates: crates/rcad-geom/src/isometry.rs named_by at c0859e3f",
+        "# restates: Cargo.lock nalgebra at c0859e3f",
+        "# 464.19's point.g, the moved point's x, with zero factors " + listed(zeros) + ",",
+        "# cancelling sums " + listed(cancels) + ", and so zero " + listed(unrounded) + ".",
+        "@rnd = float<ieee_64, ne>;",
+        "",
+        "# The quaternion (w, v), the point and the shift's x, each an f64, a zero",
+        "# factor the double 0.",
+    ]
+
+    def inputs(names):
+        return " ".join(f"{n} = 0;" if n in zero else f"{n} = rnd({n}_);" for n in names)
+
+    src += [inputs(TURN), inputs(("p0", "p1", "p2")), "s0 = rnd(s0_);", "",
+            "# What apply_to_point computes, line for line, a zero written unrounded,",
+            "# since it rounds to itself (464.11's refl.g)."]
+    for result, argname, arg, _, _ in OPS:
+        value = f"rnd({argname})" if state[result] == "rounded" else argname
+        src.append(f"{argname} = {arg}; {result} = {value};")
+        if result == "c2":
+            src.append("t0 = c0 * 2; t1 = c1 * 2; t2 = c2 * 2;")
+    src += ["", "# The same arithmetic without rounding.",
+            "Ex = 2 * w * (v1 * p2 - v2 * p1)",
+            "   + v1 * (2 * (v0 * p1 - v1 * p0)) - v2 * (2 * (v2 * p0 - v0 * p2))",
+            "   + p0 + s0;", "",
+            "# What each rounding on a live path multiplied its argument by."]
+    for k in range(0, len(rounded), 4):
+        src.append(" ".join(f"{op[3]} = {op[0]} / {op[1]};" for op in rounded[k:k + 4]))
+    ratio = {op[0]: op[3] for op in rounded}
+
+    def chain(path):
+        rs = [ratio[r] for r in reversed(path) if r in ratio]
+        return " * ".join(rs) + " - 1" if rs else "0"
+
+    src += ["", "# Each term of Ex as out carries it, less the term itself, through the",
+            "# roundings left on its path. A term with a zero factor is zero."]
+    src += [f"W{k + 1} = {chain(TERMS[k][2])};" for k in live]
+    if p0_live:
+        src.append(f"W7 = {chain(P0_PATH)};")
+    src.append(f"W8 = {chain(S0_PATH)};")
+    for k in live:
+        t = TERMS[k][0]
+        src.append(f"e{k + 1} = -({t[2:-1]} * W{k + 1});" if t.startswith("-(") else f"e{k + 1} = {t} * W{k + 1};")
+    src.append("e7 = p0 * W7 + s0 * W8;" if p0_live else "e7 = s0 * W8;")
+    src += ["", "# Each live term's share of D, as point.g's, and p0 and s0 sharing 3L."]
+    src += [f"d{k + 1} = {TERMS[k][3]} * L;" for k in live]
+    src += ["d7 = 3 * L;", "D = " + " + ".join(f"d{k + 1}" for k in live + [6]) + ";", "",
+            "# q.q and the four squares D / L is written with below.",
+            "N4 = |w| * |w| + |v0| * |v0| + |v1| * |v1| + |v2| * |v2|;",
+            "X = |w| - 30/109 * (|v1| + |v2|);",
+            "Y = |v0| - 35/109 * (|v1| + |v2|);",
+            "Z = |v1| - |v2|;", ""]
+    nz = [f for f in FACTORS if f not in zero]
+    hyp = ["  # Every input is a finite f64.",
+           "     " + " /\\ ".join(f"|{n}| <= 1b1024" for n in nz[:4]),
+           "  /\\ " + " /\\ ".join(f"|{n}| <= 1b1024" for n in nz[4:] + ["s0"]),
+           "  # No factor of a product is zero but " + listed(zeros) + ".",
+           "  /\\ " + " /\\ ".join(f"|{n}| >= 1b-1074" for n in nz)]
+    rs = [op for op in rounded if op[4] == "sum"]
+    if rs:
+        hyp += ["  # The rounded sums on a live path do not cancel, and each adds two doubles."]
+        hyp += ["  /\\ " + " /\\ ".join(f"|{op[1]}| >= 1b-1074" for op in rs[k:k + 4]) for k in range(0, len(rs), 4)]
+        hyp += ["  /\\ " + " /\\ ".join(f"@FIX({op[1]}, -1074)" for op in rs[k:k + 4]) for k in range(0, len(rs), 4)]
+    if cancels:
+        hyp += ["  # The sums that cancel.", "  /\\ " + " /\\ ".join(f"{c} in [0, 0]" for c in cancels)]
+    rp = [op for op in rounded if op[4] == "product"]
+    if rp:
+        hyp += ["  # The products on a live path are normal, which apply_to_point does not",
+                "  # check, and what lemma.g proves each of them gives."]
+        hyp += ["  /\\ " + " /\\ ".join(f"|{op[0]}| >= 1b-1022" for op in rp[k:k + 3]) for k in range(0, len(rp), 3)]
+        hyp += [f"  /\\ {op[0]} -/ {op[1]} {LEMMA}" for op in rp]
+    hyp += ["  # L is at least every coordinate of the point and the shift.",
+            "  /\\ L in [1b-1074, 1b1024]",
+            "  /\\ " + " /\\ ".join(f"{n} / L in [-1, 1]" for n in ("p0", "p1", "p2", "s0") if n not in zero),
+            "  # A stored turn has |q.q - 1| <= 6 epsilon (held_near_length_one), and",
+            "  # 6 epsilon is 12b-53.",
+            "  /\\ N4 in [9007199254740980b-53, 9007199254741004b-53]",
+            "  # x / |x| is in [-1, 1] for any x that is not zero.",
+            "  /\\ " + " /\\ ".join(f"{n} / |{n}| in [-1, 1]" for n in TURN if n not in zero)]
+    src += ["{"] + hyp + ["->", "  (out - Ex) / D in ? /\\ D / L in ?", f"  /\\ {goal}", "}", ""]
+    if rounded:
+        src.append("# How far each rounding on a live path is from the identity.")
+        src += [f"{op[0]} / {op[1]} -> 1 + ({op[0]} - {op[1]}) / {op[1]};" for op in rounded]
+        src.append("")
+    src += ["# The error is the sum of the live shares' errors, each a fraction of its",
+            "# own share of D; add_rr then averages them.",
+            "(out - Ex) / L -> ((out - Ex) / D) * (D / L);",
+            "(out - Ex) / D -> ((D + (out - Ex)) - D) / D;",
+            "D + (out - Ex) -> " + " + ".join(f"(d{k + 1} + e{k + 1})" for k in live + [6]) + ";"]
+    src += [f"(d{k + 1} + e{k + 1}) - d{k + 1} -> e{k + 1};" for k in live + [6]]
+    src += [f"e{k + 1} / d{k + 1} -> {TERMS[k][4]};" for k in live]
+    src.append("e7 / d7 -> ((p0 / L) * W7 + (s0 / L) * W8) / 3;" if p0_live else "e7 / d7 -> ((s0 / L) * W8) / 3;")
+    kept = [v for v in ("v1", "v2") if v not in zero]
+    took = [TERMS[k][3] for k in gone] + [f"1/545 * |{v}| * |{v}|" for v in ("v1", "v2") if v in zero]
+    hint = ["D / L -> 109/5 * N4 - (109/5 * (X * X) + 109/5 * (Y * Y) + 425/109 * (Z * Z)"]
+    if kept:
+        hint.append("                       + 1/545 * (" + " + ".join(f"|{v}| * |{v}|" for v in kept) + ")) + 3")
+    else:
+        hint[0] += ") + 3"
+    if took:
+        hint.append("        - (" + " + ".join(took) + ")")
+    src += ["", "# D / L is point.g's 3 and quadratic, 109/5 q.q less four squares, less",
+            "# the share of each term a zero factor took out, and a zero v's square."]
+    src += hint[:-1] + [hint[-1] + ";"]
+    return "\n".join(src) + "\n"
+
+
+def main():
+    seen, exact = [], []
+    for zero, state in cases():
+        name = name_of(zero, state)
+        assert name not in seen, name
+        seen.append(name)
+        open(name + ".g", "w").write(make(zero, state))
+        if all(set(t[1]) & zero for t in TERMS) and "p0" in zero and state["out"] == "cancels":
+            exact.append(name)
+            open("c_" + name + "_half.g", "w").write(make(zero, state, ZERO))
+        else:
+            open("c_" + name + "_half.g", "w").write(make(zero, state, HALF))
+    open("cases.txt", "w").write("\n".join(seen) + "\n")
+    print(len(seen), "cases,", len(exact), "with out and Ex both 0")
+
+
+main()
+```
+
+`runpz.sh`, whole, which runs each case named on its input, one a line,
+through 464.13's `one.sh` with `coq`, and its control without:
+
+```sh
+#!/bin/bash
+# Run each case named on stdin, one a line, through 464.13's one.sh with coq,
+# and its control at u / 2 without, P at once (default 16), printing one.sh's
+# lines as each ends.
+cd "$(dirname "$0")"
+P=${P:-16}
+while read -r n; do
+  echo "./one.sh $n.g coq"
+  echo "./one.sh c_${n}_half.g"
+done | xargs -P "$P" -I{} sh -c '{}'
+```
+
+`start.sh`, whole, which the second and third lanes started with `setsid -f
+nohup ./start.sh` and waited on by the pid it writes:
+
+```sh
+#!/bin/bash
+# Run every case in cases.txt through runpz.sh, the 42 with no zero factor
+# first since they take longest, P at once (default 14), writing runpz.txt,
+# which ends "done".
+cd "$(dirname "$0")"
+echo $$ > start.pid
+{ grep '^pz_n' cases.txt; grep -v '^pz_n' cases.txt; } | P=${P:-14} ./runpz.sh > runpz.txt 2>&1
+echo done >> runpz.txt
+```
+
+`tallypz.py`, whole:
+
+```python
+"""Count what runpz.txt and the files beside it say of each case in cases.txt
+and its control: each case's exit, Coq's two exits, its proof's size, the
+bound it printed on (out - Ex) / D and on D / L, each control's exit and its
+best on (out - Ex) / L in u, and every line of an .out, .bcoq or .coqc that
+is not a result or a divisor Gappa took to be nonzero. A control that asks
+for (out - Ex) / L in [2^-60, 1], where out and Ex are both 0, has no best
+and is to say it found no contradiction instead.
+Run as: python3 tallypz.py"""
+import collections
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+U = 2.0 ** -53
+cases = open("cases.txt").read().split()
+log = open("runpz.txt").read().splitlines()
+assert log and log[-1] == "done", "runpz.txt does not end done"
+
+EXIT = re.compile(r"^(\S+) exit (\d+) ([\d.]+)s$")
+COQ = re.compile(r"^(\S+) coq -Bcoq exit (\d+) coqc exit (\d+) ([\d.]+)s lines (\d+) hints (\d+)$")
+exits, coqs, odd_log = {}, {}, []
+for line in log[:-1]:
+    if m := EXIT.match(line):
+        exits[m[1]] = (int(m[2]), float(m[3]))
+    elif m := COQ.match(line):
+        coqs[m[1]] = (int(m[2]), int(m[3]), float(m[4]), int(m[5]), int(m[6]))
+    else:
+        odd_log.append(line)
+
+WARNING = re.compile(r"^Warning: the expression .* has been assumed to be nonzero when checking a rewriting rule\.$")
+RESULT = re.compile(r"^  (.*) in \[(.*)\]$")
+BEST = re.compile(r"^  BND\((\(.* - Ex\) / L)\), best: \[(\S+), (\S+)\]$")
+DECIMAL = re.compile(r"\{(-?[\d.e+-]+),")
+ZERO = "(out - Ex) / L in [1b-60, 1]"
+NONE_FOUND = "Error: no contradiction was found."
+
+
+def odd_lines(path, control, zero=False):
+    allowed = [WARNING, RESULT] + ([BEST] if control and not zero else [])
+    fixed = {"Results:"}
+    if control:
+        fixed.add(NONE_FOUND if zero else "Error: some properties were not satisfied:")
+    if not os.path.exists(path):
+        return [f"{path} missing"]
+    return [f"{path}: {line}" for line in open(path).read().splitlines()
+            if line not in fixed and not any(p.match(line) for p in allowed)]
+
+
+def high_end(interval):
+    """The upper end of a Gappa result interval, as a float: the part after
+    the comma that is outside every brace."""
+    depth = 0
+    for i, ch in enumerate(interval):
+        depth += {"{": 1, "}": -1}.get(ch, 0)
+        if ch == "," and depth == 0:
+            hi = interval[i + 1:].strip()
+            break
+    m = DECIMAL.search(hi)
+    return float(m[1]) if m else float(hi)
+
+
+problems, bests, ratios, dls, times, sizes, zeros = [], {}, {}, {}, [], [], []
+for n in cases:
+    c = "c_" + n + "_half"
+    zero = ZERO in open(c + ".g").read()
+    if exits.get(n, (None,))[0] != 0:
+        problems.append(f"{n} exit {exits.get(n)}")
+    if exits.get(c, (None,))[0] != 1:
+        problems.append(f"{c} exit {exits.get(c)}")
+    k = coqs.get(n)
+    if not k or k[0] != 0 or k[1] != 0:
+        problems.append(f"{n} coq {k}")
+    else:
+        sizes.append((k[3], k[4], k[2], n))
+    times.append((exits.get(n, (0, 0.0))[1], n))
+    problems += odd_lines(n + ".out", False) + odd_lines(n + ".bcoq", False)
+    problems += odd_lines(c + ".out", True, zero)
+    if os.path.exists(n + ".coqc") and open(n + ".coqc").read():
+        problems.append(f"{n}.coqc is not empty")
+    for line in open(n + ".out").read().splitlines():
+        if m := RESULT.match(line):
+            if " - Ex) / " in m[1]:
+                ratios[n] = high_end(m[2]) / U
+            else:
+                dls[n] = high_end(m[2])
+    if n not in ratios or n not in dls:
+        problems.append(f"{n}.out lacks a result")
+    best = [BEST.match(line) for line in open(c + ".out").read().splitlines()]
+    best = [m for m in best if m]
+    if zero:
+        zeros.append(n)
+        if best or NONE_FOUND not in open(c + ".out").read().splitlines():
+            problems.append(f"{c} has a best line or no '{NONE_FOUND}'")
+    elif len(best) != 1:
+        problems.append(f"{c} has {len(best)} best lines")
+    else:
+        bests[n] = float(best[0][3]) / U
+
+print(len(cases), "cases,", len(exits), "exit lines,", len(coqs), "coq lines")
+print("lines of runpz.txt that are neither:", odd_log or "none")
+print("problems:", len(problems))
+for p in problems:
+    print("  " + p)
+proved = sum(exits.get(n, (None,))[0] == 0 for n in cases)
+failed = sum(exits.get("c_" + n + "_half", (None,))[0] == 1 for n in cases)
+print(f"cases that exit 0: {proved} of {len(cases)}; controls that exit 1: {failed} of {len(cases)}")
+print("gappa time per case: %.2f s (%s) to %.2f s (%s)" % (min(times) + max(times)))
+sizes.sort()
+print("coq: %d lines %d hints %.2f s (%s) to %d lines %d hints %.2f s (%s)" % (sizes[0] + sizes[-1]))
+print("(out - Ex) / D or / (3L), upper end in u:",
+      sorted(collections.Counter(round(r, 4) for r in ratios.values()).items()))
+print("D / L upper end:", sorted(collections.Counter(round(d, 4) for d in dls.values()).items()))
+print("largest (out - Ex) / D times D / L: %.4fu (%s), against POINT_ROUNDOFF's 36u"
+      % max((ratios[n] * dls[n], n) for n in cases if n in ratios and n in dls))
+print("controls at [2^-60, 1], out and Ex both 0, (out - Ex) / (3L) in [0, 0]:", len(zeros),
+      all(ratios.get(n) == 0 for n in zeros))
+print("control best on (out - Ex) / L, in u, and how many controls:")
+for b, k in sorted(collections.Counter(round(b, 2) for b in bests.values()).items()):
+    print(f"  {b}u: {k}", ", ".join(n for n in bests if round(bests[n], 2) == b) if k <= 12 else "")
+print("largest best: %.4fu (%s), against POINT_ROUNDOFF's 36u" % max((b, n) for n, b in bests.items()))
+```
+
+`python3 tallypz.py`, on the third lane's run, prints:
+
+```text
+436 cases, 872 exit lines, 436 coq lines
+lines of runpz.txt that are neither: none
+problems: 0
+cases that exit 0: 436 of 436; controls that exit 1: 436 of 436
+gappa time per case: 0.21 s (pz_v1v2p0p1_xo) to 164.14 s (pz_n_xc0)
+coq: 657 lines 7 hints 4.20 s (pz_v1v2p0p1p2) to 8130 lines 34 hints 104.60 s (pz_n)
+(out - Ex) / D or / (3L), upper end in u: [(0.0, 21), (0.1631, 1), (0.3333, 34), (0.4052, 1), (0.4228, 1), (0.5123, 2), (0.5403, 1), (0.5484, 1), (0.5556, 2), (0.5584, 1), (0.5628, 1), (0.5682, 1), (0.5688, 5), (0.5695, 1), (0.5697, 1), (0.5699, 2), (0.5702, 1), (0.6316, 2), (0.6426, 2), (0.6452, 1), (0.6559, 2), (0.6609, 2), (0.6618, 1), (0.6749, 2), (0.6767, 4), (0.6879, 10), (0.6885, 6), (0.6935, 1), (0.6942, 4), (0.6976, 6), (0.6989, 6), (0.7005, 3), (0.7028, 2), (0.7037, 2), (0.7054, 6), (0.7065, 5), (0.7081, 2), (0.7082, 2), (0.7085, 1), (0.7091, 2), (0.7098, 4), (0.7107, 3), (0.711, 2), (0.7115, 1), (0.7685, 2), (0.7832, 6), (0.7879, 1), (0.7988, 2), (0.8065, 1), (0.807, 2), (0.8104, 2), (0.8152, 6), (0.8153, 2), (0.8157, 1), (0.8246, 2), (0.8253, 2), (0.8273, 2), (0.829, 2), (0.8296, 4), (0.8297, 1), (0.8307, 2), (0.8319, 2), (0.8321, 1), (0.8334, 2), (0.8344, 2), (0.8378, 10), (0.8382, 6), (0.8387, 1), (0.8449, 6), (0.8456, 1), (0.8459, 6), (0.8471, 4), (0.8487, 2), (0.8501, 10), (0.8503, 6), (0.8514, 5), (0.8526, 2), (0.8527, 6), (0.8529, 1), (0.853, 6), (0.8533, 2), (0.8539, 4), (0.8541, 2), (0.8545, 3), (0.8551, 5), (0.8555, 2), (0.8556, 1), (0.8558, 2), (0.856, 4), (0.8562, 3), (0.931, 2), (0.9599, 6), (0.9636, 3), (0.9673, 6), (0.9724, 2), (0.9815, 2), (0.9823, 2), (0.9859, 1), (0.991, 1), (1.0, 103)]
+D / L upper end: [(3.0, 50), (24.8, 386)]
+largest (out - Ex) / D times D / L: 24.7999u (pz_wv2p2_xc2), against POINT_ROUNDOFF's 36u
+controls at [2^-60, 1], out and Ex both 0, (out - Ex) / (3L) in [0, 0]: 21 True
+control best on (out - Ex) / L, in u, and how many controls:
+  1.0u: 25 
+  3.0u: 4 pz_v1v2, pz_v1v2p1, pz_v1v2p2, pz_v1v2p1p2
+  4.05u: 1 pz_v0p0_xc0o
+  8.27u: 9 pz_n_xc0c1c2o, pz_w_xc1c2o, pz_wv1_xc1o, pz_wv2_xc2o, pz_v0p0_xc0, pz_v1p1_xc1o, pz_v2p2_xc2o, pz_wv1p1_xc1o, pz_wv2p2_xc2o
+  10.05u: 1 pz_p0_xc0kko
+  10.49u: 1 pz_wp0_xkko
+  12.71u: 2 pz_p0p1_xao, pz_p0p2_xao
+  13.4u: 1 pz_p0_xao
+  13.6u: 1 pz_p1p2_xkko
+  13.78u: 2 pz_v1p0_xao, pz_v2p0_xao
+  13.85u: 1 pz_p0_xc0kk
+  13.96u: 1 pz_n_xc0kko
+  14.09u: 1 pz_wp0_xkk
+  14.11u: 5 pz_wv0_xkko, pz_wv0p1_xkko, pz_wv0p2_xkko, pz_v0p1p2_xkko, pz_wv0p1p2_xkko
+  14.12u: 1 pz_wp1p2_xkko
+  14.13u: 3 pz_v0_xc0kko, pz_wp1_xkko, pz_wp2_xkko
+  14.14u: 1 pz_w_xkko
+  15.66u: 2 pz_p1_xkkro, pz_p2_xkkro
+  15.94u: 2 pz_n_xkkro, pz_n_xc1c2ro
+  16.0u: 1 pz_p1p2_xro
+  16.27u: 2 pz_v1_xc1ro, pz_v2_xc2ro
+  16.39u: 2 pz_v0p1_xkkro, pz_v0p2_xkkro
+  16.41u: 1 pz_v0_xkkro
+  16.74u: 2 pz_p0p1_xa, pz_p0p2_xa
+  16.78u: 4 pz_p1_xro, pz_p1_xc1ro, pz_p2_xro, pz_p2_xc2ro
+  17.06u: 10 pz_wv1p2_xro, pz_wv2p1_xro, pz_v0v1p1_xro, pz_v0v2p2_xro, pz_v1p1p2_xro, pz_v2p1p2_xro, pz_wv1p1p2_xro, pz_wv2p1p2_xro, pz_v0v1p1p2_xro, pz_v0v2p1p2_xro
+  17.07u: 6 pz_n_xro, pz_n_xc2ro, pz_n_xc1ro, pz_n_xc0ro, pz_n_xc0c2ro, pz_n_xc0c1ro
+  17.2u: 1 pz_p0_xa
+  17.22u: 4 pz_p1_xao, pz_p1_xc1ao, pz_p2_xao, pz_p2_xc2ao
+  17.3u: 6 pz_v0v1_xro, pz_v0v2_xro, pz_v1p2_xro, pz_v2p1_xro, pz_v0v1p2_xro, pz_v0v2p1_xro
+  17.33u: 6 pz_wv1_xro, pz_wv2_xro, pz_v1p1_xro, pz_v2p2_xro, pz_wv1p1_xro, pz_wv2p2_xro
+  17.37u: 3 pz_n_xao, pz_n_xc2ao, pz_n_xc1ao
+  17.43u: 2 pz_v1_xro, pz_v2_xro
+  17.45u: 2 pz_v1p0_xa, pz_v2p0_xa
+  17.49u: 6 pz_v0v1_xao, pz_v0v2_xao, pz_v1p2_xao, pz_v2p1_xao, pz_v0v1p2_xao, pz_v0v2p1_xao
+  17.52u: 5 pz_wv0_xro, pz_wv0p1_xro, pz_wv0p2_xro, pz_v0p1p2_xro, pz_wv0p1p2_xro
+  17.56u: 4 pz_v1_xao, pz_v2_xao, pz_v0p1_xro, pz_v0p2_xro
+  17.57u: 1 pz_wp1p2_xro
+  17.59u: 2 pz_v0_xro, pz_v0_xc0ro
+  17.6u: 4 pz_wp1_xro, pz_wp1_xc1ro, pz_wp2_xro, pz_wp2_xc2ro
+  17.62u: 3 pz_w_xro, pz_w_xc2ro, pz_w_xc1ro
+  17.63u: 2 pz_v0p1_xao, pz_v0p2_xao
+  17.65u: 1 pz_v0_xao
+  19.06u: 2 pz_p0p1_xo, pz_p0p2_xo
+  19.42u: 6 pz_v0v1p0_xo, pz_v0v2p0_xo, pz_v1p0p2_xo, pz_v2p0p1_xo, pz_v0v1p0p2_xo, pz_v0v2p0p1_xo
+  19.54u: 1 pz_p0_xkko
+  19.81u: 2 pz_v0p0p1_xo, pz_v0p0p2_xo
+  20.0u: 1 pz_p1p2_xo
+  20.01u: 2 pz_p1_xkko, pz_p2_xkko
+  20.1u: 2 pz_p0_xo, pz_p0_xc0o
+  20.22u: 8 pz_n_xkko, pz_n_xc1c2o, pz_wv1p0_xo, pz_wv2p0_xo, pz_v1p0p1_xo, pz_v2p0p2_xo, pz_wv1p0p1_xo, pz_wv2p0p2_xo
+  20.23u: 1 pz_v0p0_xo
+  20.45u: 2 pz_p1_xkkr, pz_p2_xkkr
+  20.47u: 2 pz_v1_xc1o, pz_v2_xc2o
+  20.52u: 2 pz_n_xkkr, pz_n_xc1c2r
+  20.56u: 2 pz_v0p1_xkko, pz_v0p2_xkko
+  20.57u: 4 pz_p1_xo, pz_p1_xc1o, pz_p2_xo, pz_p2_xc2o
+  20.58u: 1 pz_v0_xkko
+  20.6u: 2 pz_v1_xc1r, pz_v2_xc2r
+  20.63u: 2 pz_v0p1_xkkr, pz_v0p2_xkkr
+  20.64u: 1 pz_v0_xkkr
+  20.67u: 2 pz_v1p0_xo, pz_v2p0_xo
+  20.69u: 2 pz_wp0p1_xo, pz_wp0p2_xo
+  20.78u: 10 pz_wv1p2_xo, pz_wv2p1_xo, pz_v0v1p1_xo, pz_v0v2p2_xo, pz_v1p1p2_xo, pz_v2p1p2_xo, pz_wv1p1p2_xo, pz_wv2p1p2_xo, pz_v0v1p1p2_xo, pz_v0v2p1p2_xo
+  20.79u: 6 pz_n_xo, pz_n_xc2o, pz_n_xc1o, pz_n_xc0o, pz_n_xc0c2o, pz_n_xc0c1o
+  20.8u: 1 pz_p1p2_xr
+  20.95u: 6 pz_v0v1_xo, pz_v0v2_xo, pz_v1p2_xo, pz_v2p1_xo, pz_v0v1p2_xo, pz_v0v2p1_xo
+  20.97u: 1 pz_wp0_xo
+  20.98u: 6 pz_wv1_xo, pz_wv2_xo, pz_v1p1_xo, pz_v2p2_xo, pz_wv1p1_xo, pz_wv2p2_xo
+  21.01u: 4 pz_p1_xr, pz_p1_xc1r, pz_p2_xr, pz_p2_xc2r
+  21.05u: 2 pz_v1_xo, pz_v2_xo
+  21.08u: 10 pz_wv1p2_xr, pz_wv2p1_xr, pz_v0v1p1_xr, pz_v0v2p2_xr, pz_v1p1p2_xr, pz_v2p1p2_xr, pz_wv1p1p2_xr, pz_wv2p1p2_xr, pz_v0v1p1p2_xr, pz_v0v2p1p2_xr
+  21.09u: 6 pz_n_xr, pz_n_xc2r, pz_n_xc1r, pz_n_xc0r, pz_n_xc0c2r, pz_n_xc0c1r
+  21.12u: 5 pz_wv0_xo, pz_wv0p1_xo, pz_wv0p2_xo, pz_v0p1p2_xo, pz_wv0p1p2_xo
+  21.14u: 2 pz_v0p1_xo, pz_v0p2_xo
+  21.15u: 7 pz_v0v1_xr, pz_v0v2_xr, pz_v1p2_xr, pz_v2p1_xr, pz_wp1p2_xo, pz_v0v1p2_xr, pz_v0v2p1_xr
+  21.16u: 8 pz_v0_xo, pz_v0_xc0o, pz_wv1_xr, pz_wv2_xr, pz_v1p1_xr, pz_v2p2_xr, pz_wv1p1_xr, pz_wv2p2_xr
+  21.18u: 6 pz_v1_xr, pz_v2_xr, pz_wp1_xo, pz_wp1_xc1o, pz_wp2_xo, pz_wp2_xc2o
+  21.19u: 3 pz_w_xo, pz_w_xc2o, pz_w_xc1o
+  21.21u: 5 pz_wv0_xr, pz_wv0p1_xr, pz_wv0p2_xr, pz_v0p1p2_xr, pz_wv0p1p2_xr
+  21.22u: 5 pz_v0_xr, pz_v0_xc0r, pz_v0p1_xr, pz_v0p2_xr, pz_wp1p2_xr
+  21.23u: 7 pz_w_xr, pz_w_xc2r, pz_w_xc1r, pz_wp1_xr, pz_wp1_xc1r, pz_wp2_xr, pz_wp2_xc2r
+  23.09u: 2 pz_p0p1, pz_p0p2
+  23.8u: 6 pz_v0v1p0, pz_v0v2p0, pz_v1p0p2, pz_v2p0p1, pz_v0v1p0p2, pz_v0v2p0p1
+  23.9u: 3 pz_p0, pz_p0_xkk, pz_p0_xc0
+  23.99u: 6 pz_wv1p0, pz_wv2p0, pz_v1p0p1, pz_v2p0p2, pz_wv1p0p1, pz_wv2p0p2
+  24.11u: 2 pz_v0p0p1, pz_v0p0p2
+  24.34u: 2 pz_v1p0, pz_v2p0
+  24.36u: 2 pz_wp0p1, pz_wp0p2
+  24.45u: 1 pz_v0p0
+  24.58u: 1 pz_wp0
+  24.8u: 99 
+largest best: 24.8000u (pz_wv2p2_xc2), against POINT_ROUNDOFF's 36u
+```
+
+The controls of 25 at `u` and 99 at `24.8u` are not listed by name, since
+`tallypz.py` names a best's controls only when there are 12 or fewer.
+
+`samepz.py`, whole:
+
+```python
+"""Check that each script 464.34 appends whole is byte for byte the file that
+ran, in the directory given; that one.sh there is 464.13's block; that
+pointzero.py, run again in a fresh directory from the appended text, writes
+the scripts and the cases.txt that ran; and that pz_n.g is 464.19's point.g
+but for its layout and comments, its @FIX hypotheses and its queries.
+Run as: python3 samepz.py <doc> <run dir>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+doc, ran = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+FENCED = re.compile(r"^```(\w+)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+def block(n, first):
+    got = [b for _, b in FENCED.findall(section(n)) if b.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+marks = {
+    "pointzero.py": '"""Write 464.19\'s point.g in its zero branches',
+    "runpz.sh": "#!/bin/bash\n# Run each case named on stdin",
+    "start.sh": "#!/bin/bash\n# Run every case in cases.txt through runpz.sh",
+    "tallypz.py": '"""Count what runpz.txt and the files beside it say',
+    "samepz.py": '"""Check that each script 464.34 appends whole',
+}
+print("code blocks in 464.34:", len(FENCED.findall(section(34))))
+found = {name: block(34, mark) for name, mark in marks.items()}
+for name, body in found.items():
+    path = os.path.abspath(__file__) if name == "samepz.py" else os.path.join(ran, name)
+    print(name, "same" if open(path).read() == body else "DIFFERS")
+one = block(13, "#!/bin/bash\n# Run one Gappa script under 464.4's pin")
+print("one.sh is 464.13's block:", open(os.path.join(ran, "one.sh")).read() == one)
+
+fresh = tempfile.mkdtemp()
+open(os.path.join(fresh, "pointzero.py"), "w").write(found["pointzero.py"])
+subprocess.run(["python3", "pointzero.py"], cwd=fresh, check=True)
+written = sorted(f for f in os.listdir(fresh) if f.endswith(".g"))
+same = [f for f in written if os.path.exists(os.path.join(ran, f))
+        and filecmp.cmp(os.path.join(fresh, f), os.path.join(ran, f), shallow=False)]
+print("written again:", len(written), "same as ran:", len(same),
+      "differ:", [f for f in written if f not in same])
+print("cases.txt same as ran:", filecmp.cmp(os.path.join(fresh, "cases.txt"),
+                                            os.path.join(ran, "cases.txt"), shallow=False))
+
+
+def parts(script):
+    """A script's definitions, hypotheses, goals and hints, each sorted, with
+    its comments and layout gone, and its @FIX hypotheses and its queries."""
+    script = re.sub(r"#[^\n]*", "", script)
+    script = " ".join(script.split())
+    defs, rest = script.split("{", 1)
+    prop, hints = rest.split("}", 1)
+    hyps, goals = prop.split(" -> ", 1)
+
+    def some(s, sep):
+        got = (p.strip() for p in re.split(sep, s))
+        return sorted(p for p in got if p and not p.startswith("@FIX") and not p.endswith("in ?"))
+
+    return some(defs, ";"), some(hyps, r"/\\"), some(goals, r"/\\"), some(hints, ";")
+
+
+point = block(19, "# restates: crates/rcad-geom/src/isometry.rs apply_to_point")
+pz_n = open(os.path.join(fresh, "pz_n.g")).read()
+print("pz_n.g is point.g but for layout, comments, @FIX and queries:", parts(point) == parts(pz_n))
+shutil.rmtree(fresh)
+```
+
+It prints:
+
+```text
+436 cases, 21 with out and Ex both 0
+code blocks in 464.34: 7
+pointzero.py same
+runpz.sh same
+start.sh same
+tallypz.py same
+samepz.py same
+one.sh is 464.13's block: True
+written again: 872 same as ran: 872 differ: []
+cases.txt same as ran: True
+pz_n.g is point.g but for layout, comments, @FIX and queries: True
+```
+
+Its first line is `pointzero.py`'s own, run again in the fresh directory;
+the parent's lines come after it because its output is buffered when it is
+not a terminal.
