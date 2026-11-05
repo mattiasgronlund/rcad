@@ -51,12 +51,18 @@
 //! its wobble of each other as one, so the cap, the side and the ball share
 //! the rim again. Certified, the refusals stay, and they are limits: the ring
 //! and the lunes are `1e16` and more times smaller than the rod.
+//!
+//! **Every tolerant answer came with an empty log until Q3180**, so it read as
+//! certified. The fuse asked the cap, the pipe and the ball whether they share
+//! more than a point with a log it threw away, and the record of taking the two
+//! circles as one went with it. The fold the arrangement makes and the joins
+//! `assemble` makes on that answer write its records to the fuse's log now.
 
 use std::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Surface, Vector};
 use rcad_predicates::expansion::{expansion_sum, scale_expansion};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_predicates::{Cause, Decision, Policy, ProvenanceLog};
 use rcad_topo::{Measurement, Model, Rule, SolidKey};
 
 const BAR_RADIUS: f64 = 5.0;
@@ -233,6 +239,9 @@ impl Shape {
     }
 }
 
+/// Each answer rests on the policy taking the ball's circle on the cap and the
+/// rim as one, so its log says so: an empty log would read as certified, and
+/// every one of the 96 was empty until Q3180.
 #[test]
 fn a_rod_with_a_ball_of_its_radius_on_its_cap_turned_fuses_under_a_tolerant_policy() {
     for working_size in [100.0, 10.0] {
@@ -245,9 +254,21 @@ fn a_rod_with_a_ball_of_its_radius_on_its_cap_turned_fuses_under_a_tolerant_poli
                     First::Bar => [bar, ball],
                     First::Ball => [ball, bar],
                 };
+                let mut log = ProvenanceLog::new();
                 let answer = model
-                    .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+                    .fuse(&[one], &[other], rule, &policy, &mut log)
                     .unwrap_or_else(|why| panic!("{what} was refused: {why:?}"));
+                assert!(
+                    log.records().iter().any(|record| {
+                        record.predicate() == "two circles on one plane taken as one"
+                            && record.outcome() == Decision::Zero
+                            && record
+                                .approximation()
+                                .is_some_and(|tag| tag.cause() == Cause::TolerantFallback)
+                    }),
+                    "{what} does not log taking the two circles as one: {:?}",
+                    log.records()
+                );
                 let [solid] = answer.solids() else {
                     panic!("{what}: {} solids, not one", answer.solids().len());
                 };
