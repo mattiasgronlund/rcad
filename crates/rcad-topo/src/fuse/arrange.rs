@@ -13053,10 +13053,18 @@ impl<'f> Arrangement<'f> {
     ///   n_y sin θ)) / n_z` on a pipe — so along one the angle only ever grows or
     ///   only ever shrinks, and a closed one goes round exactly once. A circle
     ///   square to the axis is that at one height. A cone against a pipe, a
-    ///   second cone or a ball, and a pipe against a cone, cross only in such
-    ///   circles, because `intersect` names those pairs only on one axis. A
-    ///   straight arc is a ruling or a line along a pipe, at one angle
-    ///   throughout. Every other curved partner is not answered.
+    ///   second cone or a ball, and a pipe against a cone, are counted only
+    ///   where the two are proved to stand on one axis
+    ///   ([`the_axis_two_round_surfaces_share`], or the ball's centre exactly on
+    ///   the cone's axis), and then they cross only in such circles. Off one
+    ///   axis `intersect` names loops and branches of a curve of degree four
+    ///   (Q2789, Q2807), and a loop need not go round the axis at all: two
+    ///   pointed cones eight and ten high, one leaning off the other, cross in
+    ///   a loop that goes round the leaning cone's axis and not the upright
+    ///   one's, and counted as once round both it joined the wrong walks of
+    ///   the upright wall (Q3172). A straight arc is a ruling or a line along
+    ///   a pipe, at one angle throughout. Every other curved partner is not
+    ///   answered.
     /// - How often a walk goes round is counted as how often it crosses one
     ///   half-plane through the axis, each arc's crossing read off exact signs of
     ///   the node boxes ([`Arrangement::how_often_an_arc_crosses`]). The
@@ -13188,14 +13196,21 @@ impl<'f> Arrangement<'f> {
             return Some(0);
         }
         match (self.surface, crossing.partner) {
-            (_, Surface::Plane(_))
-            | (Surface::Cone(_), Surface::Cylinder(_) | Surface::Cone(_) | Surface::Sphere(_))
-            | (Surface::Cylinder(_), Surface::Cone(_)) => (),
+            (_, Surface::Plane(_)) => (),
+            (Surface::Cone(_), Surface::Cylinder(_) | Surface::Cone(_))
+            | (Surface::Cylinder(_), Surface::Cone(_))
+                if the_axis_two_round_surfaces_share(&self.surface, &crossing.partner)
+                    .is_some() => {}
+            (Surface::Cone(cone), Surface::Sphere(ball))
+                if lies_exactly_on_the_axis(ball.centre(), cone.axis()) == Some(true) => {}
             (Surface::Cylinder(_), Surface::Cylinder(_)) if crossing.half_an_ellipse.is_some() => {}
-            (Surface::Cone(_), Surface::Torus(_))
+            (
+                Surface::Cone(_),
+                Surface::Cylinder(_) | Surface::Cone(_) | Surface::Sphere(_) | Surface::Torus(_),
+            )
             | (
                 Surface::Cylinder(_),
-                Surface::Cylinder(_) | Surface::Sphere(_) | Surface::Torus(_),
+                Surface::Cone(_) | Surface::Cylinder(_) | Surface::Sphere(_) | Surface::Torus(_),
             )
             | (Surface::Plane(_) | Surface::Sphere(_) | Surface::Torus(_), _) => return None,
             _ => return None,
