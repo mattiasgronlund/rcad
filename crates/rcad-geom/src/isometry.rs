@@ -77,17 +77,20 @@ impl Isometry {
     ///
     /// Gappa proves the 18 (`docs/decisions.md` §464.19): each coordinate lands
     /// within `18 · f64::EPSILON · L` while the turn's `q·q`, worked out
-    /// exactly, is within `6 · f64::EPSILON` of one and the products on a live
-    /// path are normal numbers. The same holds in every zero branch
-    /// (`docs/decisions.md` §464.34): each of `w`, `v` and `p` zero, and each
-    /// sum cancelling to zero, still lands within the 18, and none goes past
-    /// `24.80·u·L`. The count
+    /// exactly, is within `6 · f64::EPSILON` of one and `L` is at least
+    /// `2^-1022`, the smallest normal number. The same holds in every zero
+    /// branch (`docs/decisions.md` §464.34): each of `w`, `v` and `p` zero, and
+    /// each sum cancelling to zero, still lands within the 18. The count
     /// above charges each stage at its own worst case, and those cannot all
     /// happen at once: `|w| = 1` forces `v = 0`, and so `k = 0`. Charged
-    /// together, the proof reaches `24.80·u·L`, which leaves `11.2·u·L` of room
-    /// where the count left `0.22·u·L`. A turn of a cube is one addition per
-    /// coordinate, within `2u·L`. Only the products below the normals have not
-    /// been run.
+    /// together, with each product on a live path normal, below the normals or
+    /// zero (`docs/decisions.md` §464.35), the proof reaches `34.73·u·L` over
+    /// 88 cases, where products that are all normal reach `24.80·u·L`. That
+    /// leaves `1.27·u·L` of room under the `36·u·L` of the 18, where the count
+    /// left `0.22·u·L`. The condition is that `L` is normal, not that the
+    /// products are. With `L` below the normals the proof fails, and the bound
+    /// is a limit there, not a gap. A turn of a cube is one addition per
+    /// coordinate, within `2u·L`.
     ///
     /// **A turn further than `6 · f64::EPSILON` from length one is outside the
     /// proof, and can go past the 18**: one four times as long as one put 40
