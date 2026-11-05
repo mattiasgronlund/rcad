@@ -160,22 +160,17 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 /// `4e-16` below the leaning cap's plane, and the same reading tells the
 /// leaning cone's wall that side as well, where its box could not.
 ///
-/// **Every fuse is still refused**, under every rule both ways round, now
-/// finding a point inside a piece of a face whose three corners lie in boxes
-/// about `1e-14` across near `(−3.9541, −0.6045, 8)`, two of them on `z = 8`.
+/// Since Q3133 every fuse was refused finding a point inside a piece of a face
+/// whose three corners lie in boxes about `1e-14` across near
+/// `(−3.9541, −0.6045, 8)`, two of them on `z = 8`. The piece is a speck of
+/// the leaning cap's plane: its sides run along the leaning cone, along
+/// `z = 8` with its material above, and along the upright cone with its
+/// material outside, so it is all above `z = 8`, where the upright cone is
+/// not. **Every fuse is to answer**, under every rule both ways round (Q3168).
 #[test]
-fn two_pointed_cones_one_leaning_off_the_other_are_refused_a_point_inside_a_piece_a_rounding_across()
- {
-    assert_eq!(
-        every_fuse_of(two_pointed_cones).refusals(),
-        [[Some(NO_POINT_INSIDE_A_PIECE_A_ROUNDING_ACROSS); 2]; 3]
-    );
+fn two_pointed_cones_one_leaning_off_the_other_answer_every_fuse() {
+    assert_eq!(every_fuse_of(two_pointed_cones).refusals(), [[None; 2]; 3]);
 }
-
-/// What a fuse is refused with where no point is found inside a piece of a
-/// face whose corners are a rounding apart.
-const NO_POINT_INSIDE_A_PIECE_A_ROUNDING_ACROSS: &str =
-    "could not settle 1 decisions the answer depends on: a point inside a piece of a face";
 
 /// **The same two, the leaning one ten high**, row Q2917, so the two caps'
 /// rims are apart. `intersect` names the crossing as one loop and two

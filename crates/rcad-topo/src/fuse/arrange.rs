@@ -18600,7 +18600,7 @@ fn every_point_between_lies_within(surface: &Surface, ends: [[Interval; 3]; 2], 
 ///
 /// **Round a cone it parts two meets of a cap's rim a rounding apart.** The
 /// upright cone of
-/// `two_pointed_cones_one_leaning_off_the_other_are_refused_a_point_inside_a_piece_a_rounding_across`
+/// `two_pointed_cones_one_leaning_off_the_other_answer_every_fuse`
 /// in `tests/a_funnel_with_a_leaning_spout.rs`, of slope a half up `z`, has its
 /// cap's rim, where `z = 8` cuts it, walked from `(0, 4, 8)`. Near `(−3.9541,
 /// −0.6045, 8)` the leaning cone crosses that rim, and the leaning cone's cap
@@ -33314,7 +33314,7 @@ mod two_loops_of_two_leaning_pipes {
 #[cfg(test)]
 mod two_points_a_rounding_apart_on_a_cone_caps_rim {
     //! The rim of the upright cone's cap in
-    //! `two_pointed_cones_one_leaning_off_the_other_are_refused_a_point_inside_a_piece_a_rounding_across`
+    //! `two_pointed_cones_one_leaning_off_the_other_answer_every_fuse`
     //! in `tests/a_funnel_with_a_leaning_spout.rs`: the cone of slope a half
     //! up `z` from the origin, cut by `z = 8` in a circle of radius 4, walked
     //! from `(0, 4, 8)`. Two of its nodes are a rounding apart near
