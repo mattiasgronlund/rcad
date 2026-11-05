@@ -40,8 +40,10 @@ human and every old process at once.
 - **Q3102.** lane.md gained "Stop every process you start before you report".
   The same commit made `prune-worktrees` stop what still runs in a tree a
   merger marked finished. What the paragraph adds is the time between the
-  lane's report and that mark; if that time costs cores, the tool that ends
-  the lane's run is where to close it, not a paragraph every lane reads.
+  lane's report and that mark, and for a run handed back unmerged there is no
+  mark at all, so the tree is never pruned that way. If that costs cores, the
+  tool that ends the lane's run is where to close it, not a paragraph every
+  lane reads.
 
 ## 2. The tool prints the instruction beside the case it applies to
 
@@ -53,12 +55,13 @@ fresh on every run, and only when its case is there.
   under it, on some rows, `narrowed to <set>, taken with <...>` or ``write set
   set to <set> by `writes`, <column> in docs/queue.md``. Q2975 rewrote
   prep.md's paragraph, and Q3108 wrote one into verifier.md, each saying to
-  read the newer set off those lines and not the column. One line from `show`
-  naming the write set in force would need neither paragraph.
+  read the newer set off those lines and not the column. Q3166 made `show`
+  print one `write set in force:` line, so prep.md and verifier.md name that
+  line and need neither paragraph.
 - **Q2996.** `just verify-lane` gained the key `commands_that_cannot_run`, and
-  verifier.md gained a bullet saying what to do when it is not empty. The tool
-  can print that instruction beside the key, only on a run where the key is not
-  empty.
+  verifier.md gained a bullet saying what to do when it is not empty. Q3166
+  made the tool print that instruction beside the key, in
+  `about_commands_that_cannot_run`, only on a run where the key is not empty.
 
 ## 3. A file the agent reads at the step that needs it
 
@@ -69,8 +72,8 @@ never reach the step never read it.
 
 - **Q3096.** prep.md gained a paragraph saying a row that asks for a test that
   fails without its change is not `sameBehaviour`. It concerns one step,
-  choosing a mark. A file on the marks, which prep reads when it is about to
-  set one, would hold it; prep.md would change once, to name that file.
+  choosing a mark. It now lives in `docs/prep-marks.md`, which prep reads when
+  it is about to set one; prep.md names that file and no more.
 
 ## When it has to be the agent file
 
