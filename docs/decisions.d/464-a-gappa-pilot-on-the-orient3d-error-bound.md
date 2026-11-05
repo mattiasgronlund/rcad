@@ -25803,20 +25803,312 @@ print(f"subl.py prints what the text says: {read == prints['subl.py']}")
 
 ### 464.36 Plane::NORMAL_LENGTH_ROUNDOFF's vector.g below the normals and in the zero branches
 
-**Draft, unfinished: relay 1 of Q2825 and Q3211, on 2026-11-05.** The next
-lane finishes this subsection or rewrites it. Nothing below is a finding
-until it is.
+Q2825 and Q3211 ran 464.20's `vector.g` with each of its products free to
+fall below the normals and in the zero branches, and its `square.g` in the
+zero branches, in two lanes on 2026-11-05. The first, over four runs, wrote
+`vectorsub.py` and ran four of its cases through `peakv.sh` (5); ran all 88
+cases and their controls, wrote `squarezero.py` and started its 77; counted
+those; and ran `peakv.sh` again and wrote `samevm.py`. The second ran
+`samevm.py` and wrote this.
 
-What ran. `vectorsub.py`, below, is 464.35's `pointsub.py` with `vector.g`'s
-arithmetic: `n` for `p`, no `s₀`, and so one rounding fewer on each path;
-`vector.g`'s shares of `D` (10, 12 and 1) and its hint on `D`; each
-component of the vector at most one; and the goal `out − Ex` within `20u`,
-absolute, as `vector.g`'s. Each amount's share of `G` is `|f| · Lo`, `Lo` a
-name held to `2⁻¹⁰²²`, so `G / Lo` is `pointsub.py`'s `G / L`. It writes 88
-cases, 25 with no rounded product on a live path, and in 21 of those
-nothing is live, `n₀` zero too, so `out` and `Ex` are both exactly 0, and
-the control asks for `[2⁻⁶⁰, 1]`. `peakv.sh`, below, ran four of them, each
-under a 12 GB cap:
+`vector.g`'s `20u` holds with each product on a live path normal, below the
+normals or 0, and in each zero branch of the turn and the vector that the
+turn's arithmetic can reach (2). Each of the 88 cases proves the turned
+vector's `x` within `20u` of what the turn's own numbers, worked without
+rounding, give (3). `y` and `z` are covered by the same cases (2), Coq checks
+each proof, modulo its hints (3), and each control fails (4). The terms'
+errors reach at most `19.5999u`, as 464.20's `vector.g` does with its
+products normal, and the products below the normals add at most `9.93u ·
+2⁻¹⁰²²` on top, which is nothing beside `20u`. Unlike 464.35's `36u · L`,
+this needs no floor under any number: `vector.g`'s goal is absolute, since
+each component of the vector is at most one, and so is what the products
+below the normals add (1). That answers Q3211, and the `vector.g` half of
+Q2825.
+
+With that `20u` as its `d`, `square.g` proves `NORMAL_LENGTH_ROUNDOFF`'s
+`64ε` with one or two components of `m` zero and up to two parts of the turn
+zero, in each of 77 cases (2, 3), and each control fails (4). Where at most
+one component of `m` is zero, the four parts add to `119.28u`, 464.20's own
+sum. Where two are, `n` is exactly `±1` along an axis, the constructor's
+`2u` drops out, and they add to `117.28u`, or to `40u` for a turn about that
+axis and `88u` for a half turn about an axis at right angles to it. So the
+`64ε` holds in the zero branches, and with the turn's products below the
+normals, under 464.20's other hypotheses: the turn's `q·q` within `6ε` of
+one, and each component of `m` that is not zero at least `2⁻¹⁰¹²`. Below
+`2⁻¹⁰¹²`, `scaled_to_length_one_from_anywhere` promises one ulp and not the
+nearest `f64`, and nothing here ran there: a row (6). That answers the
+`square.g` half of Q2825.
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, started by 464.34's `runpz.sh`, both unchanged (7),
+against `isometry.rs`, `plane.rs` and `point.rs` at `c40cc82e` and nalgebra
+0.35.0. 464.20's `square.g` restates them at `4b642567`. From there to
+`c40cc82e`, `point.rs` and `Cargo.lock` do not change and `plane.rs` changes
+in comments alone. `isometry.rs` changes `POINT_ROUNDOFF`'s doc and one more
+doc line, adds `TryFrom<na::Isometry3<f64>>` and its tests in place of the
+`From` it drops, and has `held_near_length_one` call a new
+`sits_near_length_one`, which makes the same test, `(q.norm_squared() -
+1).abs() <= TURN_LENGTH_DRIFT`; `apply_to_vector`, `turned_by` and
+`named_by` have no hunk (`git diff -U0`). So `squarezero.py` writes each of
+its cases restating `c40cc82e`. At this lane's base, `ab689aa7`, the four
+files are `c40cc82e`'s (`git diff --stat`). `u` is `2⁻⁵³` and `ε` is
+`f64::EPSILON = 2u`.
+
+**1. The form.** `vectorsub.py` (7) writes `vector.g` in 464.35's form, from
+464.35's `pointsub.py`. Each rounded product on a live path is `P * (1 + m *
+s) + m * 1b-1022`, with `m` in `[−u, u]` and `s` in `[−1, 1]`, and each
+rounded sum on one is `C * r`, with `r` in `[1 − u, 1 + u]`, all of them
+free, from the same three lemmas, `mixedn.g`, `mixeds.g` and `sum.g`
+(464.35's 1). That takes in at once a product normal, below the normals or
+rounded to 0 with neither factor 0, a sum that cancels, and a sum with one
+part zero, so no case is split by which sums cancel. A zero factor is the
+double 0, and each product and sum it makes zero is written unrounded. What
+differs from `pointsub.py`:
+
+- The vector `n` takes the point's place, each component in `[−1, 1]`, as a
+  constructor's normal is (464.20's 2). There is no shift, so no `s₀`, and
+  one rounding fewer on each path.
+- The terms' shares of `D` are `vector.g`'s: `10|w||v₁|` and `10|w||v₂|` for
+  the two through `w`, `12` times its two parts of `v` for each of the four
+  through `k`, and `1` for `n₀`. `D`'s hint is `vector.g`'s, `93/5 · q·q`
+  less four squares, plus 1 for `n₀`, with what a zero factor takes out of
+  `D` taken out of the hint.
+- The goal is `vector.g`'s, `out − Ex` within `20u`, which is absolute. So
+  each amount's share of `G` is `|f| · Lo`, with `Lo` a name held to
+  `2⁻¹⁰²²`, the smallest normal number, where 464.35's is `|f| · L`. Each
+  amount is then within `u` of its share for every input, `G / Lo` is
+  `pointsub.py`'s `G / L`, the same shares of the same nine products, and
+  its hint is 464.35's, with `λ` as there. `out − Ex` is within `E / D · D +
+  Asum / G · G / Lo · 2⁻¹⁰²²`, every part of it absolute, so no hypothesis
+  puts a floor under any number, where 464.35's needs `L` at least
+  `2⁻¹⁰²²`.
+- Where no term of `Ex` keeps all its factors and `n₀` is zero, `out` and
+  `Ex` are both exactly 0, and the script has no `D`. Its control asks for
+  `out − Ex` in `[2⁻⁶⁰, 1]`, which leaves out the 0, as 464.34's 4 does for
+  its 21.
+
+`squarezero.py` (7) writes `square.g`'s cases from 464.20's `square.g`
+itself, by replacing its lines, each of which it asserts it finds once. A
+zero `mᵢ` is the constructor's `nᵢ = 0` exactly, so `mᵢ`'s `gᵢ` and `hᵢ`
+drop out of the averaging over the `mᵢ²`, with their three hints, and `M2`
+is the sum of the squares left, still one. A zero part of the turn is the
+double 0, with its bound as a finite `f64` dropped. `square.g` puts no lower
+bound on a part of the turn, so a zero part was inside its hypotheses
+already, and writing it 0 shows it. The hypothesis on `d` is `vector.g`'s
+`20u`, which 3 proves in every zero branch of the vector and the turn.
+`sq_n.g`, the case with nothing zero, differs from `square.g` in the sha on
+the six lines that name it, an added `# 464.36:` line naming the zero
+factors, and `and none is zero but none.` (`diff`).
+
+**2. The cases.** One case for each zero set of 464.34's 2, `vm_<zeros>.g`,
+`<zeros>` the zero factors or `n` for none, with a control
+`c_vm_<zeros>_half.g` beside each (4). Of the 128 sets of the seven factors,
+the 40 that hold three or four of the turn's parts never reach this
+arithmetic or cannot keep `q·q` near one (464.34's 1), which leaves 88. In 25
+of them no rounded product is on a live path. In 21 of the 25 nothing is
+live: `n₀` is zero and each term has a zero factor. The other four,
+`vm_v1v2`, `vm_v1v2n1`, `vm_v1v2n2` and `vm_v1v2n1n2`, are turns about the
+`x` axis with `n₀` not zero, and there `n₀` is all that is live and `D` is
+1. The other 63 have a rounded product on a live path, and so an `Asum` and a
+`G`; `vm_n`, with nothing zero, has all nine. `y` and `z` are `x` with every
+index turned (464.20's `turn.py`), and the 88 zero sets are closed under that
+turn, so the cases for `x` are the cases for `y` and `z`.
+
+`square.g`'s cases are `sq_<zeros>.g`, `<zeros>` the zero factors, `m`'s
+first, or `n` for none, with `c_sq_<zeros>_half.g` beside each. `m` has
+length one, so at most two of its components are zero, which is 7 zero
+sets, and the turn has at most two parts zero, as above, which is 11: 77 in
+all. `square.g` holds all three turned components, so its `d` stands on the
+88 for `x`, `y` and `z` alike, each case on the 88's case with its zero
+parts of the turn and its zero components of `n`.
+
+**3. What they print.** `startvm.sh` (7) ran the 88 cases, each with `gappa
+-Bcoq` and `coqc`, and their 88 controls, 12 at once, from 17:14:28 to
+17:18:42 UTC by its files' times. `tallyvm.py` (7), 464.35's `tallypm.py`
+with these names and the absolute goal, counts them, and its whole print is
+below:
+
+- Each of the 88 exits 0 at `vector.g`'s `20u`, in 0.03 s (`vm_v2n0n1n2`) to
+  20.44 s (`vm_n`).
+- In the 21 where nothing is live there is no result to print, and
+  `tallyvm.py` finds them to be the cases where `n₀` is zero and every term
+  has a zero factor.
+- The terms' error over `D` is within `u`, and a little more, in each of the
+  other 67.
+- The upper end of `D` is 1 in the four turns about `x`, 13 to 18.6 in 33,
+  and 19.6, `vector.g`'s own `93/5 + 1`, in 30.
+- `Asum / G` is within `u`, and a little more, in each of the 63.
+- The upper end of `G / Lo` is 9.93 in `vm_n`, and 3 to 7.90 in the other 62:
+  the same eight values, in the same counts, as 464.35's `G / L`.
+- So the terms' part of `out − Ex` reaches at most `19.5999u`
+  (`vm_wv2n2`), and the amounts' part at most `9.9285u · 2⁻¹⁰²²` (`vm_n`),
+  against the goal's `20u`. With the products normal, 464.20's `vector.g`
+  reaches `19.6u` (464.20's 4).
+- `gappa -Bcoq` and `coqc` exit 0 on all 88: 427 lines with 6 hints
+  (`vm_v1v2n1n2`, 2.10 s) to 9338 lines with 41 hints (`vm_n`, 27.55 s),
+  where 464.20's `vector.v` came to 6740 lines with 33.
+- No `.out`, `.bcoq` or `.coqc` of the 88 has a line other than its results,
+  warnings that a divisor has been assumed to be nonzero, and one warning
+  more in each `.out`, `.bcoq` and control `.out` of the 67: that Gappa had
+  no need of the hint writing the terms' error as its fraction of `D` times
+  `D`, if `D` is not zero. That is `E -> (E / D) * D` in the 63 and `out -
+  Ex -> ((out - Ex) / D) * D` in the four, as 464.20's `vector.out` said of
+  the second (464.20's 7). So no hint was reported as not an identity, and
+  each `.coqc` is empty.
+
+`tallyvm.py`'s whole print:
+
+```
+88 cases, 176 exit lines, 88 coq lines
+lines of runvm.txt that are neither: none
+problems: 0
+cases that exit 0: 88 of 88; controls that exit 1: 88 of 88
+gappa time per case: 0.03 s (vm_v2n0n1n2) to 20.44 s (vm_n)
+coq: 427 lines 6 hints 2.10 s (vm_v1v2n1n2) to 9338 lines 41 hints 27.55 s (vm_n)
+cases where nothing is live, so out and Ex are 0: 21 of 88
+  they are the cases where n0 is zero and every term has a zero factor: True
+cases with a rounded product on a live path: 63 of 88
+terms' error / D, upper end in u: [(1.0, 67)]
+D upper end: [(1.0, 4), (13.0, 10), (15.871, 6), (18.6, 17), (19.6, 30)]
+Asum / G, upper end in u: [(1.0, 63)]
+G / Lo upper end: [(3.0, 26), (4.8286, 18), (5.0, 7), (6.4643, 2), (6.4722, 4), (7.6569, 1), (7.8992, 4), (9.9286, 1)]
+hints Gappa had no need of, while D is not zero, and how often:
+  189: E -> (E / D) * D;
+  12: out - Ex -> ((out - Ex) / D) * D;
+largest terms' part: 19.5999u (vm_wv2n2), against vector.g's 20u
+largest amounts' part: 9.9285u * 2^-1022 (vm_n)
+control best on out - Ex, in u, and how many controls:
+  1.0u: 4 vm_v1v2, vm_v1v2n1, vm_v1v2n2, vm_v1v2n1n2
+  13.0u: 10 vm_wv1n2, vm_wv2n1, vm_v0v1n1, vm_v0v2n2, vm_v1n1n2, vm_v2n1n2, vm_wv1n1n2, vm_wv2n1n2, vm_v0v1n1n2, vm_v0v2n1n2
+  15.69u: 6 vm_wv1n0, vm_wv2n0, vm_v1n0n1, vm_v2n0n2, vm_wv1n0n1, vm_wv2n0n2
+  18.56u: 6 vm_v0v1n0, vm_v0v2n0, vm_v1n0n2, vm_v2n0n1, vm_v0v1n0n2, vm_v0v2n0n1
+  18.57u: 2 vm_v0n0n1, vm_v0n0n2
+  18.6u: 9 vm_n0, vm_wn0, vm_v0n0, vm_v1n0, vm_v2n0, vm_n0n1, vm_n0n2, vm_wn0n1, vm_wn0n2
+  19.6u: 30 
+largest best: 19.6000u (vm_wv2n2), against vector.g's 20u
+each best at most its case's terms' part, and a little more: True
+bests within 0.01% of their case's terms' part: 51 of 67
+the others, best and terms' part in u: vm_wv1n0 15.6860 15.8710, vm_wv2n0 15.6860 15.8710, vm_wn0n1 18.5951 18.5999, vm_wn0n2 18.5951 18.5999, vm_v0v1n0 18.5567 18.5999, vm_v0v2n0 18.5567 18.5999, vm_v0n0n1 18.5650 18.5999, vm_v0n0n2 18.5650 18.5999, vm_v1n0n1 15.6865 15.8710, vm_v1n0n2 18.5616 18.5999, vm_v2n0n1 18.5616 18.5999, vm_v2n0n2 15.6865 15.8710, vm_wv1n0n1 15.6860 15.8710, vm_wv2n0n2 15.6860 15.8710, vm_v0v1n0n2 18.5567 18.5999, vm_v0v2n0n1 18.5567 18.5999
+```
+
+`startsq.sh` (7) ran `square.g`'s 77 cases the same way, and their 77
+controls, from 17:19:35 to 17:20:18 UTC by its files' times. `tallysq.py`
+(7), `tallyvm.py` with these names and `square.g`'s five results, reads each
+bound from the exact number Gappa prints before its decimal, counts them, and
+its whole print is below:
+
+- Each of the 77 exits 0 at the code's `128u`, in 0.89 s (`sq_m1m2v1v2`) to
+  2.74 s (`sq_v0`).
+- `n·n − 1` is within 464.20's `2u` in the 44 where at most one component of
+  `m` is zero, and `[0, 0]` in the 33 where two are, since there `n` is
+  exactly `±1` along an axis.
+- `|v × n|²`, `VN`, is in `[0, 1]` in 71. It is within `12u` of one in the
+  three where `w` and `n`'s own part of `v` are zero, a half turn about an
+  axis at right angles to `n`: `sq_m0m1wv2.out` prints `[2251799813685245b-51,
+  2251799813685251b-51]`, which the print rounds to `[1.0, 1.0]`. It is `[0,
+  0]` in the three where `v` lies along `n`, a turn about `n`'s axis.
+- `4(q·q − 1)|v × n|²` is within `48u` in 74, and `[0, 0]` in those last
+  three.
+- `2 Ex·d`, `F2`, is within `69.28u`, 464.20's `2√3 · 20u`, in 71, and within
+  `40u`, `2 · 20u`, in the six of those two kinds, where `Ex` is `±n` and so
+  only one `dᵢ` meets it: `sq_m0m1v0v1.out` prints `5b-50`.
+- `d·d`, `DD`, is at most `1200u²` in all 77.
+- So the four parts add to at most `119.2820u`, 464.20's own sum, in `sq_n`
+  and 31 more. The other 12 of the 44 with at most one component of `m`
+  zero, the cases with two parts of `v` zero, `sq_v0v1` to `sq_m2v1v2`, fall
+  short of it only past the print's fourth decimal. With two components of
+  `m` zero the parts add to `117.28u` in 27, `88u` in 3 and `40u` in 3 (4).
+- `gappa -Bcoq` and `coqc` exit 0 on all 77: 1750 lines with 12 hints
+  (`sq_m0m1v0v1`, 1.76 s) to 5525 lines with 15 hints (`sq_m1`, 3.66 s),
+  where 464.20's `square.v` came to 4398 with 18. Each `.bcoq` prints the
+  same results as its `.out`.
+- No `.out`, `.bcoq` or `.coqc` of the 77 has a line other than its results
+  and warnings that a divisor has been assumed to be nonzero, and no such
+  divisor names a component of `m` that the case has zero. Each `.coqc` is
+  empty.
+
+`tallysq.py`'s whole print:
+
+```
+77 cases, 154 exit lines, 77 coq lines
+lines of runsq.txt that are neither: none
+problems: 0
+cases that exit 0: 77 of 77; controls that exit 1: 77 of 77
+gappa time per case: 0.89 s (sq_m1m2v1v2) to 2.74 s (sq_v0)
+coq: 1750 lines 12 hints 1.76 s (sq_m0m1v0v1) to 5525 lines 15 hints 3.66 s (sq_m1)
+cases whose .bcoq prints the same results as their .out: 77 of 77
+cases by the components of m that are zero: none 11, m0 11, m1 11, m2 11, m0m1 11, m0m2 11, m1m2 11
+each part's bound, and the cases it is in:
+  NN - 1, in u:
+    [-2.0, 2.0]: 44, m zero none, m0, m1, m2
+    [0.0, 0.0]: 33, m zero m0m1, m0m2, m1m2
+  VN:
+    [0.0, 1.0]: 71, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
+    [1.0, 1.0]: 3, sq_m0m1wv2, sq_m0m2wv1, sq_m1m2wv0
+    [0.0, 0.0]: 3, sq_m0m1v0v1, sq_m0m2v0v2, sq_m1m2v1v2
+  4 * (N4 - 1) * VN, in u:
+    [-48.0, 48.0]: 74, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
+    [0.0, 0.0]: 3, sq_m0m1v0v1, sq_m0m2v0v2, sq_m1m2v1v2
+  F2, in u:
+    [-69.282, 69.282]: 71, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
+    [-40.0, 40.0]: 6, sq_m0m1wv2, sq_m0m1v0v1, sq_m0m2wv1, sq_m0m2v0v2, sq_m1m2wv0, sq_m1m2v1v2
+  DD, in u^2:
+    [0.0, 1200.0]: 77, m zero none, m0, m1, m2, m0m1, m0m2, m1m2
+largest of the four parts added: 119.2820u (sq_n and 31 more), against NORMAL_LENGTH_ROUNDOFF's 128u
+control best on OO - 1, in u, and how many controls:
+  40.0u: 3, sq_m0m1v0v1, sq_m0m2v0v2, sq_m1m2v1v2
+  88.0u: 3, sq_m0m1wv2, sq_m0m2wv1, sq_m1m2wv0
+  117.28u: 27, m zero m0m1, m0m2, m1m2
+  119.28u: 44, m zero none, m0, m1, m2
+largest best: 119.2823u (sq_n and 43 more), against NORMAL_LENGTH_ROUNDOFF's 128u
+each best within 0.01% of its case's four parts added: True
+```
+
+`19.5999u` and `119.28u` are how far this averaging reaches, not points any
+input has been seen at, for the reason 464.35's 3 gives. Gappa does not write
+the same proof each run (464.4), so the sizes and times are this run's. Each
+proof stands on its hints and on the divisors Gappa took to be nonzero, as
+464.19's 8 says of its own. `field` has not been run on these hints (464.10).
+
+**4. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3), so each case has a control that must fail, and each
+of the 165 exits 1. Gappa's best for a goal it does not prove can change from
+one run to the next (464.26), so these are this run's, each a bound Gappa
+found on the size of the goal's expression.
+
+`vector.g`'s controls ask for `out − Ex` within `u / 2`, `1b-54`, in the 67
+cases where something is live, and for `out − Ex` in `[2⁻⁶⁰, 1]` in the 21
+where nothing is, which leaves out the 0 that both are there. Each of the 21
+prints `Error: no contradiction was found.` and no best. The bests of the 67:
+
+- `u` in the four turns about `x`, `vm_v1v2`, `vm_v1v2n1`, `vm_v1v2n2` and
+  `vm_v1v2n1n2`, whose `out` is `n₀` times a free ratio;
+- `13u` to `19.6u` in the 63, the largest `19.6000u` (`vm_wv2n2`), which is
+  464.20's `c_vector_195`'s.
+
+Each is at most its case's terms' part, and a little more, and 51 of the 67
+are within 0.01% of it, the check 464.35's 4 makes. The other 16, each with
+`n₀` zero, are up to 1.2% under it: `vm_wv1n0`'s best is `15.6860u` where
+its terms' part is `15.8710u`. So `tallyvm.py` checks "at most" where
+464.35's `tallypm.py` checks "within 0.01%".
+
+`square.g`'s controls ask for `out·out − 1`, `OO − 1`, within `u / 2`, where
+464.20's `c_square_119` asks for `119u`. With two components of `m` zero the
+cases reach only `117.28u`, `88u` or `40u` (3), so a goal at `119u` would
+sit above what 33 of them reach, and a proof there would show nothing. The
+bests are `119.28u` in the 44 with at most one component of `m` zero, which
+is `c_square_119`'s, `117.28u` in 27, `88u` in 3 and `40u` in 3, each within
+0.01% of its case's four parts added.
+
+So none of the 165 proofs came from a contradiction in its hypotheses.
+
+**5. The memory.** 464.35's first three forms ran out of memory on
+`point.g`'s case with nothing zero (464.35's 6), so the first lane ran four
+of these through `peakv.sh` (7) before the rest, each under a 12 GB cap:
+`vm_n`, all nine products free to fall below the normals and nothing zero;
+`vm_v0v1n0n1n2`, one of the 21 where nothing is live; and their controls.
+
+`peakv.sh` printed:
 
 ```text
 vm_n exit 0 6.57s peak 128276 KB
@@ -25825,27 +26117,85 @@ vm_v0v1n0n1n2 exit 0 0.01s peak 6612 KB
 c_vm_v0v1n0n1n2_half exit 1 0.17s peak 6876 KB
 ```
 
-`vm_n`, all nine products free to fall below the normals and nothing zero,
-printed `D` in `[1, 19.6]`, `E / D` and `Asum / G` each within `2⁻⁵³`, and
-`G / Lo` in `[3, 9.92857]`. So `out − Ex` is within `19.6u`, and a little
-more, plus at most `9.93u · 2⁻¹⁰²²` for the amounts, inside the `20u`. Its
-control's best was `±2.17604e-15`, `19.6u`, as 464.20's `c_vector_195`.
-`c_vm_v0v1n0n1n2_half` printed `Error: no contradiction was found.`
+By the run directory's file times, `peakv.sh` ran at 17:09:39 UTC, and all
+176 of `vectorsub.py`'s scripts and `casesv.txt` were written again at
+17:13:49, after `vectorsub.py` last changed, at 17:09:17, and before
+`startvm.sh` started. The times alone cannot show that `peakv.sh` ran on the `vm_n.g` the 88 ran
+on, so the first lane's fourth run copied `peakv.sh` and its four scripts
+into `peak/` in the run directory and ran them there again at 17:34 UTC,
+`./peak/peakv.sh vm_n.g c_vm_n_half.g vm_v0v1n0n1n2.g
+c_vm_v0v1n0n1n2_half.g`. `samevm.py` finds the four in `peak/` the run
+directory's, and those the ones the text's `vectorsub.py` writes (7).
 
-What is left, in order: run the other 86 cases with `gappa -Bcoq` and
-`coqc` and their controls, through 464.34's `runpz.sh` with a `casesv.txt`
-(a `startpm.sh` with these names), and count them with a `tallypm.py`
-adapted to `out − Ex` and to the controls of the 21, which print `no
-contradiction` rather than a best; if every case holds `20u`, that answers
-Q3211 and Q2825's `vector.g` half. Then `square.g` in the zero branches,
-Q2825's other half: `m` with one or two components zero, so `nᵢ = 0` and
-that component's `gᵢ` and `hᵢ` drop out of the averaging over the `mᵢ²`;
-`square.g` puts no lower bound on a part of the turn, so a turn with parts
-zero is inside its hypotheses already, though writing them as the double 0
-would show it. Then the write-up, its controls and a `same` script that
-checks this text against the files that ran, as 464.35's `samepm.py` does.
+`peakv.sh` printed again, in `peak/`:
 
-`vectorsub.py`, as it ran:
+```text
+vm_n exit 0 6.58s peak 128404 KB
+c_vm_n_half exit 1 15.14s peak 153760 KB
+vm_v0v1n0n1n2 exit 0 0.01s peak 6556 KB
+c_vm_v0v1n0n1n2_half exit 1 0.17s peak 6760 KB
+```
+
+Each figure is within 2% of the first run's. `vm_n` proves in 6.58 s at a
+peak of 128 404 KB, where 464.35's `pm_n` takes 5.46 s and 89 188 KB, and
+464.19's `point.g` 49.18 s and 4 496 464 KB.
+
+`/usr/bin/time`'s `%x` prints 0 for a run a signal ends (464.35's 6), and no
+`.time` in the run directory or in `peak/` has the line `Command terminated`
+(`grep -l`). Gappa writes its results and warnings to standard error, so
+`peakv.sh` puts them in `<name>.time`, above the time line, and leaves
+`<name>.out` empty. That is why the second run went in `peak/`: in the run
+directory it would have emptied the `.out` files `tallyvm.py` reads.
+
+**6. What this leaves.** One row, filed from this write-up when it merges,
+from Q2825:
+
+- Run `square.g` with a component of `m` strictly between 0 and `2⁻¹⁰¹²`.
+  There `scaled_to_length_one_from_anywhere` promises one ulp, not the
+  nearest `f64` (`point.rs:338-341` at `c40cc82e`). `square.g` averages each
+  `hᵢ / gᵢ` over the `mᵢ²`: by the form, not run, one ulp loosens it to
+  about `4u` while `mᵢ` is a normal number, and below the normals no ratio
+  bounds it, so there `hᵢ` would be bounded absolutely. And say whether
+  `NORMAL_LENGTH_ROUNDOFF`'s doc (`plane.rs:126-128` at `c40cc82e`), which
+  says each component is the nearest `f64` to the exact ratio, needs that
+  condition. Not run, so no class (§360.5).
+
+And what is not a row: Q2826, a normal that does not come straight from a
+constructor, which `square.g`'s constructor `ε` before the turn leaves out;
+Q2831, `vector.g` with each component up to about `1 + 64u`, as a stored axis
+direction can have; Q2700, which moves these scripts into `proofs/gappa/`
+with the rest of 464's; and `field` on these hints, which 464.10 leaves for
+every script of 464.
+
+**7. The scripts.** `vectorsub.py` writes `vector.g`'s 88 cases, their
+controls and `casesv.txt`; `peakv.sh` runs the scripts it names as `one.sh`
+does, without Coq, in turn under a 12 GB cap, and prints each one's exit,
+time and peak memory; `startvm.sh` runs every case in `casesv.txt` through
+464.34's `runpz.sh`, each process under the same cap, writing `runvm.txt`;
+`tallyvm.py` counts that run; `squarezero.py` writes `square.g`'s 77 cases
+from 464.20's `square.g`, their controls and `casesq.txt`; `startsq.sh` is
+`startvm.sh` for those, writing `runsq.txt`; `tallysq.py` counts that run;
+and `samevm.py` checks this text against the files that ran.
+
+To run them again, save the scripts beside 464.13's `one.sh`, 464.34's
+`runpz.sh` and 464.20's `square.g`, run `python3 vectorsub.py` and `python3
+squarezero.py`, then start `./startvm.sh` with `setsid -f nohup` and wait on
+the pid it writes to `startvm.pid`, and then `./startsq.sh` the same way,
+with `startsq.pid`. Each `run*.txt` ends `done`, and `python3 tallyvm.py`
+and `python3 tallysq.py` count them. `./peakv.sh vm_n.g c_vm_n_half.g
+vm_v0v1n0n1n2.g c_vm_v0v1n0n1n2_half.g` runs 5's four, from a directory
+holding copies of them and of `peakv.sh`, for the reason 5 gives.
+
+The second lane ran `samevm.py` on this text from its tree's `target/`, with
+the run's directory, `python3 samevm.py <464 file> <run directory>`.
+
+`samevm.py`'s whole print:
+
+```
+not yet run
+```
+
+`vectorsub.py`, whole, as it ran:
 
 ```python
 """Write 464.20's vector.g in 464.35's form: one script per zero set of its
@@ -26234,10 +26584,13 @@ if __name__ == "__main__":
     main()
 ```
 
-It printed `88 cases, 25 with no rounded product on a live path, 21 with
-nothing live`.
+`vectorsub.py`'s whole print:
 
-`peakv.sh`, as it ran:
+```
+88 cases, 25 with no rounded product on a live path, 21 with nothing live
+```
+
+`peakv.sh`, whole, as it ran:
 
 ```bash
 #!/bin/bash
