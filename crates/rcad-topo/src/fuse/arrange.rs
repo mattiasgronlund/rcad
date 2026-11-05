@@ -14599,7 +14599,12 @@ impl<'f> Arrangement<'f> {
     /// loops, picked by a flat surface square to one of the two axes that the
     /// loops are not circles round, and
     /// [`Arrangement::whether_past_the_flat_surface_between_two_loops_of_two_cones`]
-    /// answers there (Q2807). A flat face square to a ring's axis is the one pair picked by
+    /// answers there (Q2807). So are two cones off one axis that cross in one
+    /// loop and two branches, whose loop is picked by two flat surfaces, one
+    /// through the apex of the cone whose straight lines each cross the loop,
+    /// and
+    /// [`Arrangement::whether_past_the_pickers_of_a_loop_and_two_branches`]
+    /// answers there (Q3172). A flat face square to a ring's axis is the one pair picked by
     /// something other than a half-space: the plane cuts the ring in two
     /// circles round the axis, the pipe of the ring's own radius tells them
     /// apart, and
@@ -14673,6 +14678,16 @@ impl<'f> Arrangement<'f> {
         {
             return Self::whether_a_pipe_is_past_the_flat_surface_through_a_cones_apex(
                 picker, &pipe, &cone, at,
+            );
+        }
+        if let (Surface::Cone(this), Surface::Cone(other)) = (self.surface, partner)
+            && let [
+                Picker::InFrontOfAFlatThrough(apex),
+                behind @ (Picker::InFrontOf(_) | Picker::InFrontOfAFlatThrough(_)),
+            ] = self.crossings[crossing].picked_by()
+        {
+            return Self::whether_past_the_pickers_of_a_loop_and_two_branches(
+                apex, behind, &this, &other, at,
             );
         }
         if let (Surface::Cone(this), Surface::Cone(other)) = (self.surface, partner)
@@ -14996,6 +15011,112 @@ impl<'f> Arrangement<'f> {
         }
     }
 
+    /// On a cone another cone off its axis cuts in one loop and two branches:
+    /// whether a point is past either of the two flat half-spaces that pick the
+    /// loop out, and if it is, which side of the other cone the loop has
+    /// towards it.
+    ///
+    /// The half-spaces are the two `rcad_geom`'s
+    /// `a_loop_and_two_branches_picked_by` names the loop by, for a pair
+    /// `how_two_cones_off_one_axis_cross` or
+    /// `a_loop_and_two_branches_that_nearly_meet` proves. Call `X` the cone
+    /// each of whose straight lines out of its apex crosses the loop once, and
+    /// `Y` the other. `apex` is the flat surface through `X`'s apex square to
+    /// `X`'s axis, facing the nappe the loop is on, and `X` is told by that
+    /// point being its apex exactly. `behind` is the flat surface `G` that each
+    /// of `X`'s straight lines on that nappe crosses between the loop and the
+    /// branch beyond it, facing back towards the apex. Either proof gives:
+    ///
+    /// 1. `X`'s apex is outside `Y`.
+    /// 2. `G` cuts a closed curve `∂E` out of the loop's nappe of `X`, and the
+    ///    other nappe never meets `G`.
+    /// 3. `∂E` is inside `Y`.
+    ///
+    /// So along each straight line of the loop's nappe, `Y`'s form goes from
+    /// above nought at the apex to below nought at `G`, and is nought once in
+    /// between, on the loop.
+    ///
+    /// **On `X`** the loop parts the surface into the piece round the apex,
+    /// which runs on through the apex into the other nappe, and the rest of
+    /// the loop's nappe. Beside the loop the first is outside `Y` and the
+    /// second inside it. Behind `apex` is the other nappe: `Pos`. In front of
+    /// both half-spaces `Y` cuts `X` in the loop alone, so `Y`'s sign is the
+    /// side there, and [`PastThePicker::No`] says so. Past `G` is the loop's
+    /// nappe beyond the loop: `Neg`, even beyond the far branch, where `Y`'s
+    /// sign is positive.
+    ///
+    /// **On `Y`** call `K` the solid piece of `X`'s loop nappe between its apex
+    /// and `G`, and `E` the flat piece of `G` that `∂E` bounds. By 3, `∂E` is
+    /// inside one solid nappe of `Y`, which is convex, so all of `E` is, and
+    /// `Y` never meets `E`. So `Y` meets the skin of `K` in the loop alone, and
+    /// `Y`'s points inside `K` are one bounded piece the loop parts off `Y`:
+    /// inside `X` beside the loop, `Neg`, and the rest of `Y` outside it,
+    /// `Pos`. In front of both half-spaces a point of `Y` is inside `K` just
+    /// where it is inside `X`, so `X`'s sign is the side there, and
+    /// [`PastThePicker::No`] says so. Past either it is not in `K`: `Pos`, even
+    /// inside `X`'s other nappe, or inside its loop nappe beyond `G`, where
+    /// `X`'s sign is negative.
+    ///
+    /// A point on either flat surface reads the same both ways: on `X` it is
+    /// the apex, outside `Y` by 1, or on `∂E`, inside it by 3, and on `Y` it is
+    /// outside `X`. A point whose box straddles one is answered where every
+    /// reading it could have agrees. Where neither cone's apex is `apex`'s
+    /// point exactly, nothing here is known of the pair, and the partner's sign
+    /// is read, as it always was.
+    ///
+    /// Read without this, the leaning cone of two pointed cones, `8` and `10`
+    /// high, the second turned `0.3` about `x` through `(0, 0, 4)`, read the
+    /// side of its loop off nodes on its rim, past `G` and outside the upright
+    /// cone, and its walk round the strip between the far branch and `z = 8`
+    /// was joined to the walk round its apex (Q3172).
+    fn whether_past_the_pickers_of_a_loop_and_two_branches(
+        apex: &HalfSpaceThroughAPoint,
+        behind: &Picker,
+        this: &Cone,
+        other: &Cone,
+        at: PredicatePoint,
+    ) -> PastThePicker {
+        let past_the_far_flat_surface = if apex.through() == this.apex() {
+            Decision::Neg
+        } else if apex.through() == other.apex() {
+            Decision::Pos
+        } else {
+            return PastThePicker::No;
+        };
+        // Compared rather than matched, so that `Decision`'s wildcard arm is
+        // not written once more (§40).
+        let past = |picker: Decision| {
+            if picker == Decision::Neg {
+                Some(true)
+            } else if picker == Decision::Pos || picker == Decision::Zero {
+                Some(false)
+            } else {
+                None
+            }
+        };
+        let if_the_partner_agrees = |side: Decision| {
+            if side_of_surface(&Surface::Cone(*other), at) == side {
+                PastThePicker::Yes(side)
+            } else {
+                PastThePicker::CannotTell
+            }
+        };
+        match (past(apex.side_of_point(at)), past(behind.side_of_point(at))) {
+            (Some(true), _) => PastThePicker::Yes(Decision::Pos),
+            (Some(false), Some(false)) => PastThePicker::No,
+            (Some(false), Some(true)) => PastThePicker::Yes(past_the_far_flat_surface),
+            (Some(false), None) => if_the_partner_agrees(past_the_far_flat_surface),
+            (None, Some(false)) => if_the_partner_agrees(Decision::Pos),
+            (None, Some(true)) if past_the_far_flat_surface == Decision::Pos => {
+                PastThePicker::Yes(Decision::Pos)
+            }
+            (None, None) if past_the_far_flat_surface == Decision::Pos => {
+                if_the_partner_agrees(Decision::Pos)
+            }
+            (None, Some(true) | None) => PastThePicker::CannotTell,
+        }
+    }
+
     /// On a cone another cone off its axis cuts in two loops: whether a point
     /// is past the flat half-space that picks one loop out, and if it is, which
     /// side of the other cone that loop has towards it.
@@ -15009,8 +15130,12 @@ impl<'f> Arrangement<'f> {
     /// where the flat surface meets the first cone's inside. Where the pair is
     /// not two loops, or the picker is not the flat surface between them, the
     /// other cone's sign is the side, as it always was, and
-    /// [`PastThePicker::No`] says so: that is a loop and two branches, whose
-    /// branches are each picked by one flat surface of their own.
+    /// [`PastThePicker::No`] says so. A loop and two branches comes here only
+    /// for a branch, which is picked by one flat surface of its own and runs on
+    /// for ever, so it is never a closed curve anything is placed by. Its loop
+    /// is picked by two flat surfaces, and
+    /// [`Arrangement::whether_past_the_pickers_of_a_loop_and_two_branches`]
+    /// reads it.
     ///
     /// On or in front of the half-space the other cone cuts this one in that
     /// loop alone, so its sign is the side there. A point whose box straddles
