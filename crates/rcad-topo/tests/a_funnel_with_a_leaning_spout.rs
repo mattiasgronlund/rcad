@@ -431,37 +431,20 @@ fn the_upright_rim_runs_through_the_leaning_cone_for_4e_16_where_both_rims_nearl
 /// point of the run on a straight line of a cone instead, where that line
 /// meets the branch.
 ///
-/// **Every fuse is still refused**, under every rule both ways round, now
-/// meshing the answer: the union with the upright cone first and the upright
-/// cone less the leaning one because a curved face is bounded by one curve
-/// right round it, the union the other way round because a face's boundary
-/// crosses itself, and the intersection both ways round and the leaning cone
-/// less the upright one because a curved face with a hole goes too far round.
+/// Until row Q3172 every fuse was refused meshing the answer: the union with
+/// the upright cone first and the upright cone less the leaning one because a
+/// curved face is bounded by one curve right round it, the union the other way
+/// round because a face's boundary crosses itself, and the intersection both
+/// ways round and the leaning cone less the upright one because a curved face
+/// with a hole goes too far round. **Every fuse is to answer**, under every
+/// rule both ways round.
 #[test]
-fn two_pointed_cones_eight_and_ten_high_one_leaning_off_the_other_are_refused_meshing_the_answer() {
+fn two_pointed_cones_eight_and_ten_high_one_leaning_off_the_other_answer_every_fuse() {
     assert_eq!(
         every_fuse_of(two_pointed_cones_eight_and_ten_high).refusals(),
-        [
-            [Some(NO_SEAM_TO_OPEN_AT), Some(THE_BOUNDARY_CROSSES_ITSELF)],
-            [Some(TOO_FAR_ROUND); 2],
-            [Some(NO_SEAM_TO_OPEN_AT), Some(TOO_FAR_ROUND)],
-        ]
+        [[None; 2]; 3]
     );
 }
-
-/// What a fuse is refused with where a curved face of the answer is bounded
-/// by one curve right round its surface.
-const NO_SEAM_TO_OPEN_AT: &str =
-    "a curved face is bounded by one curve right round it and has no seam to open at";
-
-/// What a fuse is refused with where a face of the answer, drawn, crosses
-/// itself.
-const THE_BOUNDARY_CROSSES_ITSELF: &str = "a face of this solid could not be cut into triangles: the boundary crosses itself, at the side leaving corner 30";
-
-/// What a fuse is refused with where a curved face of the answer with a hole
-/// in it goes too far round its surface.
-const TOO_FAR_ROUND: &str =
-    "a curved face with a hole in it goes too far round its surface to be meshed";
 
 /// **Two pointed cones, one a quarter turn off the other.** Both have slope a
 /// half and height eight, and the second turns a quarter about the `x` axis
