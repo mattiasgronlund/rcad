@@ -477,6 +477,19 @@ fn two_cubes(turn: [f64; 4], tx: f64) -> (Model, SolidKey, SolidKey) {
     (model, block, turned)
 }
 
+/// [`divided_by_its_length`] moves each of the four parts of both turns one
+/// step further from zero.
+#[test]
+fn dividing_either_turn_by_its_length_moves_every_part_one_step_further_from_zero() {
+    for turn in [TURNED_ABOUT_X_FIRST, TURNED_ABOUT_Z_FIRST] {
+        assert_eq!(
+            divided_by_its_length(turn).map(f64::to_bits),
+            turn.map(|part| part.to_bits() + 1),
+            "{turn:?}"
+        );
+    }
+}
+
 /// `turn` divided by its length, as `Isometry::try_from` divided every turn
 /// until queue row Q3234, by nalgebra's `UnitQuaternion::from_quaternion`,
 /// which adds the squares as `(i² + k²) + (j² + w²)`.

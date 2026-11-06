@@ -851,6 +851,42 @@ fn the_block_and_the_tipped_cube(model: &mut Model, tilt: [f64; 4]) -> [SolidKey
     [block, tipped]
 }
 
+/// [`divided_by_its_length`] moves `s` and `c` one step up at 16 of this
+/// file's 28 tilts, the two of [`TILTS`] among them, and keeps the other 12
+/// as they are written.
+#[test]
+fn dividing_a_tilt_by_its_length_moves_it_one_step_up_at_sixteen_of_the_twenty_eight() {
+    let mut tilts: Vec<[f64; 4]> = every_tilt()
+        .chain(TILTS_A_CERTIFIED_FUSE_IS_REFUSED_FOR_THE_RANGE_AT)
+        .collect();
+    tilts.sort_by(|one, other| one[2].total_cmp(&other[2]));
+    tilts.dedup();
+    let bits = |turn: [f64; 4]| turn.map(f64::to_bits);
+    let one_step_up = |[w, i, s, c]: [f64; 4]| {
+        [
+            w,
+            i,
+            f64::from_bits(s.to_bits() + 1),
+            f64::from_bits(c.to_bits() + 1),
+        ]
+    };
+    let moved: Vec<[f64; 4]> = tilts
+        .iter()
+        .copied()
+        .filter(|&tilt| {
+            let divided = bits(divided_by_its_length(tilt));
+            assert!(
+                divided == bits(tilt) || divided == bits(one_step_up(tilt)),
+                "{tilt:?} is divided to {:?}",
+                divided_by_its_length(tilt)
+            );
+            divided != bits(tilt)
+        })
+        .collect();
+    assert_eq!((moved.len(), tilts.len()), (16, 28));
+    assert!(TILTS.iter().all(|tilt| moved.contains(tilt)));
+}
+
 /// `turn` divided by its length, as `Isometry::try_from` divided every turn
 /// until queue row Q3234, by nalgebra's `UnitQuaternion::from_quaternion`,
 /// which adds the squares as `(i² + k²) + (j² + w²)`.
