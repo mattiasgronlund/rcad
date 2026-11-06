@@ -80,6 +80,44 @@ fn a_block_on_a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_in
     }
 }
 
+/// Not turned at all, the two thin bars touch exactly along the `z` axis and
+/// do not overlap, so `|c|² − 1` is nought rather than below it. The block is
+/// united with the thick bar first, then the thin bars one at a time.
+#[test]
+fn a_block_on_a_thick_bar_unites_with_two_thin_bars_touching_exactly_inside_it() {
+    let turn = 0.0;
+    let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+    let thick = a_bar(&mut model, 2.0, 4.0, [0.0, 0.0, -2.0], turn);
+    let block = the_block(&mut model, turn);
+    let left = a_bar(&mut model, 1.0, 6.0, [-1.0, 0.0, -3.0], turn);
+    let right = a_bar(&mut model, 1.0, 6.0, [1.0, 0.0, -3.0], turn);
+
+    let c = where_its_axis_crosses_z_nought(&model, right);
+    assert_eq!(
+        where_its_axis_crosses_z_nought(&model, left),
+        c.map(|x| -x),
+        "the thin bars' axes are at c and −c"
+    );
+    assert_eq!(
+        squared_length_less_one(c),
+        Decision::Zero,
+        "the thin bars' axes at {c:?} are exactly 2 apart, so the bars touch"
+    );
+
+    let with_the_block = fused(&mut model, &[thick], &[block], Rule::Union, || {
+        "not turned, the block".to_string()
+    });
+    let with_the_left_bar = fused(&mut model, &with_the_block, &[left], Rule::Union, || {
+        "not turned, the bar at x = −1".to_string()
+    });
+    let last = || "not turned, the bar at x = 1".to_string();
+    let [whole] = fused(&mut model, &with_the_left_bar, &[right], Rule::Union, last)[..] else {
+        panic!("{}: the four unite into one solid", last());
+    };
+    let deflection = Deflection::of(0.01).expect("a fine mesh");
+    valid_and_of_volume(&model, whole, the_volume(), deflection, last);
+}
+
 /// The union is the thick bar and the four ends of length 1, `16π + 4π`.
 #[test]
 fn a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_inside_it() {
