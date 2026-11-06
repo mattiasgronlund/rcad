@@ -45,7 +45,9 @@ branches, and 464.37 is Q2826, on that constant for a normal that does not
 come straight from a constructor. 464.38 is Q2830, which searched for a corner
 on a cone past `CORNER_AFTER_MOVING_ROUNDOFF`. 464.39 is Q2831, on `vector.g`
 with each component up to `1 + 64u`, and 464.40 is Q2837, which has Coq check
-464.22's `stage_e0_1.g`.*
+464.22's `stage_e0_1.g`. 464.41 is Q2851, on the two directions on a parabola,
+and 464.42 is Q2858, on a distance off a plane and a plane's shift with two or
+three products below the normals.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -87,6 +89,8 @@ with each component up to `1 + 64u`, and 464.40 is Q2837, which has Coq check
   464.38  A corner on a cone, searched for past CORNER_AFTER_MOVING_ROUNDOFF
   464.39  vector.g with each component up to 1 + 64u
   464.40  stage_e0_1.g in Coq
+  464.41  The two directions on a parabola
+  464.42  A distance off a plane, and a plane's shift, with two or three products below the normals
 
 ### 464.1 The bugs a bound prover is for
 
@@ -16659,7 +16663,7 @@ for the shift, near `2⁻¹⁰²²` or above (3). Coq checks all twelve, modulo 
 hints (4). A half-space whose normal is `2⁻⁶⁰` long, shifted by `(2⁻¹⁰²², 0,
 0)`, does not move at all where it should move `0.6·L`: for a half-space, `L`
 normal is not enough (5). Two or three products below the normals, and a zero
-factor, are not run (What this leaves).
+factor, are not run here; 464.42 runs them (What this leaves).
 
 Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
 464.13's `one.sh`, unchanged, and `coqc` under 464.5's pins with gappalib
@@ -16793,7 +16797,8 @@ product, `n₀·d₀`, is below the normals and the other two are zero, so the c
 is outside the twelve, which ask the other two to be normal. For a half-space,
 whose normal is any length, the condition on a shift has to be on `|n|·L` or
 on the products, not on `L`. Whether a `Plane`, whose normal is near unit
-length, misses with two or three products below the normals is the row below.
+length, misses with two or three products below the normals was the row below,
+and 464.42 finds it does not, with `|n|·L` at least `2⁻¹⁰²²`.
 This is class wrong/D (§352.3): a product below `2⁻¹⁰²²` needs numbers far
 outside §3.5's envelope, here `L = 2⁻¹⁰²²`, `2.2e-310` times its nominal `100`,
 and `|n| = 2⁻⁶⁰`. What it makes false is the doc on `moved_corner.rs:99-143`,
@@ -16814,11 +16819,13 @@ named the shift too, and `shifts0.g` and `shifts2.g` did not parse.
 - Two or three products below `2⁻¹⁰²²`, or a zero factor, for `signed.g` with
   `L` at least `2⁻¹⁰²²` and for `shiftplane.g` with `|n|·L` at least
   `2⁻¹⁰²²`, split by where each product lands as 464.18's `planeall.py` split
-  `plane.g`: a row. The half-space of 5 is one such case.
+  `plane.g`, was Q2858, and 464.42 answers it: both bounds hold under those
+  conditions however the three products land. The half-space of 5 is one such
+  case, and lies outside the shift's condition: its `|n|·L` is `2⁻¹⁰⁸²`.
 - Q2695 restates the doc comments of `plane.rs:85-112` and
   `moved_corner.rs:99-143` with the condition the proofs need, and now waits on
-  that row. For a half-space that condition is on `|n|·L` or on the products,
-  not on `L` (5). That is Q2695's to state, not a new row.
+  Q2858, which 464.42 answers. For a half-space that condition is on `|n|·L` or
+  on the products, not on `L` (5). That is Q2695's to state, not a new row.
 - Q2700 moves these scripts into `proofs/gappa/` with the rest of §464's.
 
 **The scripts, whole, as they ran.** To run them again, save
