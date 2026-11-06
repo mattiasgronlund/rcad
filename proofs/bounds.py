@@ -206,12 +206,20 @@ KINDS = "fn|struct|enum|trait|type|union|mod|static"
 def rust_item(text, item):
     """`just src`'s extent of the one item of this name in the file, read off
     rustfmt's layout as that recipe reads it: back to the blank line above
-    the definition, forward to the first `}` at its own indentation."""
+    the definition, forward to the first `}` at its own indentation.
+
+    `Owner::name` is the one `name` inside the file's `impl` blocks for
+    `Owner`, for a name the file defines more than once, as plane.rs does
+    `on_floats`. `just src` takes no owner, so for those the selftest holds
+    the extent to `just src`'s in a copy where the other definitions are
+    renamed."""
+    owner, _, name = item.rpartition("::")
     pattern = re.compile(
-        LEAD + rf"(({KINDS})[ \t]+{item}\b|const[ \t]+{item}[ \t]*:|macro_rules![ \t]*{item}\b)"
+        LEAD + rf"(({KINDS})[ \t]+{name}\b|const[ \t]+{name}[ \t]*:|macro_rules![ \t]*{name}\b)"
     )
     lines = text.split("\n")
-    hits = [i for i, line in enumerate(lines) if pattern.search(line)]
+    inside = impl_lines(lines, owner) if owner else range(len(lines))
+    hits = [i for i in inside if pattern.search(lines[i])]
     if len(hits) != 1:
         return None
     at = hits[0]
@@ -230,6 +238,19 @@ def rust_item(text, item):
         if lines[end].startswith(pad + "}"):
             return lines[start : end + 1]
     return None
+
+
+def impl_lines(lines, owner):
+    """The lines inside the file's top-level `impl` blocks for `owner`, its
+    own and each trait's, but not a block inside a module such as `tests`."""
+    opens = re.compile(rf"^impl(<.*?>)?[ \t]+((\S.*[ \t])?for[ \t]+)?{owner}\b")
+    inside = []
+    for at, line in enumerate(lines):
+        if not opens.match(line) or line.rstrip().endswith("}"):
+            continue
+        end = next(i for i in range(at + 1, len(lines)) if lines[i].startswith("}"))
+        inside += range(at + 1, end)
+    return inside
 
 
 def package_entry(text, name):
