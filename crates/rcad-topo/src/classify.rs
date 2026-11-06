@@ -362,6 +362,7 @@ impl SolidView<'_> {
                 let surface = face.surface();
                 surface.as_plane().is_some_and(|flat| {
                     every_side_of_it_is_straight(face)
+                        && !is_further_off_its_plane_than_its_corners(face, flat, point)
                         && its_corners_and_plane_part_at(face, flat, point)
                 })
             })
@@ -1052,6 +1053,39 @@ fn its_corners_and_plane_part_at(face: FaceView<'_>, flat: &Plane, point: Predic
         };
     });
     parted
+}
+
+/// Whether every point of `point`'s box is further off `flat`, on one side,
+/// than any corner of `face`'s fan, read as `normal · x - offset` over
+/// outward-rounded intervals.
+///
+/// **Every triangle of the fan lies in the slab its corners span**, since that
+/// value is affine and a triangle is made of its corners. A box outside that
+/// slab is between no triangle and the plane, so no ray reads it differently
+/// by the triangles than by the plane: where its line passes through a
+/// triangle, that point is in the slab and on the segment exactly when the
+/// plane separates the point from the target. A fan triangle with almost no
+/// area, as a fused face's two nearly collinear corners and a third make, has
+/// an own plane that cannot settle a box `0.077` off the face's stored plane,
+/// and that read as a parting and refused a union of cubes turned about a
+/// slanted axis (Q3224).
+fn is_further_off_its_plane_than_its_corners(
+    face: FaceView<'_>,
+    flat: &Plane,
+    point: PredicatePoint,
+) -> bool {
+    let normal = flat.normal().components().map(Interval::exactly);
+    let off_the_plane =
+        |at: [Interval; 3]| dot_enclosing(normal, at) - Interval::exactly(flat.offset());
+    let mut furthest_corner = 0.0f64;
+    face.for_each_triangle(|corners| {
+        for corner in corners {
+            let off = off_the_plane(exactly(corner.coordinates()));
+            furthest_corner = furthest_corner.max(off.lo().abs()).max(off.hi().abs());
+        }
+    });
+    let off = off_the_plane(point.enclosure());
+    off.lo() > furthest_corner || off.hi() < -furthest_corner
 }
 
 /// What one plane says of a point, against the sign it gives a point in
