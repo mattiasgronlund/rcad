@@ -6121,8 +6121,8 @@ impl<'f> Arrangement<'f> {
     /// images held apart
     /// ([`Arrangement::as_a_line_in_the_cut_halfway_between_mirror_cones_says`]),
     /// a meet of two planes' line with a ball, a pipe or a cone against the
-    /// crossing's meet with another of those, or a pipe's against a plane's,
-    /// read off the sign of the other's expression at the first
+    /// crossing's meet with another of those, read off the sign of the other's
+    /// expression at the first
     /// ([`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`]),
     /// two meets of a branch two cones cross in with two planes, read off which
     /// side of the second's plane the first is
@@ -6149,8 +6149,11 @@ impl<'f> Arrangement<'f> {
     /// ([`Arrangement::as_the_side_of_one_cut_the_other_is_on_says`]), and
     /// where a node is a meet of the line two planes cross in and a pipe, read
     /// off where the line crosses the pipe
-    /// ([`Arrangement::as_the_pipes_a_line_crosses_say`]), is asked only where
-    /// the policy would refuse.** Asked before the policy,
+    /// ([`Arrangement::as_the_pipes_a_line_crosses_say`]) or off the side of
+    /// the other node's plane that meet is on
+    /// ([`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`] with
+    /// [`TheOtherNodesSurface::APlaneAgainstAPipe`]), is asked only where the
+    /// policy would refuse.** Asked before the policy,
     /// the second kept a tolerant fuse of a cube whose edges run through a
     /// frustum's far rim from answering: it put the corner and the meet a
     /// rounding apart where the policy reads them as one point, and the fuse
@@ -6323,8 +6326,12 @@ impl<'f> Arrangement<'f> {
             decided = proved;
         }
         if matches!(decided, Decision::Undecidable { .. })
-            && let Some(proved) =
-                self.as_the_sign_of_a_quadric_at_a_meet_of_a_line_says(crossing, first, second)
+            && let Some(proved) = self.as_the_sign_of_a_quadric_at_a_meet_of_a_line_says(
+                crossing,
+                first,
+                second,
+                TheOtherNodesSurface::AQuadric,
+            )
         {
             decided = proved;
         }
@@ -6474,6 +6481,14 @@ impl<'f> Arrangement<'f> {
             })
             .or_else(|| self.as_the_side_of_one_cut_the_other_is_on_says(crossing, first, second))
             .or_else(|| self.as_the_pipes_a_line_crosses_say(crossing, first, second))
+            .or_else(|| {
+                self.as_the_sign_of_a_quadric_at_a_meet_of_a_line_says(
+                    crossing,
+                    first,
+                    second,
+                    TheOtherNodesSurface::APlaneAgainstAPipe,
+                )
+            })
     }
 
     /// Which of two nodes on a crossing comes first along it, from their boxes
@@ -7419,16 +7434,29 @@ impl<'f> Arrangement<'f> {
     /// `(13, 10, 1)` and the cap in a box `5.3e−15` wide round it. Every fuse
     /// of the two was refused (Q3228,
     /// `tests/a_bar_with_a_leaning_cap_cut_beside_its_rim_corner.rs`).
+    ///
+    /// **A plane against a pipe is asked only where the policy would refuse**
+    /// ([`TheOtherNodesSurface::APlaneAgainstAPipe`]), as
+    /// [`Arrangement::as_the_pipes_a_line_crosses_say`] is, and for the same
+    /// reason: it proves a rounding apart two meets a tolerant policy reads as
+    /// one point. Asked before the policy, the tolerant union of a plate with
+    /// a round tab and a block cornered twice on the tab's rim, under the
+    /// plate's floor, came out with three faces of no area where it had one
+    /// (`tests/a_block_cornered_on_a_round_tabs_rim.rs`), and the tolerant
+    /// fuses of a round bar notched by a block cornered on its wall at radius
+    /// `8` merged no two rulings' feet on how far apart their tighter boxes let
+    /// them be (`tests/a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`).
     fn as_the_sign_of_a_quadric_at_a_meet_of_a_line_says(
         &self,
         crossing: usize,
         first: usize,
         second: usize,
+        which: TheOtherNodesSurface,
     ) -> Option<Decision> {
-        if let Some(forward) = self.lies_forward_of_the_other(crossing, second, first) {
+        if let Some(forward) = self.lies_forward_of_the_other(crossing, second, first, which) {
             return Some(forward);
         }
-        let backward = self.lies_forward_of_the_other(crossing, first, second)?;
+        let backward = self.lies_forward_of_the_other(crossing, first, second, which)?;
         Some(match backward {
             Decision::Pos => Decision::Neg,
             Decision::Neg => Decision::Pos,
@@ -7447,6 +7475,7 @@ impl<'f> Arrangement<'f> {
         crossing: usize,
         on_the_line: usize,
         other: usize,
+        which: TheOtherNodesSurface,
     ) -> Option<Decision> {
         let ((surfaces, _), (named_too, _)) = (
             self.the_one_meet_it_stands_for(on_the_line)?,
@@ -7479,13 +7508,16 @@ impl<'f> Arrangement<'f> {
         let (Some(asked), None) = (theirs.next(), theirs.next()) else {
             return None;
         };
-        let a_quadric = matches!(
-            asked,
-            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
-        );
-        let a_plane_on_a_pipe =
-            matches!((asked, &round), (Surface::Plane(_), Surface::Cylinder(_)));
-        if *asked == round || !(a_quadric || a_plane_on_a_pipe) {
+        let takes_it = match which {
+            TheOtherNodesSurface::AQuadric => matches!(
+                asked,
+                Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+            ),
+            TheOtherNodesSurface::APlaneAgainstAPipe => {
+                matches!((asked, &round), (Surface::Plane(_), Surface::Cylinder(_)))
+            }
+        };
+        if *asked == round || !takes_it {
             return None;
         }
         let ways =
@@ -20300,6 +20332,18 @@ fn two_planes_and_a_quadric(surfaces: &[Surface; 3]) -> Option<([Plane; 2], Surf
         )
     })?;
     Some(([*one, *other], *round))
+}
+
+/// The surface of the node off the line that
+/// [`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`] asks the
+/// sign of, at the meet of the line and its round surface.
+#[derive(Clone, Copy)]
+enum TheOtherNodesSurface {
+    /// A ball, a pipe or a cone, asked before any policy.
+    AQuadric,
+    /// A plane, where the line's round surface is a pipe, asked only where
+    /// the policy would refuse.
+    APlaneAgainstAPipe,
 }
 
 /// The planes and the cones among a meet's three surfaces.
