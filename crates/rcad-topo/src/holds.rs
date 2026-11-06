@@ -121,13 +121,17 @@ impl<'m> SolidView<'m> {
     ///
     /// **The wires it follows on a flat face with no arc of a crossing among its
     /// sides**: a polygon whose sides are straight or pieces of a cone's ruling,
-    /// walked; and a whole closed curve, a circle walked as two arcs from pole to
-    /// pole, or several whole circles that all close at the wire's one corner —
-    /// the one wire two round holes that touch at a point leave — each read
-    /// circle by circle against the round surface across that circle's own
-    /// edge. A wire that is none of these is refused by name. A flat face with
-    /// an arc among its sides is wound by its chords and arcs instead, and its
-    /// whole circles, one or several to a wire, are read the same way there.
+    /// walked, which may also run right round a whole circle at one of its
+    /// corners — a round hole touching the face's outline at one point, which a
+    /// pin through a plate touching the plate's side leaves; and a whole closed
+    /// curve, a circle walked as two arcs from pole to pole, or several whole
+    /// circles that all close at the wire's one corner — the one wire two round
+    /// holes that touch at a point leave. Each whole circle is read on its own
+    /// against the round surface across that circle's own edge. A wire that is
+    /// none of these is refused by name. A flat face with an arc among its sides
+    /// is wound by its chords and arcs instead, and its whole circles, one or
+    /// several to a wire or at one corner of a wire, are read the same way
+    /// there.
     ///
     /// # Errors
     ///
@@ -404,6 +408,16 @@ fn a_point_off_the_plane(face: FaceView<'_>, plane: &Plane) -> Option<Point> {
 /// pole ([`is_one_circle_cut_in_two`]), and a wire of several whole circles
 /// that all close at its one corner, which two round holes that touch leave
 /// ([`is_several_whole_circles`]). See [`how_often_a_round_wire_winds_round`].
+///
+/// **A side that runs right round a whole closed curve at one corner among a
+/// wire's other sides is left out of the walk** ([`runs_right_round_at_one_corner`]):
+/// a pin through a plate that touches the plate's side leaves one in the
+/// plate's top, a round hole touching its outline at one point. The sides left
+/// are still a polygon, closed at that corner, and the side's disk is read on
+/// its own instead, the way a round wire's is ([`how_many_disks_hold`]). Each
+/// such side adds one to the face's count inside its disk and nothing outside,
+/// so the face holds a point where the walk's count and the number of those
+/// disks holding it add up to an odd number ([`held_where_it_and_its_disks_wind`]).
 fn what_a_flat_face_holds(
     solid: SolidView<'_>,
     face: FaceView<'_>,
@@ -677,7 +691,9 @@ fn the_circles_a_round_wire_is_made_of<'m>(
 /// Which side of the surface one circle of a round wire is cut from `point` is
 /// on: [`Decision::Neg`] inside the circle, [`Decision::Pos`] outside it,
 /// [`Decision::Zero`] exactly on it. `circle` is the coedge along it, one of
-/// [`the_circles_a_round_wire_is_made_of`].
+/// [`the_circles_a_round_wire_is_made_of`], or a side that runs right round a
+/// whole closed curve at one corner among its wire's other sides, which
+/// [`how_many_disks_hold`] hands it as well ([`runs_right_round_at_one_corner`]).
 ///
 /// **The inside of such a circle is the inside of the ball or pipe that cut
 /// it**, and that is a fact rather than a convention: a closed curve cut on a
@@ -1027,7 +1043,9 @@ pub(crate) fn the_meridian_half_space_keeps(
 /// Every side must be straight between its two corners: stored as
 /// [`EdgeRun::Straight`], or a piece of a cone's ruling
 /// ([`is_a_piece_of_a_ruling`]), which is the same segment stored as part of a
-/// crossing.
+/// crossing. A side that runs right round a whole closed curve at one corner
+/// ([`runs_right_round_at_one_corner`]) is left out, and the polygon is the
+/// sides left: [`what_a_flat_face_holds`] reads that side's disk on its own.
 #[expect(
     clippy::too_many_arguments,
     reason = "the solid is what a ruling side's face across is found in, and every other one \
@@ -3945,6 +3963,15 @@ fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
 /// [`what_a_flat_face_holds`] counts one. `sides` leaves such wires out. The
 /// count round the face is the sum of each wire's, so the two add.
 ///
+/// **So is a side right round a whole closed curve at one corner among its
+/// wire's other sides** ([`runs_right_round_at_one_corner`]): the thick bar's
+/// end that a thin bar touching its wall from inside goes through has one, the
+/// thin bar's circle, among the arcs of the thick bar's rim. `sides` leaves it
+/// out too, and `disks` holds it. Its disk is read as a round wire's is
+/// ([`how_many_disks_hold`]), and the face then holds a point where the count
+/// of the rest and the number of those disks holding it add up to an odd
+/// number, for the reason [`held_where_it_and_its_disks_wind`] gives.
+///
 /// **This reads the face's boundary, and never asks whether the part in front of
 /// every cut is one piece.** That is why it answers the cap of a slab with a
 /// round scoop out of its top, which keeps the outside of the pipe and is one of
@@ -5424,8 +5451,13 @@ enum Lies {
 /// **A flat face's round wires are left out too** ([`is_a_round_wire_of_a_flat_face`]):
 /// a whole closed curve has no two ends to read a chord between, and
 /// [`what_a_flat_face_of_chords_and_arcs_holds`] counts it as a whole instead.
-/// So, for the same reason, is a cone face's side right round the curve a
-/// plane cuts it in ([`a_whole_curve_round_a_cone_or_a_ball`]), which
+/// So, for the same reason, is a flat face's side right round a whole closed
+/// curve at one corner among its wire's other sides
+/// ([`runs_right_round_at_one_corner`]), which goes in [`Readings::disks`]
+/// before the face across it is looked for: [`what_a_round_wire_encloses`]
+/// reads its disk, and refuses one with no face across, a flat one, or a ring
+/// naming no one circle through it. So is a cone face's side right round the
+/// curve a plane cuts it in ([`a_whole_curve_round_a_cone_or_a_ball`]), which
 /// [`what_a_cone_face_seen_down_its_axis_holds`] reads as a whole, and a ball
 /// face's side right round the circle a plane cuts it in, which
 /// [`what_the_part_in_front_of_its_cuts_holds`] reads as a cut with no corners.
@@ -5602,8 +5634,10 @@ fn is_a_round_wire_of_a_flat_face(face: FaceView<'_>, wire: WireView<'_>) -> boo
 /// tells from its sibling and that is not an arc of a cone's face along a curve
 /// that does not close ([`the_way_into_an_arc_that_does_not_close`]), a whole
 /// closed crossing among parts of others that is not a cone or a ball face's
-/// [`WholeCurve`], which never reaches here, or a kind of run this has not been
-/// taught, and whatever [`the_face_across`] gives for the edge.
+/// [`WholeCurve`] or a flat face's side right round at one corner, neither of
+/// which reaches here ([`every_reading_of_the_sides_of`] leaves both out), or a
+/// kind of run this has not been taught, and whatever [`the_face_across`] gives
+/// for the edge.
 fn the_way_a_side_runs(
     solid: SolidView<'_>,
     face: FaceView<'_>,
