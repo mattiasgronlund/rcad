@@ -7682,9 +7682,15 @@ impl Edge {
     /// from each pole to the corner a rounding off it
     /// (`a_narrow_lune_from_a_pole_corner.rs`) had their crossing squared off to
     /// a rounding along the chord, `(0, ±4.7e−38, 0)` and `(0, ±3.3e−55, 0)`,
-    /// at both ends, and are now faced `(0, 0, ∓6.4e−13)` and
+    /// at both ends, and were faced `(0, 0, ∓6.4e−13)` and
     /// `(0, 0, ∓1.25e−18)`, away from the ball's centre, the short arcs, as the
-    /// 90 degree lune's already were.
+    /// 90 degree lune's already were. Since Q3228 the corners of those answers
+    /// on the polar axis are the poles themselves, so no arc there runs from a
+    /// pole to a corner a rounding off it. This reading is still reached, and
+    /// facing it the other way fails tests such as
+    /// `a_half_ball_cut_by_a_block_a_hundred_hairs_off_its_polar_axis_is_answered`
+    /// and `an_arc_from_a_pole_to_a_corner_a_hair_off_it_is_named_by_the_way_it_sets_off`
+    /// (Q3242), and makes five fuses of the round-bar tests not come back.
     ///
     /// **A dot of exactly zero** means the named direction lay along its chord,
     /// or the crossing's direction at the chosen end does, and

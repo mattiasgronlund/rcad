@@ -1397,10 +1397,11 @@ impl BuildingAMesh {
         // the block's corner, and both unions were refused on the piece of the
         // wall between the two rulings
         // (`a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`, Q2352).
-        // The 90 degree lunes of `a_narrow_lune_from_a_pole_corner.rs` have
+        // The 90 degree lunes of `a_narrow_lune_from_a_pole_corner.rs` had
         // one on the arc of `x = 0` from the south pole to the corner beside
         // it, and at radius 3 the lune and that flat face each cut a lobe off
-        // there and drew the side closing it twice.
+        // there and drew the side closing it twice. Since Q3228 that corner
+        // is the pole itself, so those lunes have no such point.
         points.retain(|point| {
             ends.iter()
                 .all(|end| point.coordinates() != end.coordinates())
@@ -4963,7 +4964,8 @@ struct ThePatchAsCut {
 /// wall is refused `CornersCoincide`
 /// (`a_round_bar_notched_by_a_block_cornered_on_its_wall.rs`). The 90 degree
 /// lune at radius 1 of
-/// `two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy`
+/// `the_nine_wedges_once_refused_for_the_range_answer_under_either_policy`
+/// (once `two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy`)
 /// had a lobe of the flat face of `x = 0` refused `LoopsTouch`, where the whole
 /// face is refused `CornersCoincide`. With the fix, a marker here fired in no
 /// test of the workspace.
@@ -4977,10 +4979,14 @@ struct ThePatchAsCut {
 /// `4.4e−16` from it. Each face cut `P′` off as a lobe and kept the side `P C`
 /// inside its patch, and so that side was used four times, where uncut the lune
 /// was refused `CornersCoincide`
-/// (`two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy`).
+/// (`two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy`,
+/// which `a_narrow_lune_from_a_pole_corner.rs` replaced by
+/// `the_nine_wedges_once_refused_for_the_range_answer_under_either_policy`,
+/// since those nine wedges now answer under either policy).
 /// `P′` was the walk's one point on the arc from `P` to `C`, stored at `P`.
-/// `BuildingAMesh::walk` now drops it, and that difference is refused
-/// `FacesDoNotAgreeWhichWayTheyFace` instead.
+/// `BuildingAMesh::walk` dropped it, and that difference was refused
+/// `FacesDoNotAgreeWhichWayTheyFace` instead. Since Q3228 the corner `C` on
+/// the polar axis is the pole itself, so the arc has no such second entry.
 fn what_the_triangulator_can_cut(
     surface: &Surface,
     patch: Vec<(ALoopToCut, bool)>,
