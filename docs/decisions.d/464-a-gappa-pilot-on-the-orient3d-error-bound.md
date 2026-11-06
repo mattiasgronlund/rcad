@@ -47,7 +47,9 @@ on a cone past `CORNER_AFTER_MOVING_ROUNDOFF`. 464.39 is Q2831, on `vector.g`
 with each component up to `1 + 64u`, and 464.40 is Q2837, which has Coq check
 464.22's `stage_e0_1.g`. 464.41 is Q2851, on the two directions on a parabola,
 and 464.42 is Q2858, on a distance off a plane and a plane's shift with two or
-three products below the normals.*
+three products below the normals. 464.43 is Q2862, which runs block 1 with one
+or more of the differences at zero and one or two minors cancelling, past
+464.26's one of each.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -91,6 +93,7 @@ three products below the normals.*
   464.40  stage_e0_1.g in Coq
   464.41  The two directions on a parabola
   464.42  A distance off a plane, and a plane's shift, with two or three products below the normals
+  464.43  Differences at zero with minors cancelling, past one of each
 
 ### 464.1 The bugs a bound prover is for
 
@@ -633,8 +636,9 @@ paper, as 464.4 argues them; since 464.11 each is run, and proves at the code's
 bound. Since 464.25 each set of two or more differences at zero at once that
 leaves `y` not zero is run too, and proves at the code's bound. Since 464.26
 each branch with one difference at zero and one minor cancelling to zero is
-run too, and proves at the code's bound. The step from `y` to the sign is
-still on paper.
+run too, and proves at the code's bound. Since 464.43 each branch with two or
+more differences at zero, or two minors cancelling, is run too, and proves at
+the code's bound. The step from `y` to the sign is still on paper.
 
 ### 464.7 value past the bound, and every minor at zero run
 
@@ -17698,7 +17702,8 @@ main()
 - One or two of `first`, `second` and `third` cancelling to zero, their two
   products the same double as in 464.7, together with one or more of the
   differences at zero, past the one minor with one difference that 464.26
-  runs. A row after Q2748.
+  runs. A row after Q2748. That row is Q2862, done in 464.43: each of its 45
+  branches proves at the code's `B`.
 - `t1 + t2` cancelling to zero while neither is zero, with one or more of the
   differences at zero. Block 1 assumes it away with `|t1 + t2| ≥ 2⁻¹⁰⁷⁴`.
   464.4 runs it with no difference at zero, and it proves at `6u + 13u²`;
@@ -18225,7 +18230,9 @@ main()
 
 - One or two of `first`, `second` and `third` cancelling to zero together with
   one or more of the differences at zero, past the one minor with one
-  difference run here. Q2862, filed after Q2748.
+  difference run here. Q2862, filed after Q2748. Done, in 464.43: each of the
+  45 branches proves at the code's `B`, and each of the 414 minors that cannot
+  cancel is proved not to.
 - Nothing more for `t1 + t2` cancelling while neither is zero (Q2863, from
   464.25): in these pairs block 1's hypothesis on it costs nothing, as above.
 - The row that moves the scripts into `proofs/gappa/`, Q2700, takes
@@ -31020,3 +31027,757 @@ rm -f l_*.g l_*.out
 python3 lower.py "$@"
 ./runall.sh l_*.g | sort
 ```
+
+### 464.43 Differences at zero with minors cancelling, past one of each
+
+Q2862 ran block 1 with one or two of `first`, `second` and `third` cancelling
+to zero, their two products the same double as in 464.7, together with one or
+more of the nine differences `adx` to `cdz` at zero, past 464.26's one
+difference with one minor, in two lanes on 2026-11-06. Each of the 45 branches
+proves at the code's `B` and fails below the bound it proves, and Coq checks
+each proof, modulo its hints. Nothing in `orient3d.rs` needs to change for it.
+With 464.26's 27 pairs, this covers every set of one or more differences at
+zero with one or two minors cancelling, each run or shown not to be a branch.
+All three cancelling makes `y` zero, and `decide` certifies no sign (464.7).
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, with `block1.g` 464.5's first `gappa` block, against
+`on_floats` as 464.4 read it at `d9f931e8`: no commit touches `orient3d.rs`
+after `c827c89b`, 464.7's, up to `ad8a4339`.
+
+**Which sets are branches.** A set is one or more of the nine differences at
+zero and one or two minors cancelling. With 464.26's 27 pairs left out, 3039
+sets are left. The generator's `every_branch` leaves a set out at the first of
+these tests that holds of it, and `summarize_sets.py` below counts them in
+that order:
+
+- **1590 where the differences make every term zero by its shape.** `y` is
+  zero, and `decide` certifies no sign (464.7).
+- **1026 with a minor that cannot cancel**: one of its products has a zero
+  factor and the other has not. That minor rounds the other product, which
+  `product_is_normal` has checked, so it cannot cancel (464.26). The 414 `dmi_`
+  scripts below prove it for each set of two or more differences, as 464.26's
+  12 do for one.
+- **348 with a minor whose two products both have a zero factor.** That minor
+  is zero already, and the set is the same branch as the set without it.
+- **30 where every term is zero, by its shape or by cancelling.** `y` is zero
+  again.
+
+That leaves 45 branches:
+
+- **18 with a cancelled term left alive**: its term is zero in `y` and not in
+  `Ex`. In each, the other two terms are one zero by its shape and one alive.
+- **27 where every cancelled minor's term is zero by its shape already**: its z
+  difference is zero, so only its products and its minor change, as in
+  464.26's three.
+
+**What runs, at the code's `B`.** Each of the 45 proves, with `(y − Ex) / P6`
+within:
+
+- `5.55112e-16`, `5u` and some `u²`, for 28. At `6u` each proves, and at `5u`
+  each fails with best `±1`.
+- `6.66134e-16`, `6u` and some `u²`, for 17. At `6u` each fails with best
+  `±1`, and at `5u` with `±1.2`.
+
+In each of the 45 the count of `u` is the count of roundings on the longest
+path, counted as 464.26 counts it, and `summarize_sets.py` works it out from
+the set alone: its groups split the 45 the same way the printed bounds do.
+
+`P −/ Phat` is within `6.66134e-16` in the 12 new ones that ask for it, and
+`(P − Phat) / Phat` within `6.66134e-16` in the 6 where `t1` and `t2` are both
+zero. In the 27 that only cancel a zeroed term, `P −/ Phat` is within
+`4.44089e-16` in 20, and `(P − Phat) / Phat` within `3.33067e-16` in 7, as
+464.25 found for their sets of differences.
+
+Every one of the 45 fails at `5u`, and the 17 whose bound is above `6u` fail
+there too, so each fails below the bound it proves, and none proves its goal
+from hypotheses that contradict each other (464.7). The 30 `dmq_` scripts,
+each a `dm_` script with its `q` hypotheses taken out and only its `|q|` goals
+left, each prove: no goal leans on the hypothesis it backs. The other 15 have
+no `q` hypothesis to take out.
+
+Block 1's `|t1 + t2| ≥ 2⁻¹⁰⁷⁴` costs nothing here either. 32 of the 45 keep
+it. In 30 of those, one of `t1` and `t2` is zero, by its shape or by
+cancelling, and `t1 + t2` is the other. In `cdx_cdz_third` and
+`cdy_cdz_third` neither is zero, but `t3` is zero by `cdz`, so `t1 + t2` at
+zero makes `y` zero, and `decide` certifies no sign (464.7).
+
+`gappa -Bcoq` writes each of the 45 proofs, 5194 to 9236 lines with 22 to 35
+hints, and `coqc` under 464.5's commands accepts each, exit 0. At twelve at
+once, Gappa takes 1.93 to 5.09 s on a script, and `-Bcoq` and `coqc` together
+4.31 to 8.33 s. `field` has not been run on these hints (464.10). Gappa
+prints its "assumed to be nonzero when checking a rewriting rule" lines, 65
+to 143 of them in a `dm_` run, as block 1 and the `dz_` scripts do, and no
+"not trivially equal" in any output.
+
+**The minors that cannot cancel.** For each of the 237 sets of two or more
+differences 464.25 runs, and each minor with one product that has a zero
+factor and one that has not, 414 in all, `dmi_<set>.g` is `dz_<set>.g` asking
+only `|minor| >= 1b-1022`, and each proves; `-Bcoq` and `coqc` exit 0 on each,
+1005 to 1530 lines with 16 to 31 hints. A `dmi_` script's hypotheses are its
+`dz_<set>.g`'s, or those less `|minor| >= 1b-1074`, and 464.25 has each
+`dz_<set>.g` failing at `5u`, so those do not contradict each other either.
+Each of the 414 controls `c_dmi_<set>.g`, with the other product's
+`>= 1b-1022` taken out, fails at `BND(|minor|)`, after 27.07 to 431.61 s at
+sixteen at once: the 276 whose minor's z difference is not zero with best
+`[4.94066e-324, 2.22507e-308]`, and the 138 whose z difference is zero with
+best `[0, 2.22507e-308]`. No control asks `|minor| >= 1b-1074`. Each of the
+276 asks its term `t` to be at least `2⁻¹⁰²²`, so the minor is not zero, and
+none of the 138 does, since its term is zero by its shape.
+
+`make_minors_zero_with_differences.py`, run by `write_all.sh` below:
+
+```python
+"""Write block 1 with one or more differences zero and one or two minors
+cancelling to zero.
+
+Run beside the dz_<differences>.g that make_differences_zero.py writes. Each
+argument is a set of differences and minors such as adx_bdz_first or
+adz_first_second: the differences in the order DIFFERENCES gives them, then
+the minors. With no arguments, write every set past 464.26's one difference
+with one minor that is a branch, and print the names, one line each.
+
+A branch, where every minor named has both its products free of the zero
+differences, is dm_<set>.g, with the controls c_dm_<set>_6u.g and
+c_dm_<set>_5u.g, and, where a minor rounds a double less a zero,
+dmq_<set>.g: the script with its q hypotheses taken out and only its |q| goals
+left. Written with --impossible, each argument is instead a set of
+differences and one minor with one product free of them and one not, and the
+script is dmi_<set>.g, which asks only that the minor is at least 2^-1022,
+with its control c_dmi_<set>.g, which drops the check on the free product.
+"""
+import itertools
+import sys
+
+DIFFERENCES = ["adx", "ady", "adz", "bdx", "bdy", "bdz", "cdx", "cdy", "cdz"]
+PRODUCT = {
+    1: ("bdxcdy", "bdx", "cdy"),
+    2: ("cdxbdy", "cdx", "bdy"),
+    3: ("cdxady", "cdx", "ady"),
+    4: ("adxcdy", "adx", "cdy"),
+    5: ("adxbdy", "adx", "bdy"),
+    6: ("bdxady", "bdx", "ady"),
+}
+MINOR = {"first": 1, "second": 2, "third": 3}
+NAME = {1: "first", 2: "second", 3: "third"}
+NOTE = {1: "|bdxcdy| + |cdxbdy|", 2: "|cdxady| + |adxcdy|", 3: "|adxbdy| + |bdxady|"}
+Z_OF = {1: "adz", 2: "bdz", 3: "cdz"}
+BOUND = "in [-4503599627370497b-105, 4503599627370497b-105]\n"
+
+
+def main():
+    args = sys.argv[1:]
+    impossible = args[:1] == ["--impossible"]
+    if impossible:
+        args = args[1:]
+    if args:
+        sets = [split(arg) for arg in args]
+    else:
+        sets = every_impossible() if impossible else every_branch()
+    for zero, minors in sets:
+        name = "_".join(zero + [NAME[m] for m in minors])
+        src = open(f"dz_{'_'.join(zero)}.g").read()
+        if impossible:
+            (m,) = minors
+            write(f"dmi_{name}.g", cannot_cancel(src, set(zero), m))
+            write(f"c_dmi_{name}.g", cannot_cancel(src, set(zero), m, control=True))
+        else:
+            src = cancel(src, zero, minors)
+            write(f"dm_{name}.g", src)
+            write(f"c_dm_{name}_6u.g", sub(src, "B = 7b-53 + 7b-103;", "B = 6b-53;"))
+            write(f"c_dm_{name}_5u.g", sub(src, "B = 7b-53 + 7b-103;", "B = 5b-53;"))
+            if "  /\\ q" in src:
+                write(f"dmq_{name}.g", q_goals_alone(src))
+        print(name)
+
+
+def split(arg):
+    words = arg.split("_")
+    return [w for w in words if w in DIFFERENCES], [MINOR[w] for w in words if w in MINOR]
+
+
+def dead_products(zero):
+    return {k for k, (_, f, g) in PRODUCT.items() if f in zero or g in zero}
+
+
+def shape_zero_terms(zero):
+    dead = dead_products(zero)
+    return {m for m in (1, 2, 3) if Z_OF[m] in zero or {2 * m - 1, 2 * m} <= dead}
+
+
+def every_branch():
+    """Every set of differences and minors past 464.26 that is a branch: y not
+    zero by the differences' shape, each minor named with both its products
+    free of them, and some term left that is neither zero by its shape nor
+    cancelled."""
+    out = []
+    for n in range(1, 10):
+        for zero in itertools.combinations(DIFFERENCES, n):
+            dead = dead_products(set(zero))
+            shape = shape_zero_terms(set(zero))
+            if shape == {1, 2, 3}:
+                continue
+            for c in (1, 2):
+                if n == 1 and c == 1:
+                    continue
+                for minors in itertools.combinations((1, 2, 3), c):
+                    if any({2 * m - 1, 2 * m} & dead for m in minors):
+                        continue
+                    if shape | set(minors) == {1, 2, 3}:
+                        continue
+                    out.append((list(zero), list(minors)))
+    return out
+
+
+def every_impossible():
+    """Every set of two or more differences whose y is not zero by its shape,
+    with each minor that has one product free of them and one not: that
+    minor cannot cancel."""
+    out = []
+    for n in range(2, 10):
+        for zero in itertools.combinations(DIFFERENCES, n):
+            dead = dead_products(set(zero))
+            if shape_zero_terms(set(zero)) == {1, 2, 3}:
+                continue
+            for m in (1, 2, 3):
+                if len({2 * m - 1, 2 * m} & dead) == 1:
+                    out.append((list(zero), [m]))
+    return out
+
+
+def write(path, text):
+    with open(path, "w") as f:
+        f.write(text)
+
+
+def cannot_cancel(src, zero, m, control=False):
+    """dz_<differences>.g asking only that the minor is at least 2^-1022.
+
+    One product of the minor is zero, so the minor rounds the other one, a
+    double that product_is_normal has checked; the hint that says so is in
+    dz_<differences>.g already. The control drops that check, and must fail.
+    """
+    minor = NAME[m]
+    left, right = PRODUCT[2 * m - 1][0], PRODUCT[2 * m][0]
+    gone = 2 * m - 1 if set(PRODUCT[2 * m - 1][1:]) & zero else 2 * m
+    hint = f"{left} - {right} -> -{right};\n" if gone == 2 * m - 1 else f"{left} - {right} -> {left};\n"
+    if m in shape_zero_terms(zero):
+        # dz_<differences>.g asks nothing of a minor whose term its z
+        # difference zeroes, and gives no hint for it.
+        assert hint not in src
+        src += f"\n# {minor} rounds a double less a zero, or a zero less a double,\n# and so rounds to itself.\n" + hint
+    else:
+        assert hint in src
+        src = drop_conj(src, f"|{minor}| >= 1b-1074")
+    lines = src.split("\n")
+    start = lines.index("->")
+    end = lines.index("}", start)
+    lines = lines[: start + 1] + [f"  |{minor}| >= 1b-1022"] + lines[end:]
+    src = "\n".join(lines)
+    if control:
+        (alive,) = [PRODUCT[k][0] for k in (2 * m - 1, 2 * m) if not set(PRODUCT[k][1:]) & zero]
+        src = drop_conj(src, f"|{alive}| >= 1b-1022")
+    return src
+
+
+def cancel(src, zero, minors):
+    """dz_<differences>.g with each named minor's two products the same
+    double, as 464.7 writes a minor at zero."""
+    shape = shape_zero_terms(set(zero))
+    differences = " and ".join(zero)
+    cancelled = " and ".join(NAME[m] for m in minors)
+    src = sub(
+        src,
+        f"# Block 1 where {differences} are zero. A zero rounds to itself,\n"
+        "# and so does a product with a zero factor.\n",
+        f"# Block 1 where {differences} are zero and {cancelled} {'cancels' if len(minors) == 1 else 'cancel'} to zero:\n"
+        "# the two products of each are one double. A zero rounds to itself, and\n"
+        "# so does a product with a zero factor.\n",
+    )
+    src = sub(
+        src,
+        f"  # No factor of the nine products is zero but {differences}. For an\n"
+        "  # f64 that is the same as being at least the smallest subnormal.\n",
+        f"  # No factor of the nine products is zero but {differences} and\n"
+        f"  # {cancelled}. For an f64 that is the same as being at least the\n"
+        "  # smallest subnormal.\n",
+    )
+    alive = [m for m in minors if m not in shape]
+    for m in minors:
+        minor = NAME[m]
+        left, f, g = PRODUCT[2 * m]
+        src = sub(src, f"{left} = rnd({f} * {g});", f"{left} = {PRODUCT[2 * m - 1][0]};")
+        src = sub(src, f"{minor} = rnd(M{m});", f"{minor} = M{m};")
+    # A term zero by its shape already is zero in y and in Ex alike, and
+    # dz_<differences>.g carries it so: only its products and its minor change.
+    assert len(alive) <= 1, (zero, minors)
+    if not alive:
+        return src
+    (m,) = alive
+    minor = NAME[m]
+    src = sub(src, f"t{m} = rnd(U{m});", f"t{m} = U{m};")
+    src = sub(src, f"rm{m} = {minor} / M{m};", f"rm{m} = 1;")
+    src = sub(src, f"rt{m} = t{m} / U{m};", f"rt{m} = 1;")
+    src = drop_conj(src, f"|{minor}| >= 1b-1074")
+    src = drop_conj(src, f"|t{m}| >= 1b-1022")
+    src = drop_conj(src, f"|r{m}| >= 1b-1022")
+    start = src.index("  # Each of r")
+    end = src.index("\n", src.index("\n", start) + 1) + 1
+    zeroed = sorted(shape)
+    said = f"{' and '.join(f'r{k}' for k in zeroed)} {'is' if len(zeroed) == 1 else 'are'} zero, and nothing" if zeroed else "Nothing"
+    src = sub(
+        src,
+        src[start:end],
+        "  # Each r asked to be normal here is, because its t is and its minor is\n"
+        f"  # at most its q. {said} checks r{m}, since {minor} is zero.\n",
+    )
+    src = sub(src, f"  /\\ t{m} -/ U{m} {BOUND}", "")
+    src = sub(src, f"  /\\ r{m} -/ R{m} {BOUND}", "")
+    src = sub(src, f"{minor} / M{m} -> 1 + ({minor} - M{m}) / M{m};\n", "")
+    src = sub(src, f"t{m} / U{m} -> 1 + (t{m} - U{m}) / U{m};\n", "")
+    if m == 3:
+        return src
+    other = 3 - m
+    if other in shape:
+        # t1 and t2 are both zero, so s12 is too and nothing rounds.
+        src = sub(src, "s12 = rnd(S);", "s12 = S;")
+        src = sub(src, "rs = s12 / S;\n", "")
+        src = src.replace(" * rs - 1", " - 1")
+        src = sub(src, "  # The first two terms do not cancel to zero.\n  /\\ |t1 + t2| >= 1b-1074\n", "")
+        src = sub(src, "s12 / S -> 1 + (s12 - S) / S;\n", "")
+        src = sub(src, f"\n# t{other} is zero, so t1 + t2 is the double t{m} and rounds to itself.\nt1 + t2 -> t{m};\n", "")
+        return both_first_terms_zero(src, m, other)
+    return src + f"\n# t{m} is zero, so t1 + t2 is the double t{other} and rounds to itself.\nt1 + t2 -> t{other};\n"
+
+
+def both_first_terms_zero(src, m, other):
+    """t{m} cancels and t{other} is zero by its shape, as 464.26's
+    make_minor_zero_too.py writes it for one difference."""
+    note = NOTE[m]
+    src = sub(src, "/\\ P -/ Phat in ?\n", "/\\ (P - Phat) / Phat in ?\n")
+    src = sub(src, "P = rnd(rnd(r1 + r2) + r3);", "P12 = rnd(r1 + r2);\nP = rnd(P12 + r3);")
+    src = sub(
+        src,
+        "Phat = (|bdxcdy| + |cdxbdy|) * |adz|\n"
+        "     + (|cdxady| + |adxcdy|) * |bdz|\n"
+        "     + (|adxbdy| + |bdxady|) * |cdz|;\n",
+        "Phat1 = (|bdxcdy| + |cdxbdy|) * |adz|;\n"
+        "Phat2 = (|cdxady| + |adxcdy|) * |bdz|;\n"
+        "Phat3 = (|adxbdy| + |bdxady|) * |cdz|;\n"
+        "Phat = Phat1 + Phat2 + Phat3;\n",
+    )
+    x = "(P12 + r3)"
+    return src + (
+        f"\n# r{m} may be below the normals and r{other} is zero, so their errors are\n"
+        "# amounts and not fractions. Carry each as an amount against Phat, which\n"
+        "# Phat3 keeps away from zero.\n"
+        f"(P - Phat) / Phat -> ((P - {x}) / {x}) * (1 + ({x} - Phat) / Phat) + ({x} - Phat) / Phat;\n"
+        f"({x} - Phat) / Phat -> (P12 - (r1 + r2)) / Phat + (r{other} - Phat{other}) / Phat"
+        f" + (r{m} - R{m}) / Phat + ((q{m} - ({note})) / ({note})) * (Phat{m} / Phat)"
+        " + ((r3 - Phat3) / Phat3) * (Phat3 / Phat);\n"
+        f"Phat{m} / Phat -> 1 / (1 + (Phat{other} + Phat3) / Phat{m});\n"
+        "Phat3 / Phat -> 1 / (1 + (Phat1 + Phat2) / Phat3);\n"
+        "Phat3 -> r3 / (1 + (r3 - Phat3) / Phat3);\n"
+        f"{x} -> P / (1 + (P - {x}) / {x});\n"
+    )
+
+
+def q_goals_alone(src):
+    """The script with its q hypotheses out and its |q| goals alone left."""
+    lines = src.split("\n")
+    lines = [l for l in lines if not l.startswith("  /\\ q")]
+    start = lines.index("->")
+    end = lines.index("}", start)
+    goals = [l for l in lines[start + 1 : end] if l.startswith("  /\\ |q")]
+    goals[0] = "  " + goals[0][len("  /\\ ") :]
+    return "\n".join(lines[: start + 1] + goals + lines[end:])
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+def drop_conj(src, item):
+    """Take one conjunct out of a hypothesis line, and the line with it when
+    nothing is left on it."""
+    if src.count("\n  /\\ " + item + "\n") == 1:
+        return src.replace("\n  /\\ " + item + "\n", "\n")
+    if src.count(item + " /\\ ") == 1:
+        return src.replace(item + " /\\ ", "")
+    if src.count(" /\\ " + item + "\n") == 1:
+        return src.replace(" /\\ " + item + "\n", "\n")
+    return sub(src, "  /\\ " + item + "\n", "")
+
+
+main()
+```
+
+`write_all.sh` writes every script beside `block1.g`, 464.25's
+`make_differences_zero.py` and the generator above:
+
+```sh
+#!/bin/bash
+# Write every dz_ script for the differences, then every dm_ branch and every
+# dmi_ set beside them.
+cd "$(dirname "$0")"
+set -e
+rm -f dz_*.g c_dz_*.g dzq_*.g dm_*.g c_dm_*.g dmq_*.g dmi_*.g c_dmi_*.g
+rm -f *.out *.v *.bcoq *.coqc *.vo *.vok *.vos *.glob .*.aux run_dm.txt run_c.txt run_dmi.txt
+python3 make_differences_zero.py > names_dz.txt
+python3 make_differences_zero.py adx ady adz bdx bdy bdz cdx cdy cdz > /dev/null
+rm -f c_dz_*.g dzq_*.g
+python3 make_minors_zero_with_differences.py > names.txt
+python3 make_minors_zero_with_differences.py --impossible > names_dmi.txt
+wc -l names_dz.txt names.txt names_dmi.txt
+ls dm_*.g | wc -l
+ls c_dm_*.g | wc -l
+ls dmq_*.g | wc -l
+ls dmi_*.g | wc -l
+ls c_dmi_*.g | wc -l
+```
+
+`run_all.sh` then runs them through 464.13's `one.sh`. Its lines were run by
+hand, one or two to a call and in this order, and not as the script. The last
+was stopped with 100 of the 414 controls run, when the first lane passed its
+budget, and five calls of `cdmi_chunk.sh` below ran the other 314:
+
+```sh
+#!/bin/bash
+# Run every script write_all.sh wrote: each dm_ and dmi_ script with its proof
+# checked by coqc, then each control and each dmq_ check without. One line per
+# run, as one.sh prints it.
+cd "$(dirname "$0")"
+ls dm_*.g | xargs -P 12 -I{} ./one.sh {} coq > run_dm.txt 2>&1
+ls c_dm_*.g dmq_*.g | xargs -P 12 -I{} ./one.sh {} > run_c.txt 2>&1
+ls dmi_*.g | head -207 > dmi_a.txt
+ls dmi_*.g | tail -n +208 > dmi_b.txt
+xargs -P 16 -I{} ./one.sh {} coq < dmi_a.txt > run_dmi_a.txt 2>&1
+xargs -P 16 -I{} ./one.sh {} coq < dmi_b.txt > run_dmi_b.txt 2>&1
+cat run_dmi_a.txt run_dmi_b.txt > run_dmi.txt
+ls c_dmi_*.g | xargs -P 16 -I{} ./one.sh {} > run_cdmi.txt 2>&1
+echo finished
+```
+
+`cdmi_chunk.sh`, `start_one.sh` and `check27.py` sat in a directory `g2`
+beside the directory `g` holding everything else, whose whole path
+`cdmi_chunk.sh` names. `cdmi_chunk.sh`:
+
+```sh
+#!/bin/bash
+# Run the c_dmi controls not yet in run_cdmi.txt, sixteen at a time, the ones
+# with the most differences first, and start none after 300 s, so that one
+# call ends in under ten minutes. Run it again until "left 0".
+cd /tmp/claude-1000/-home-mattias-git-mattiasgronlund-rcad-worktrees-clean-up-dead-sessions/4d9d4cbe-25a9-48ba-b069-984561156aa7/scratchpad/g
+python3 ../g2/check27.py . left_cdmi.txt > /dev/null
+DEADLINE=$(( $(date +%s) + 300 ))
+export DEADLINE
+xargs -P 16 -I{} ../g2/start_one.sh {} < left_cdmi.txt >> run_cdmi.txt 2>&1
+python3 ../g2/check27.py .
+```
+
+`start_one.sh`:
+
+```sh
+#!/bin/bash
+# Run one control through one.sh, unless the chunk's start deadline has passed.
+if [ "$(date +%s)" -gt "$DEADLINE" ]; then
+  exit 0
+fi
+exec ./one.sh "$1"
+```
+
+`check27.py`, which writes the list of controls not yet run and prints how
+many are left:
+
+```python
+import collections
+import os
+import re
+import sys
+
+os.chdir(sys.argv[1])
+DIFFERENCES = ["adx", "ady", "adz", "bdx", "bdy", "bdz", "cdx", "cdy", "cdz"]
+PRODUCT = {1: ("bdx", "cdy"), 2: ("cdx", "bdy"), 3: ("cdx", "ady"), 4: ("adx", "cdy"), 5: ("adx", "bdy"), 6: ("bdx", "ady")}
+MINOR = {"first": 1, "second": 2, "third": 3}
+Z_OF = {1: "adz", 2: "bdz", 3: "cdz"}
+
+
+def shape(zero):
+    dead = {k for k, (f, g) in PRODUCT.items() if f in zero or g in zero}
+    return {m for m in (1, 2, 3) if Z_OF[m] in zero or {2 * m - 1, 2 * m} <= dead}
+
+
+ran = {}
+for line in open("run_cdmi.txt"):
+    w = line.split()
+    ran[w[0]] = (int(w[2]), float(w[3].rstrip("s")))
+c = collections.Counter()
+bysize = collections.defaultdict(list)
+for name, (code, s) in ran.items():
+    words = name[len("c_dmi_"):].split("_")
+    zero = {w for w in words if w in DIFFERENCES}
+    (m,) = [MINOR[w] for w in words if w in MINOR]
+    text = open(name + ".out").read()
+    best = re.search(r", best: \[([^\]]*)\]", text)
+    c[(code, m in shape(zero), best.group(1) if best else "-")] += 1
+    bysize[len(zero)].append(s)
+print("(exit, minor's term zero by its z difference, best):", c)
+for k in sorted(bysize):
+    v = bysize[k]
+    print("differences", k, "ran", len(v), "seconds", min(v), "to", max(v), "mean", round(sum(v) / len(v), 1))
+allnames = [l.strip() for l in open("names_dmi.txt") if l.strip()]
+left = ["c_dmi_" + n for n in allnames if "c_dmi_" + n not in ran]
+print("left", len(left))
+print("left by differences", sorted(collections.Counter(len([w for w in n.split("_") if w in DIFFERENCES]) for n in left).items()))
+print("all by differences", sorted(collections.Counter(len([w for w in n.split("_") if w in DIFFERENCES]) for n in allnames).items()))
+print("sum seconds ran", round(sum(s for _, s in ran.values()), 1))
+if len(sys.argv) > 2:
+    with open(sys.argv[2], "w") as f:
+        for n in sorted(left, key=lambda n: -len([w for w in n.split("_") if w in DIFFERENCES])):
+            f.write(n + ".g\n")
+```
+
+`summarize_sets.py`, run in `g` once every run was done, prints each figure
+above:
+
+```python
+"""Count the sets past 464.26, read every run of the 45 branches and the 414
+dmi_ sets, and group them by what they printed.
+
+First, each set of one or more differences and one or two minors past
+464.26's 27, counted by the first of every_branch's tests that leaves it out,
+or as a branch; the branches must be the names in names.txt. For each dm_
+branch: the count of roundings on its longest path, worked out from the set
+alone; whether a cancelled term is left alive; the exit codes of its script,
+-Bcoq and coqc; the bounds Gappa printed for (y - Ex) / P6 and for P against
+Phat; each control's exit and the goal it failed at, with its best; its dmq_
+exit. Then the branches that keep block 1's |t1 + t2| >= 1b-1074, naming each
+where neither t1 nor t2 is zero, Gappa's "assumed to be nonzero" lines in each
+dm_ run, and the outputs that say "not trivially". For the dmi_ sets: their
+exits, and their controls' exits and the goal and best each failed at, split
+by whether the minor's z difference is zero and by what the control asks of
+the minor and its term.
+"""
+import collections
+import glob
+import itertools
+import os
+import re
+
+DIFFERENCES = ["adx", "ady", "adz", "bdx", "bdy", "bdz", "cdx", "cdy", "cdz"]
+PRODUCT = {
+    1: ("bdx", "cdy", 1),
+    2: ("cdx", "bdy", 1),
+    3: ("cdx", "ady", 2),
+    4: ("adx", "cdy", 2),
+    5: ("adx", "bdy", 3),
+    6: ("bdx", "ady", 3),
+}
+MINOR = {"first": 1, "second": 2, "third": 3}
+NAME = {1: "first", 2: "second", 3: "third"}
+Z_OF = {1: "adz", 2: "bdz", 3: "cdz"}
+
+
+def main():
+    names = [l.strip() for l in open("names.txt") if l.strip()]
+    classify(names)
+    run, coq = exits("run_dm.txt")
+    c, _ = exits("run_c.txt")
+    groups = collections.defaultdict(list)
+    for pair in names:
+        zero, cancelled = split(pair)
+        name = f"dm_{pair}"
+        text = open(f"{name}.out").read()
+        y = bound(text, "(y - Ex) / P6 in")
+        p = bound(text, "P -/ Phat in")
+        if p == "-":
+            p = bound(text, "(P - Phat) / Phat in") + " as (P - Phat) / Phat"
+        c6, c5 = f"c_{name}_6u", f"c_{name}_5u"
+        row = (
+            longest_path(zero, cancelled),
+            kind(zero, cancelled),
+            run[name][0],
+            coq.get(name, "none")[:2],
+            y,
+            p,
+            c[c6][0],
+            failed(open(f"{c6}.out").read()),
+            c[c5][0],
+            failed(open(f"{c5}.out").read()),
+            c.get(f"dmq_{pair}", ("no dmq",))[0],
+        )
+        groups[row].append(pair)
+    print("roundings | kind | exit | (-Bcoq, coqc) | (y-Ex)/P6 | P vs Phat | 6u exit, failed | 5u exit, failed | dmq exit | count")
+    for row, members in sorted(groups.items(), key=lambda kv: tuple(str(x) for x in kv[0])):
+        print(" | ".join(str(x) for x in row), "|", len(members))
+        print("    " + " ".join(members))
+    print("dm total", sum(len(m) for m in groups.values()))
+    keep = [pair for pair in names if "|t1 + t2| >= 1b-1074" in open(f"dm_{pair}.g").read()]
+    print("dm keeping |t1 + t2| >= 1b-1074:", len(keep))
+    for pair in keep:
+        zero, cancelled = split(pair)
+        zeros = dead_and_shape(zero)[1] | cancelled
+        if 1 not in zeros and 2 not in zeros:
+            print("    t1 and t2 both not zero in", pair, "with t3 zero:", 3 in zeros)
+    warnings = [open(f"dm_{pair}.out").read().count("assumed to be nonzero") for pair in names]
+    print("dm 'assumed to be nonzero' lines", min(warnings), "to", max(warnings))
+    trivially = [p for p in glob.glob("*.out") if "not trivially" in open(p).read()]
+    print("outputs saying 'not trivially'", len(trivially), "of", len(glob.glob("*.out")))
+    dm = [v for k, v in run.items() if k.startswith("dm_")]
+    cq = [v for k, v in coq.items() if k.startswith("dm_")]
+    print("dm gappa seconds", min(s for _, s in dm), "to", max(s for _, s in dm))
+    print("dm coq seconds", min(r[2] for r in cq), "to", max(r[2] for r in cq),
+          "lines", min(r[3] for r in cq), "to", max(r[3] for r in cq),
+          "hints", min(r[4] for r in cq), "to", max(r[4] for r in cq))
+    kinds = collections.Counter()
+    for k, v in c.items():
+        kinds[("dmq" if k.startswith("dmq_") else "c_dm " + k.rsplit("_", 1)[1], "exit", v[0])] += 1
+    for key in sorted(kinds):
+        print("control", *key, "count", kinds[key])
+
+    di, dq = exits("run_dmi.txt")
+    print("dmi runs", len(di), "exits", collections.Counter(v[0] for v in di.values()),
+          "seconds", min(v[1] for v in di.values()), "to", max(v[1] for v in di.values()))
+    print("dmi coq", len(dq), "(-Bcoq, coqc) exits", collections.Counter(v[:2] for v in dq.values()),
+          "seconds", min(v[2] for v in dq.values()), "to", max(v[2] for v in dq.values()),
+          "lines", min(v[3] for v in dq.values()), "to", max(v[3] for v in dq.values()),
+          "hints", min(v[4] for v in dq.values()), "to", max(v[4] for v in dq.values()))
+    ci, _ = exits("run_cdmi.txt")
+    if ci:
+        what = collections.Counter()
+        for k, v in ci.items():
+            zero, (m,) = split(k[len("c_dmi_"):])
+            z = "z difference zero" if Z_OF[m] in zero else "z difference not zero"
+            text = open(f"{k}.g").read()
+            hypotheses = text[: text.index("\n->\n")]
+            asked = (f"|t{m}| >= 1b-1022" in hypotheses, f"|{NAME[m]}| >= 1b-1074" in hypotheses)
+            what[(v[0], z) + asked + failed(open(f"{k}.out").read())] += 1
+        print("c_dmi runs", len(ci), "seconds", min(v[1] for v in ci.values()), "to", max(v[1] for v in ci.values()))
+        for key in sorted(what, key=str):
+            print("c_dmi exit, minor's z difference, |t| >= 1b-1022 asked, |minor| >= 1b-1074 asked, failed at, best",
+                  key, what[key])
+
+
+def classify(names):
+    """Count every set past 464.26's 27 by the first of every_branch's tests
+    that leaves it out, and check that the ones none leaves out are names."""
+    count = collections.Counter()
+    branches = []
+    for n in range(1, 10):
+        for zero in itertools.combinations(DIFFERENCES, n):
+            dead, shape = dead_and_shape(set(zero))
+            for c in (1, 2):
+                if n == 1 and c == 1:
+                    continue
+                for minors in itertools.combinations((1, 2, 3), c):
+                    hit = [len({2 * m - 1, 2 * m} & dead) for m in minors]
+                    if shape == {1, 2, 3}:
+                        count["y zero by the differences"] += 1
+                    elif 1 in hit:
+                        count["a minor that cannot cancel"] += 1
+                    elif 2 in hit:
+                        count["a minor zero by its products already"] += 1
+                    elif shape | set(minors) == {1, 2, 3}:
+                        count["y zero by cancelling"] += 1
+                    else:
+                        count["branch"] += 1
+                        branches.append("_".join(list(zero) + [NAME[m] for m in minors]))
+    assert branches == names, "the branches are not names.txt"
+    print("sets past 464.26", sum(count.values()))
+    for key in ("y zero by the differences", "a minor that cannot cancel",
+                "a minor zero by its products already", "y zero by cancelling", "branch"):
+        print("sets:", key, count[key])
+
+
+def dead_and_shape(zero):
+    """The products with a zero factor, and the terms zero by their shape."""
+    dead = {k for k, (f, g, _) in PRODUCT.items() if f in zero or g in zero}
+    shape = {m for m in (1, 2, 3) if Z_OF[m] in zero or {2 * m - 1, 2 * m} <= dead}
+    return dead, shape
+
+
+def exits(path):
+    out = {}
+    coq = {}
+    if not os.path.exists(path):
+        return out, coq
+    for line in open(path):
+        w = line.split()
+        if w[1] == "exit":
+            out[w[0]] = (int(w[2]), float(w[3].rstrip("s")))
+        elif w[1] == "coq":
+            coq[w[0]] = (int(w[4]), int(w[7]), float(w[8].rstrip("s")), int(w[10]), int(w[12]))
+    return out, coq
+
+
+def split(name):
+    words = name.split("_")
+    return {w for w in words if w in DIFFERENCES}, {MINOR[w] for w in words if w in MINOR}
+
+
+def bound(text, start):
+    for line in text.split("\n"):
+        if line.strip().startswith(start):
+            return upper(line)
+    return "-"
+
+
+def upper(line):
+    found = re.findall(r"\{(-?[\d.]+(?:e[-+]?\d+)?),", line)
+    if found:
+        return found[-1]
+    return line.rsplit(",", 1)[1].strip(" ]")
+
+
+def longest_path(zero, cancelled):
+    """Roundings on the longest path through a term of y, or through a
+    cancelled minor's term of Ex where y has a zero."""
+    dead, shape = dead_and_shape(zero)
+    zeros = shape | cancelled
+    longest = 0
+    for k, (f, g, m) in PRODUCT.items():
+        if k in dead or m in shape:
+            continue
+        if m in cancelled:
+            n = 3
+        else:
+            other = 2 * m if k == 2 * m - 1 else 2 * m - 1
+            n = 3 + 1 + (other not in dead) + 1
+            if m in (1, 2) and (3 - m) not in zeros:
+                n += 1
+        longest = max(longest, n)
+    return longest
+
+
+def kind(zero, cancelled):
+    _, shape = dead_and_shape(zero)
+    alive = cancelled - shape
+    zeros = sorted(shape | cancelled)
+    if not alive:
+        return "every cancelled term zero by its shape"
+    return f"t{min(alive)} cancelled, zero terms {zeros}"
+
+
+def failed(text):
+    m = re.search(r"\n  (\S.*), best: \[([^\]]*)\]", text)
+    return (m.group(1), m.group(2)) if m else ("-", "-")
+
+
+main()
+```
+
+**What this leaves.**
+
+- The row that moves the scripts into `proofs/gappa/`, Q2700, takes
+  `make_minors_zero_with_differences.py` and what it writes too. It already
+  waits on Q2862.
+- Nothing more for `t1 + t2` cancelling while neither is zero (Q2863) in
+  these sets: block 1's hypothesis on it costs nothing here, as above.
+- Why `P −/ Phat` is wider in the new ones, as 464.26 left it. No row: each
+  branch proves at the code's `B` either way, and nothing reads the answer.
+- With 464.26 and this, every set of one or more differences at zero with one
+  or two minors cancelling is run, or shown to leave `y` zero or to be another
+  set's branch. Of the zero branches block 1 assumes away, Q2863's `t1 + t2`
+  cancelling with all three terms not zero is left, and the step from `y` to
+  the sign is still on paper (464.6). No new row.
