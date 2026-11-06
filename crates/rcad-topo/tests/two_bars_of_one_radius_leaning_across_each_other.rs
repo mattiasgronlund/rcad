@@ -37,24 +37,30 @@ fn the_piece_two_bars_of_one_radius_share_is_the_same_either_way_round() {
     the_same_volume(upright_first, leaning_first, "the intersection");
 }
 
-/// The two bars unite to the same solid whichever is handed in first.
+/// The two bars unite to the same solid whichever is handed in first: each
+/// pipe with its hole, and the four caps.
+///
+/// The leaning bar reaches past the planes `z = 11` and `z = −1` of the
+/// upright bar's caps, and each plane cut an end of the leaning pipe off as a
+/// face of its own, so the union came back with 8 faces until a pipe whose
+/// rims go right round was let close them up beside the hole (Q2726).
 #[test]
 fn two_bars_of_one_radius_unite_to_the_same_solid_either_way_round() {
     let whole = UPRIGHT + LEANING - what_the_two_bars_share(1000);
-    let upright_first = answer(Rule::Union, true, whole, 8);
-    let leaning_first = answer(Rule::Union, false, whole, 8);
+    let upright_first = answer(Rule::Union, true, whole, 6);
+    let leaning_first = answer(Rule::Union, false, whole, 6);
     the_same_volume(upright_first, leaning_first, "the union");
 }
 
 /// Each bar less the other answers, and measures its own volume less what the
-/// two share. Unlike the radius-3-against-2 pair, the two differences do not
-/// come back with the same face count: the upright bar less the leaning one
-/// keeps 4 faces, the leaning bar less the upright one keeps 6.
+/// two share, in 4 faces: its pipe with its hole, its two caps, and the dent.
+/// The leaning bar less the upright one came back with 6, its pipe's ends cut
+/// off as the union's were (Q2726).
 #[test]
 fn each_bar_of_one_radius_less_the_other_answers() {
     let shared = what_the_two_bars_share(1000);
     answer(Rule::Difference, true, UPRIGHT - shared, 4);
-    answer(Rule::Difference, false, LEANING - shared, 6);
+    answer(Rule::Difference, false, LEANING - shared, 4);
 }
 
 /// The upright bar's volume, `π · 2² · 12`.
