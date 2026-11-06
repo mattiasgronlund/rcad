@@ -2134,8 +2134,7 @@ impl<'f> Arrangement<'f> {
     /// other, and is where `partner` crosses the curve those two share: the
     /// one place where the three meet that comes within what writing the
     /// corner down cost ([`what_writing_the_corner_down_cost`]), lying wholly
-    /// inside that room, or, where no place comes that near, the touch at the
-    /// corner that rounding split into every place there is.
+    /// inside that room and sharing a point with the corner's own box.
     ///
     /// [`what_writing_the_corner_down_cost`]: super::bake::what_writing_the_corner_down_cost
     ///
@@ -2180,32 +2179,10 @@ impl<'f> Arrangement<'f> {
     /// by the same room, so no second node stands a rounding from it.
     ///
     /// **Only one place may come that near.** Where two do, as where `partner`
-    /// grazes the curve within the room, nothing here says which the corner
-    /// is, and it is asked as before. The place need not share a point with
-    /// the corner's box: inside the room it is the corner moved along the
-    /// curve no further than writing it down may have, which is the argument
-    /// above, and [`Arrangement::the_corner_that_is_this_place`] folds it in
-    /// the same way. Told apart from the corner instead, it left the corner
-    /// and every meet through that place a rounding apart on the crossings
-    /// through both. A bar of radius 3 up `z` from `(10, 10, 0)`, capped by
-    /// the plane through `(13, 10, 1)` with a normal that leans along `y`
-    /// too, and turned about `z`, has its seam corner stored an ulp off a
-    /// block's floor `z = 1`, which crosses the rim there, and the place
-    /// boxed at `z = 1` exactly. The meet of that floor, the cap and the plane
-    /// through the axis and the corner was then a rounding from the corner on
-    /// the line of the two, and nothing put them in order (Q3228).
-    ///
-    /// **Where no place comes that near, the touch rounding split is the
-    /// corner** ([`Arrangement::a_touch_the_rounding_split_reaches`], whose
-    /// argument this is). A plane touching the curve at the corner, written
-    /// down a rounding off touching, crosses it at two places far along it
-    /// either side, and the curve stays within the room of the plane from the
-    /// corner to each. The same bar capped with the normal `(−0.1, 0, 1)` has
-    /// its rim at its highest just at the seam corner, at `z = 1`; the block's
-    /// floor met it about `1.1e−7` either side, the corner was stored at
-    /// `(13, 10, 1.0000000000000002)`, and every fuse was refused on the order
-    /// along the line of the cap and `y = 10` (Q3228). Every place must be
-    /// that touch, so that none is left a node beside the corner.
+    /// grazes the curve, nothing says which the corner is, and it is asked as
+    /// before. The box of the place must share a point with the corner's, so
+    /// a crossing a rounding past a corner the arithmetic can tell apart from
+    /// it still is told apart.
     ///
     /// **Every face round the corner asks the same three in the same order**,
     /// the two round it and `partner` sorted by name, so they all take the
@@ -2223,8 +2200,10 @@ impl<'f> Arrangement<'f> {
         if !one_surface(one, &self.surface) && !one_surface(two, &self.surface) {
             return false;
         }
-        let cost = super::bake::what_writing_the_corner_down_cost(corner.point.enclosure());
-        let room = super::bake::grown_by(corner.point, cost);
+        let room = super::bake::grown_by(
+            corner.point,
+            super::bake::what_writing_the_corner_down_cost(corner.point.enclosure()),
+        );
         let side = side_of_surface(partner, room);
         if side == Decision::Pos || side == Decision::Neg {
             return false;
@@ -2242,21 +2221,14 @@ impl<'f> Arrangement<'f> {
             .iter()
             .copied()
             .filter(|&place| boxes_overlap(room, place));
-        match (reaching.next(), reaching.next()) {
-            (Some(place), None) => holds_every_point_of(room, place),
-            (None, None) => {
-                !places.is_empty()
-                    && places.iter().all(|&place| {
-                        a_touch_of_three_the_rounding_split_reaches(
-                            three,
-                            corner.point,
-                            place,
-                            cost,
-                        )
-                    })
-            }
-            (Some(_), Some(_)) | (None, Some(_)) => false,
-        }
+        let (Some(place), None) = (reaching.next(), reaching.next()) else {
+            return false;
+        };
+        let (meet, room) = (place.enclosure(), room.enclosure());
+        boxes_overlap(corner.point, place)
+            && (0..3).all(|axis| {
+                room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
+            })
     }
 
     /// Whether a corner of the face is on one crossing: on its partner surface,
@@ -4426,16 +4398,23 @@ impl<'f> Arrangement<'f> {
         place: PredicatePoint,
         room: f64,
     ) -> bool {
-        a_touch_of_three_the_rounding_split_reaches(
-            [
-                self.surface,
-                self.crossings[on[0]].partner,
-                self.crossings[on[1]].partner,
-            ],
-            corner,
-            place,
-            room,
-        )
+        let three = [
+            self.surface,
+            self.crossings[on[0]].partner,
+            self.crossings[on[1]].partner,
+        ];
+        let Some(radius) = the_smallest_radius_of_a_curve_among(three) else {
+            return false;
+        };
+        let reach = (8.0 * radius * room).sqrt();
+        holds_every_point_of(super::bake::grown_by(corner, reach), place)
+            && three.iter().all(|surface| {
+                every_point_between_lies_within(
+                    surface,
+                    [corner.enclosure(), place.enclosure()],
+                    room,
+                )
+            })
     }
 
     /// A node where a cut surface touches the face's own at one point, when
@@ -7477,8 +7456,8 @@ impl<'f> Arrangement<'f> {
         other: usize,
         which: TheOtherNodesSurface,
     ) -> Option<Decision> {
-        let ((surfaces, _), (named_too, _)) = (
-            self.the_one_meet_it_stands_for(on_the_line)?,
+        let (surfaces, (named_too, _)) = (
+            self.the_meet_a_node_on_the_line_is(on_the_line, which)?,
             self.the_one_meet_it_stands_for(other)?,
         );
         let (line, round) = two_planes_and_a_quadric(&surfaces)?;
@@ -7554,6 +7533,56 @@ impl<'f> Arrangement<'f> {
                 Decision::Neg
             }),
             Decision::Undecidable { .. } | _ => None,
+        }
+    }
+
+    /// The three surfaces `node` is read as the one meet of, for
+    /// [`Arrangement::lies_forward_of_the_other`]: the meet it stands for
+    /// ([`Arrangement::the_one_meet_it_stands_for`]), and, for a plane against
+    /// a pipe, a corner of the input that stands for one meet and no other,
+    /// which [`Arrangement::the_corner_that_is_this_place`] found the corner
+    /// is or [`Arrangement::fold_the_nodes`] folded into it (`Node::also`).
+    ///
+    /// **The corner is read as that meet because it already was.** The fold
+    /// took the meet as this point, so ordering the meet orders the corner,
+    /// and the side of the other node's plane is worked out from the surfaces
+    /// alone, the corner's box saying only which of the line's two meets with
+    /// the pipe it is. A bar of radius 3 up `z` from `(10, 10, 0)`, capped by
+    /// the plane through `(13, 10, 1)` with the normal `(−0.1, 0, 1)`, has its
+    /// rim at its highest at the seam corner, stored at `(13, 10,
+    /// 1.0000000000000002)`, and the meet of the cap, the seam plane `y = 10`
+    /// and the pipe folded into it. A block whose floor is `z = 1` meets the
+    /// cap's edge line `y = 10` in a box `[12.999999999999998, 13] × 10 × 1`,
+    /// and every fuse of the two was refused on the order of the two along
+    /// that line (Q3228,
+    /// `tests/a_bar_with_a_leaning_cap_cut_beside_its_rim_corner.rs`).
+    ///
+    /// **Only after the policy**, as every plane against a pipe is
+    /// ([`TheOtherNodesSurface::APlaneAgainstAPipe`]).
+    fn the_meet_a_node_on_the_line_is(
+        &self,
+        node: usize,
+        which: TheOtherNodesSurface,
+    ) -> Option<[Surface; 3]> {
+        match (&self.nodes[node], which) {
+            (Node { vertex: None, .. }, _) => Some(self.the_one_meet_it_stands_for(node)?.0),
+            (
+                Node {
+                    vertex: Some(_),
+                    made_of: None,
+                    also,
+                    half_way_round: false,
+                    ..
+                },
+                TheOtherNodesSurface::APlaneAgainstAPipe,
+            ) => match also[..] {
+                [(three, _)] => Some(three),
+                _ => None,
+            },
+            (
+                Node { .. },
+                TheOtherNodesSurface::AQuadric | TheOtherNodesSurface::APlaneAgainstAPipe,
+            ) => None,
         }
     }
 
@@ -18934,27 +18963,6 @@ fn the_start_is_a_rounding_off(
 fn holds_every_point_of(outer: PredicatePoint, inner: PredicatePoint) -> bool {
     let (outer, inner) = (outer.enclosure(), inner.enclosure());
     (0..3).all(|axis| outer[axis].lo() <= inner[axis].lo() && inner[axis].hi() <= outer[axis].hi())
-}
-
-/// Whether `place`, where `three` meet, is the touch at `corner` that rounding
-/// split, as [`Arrangement::a_touch_the_rounding_split_reaches`] reads it:
-/// `three` are planes, balls and pipes, one of them at least curved, `place`
-/// lies within `√(8·r·room)` of the corner, and every point between the
-/// corner's box and `place`'s lies within `room` of each of the three.
-fn a_touch_of_three_the_rounding_split_reaches(
-    three: [Surface; 3],
-    corner: PredicatePoint,
-    place: PredicatePoint,
-    room: f64,
-) -> bool {
-    let Some(radius) = the_smallest_radius_of_a_curve_among(three) else {
-        return false;
-    };
-    let reach = (8.0 * radius * room).sqrt();
-    holds_every_point_of(super::bake::grown_by(corner, reach), place)
-        && three.iter().all(|surface| {
-            every_point_between_lies_within(surface, [corner.enclosure(), place.enclosure()], room)
-        })
 }
 
 /// The smallest radius among the balls and pipes of `three`, where the rest
