@@ -160,6 +160,30 @@ verifier's own deeper checks of a lane's specific claims — checking out one
 named commit to rerun one test, say — rather than a plain repeat of the
 recipe's own step, so they are not counted here.
 
+**Recounted 2026-11-06** (Q2994), the same way, over the `lanes` runs
+launched after `9c3199b5e` reached main (2026-10-30T00:42Z), the first
+at 2026-10-30T01:23Z and the last at 2026-11-06T09:48Z: 220 runs, of which
+148 have a verifier transcript. A run reads `lanes.js` when it is called, so
+these verifiers got the prompt whose no-recipe sentence points at the
+paragraph above. Of the 148, 145 called `just verify-lane` and 3 did not.
+**None of the 145 (0 of 145) ran `just lines-that-run` by hand**, before the
+recipe or after it, against 244 of 933. 3 of the 148 ran the gate again
+directly (`just pre-gate gate-lane` or `just gate quiet`), against 9 of 933; the count
+does not say whether those 3 are among the 3 that skipped the recipe.
+
+The script (`recount.py`, in a scratchpad a reboot clears) loads with
+`row_time.load()`, reads each `verifier` agent with `read_transcript()`, and
+looks at its Bash calls in order: a `just verify-lane` call sets "called", a
+call naming `lines-that-run` that is not one sets "by hand". Run on the old
+window (2026-10-03 to 2026-10-24) the same script finds 723 verifier
+transcripts, not 961, with 217 by hand and 210 before the recipe: transcripts
+have been lost since the first count, so the old rate cannot be re-derived
+here, and the rates compare as 0 of 145 against 244 of 933. The window
+between the two (2026-10-25 to 2026-10-30) still gives 50 of 159 by hand,
+which fits the old prompt. So the rate fell from about a quarter to none, and the
+change that fell on `9c3199b5e` is the only one this count can see; it does not
+isolate that edit from other changes to `verifier.md` or `lanes.js` in the same week.
+
 ### 385.3 What it fills, and what it leaves
 
 Its JSON holds the `verdictSchema` fields it can decide, and two of its own:
