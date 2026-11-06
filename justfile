@@ -127,6 +127,8 @@ gate_steps := "check-plugins \
     check-where-the-work-is \
     check-src-selftest \
     check-recipe-selftest \
+    check-proofs-selftest \
+    check-proofs \
     check-questions-selftest \
     check-corpus \
     check-corpus-selftest \
@@ -367,6 +369,8 @@ gate_reusable_steps := "check \
     check-claim-section-selftest \
     check-src-selftest \
     check-recipe-selftest \
+    check-proofs-selftest \
+    check-proofs \
     check-corpus-selftest \
     check-coverage-selftest \
     check-fuzz-overnight-selftest \
@@ -6368,8 +6372,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "65" ]; then \
-        echo "found $n check-* recipes, expected 65"; \
+    if [ "$n" != "67" ]; then \
+        echo "found $n check-* recipes, expected 67"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -7502,6 +7506,177 @@ check-src-selftest:
     if $j src 'fn beta' >/dev/null 2>&1; then
         echo "src accepted something that is not an item name"; exit 1
     fi
+
+# Prove the Gappa scripts in `proofs/gappa/`, each or the one named, and stamp
+# what was proved (docs/decisions.d/464 §464.10 3 c).
+#
+#     just prove-bounds              every script
+#     just prove-bounds block1.g     one
+#
+# For each it runs `gappa`, each of the script's controls `c_<name>_<what>.g`,
+# each of which must fail, `gappa -Bcoq`, §464.10 4's transform, which asks
+# Coq's `field` to prove each hint, and `coqc`, all under §464.4's nix pin.
+# Then it writes `<name>.stamp`: the script's and its controls' hashes, each
+# restated item's code hash, the pin, and how many hints and nonzero facts
+# the proof stands on, as `Print Assumptions` lists them.
+#
+# **It refuses to stamp a script whose restated Rust moved since the commit its
+# `# restates:` line names.** Stamping it anyway would record new code against
+# an old reading, and hide the drift `check-proofs` is there to show. Read the
+# script against the code as it is, then move the line's commit.
+#
+# Not a gate step: it needs nix, which CI has not, and 583 MiB of Coq the
+# first time (§464.10 3 c). `check-proofs` is the gate's half.
+[doc("Prove the Gappa scripts in proofs/gappa/ under the nix pin and stamp them.")]
+prove-bounds *names:
+    python3 proofs/bounds.py prove {{ names }}
+
+# The gate's half of `prove-bounds` (docs/decisions.d/464 §464.10 3 d). For each
+# script in `proofs/gappa/` it hashes the script and its controls, and each
+# item of Rust its `# restates:` lines name, by `just src`'s extent with every
+# `//` line and blank line taken out and white space made one space, so a doc
+# comment moving does not fire it. It fails, naming the script and `just
+# prove-bounds <script>`, where a hash or the pin differs from the stamp, a
+# script has no stamp, or an item is not found. It reads the working tree only
+# and needs no nix and no history, since CI checks out one commit.
+#
+# What it misses: a change to an item no header names, such as a helper
+# `on_floats` calls, and a script that restated its Rust wrong when it was
+# written. It compares the code with the code, never with the script.
+[doc("Fail when a Gappa script or the Rust it restates no longer matches its stamp.")]
+check-proofs:
+    python3 proofs/bounds.py check
+
+# Proves `check-proofs` against a scratch copy of the proofs and the files they
+# restate, so it stays proven whatever the real scripts are. Each case changes
+# one thing and asks for the verdict §464.10 3 d gives it: a restated item's
+# code and a script fail, and a comment inside the item passes. The other cases
+# of 3 d fail too: a control changed, the pin moved, a stamp gone, an item
+# renamed. And each item's extent is `just src`'s, read the same way, since
+# that is what the check claims to hash.
+[private]
+check-proofs-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root=$(pwd)
+    dir=$(mktemp -d)
+    trap 'rm -rf "$dir"' EXIT
+    repo="$dir/repo"
+    restated=$(grep -h '^# restates: ' proofs/gappa/*.g | awk '{ print $3 }' | sort -u)
+    [ -n "$restated" ] || { echo "no script in proofs/gappa/ has a restates line"; exit 1; }
+
+    fresh() {
+        local file
+        rm -rf "$repo"
+        mkdir -p "$repo/proofs"
+        cp proofs/bounds.py proofs/gappalib18.nix "$repo/proofs/"
+        cp -r proofs/gappa "$repo/proofs/"
+        for file in $restated; do
+            mkdir -p "$repo/$(dirname "$file")"
+            cp "$file" "$repo/$file"
+        done
+    }
+    check() { python3 "$repo/proofs/bounds.py" check 2>&1; }
+    fails() {
+        local what="$1" script="$2" out
+        if out=$(check); then
+            echo "check-proofs passed $what"; echo "$out"; exit 1
+        fi
+        printf '%s\n' "$out" | grep -qF "$script: " \
+            || { echo "check-proofs failed $what without naming $script:"; echo "$out"; exit 1; }
+        printf '%s\n' "$out" | grep -qF "just prove-bounds $script" \
+            || { echo "check-proofs failed $what without naming just prove-bounds $script:"; echo "$out"; exit 1; }
+    }
+
+    fresh
+    out=$(check) || { echo "check-proofs fails on an unchanged copy of the tree:"; echo "$out"; exit 1; }
+
+    # The first restates line of the first script is the item every case
+    # below changes. A line put just under its definition is inside it.
+    script=$(grep -l '^# restates: ' proofs/gappa/*.g | grep -v '/c_' | head -1)
+    name=$(basename "$script")
+    read -r _ _ path item _ _ < <(grep -m1 '^# restates: ' "$script")
+    case "$path" in Cargo.lock) echo "$name's first restates line is a dependency; put an item first"; exit 1 ;; esac
+    case "$item" in *::*) echo "$name's first restates line names an Owner::name; put a bare name first"; exit 1 ;; esac
+    at=$(grep -n -m1 -E "(fn|const|struct|enum|static|type)[[:space:]]+$item\b" "$repo/$path" | cut -d: -f1)
+    [ -n "$at" ] || { echo "found no definition of $item in $path"; exit 1; }
+
+    sed -i "${at}a\\        // a comment the selftest puts in $item" "$repo/$path"
+    out=$(check) || { echo "check-proofs failed on a comment put in $item:"; echo "$out"; exit 1; }
+    sed -i "${at}G" "$repo/$path"
+    out=$(check) || { echo "check-proofs failed on a blank line put in $item:"; echo "$out"; exit 1; }
+
+    fresh
+    sed -i "${at}a\\        let selftest = 0;" "$repo/$path"
+    fails "a line of code put in $item" "$name"
+
+    fresh
+    sed -i "${at}s/$item/${item}_renamed/" "$repo/$path"
+    fails "$item renamed, so not found" "$name"
+
+    fresh
+    printf '%s\n' '# a line the selftest adds' >>"$repo/proofs/gappa/$name"
+    fails "a changed script" "$name"
+
+    fresh
+    control=$(ls proofs/gappa/c_"${name%.g}"_*.g 2>/dev/null | head -1)
+    if [ -n "$control" ]; then
+        printf '%s\n' '# a line the selftest adds' >>"$repo/$control"
+        fails "a changed control" "$name"
+        fresh
+    fi
+    printf '%s\n' '# a line the selftest adds' >>"$repo/proofs/gappalib18.nix"
+    fails "a moved pin" "$name"
+
+    fresh
+    rm "$repo/proofs/gappa/${name%.g}.stamp"
+    fails "a script with no stamp" "$name"
+
+    # `just src` takes a bare name, and for a name the file defines more than
+    # once it lists the places, as for plane.rs' `on_floats`. So an
+    # `Owner::name` is read at each place in turn, from a scratch repo holding
+    # the file with the name's other definitions renamed, and one of those
+    # reads must be the extent the check hashes.
+    src() { {{ just_executable() }} --justfile {{ justfile() }} --working-directory "$1" src "$2" "$3"; }
+    srcrepo="$dir/src"
+    git init -q "$srcrepo"
+    extents=0
+    qualified=0
+    for line in $(grep -h '^# restates: ' proofs/gappa/*.g | awk '$3 != "Cargo.lock" { print $3 "|" $4 }' | sort -u); do
+        file=${line%|*}
+        named=${line#*|}
+        bare=${named##*::}
+        got=$(python3 proofs/bounds.py extent "$file" "$named")
+        listed=$(src "$root" "$bare" "$file")
+        case "$listed" in
+        "  "*) ;;
+        *)
+            want=$(printf '%s\n' "$listed" | tail -n +2)
+            [ "$got" = "$want" ] || { echo "the extent check-proofs hashes for $file $named is not just src's:"; \
+                diff <(echo "$want") <(echo "$got") || true; exit 1; }
+            extents=$((extents + 1))
+            continue
+            ;;
+        esac
+        [ "$bare" != "$named" ] || { echo "$file defines $named more than once; name it as Owner::$named:"; \
+            echo "$listed"; exit 1; }
+        places=$(printf '%s\n' "$listed" | awk '{ n = split($1, f, ":"); print f[n] }')
+        found=""
+        for at in $places; do
+            mkdir -p "$srcrepo/$(dirname "$file")"
+            cp "$file" "$srcrepo/$file"
+            for other in $places; do
+                [ "$other" = "$at" ] || sed -i "${other}s/\b$bare\b/${bare}_elsewhere/" "$srcrepo/$file"
+            done
+            git -C "$srcrepo" add "$file"
+            if [ "$(src "$srcrepo" "$bare" "$file" | tail -n +2)" = "$got" ]; then found=$at; fi
+        done
+        [ -n "$found" ] || { echo "the extent check-proofs hashes for $file $named is none of just src's at these places:"; \
+            echo "$listed"; echo "$got"; exit 1; }
+        extents=$((extents + 1))
+        qualified=$((qualified + 1))
+    done
+    echo "check-proofs-selftest: a comment and a blank line in $item pass; its code, its name, $name, ${control:+a control, }the pin and a stamp fail; $extents extents are just src's, $qualified of them an Owner::name"
 
 # Which file `recipe` below reads. A variable so `check-recipe-selftest` can
 # point it at a fixture: the subject here is a justfile, and a selftest that
