@@ -315,7 +315,11 @@ impl Isometry {
     /// Where `point` ends up.
     ///
     /// Within [`Isometry::POINT_ROUNDOFF`] times the largest number involved of
-    /// where the true movement would put it.
+    /// where the true movement would put it, provided that largest number is
+    /// at least `2^-1022`, the smallest normal `f64`. Below that the products
+    /// fall into the subnormals: `(3 * 2^-1074, 0, 0)` turned by `PI/6` about z
+    /// lands about `1.8e15` times the bound off, and no `f64` is within the
+    /// bound of the true answer there (`docs/decisions.md` §464.35).
     ///
     /// **A turn of a cube does better than that, and something rests on it.**
     /// It moves each coordinate onto another and negates some, which rounds
@@ -1085,6 +1089,37 @@ mod tests {
         println!(
             "worst of {cases} coordinates used {:.1}% of the bound",
             worst * 100.0
+        );
+    }
+
+    /// The bound on [`Isometry::apply_to_point`] needs the largest number
+    /// involved to be at least `2^-1022`. Below that the products fall into the
+    /// subnormals and no `f64` is within the bound of the exact answer
+    /// (`docs/decisions.md` §464.35).
+    ///
+    /// Here a point at `3 * 2^-1074` is turned by a sixth of a half turn and
+    /// lands far past the bound, so the condition is not a formality.
+    #[test]
+    fn a_point_below_the_normal_range_turned_lands_far_past_the_roundoff() {
+        let point = Point::new(3.0 * 2f64.powi(-1074), 0.0, 0.0);
+        assert!(point.coordinates()[0] < f64::MIN_POSITIVE);
+        let movement = Isometry::rotation(&Axis::z(), core::f64::consts::FRAC_PI_6).unwrap();
+        let largest = point.largest_coordinate_magnitude();
+        let computed = movement.apply_to_point(point).coordinates();
+
+        // The exact oracle needs normal products, and the movement is linear,
+        // so everything is worked a factor of 2^1000 larger, which scales
+        // exactly.
+        let lift = 2f64.powi(1000);
+        let lifted = Point::new(point.coordinates()[0] * lift, 0.0, 0.0);
+        let exact = moved_without_rounding(&movement, lifted);
+        let worst = (0..3)
+            .map(|axis| magnitude_of(&sum(&exact[axis], &entry(-computed[axis] * lift))))
+            .fold(0.0f64, f64::max);
+
+        assert!(
+            worst > 1e13 * Isometry::POINT_ROUNDOFF * largest * lift,
+            "slipped only {worst}, which is not far past the bound for a largest number of {largest}"
         );
     }
 
