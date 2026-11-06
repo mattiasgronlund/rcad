@@ -14236,7 +14236,8 @@ Two hypotheses are left unproved:
   normal a constructor stores has that, but a stored axis direction is only
   within `64ε` of length one, so a component can be about `1 + 64u`, and
   `pipe.g` and `torus.g` take `da` from `vector.g` all the same. Q2826 asks the
-  like of a normal, and one of the rows 9 files asks it of an axis.
+  like of a normal, and one of the rows 9 files asks it of an axis. Done:
+  `vector.g` in 464.39, whose `20u` holds with each component up to `1 + 64u`.
 - `point.g` and `vector.g` are proved away from their zero branches and with
   their products normal, as 464.19's 5 says; Q2801, Q2825 and Q2802 run them
   there. Done: `point.g` in 464.34 and 464.35, whose `36u · L` holds with `L`
@@ -27287,7 +27288,8 @@ argument, a normal within `10u`, `5ε`, of length one does stay inside after
 one turn: `kept_10` proves it, Coq checks it, and its control fails (3, 4).
 That proof takes `vector.g`'s `20u` for components up to `1 + 5u`, where
 `vector.g` proves it only up to one, which is Q2831's question; the
-counterexample needs no such step. At `11u` the argument reaches
+counterexample needs no such step. 464.39 answers it: the `20u` holds up to
+`1 + 64u`, so `kept_10`'s proof stands. At `11u` the argument reaches
 `128.28u`, the four parts added, past `128u`.
 
 **A constructor's normal turned twice, one turn after the other, stays
@@ -27454,6 +27456,8 @@ within `vector.g`'s `20u` of the turn's own arithmetic, and the goal,
 `vector.g` proves its `20u` for components at most one, and these reach
 `1 + K/2`, which is Q2831's question. So a case that proves rests on
 Q2831, and one that fails does not: a larger `d` could only fail by more.
+464.39 answers it: the `20u` holds up to `1 + 64u`, so `kept_10`'s proof
+stands.
 
 `allkept.sh` (6) writes the cases and runs each at once through 464.13's
 `one.sh`, Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, `kept_10`
