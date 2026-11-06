@@ -22,11 +22,14 @@
 
 #![forbid(unsafe_code)]
 
+use nalgebra as na;
 use rcad_geom::{
     Axis, Cone, Cylinder, Isometry, Plane, Point, Sphere, Surface, Torus, Vector,
     where_a_corner_lands_after_moving,
 };
-use rcad_predicates::expansion::two_sum;
+use rcad_predicates::expansion::{
+    compress, expansion_sum, product_is_exact, scale_expansion, two_diff, two_sum,
+};
 use rcad_predicates::{Decision, Point as PredicatePoint, SideOfSurface};
 
 /// How far a surface is moved to make a control that must be decided.
@@ -284,6 +287,93 @@ fn a_corner_turned_about_an_axis_whose_shift_rounds_when_added_keeps_its_box() {
     assert_eq!(wobble.magnitude(), 0.0);
 }
 
+/// A corner far out on a wide cone, turned the way that takes it furthest off
+/// its cone, stays inside the box published for it.
+///
+/// A cone's `L` counts its apex and slope and not how far it reaches, so a
+/// corner on one can sit up to `2√3 · L` from its axis where a pipe's sits
+/// within `L`. A turn stored a little longer or shorter than length one moves
+/// such a corner off its cone by about `2 · (q·q − 1)` times that distance, and
+/// most when it is half a turn about the line halfway between the axis and the
+/// corner. On paper that share, the slips and the tilt come to about `290u`,
+/// past the `256u` the box is (§464.21's 3); this is the search for a corner
+/// that gets there (Q2830).
+///
+/// So the corners here sit as far from their axes as `L` lets them, and each is
+/// turned half a turn about that halfway line by the longest and the shortest
+/// turn a movement keeps without dividing it, as well as every placement
+/// [`every_way_of_placing_it`] makes. Not every corner is exactly on its cone,
+/// since a slope of `2√2` is not an `f64`, so what is measured is how much
+/// further off its cone the move took it, worked out exactly.
+#[test]
+fn a_moved_corner_far_out_on_a_wide_cone_stays_inside_the_box_published_for_it() {
+    let mut worst_turned_halfway = 0.0f64;
+    let mut worst_placed = 0.0f64;
+    let mut readings = 0usize;
+    for (corner, cone) in corners_far_out_on_wide_cones() {
+        let halfway = halfway_between_the_axis_and(corner, &cone);
+        let through = cone.apex() + (corner - cone.apex()) * 0.5;
+        let stretched = [true, false].map(|longer| {
+            halfway
+                .map(|about| half_a_turn_stored_off_length_one(about, through, longer))
+                .to_vec()
+        });
+        let movements = stretched.into_iter().flatten().map(|it| (true, it));
+        let placings = every_way_of_placing_it().into_iter().map(|it| (false, it));
+        for (turned_halfway, movement) in movements.chain(placings) {
+            let surface = Surface::Cone(cone);
+            let (box_it_is_in, wobble) =
+                where_a_corner_lands_after_moving(corner, [&surface], &movement)
+                    .expect("these corners and movements are all finite");
+            let placed = cone.transformed(&movement);
+            let moved = movement.apply_to_point(corner);
+            let further_off = (how_far_off_a_cone_exactly(&placed, moved)
+                - how_far_off_a_cone_exactly(&cone, corner))
+            .abs();
+            readings += 1;
+            if wobble.magnitude() == 0.0 {
+                assert_eq!(
+                    further_off, 0.0,
+                    "a move that rounds nothing took {corner:?} further off {cone:?}"
+                );
+                continue;
+            }
+            let share = further_off / wobble.magnitude();
+            if turned_halfway {
+                worst_turned_halfway = worst_turned_halfway.max(share);
+            } else {
+                worst_placed = worst_placed.max(share);
+            }
+
+            let placed = Surface::Cone(placed);
+            assert!(
+                !matches!(
+                    which_side_of(&placed, box_it_is_in),
+                    Decision::Pos | Decision::Neg
+                ),
+                "a moved corner was certified off {placed:?}: {box_it_is_in:?}"
+            );
+            assert!(
+                which_side_of(&moved_clear(&placed, wobble.magnitude()), box_it_is_in)
+                    .is_certified(),
+                "the same box against {placed:?} moved comfortably clear was not decided"
+            );
+        }
+    }
+    println!(
+        "moved corners on cones: {readings} readings; the furthest a move took one off its \
+         cone was {worst_turned_halfway:.3} of the bound published for it turned half a turn \
+         about the halfway line by a stretched turn, and {worst_placed:.3} placed any other way"
+    );
+    assert!(worst_turned_halfway < NO_CORNER_MAY_USE_ALL_OF_ITS_BOUND);
+    assert!(worst_placed < NO_CORNER_MAY_USE_ALL_OF_ITS_BOUND);
+    assert!(
+        worst_turned_halfway > worst_placed,
+        "half a turn by a stretched turn is built to take a corner furthest off its cone, and \
+         took one {worst_turned_halfway} of the bound against {worst_placed} for the rest"
+    );
+}
+
 /// A round bar's cap corner and a ball's pole, at sizes across sixteen orders of
 /// magnitude.
 ///
@@ -435,5 +525,190 @@ fn how_far_off(surface: &Surface, point: Point) -> f64 {
             (across.hypot(axial) - ring.tube_radius()).abs()
         }
         other => panic!("nothing here can measure against {other:?}"),
+    }
+}
+
+/// Corners on cones, each about as far from its cone's axis as `L` lets it be.
+///
+/// Two kinds. A cone about `z` with the corner `(119, 120)` across from the
+/// axis, `169` out, a Pythagorean triple, so the corner is exactly on it. And a
+/// cube's long diagonal, corner to corner, on the cone about another of the
+/// cube's diagonals, `2√2` times as far out as along: the corner is `√(32/3)`,
+/// about `3.27`, times `L` from the axis, of the most `2√3`, and half a turn
+/// about the line halfway between takes the cube onto itself, so the move
+/// adds nothing to `L`.
+fn corners_far_out_on_wide_cones() -> Vec<(Point, Cone)> {
+    let mut all = Vec::new();
+    for size in [1.0, 2f64.powi(30)] {
+        for slope in [1.0, 4.0] {
+            let up = 84.5 * size / slope;
+            let axis = Axis::new(
+                Point::new(-60.0 * size, -60.0 * size, -up),
+                Vector::new(0.0, 0.0, 1.0),
+            )
+            .expect("a direction");
+            all.push((
+                Point::new(59.0 * size, 60.0 * size, up),
+                Cone::new(axis, slope).expect("a slope"),
+            ));
+        }
+    }
+    for size in [4.0, 2f64.powi(30)] {
+        for [x, y, z] in [[1.0, 1.0, -1.0], [1.0, -1.0, 1.0], [-1.0, 1.0, 1.0]] {
+            let axis = Axis::new(Point::new(-size, -size, -size), Vector::new(x, y, z))
+                .expect("a direction");
+            all.push((
+                Point::new(size, size, size),
+                Cone::new(axis, 8f64.sqrt()).expect("a slope"),
+            ));
+        }
+    }
+    all
+}
+
+/// The two lines halfway between `cone`'s axis and the line from its apex
+/// through `corner`, one each way round.
+fn halfway_between_the_axis_and(corner: Point, cone: &Cone) -> [Vector; 2] {
+    let out = corner - cone.apex();
+    let out = (out * (1.0 / out.length())).components();
+    let along = cone.axis().direction();
+    let along = (along * (1.0 / along.length())).components();
+    [1.0, -1.0].map(|way| {
+        Vector::new(
+            out[0] + way * along[0],
+            out[1] + way * along[1],
+            out[2] + way * along[2],
+        )
+    })
+}
+
+/// Half a turn about `about` through `through`, stored as far from length one
+/// as a movement keeps a turn without dividing it by its length: as long as it
+/// can be when `longer`, as short as it can be otherwise.
+///
+/// Read in from nalgebra, which keeps a turn's bits while `q·q` as `f64` works
+/// it out is within `4ε` of one; `q·q` worked out exactly can sit further off.
+fn half_a_turn_stored_off_length_one(about: Vector, through: Point, longer: bool) -> Isometry {
+    let unit = (about * (1.0 / about.length())).components();
+    let [x, y, z] = through.coordinates();
+    let mut best: Option<(f64, Isometry)> = None;
+    for nudges in 0..17i64 * 17 * 17 {
+        let by = [nudges % 17 - 8, nudges / 17 % 17 - 8, nudges / 289 - 8];
+        let [i, j, k] = [0, 1, 2].map(|axis| nudged(unit[axis], by[axis]));
+        let largest = i.abs().max(j.abs()).max(k.abs());
+        if [i, j, k].iter().all(|it| *it == 0.0 || it.abs() == largest) {
+            // A turn of a cube, which a movement does exactly.
+            continue;
+        }
+        let turn = na::UnitQuaternion::new_unchecked(na::Quaternion::new(0.0, i, j, k));
+        let movement = Isometry::try_from(na::Isometry3::rotation_wrt_point(
+            turn,
+            na::Point3::new(x, y, z),
+        ))
+        .expect("a finite turn");
+        if movement.rotation_quaternion().map(f64::to_bits) != [0.0, i, j, k].map(f64::to_bits) {
+            // Divided by its length on the way in.
+            continue;
+        }
+        let off = [i, j, k]
+            .iter()
+            .fold(Exactly::of(-1.0), |sum, it| {
+                sum.plus(&Exactly::of(*it).times(&Exactly::of(*it)))
+            })
+            .nearest();
+        let off = if longer { off } else { -off };
+        if best.as_ref().is_none_or(|(most, _)| off > *most) {
+            best = Some((off, movement));
+        }
+    }
+    best.expect("some nudge of the turn keeps its bits").1
+}
+
+/// `value` moved `ulps` steps along the `f64`s, away from zero for a positive
+/// count. Zero stays zero.
+fn nudged(value: f64, ulps: i64) -> f64 {
+    if value == 0.0 {
+        value
+    } else {
+        f64::from_bits(value.to_bits().wrapping_add_signed(ulps))
+    }
+}
+
+/// How far `point` sits off `cone`, outward positive, worked out exactly up to
+/// the last division.
+///
+/// With `w` the stored axis direction, `|out × w|² − s²(out · w)²` is
+/// `|w|²(ρ − s|t|)(ρ + s|t|)`, `ρ` how far the point is from the axis and `t`
+/// how far along it, and `(ρ − s|t|) / √(1 + s²)` is how far it is off the
+/// cone. The first is summed exactly; the rest only divides it by numbers
+/// `f64` holds to a rounding.
+fn how_far_off_a_cone_exactly(cone: &Cone, point: Point) -> f64 {
+    let apex = cone.apex().coordinates();
+    let at = point.coordinates();
+    let out = [0, 1, 2].map(|axis| Exactly::difference(at[axis], apex[axis]));
+    let w = cone.axis().direction().components();
+    let across = [(1, 2), (2, 0), (0, 1)].map(|(a, b)| {
+        out[a]
+            .times(&Exactly::of(w[b]))
+            .minus(&out[b].times(&Exactly::of(w[a])))
+    });
+    let across_squared = across
+        .iter()
+        .fold(Exactly::of(0.0), |sum, it| sum.plus(&it.times(it)));
+    let up = (0..3).fold(Exactly::of(0.0), |sum, axis| {
+        sum.plus(&out[axis].times(&Exactly::of(w[axis])))
+    });
+    let up_by_slope = up.times(&Exactly::of(cone.slope()));
+    let gap = across_squared
+        .minus(&up_by_slope.times(&up_by_slope))
+        .nearest();
+    let length_squared = cone.axis().direction().length_squared();
+    let from_the_axis = (across_squared.nearest() / length_squared).sqrt();
+    let along = up.nearest().abs() / length_squared.sqrt();
+    gap / (length_squared * (from_the_axis + cone.slope() * along) * cone.slope().hypot(1.0))
+}
+
+/// A number held exactly, as `f64` entries that do not overlap, smallest first,
+/// the way `rcad_predicates::expansion` keeps one.
+struct Exactly(Vec<f64>);
+
+impl Exactly {
+    fn of(value: f64) -> Self {
+        Self(vec![value])
+    }
+
+    fn difference(a: f64, b: f64) -> Self {
+        let (rounded, lost) = two_diff(a, b);
+        Self(vec![lost, rounded])
+    }
+
+    fn plus(&self, other: &Self) -> Self {
+        let mut sum = vec![0.0; self.0.len() + other.0.len()];
+        let used = expansion_sum(&self.0, &other.0, &mut sum);
+        sum.truncate(used);
+        Self(sum)
+    }
+
+    fn minus(&self, other: &Self) -> Self {
+        self.plus(&Self(other.0.iter().map(|it| -it).collect()))
+    }
+
+    fn times(&self, other: &Self) -> Self {
+        other.0.iter().fold(Self(Vec::new()), |sum, &factor| {
+            assert!(
+                self.0.iter().all(|&entry| product_is_exact(entry, factor)),
+                "a product here fell below the normals, so it is not exact"
+            );
+            let mut scaled = vec![0.0; 2 * self.0.len()];
+            let used = scale_expansion(&self.0, factor, &mut scaled);
+            scaled.truncate(used);
+            sum.plus(&Self(scaled))
+        })
+    }
+
+    fn nearest(&self) -> f64 {
+        let mut packed = vec![0.0; self.0.len()];
+        let used = compress(&self.0, &mut packed);
+        packed[..used].iter().sum()
     }
 }
