@@ -19,6 +19,11 @@
 //!   the first two halves are not passing for a box a mile wide.
 //! - The worst share of [`CORNER_AFTER_MOVING_ROUNDOFF`] any of it actually uses
 //!   is measured and printed (§15.6).
+//! - A cone's corner can sit further from its axis than the cone's `L` counts,
+//!   so the cone gets a search of its own, aimed at the share no rounding
+//!   makes: a turn stored off length one, turning the corner half a turn about
+//!   the line halfway between its axis and it. The worst it finds is printed
+//!   too (§464.38).
 
 #![forbid(unsafe_code)]
 
@@ -307,20 +312,32 @@ fn a_corner_turned_about_an_axis_whose_shift_rounds_when_added_keeps_its_box() {
 /// further off its cone the move took it, worked out exactly.
 #[test]
 fn a_moved_corner_far_out_on_a_wide_cone_stays_inside_the_box_published_for_it() {
-    let mut worst_turned_halfway = 0.0f64;
+    // The worst share a stretched half turn took, beside `2 · |q·q − 1| · ρ` for
+    // the same reading, as a share of the same box.
+    let mut worst_turned_halfway = (0.0f64, 0.0f64);
     let mut worst_placed = 0.0f64;
+    let mut furthest_off_length_one = 0.0f64;
     let mut readings = 0usize;
     for (corner, cone) in corners_far_out_on_wide_cones() {
+        let out = corner - cone.apex();
+        let along = cone.axis().direction();
+        let from_the_axis = out.cross(along).length() / along.length();
         let halfway = halfway_between_the_axis_and(corner, &cone);
-        let through = cone.apex() + (corner - cone.apex()) * 0.5;
+        let through = cone.apex() + out * 0.5;
         let stretched = [true, false].map(|longer| {
             halfway
                 .map(|about| half_a_turn_stored_off_length_one(about, through, longer))
                 .to_vec()
         });
-        let movements = stretched.into_iter().flatten().map(|it| (true, it));
-        let placings = every_way_of_placing_it().into_iter().map(|it| (false, it));
-        for (turned_halfway, movement) in movements.chain(placings) {
+        for (off_length_one, _) in stretched.iter().flatten() {
+            furthest_off_length_one = furthest_off_length_one.max(off_length_one.abs());
+        }
+        let movements = stretched
+            .into_iter()
+            .flatten()
+            .map(|(off_length_one, it)| (Some(off_length_one), it));
+        let placings = every_way_of_placing_it().into_iter().map(|it| (None, it));
+        for (off_length_one, movement) in movements.chain(placings) {
             let surface = Surface::Cone(cone);
             let (box_it_is_in, wobble) =
                 where_a_corner_lands_after_moving(corner, [&surface], &movement)
@@ -339,10 +356,13 @@ fn a_moved_corner_far_out_on_a_wide_cone_stays_inside_the_box_published_for_it()
                 continue;
             }
             let share = further_off / wobble.magnitude();
-            if turned_halfway {
-                worst_turned_halfway = worst_turned_halfway.max(share);
-            } else {
-                worst_placed = worst_placed.max(share);
+            match off_length_one {
+                Some(off) if share > worst_turned_halfway.0 => {
+                    let drift = 2.0 * off.abs() * from_the_axis / wobble.magnitude();
+                    worst_turned_halfway = (share, drift);
+                }
+                Some(_) => {}
+                None => worst_placed = worst_placed.max(share),
             }
 
             let placed = Surface::Cone(placed);
@@ -360,10 +380,14 @@ fn a_moved_corner_far_out_on_a_wide_cone_stays_inside_the_box_published_for_it()
             );
         }
     }
+    let (worst_turned_halfway, its_drift) = worst_turned_halfway;
     println!(
         "moved corners on cones: {readings} readings; the furthest a move took one off its \
          cone was {worst_turned_halfway:.3} of the bound published for it turned half a turn \
-         about the halfway line by a stretched turn, and {worst_placed:.3} placed any other way"
+         about the halfway line by a stretched turn, where 2 |q.q - 1| rho is {its_drift:.3} of \
+         it, and {worst_placed:.3} placed any other way; the stretched turns' q.q was up to \
+         {:.2} eps off one, worked out exactly",
+        furthest_off_length_one / f64::EPSILON
     );
     assert!(worst_turned_halfway < NO_CORNER_MAY_USE_ALL_OF_ITS_BOUND);
     assert!(worst_placed < NO_CORNER_MAY_USE_ALL_OF_ITS_BOUND);
@@ -584,11 +608,16 @@ fn halfway_between_the_axis_and(corner: Point, cone: &Cone) -> [Vector; 2] {
 
 /// Half a turn about `about` through `through`, stored as far from length one
 /// as a movement keeps a turn without dividing it by its length: as long as it
-/// can be when `longer`, as short as it can be otherwise.
+/// can be when `longer`, as short as it can be otherwise. Handed back with its
+/// `q·q − 1`, worked out exactly and rounded once.
 ///
 /// Read in from nalgebra, which keeps a turn's bits while `q·q` as `f64` works
 /// it out is within `4ε` of one; `q·q` worked out exactly can sit further off.
-fn half_a_turn_stored_off_length_one(about: Vector, through: Point, longer: bool) -> Isometry {
+fn half_a_turn_stored_off_length_one(
+    about: Vector,
+    through: Point,
+    longer: bool,
+) -> (f64, Isometry) {
     let unit = (about * (1.0 / about.length())).components();
     let [x, y, z] = through.coordinates();
     let mut best: Option<(f64, Isometry)> = None;
@@ -616,12 +645,12 @@ fn half_a_turn_stored_off_length_one(about: Vector, through: Point, longer: bool
                 sum.plus(&Exactly::of(*it).times(&Exactly::of(*it)))
             })
             .nearest();
-        let off = if longer { off } else { -off };
-        if best.as_ref().is_none_or(|(most, _)| off > *most) {
+        let further = |than: f64| if longer { off > than } else { off < than };
+        if best.as_ref().is_none_or(|(most, _)| further(*most)) {
             best = Some((off, movement));
         }
     }
-    best.expect("some nudge of the turn keeps its bits").1
+    best.expect("some nudge of the turn keeps its bits")
 }
 
 /// `value` moved `ulps` steps along the `f64`s, away from zero for a positive
