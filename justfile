@@ -7597,6 +7597,7 @@ check-proofs-selftest:
     name=$(basename "$script")
     read -r _ _ path item _ _ < <(grep -m1 '^# restates: ' "$script")
     case "$path" in Cargo.lock) echo "$name's first restates line is a dependency; put an item first"; exit 1 ;; esac
+    case "$item" in *::*) echo "$name's first restates line names an Owner::name; put a bare name first"; exit 1 ;; esac
     at=$(grep -n -m1 -E "(fn|const|struct|enum|static|type)[[:space:]]+$item\b" "$repo/$path" | cut -d: -f1)
     [ -n "$at" ] || { echo "found no definition of $item in $path"; exit 1; }
 
@@ -7631,17 +7632,51 @@ check-proofs-selftest:
     rm "$repo/proofs/gappa/${name%.g}.stamp"
     fails "a script with no stamp" "$name"
 
+    # `just src` takes a bare name, and for a name the file defines more than
+    # once it lists the places, as for plane.rs' `on_floats`. So an
+    # `Owner::name` is read at each place in turn, from a scratch repo holding
+    # the file with the name's other definitions renamed, and one of those
+    # reads must be the extent the check hashes.
+    src() { {{ just_executable() }} --justfile {{ justfile() }} --working-directory "$1" src "$2" "$3"; }
+    srcrepo="$dir/src"
+    git init -q "$srcrepo"
     extents=0
+    qualified=0
     for line in $(grep -h '^# restates: ' proofs/gappa/*.g | awk '$3 != "Cargo.lock" { print $3 "|" $4 }' | sort -u); do
         file=${line%|*}
         named=${line#*|}
-        want=$({{ just_executable() }} --justfile {{ justfile() }} --working-directory "$root" src "$named" "$file" | tail -n +2)
+        bare=${named##*::}
         got=$(python3 proofs/bounds.py extent "$file" "$named")
-        [ "$got" = "$want" ] || { echo "the extent check-proofs hashes for $file $named is not just src's:"; \
-            diff <(echo "$want") <(echo "$got") || true; exit 1; }
+        listed=$(src "$root" "$bare" "$file")
+        case "$listed" in
+        "  "*) ;;
+        *)
+            want=$(printf '%s\n' "$listed" | tail -n +2)
+            [ "$got" = "$want" ] || { echo "the extent check-proofs hashes for $file $named is not just src's:"; \
+                diff <(echo "$want") <(echo "$got") || true; exit 1; }
+            extents=$((extents + 1))
+            continue
+            ;;
+        esac
+        [ "$bare" != "$named" ] || { echo "$file defines $named more than once; name it as Owner::$named:"; \
+            echo "$listed"; exit 1; }
+        places=$(printf '%s\n' "$listed" | awk '{ n = split($1, f, ":"); print f[n] }')
+        found=""
+        for at in $places; do
+            mkdir -p "$srcrepo/$(dirname "$file")"
+            cp "$file" "$srcrepo/$file"
+            for other in $places; do
+                [ "$other" = "$at" ] || sed -i "${other}s/\b$bare\b/${bare}_elsewhere/" "$srcrepo/$file"
+            done
+            git -C "$srcrepo" add "$file"
+            if [ "$(src "$srcrepo" "$bare" "$file" | tail -n +2)" = "$got" ]; then found=$at; fi
+        done
+        [ -n "$found" ] || { echo "the extent check-proofs hashes for $file $named is none of just src's at these places:"; \
+            echo "$listed"; echo "$got"; exit 1; }
         extents=$((extents + 1))
+        qualified=$((qualified + 1))
     done
-    echo "check-proofs-selftest: a comment and a blank line in $item pass; its code, its name, $name, ${control:+a control, }the pin and a stamp fail; $extents extents are just src's"
+    echo "check-proofs-selftest: a comment and a blank line in $item pass; its code, its name, $name, ${control:+a control, }the pin and a stamp fail; $extents extents are just src's, $qualified of them an Owner::name"
 
 # Which file `recipe` below reads. A variable so `check-recipe-selftest` can
 # point it at a fixture: the subject here is a justfile, and a selftest that
