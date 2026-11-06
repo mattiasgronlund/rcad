@@ -110,8 +110,11 @@ use crate::{Error, Result, Surface};
 /// apex and slope and not how far it reaches, so its corner can be `2√3 · L`
 /// from its axis, and the turn's length share there is about `83u`. That is an
 /// argument and not a demonstration that the bound fails (§16.10): the three
-/// shares need not reach their worst at once, and nobody has searched for a
-/// corner on a cone that a move puts past `256u` (Q2830).
+/// shares need not reach their worst at once. A search for a corner on a cone
+/// that a move puts past `256u` (Q2830, §464.38) found none: its worst was
+/// `0.234` of the bound, about `60u`, on a corner turned half a turn by a
+/// stretched turn, and nothing past it. That neither reaches nor refutes the
+/// `290u`; only a proof for the cone can.
 ///
 /// Every proof stands on the hypotheses of the proofs it takes its slips from
 /// (§464.19, §464.20), and the pipe's and the torus's on one more that is
