@@ -100,7 +100,8 @@ fn every_turn_the_plate_was_refused_at_answers_as_the_plate() {
 /// crossing of the cap's face (Q3228).
 #[test]
 fn a_floor_touching_the_rim_at_the_seam_corner_fuses_under_every_rule() {
-    fuses_with_the_block_on_the_seam_corner([-0.1, 0.0, 1.0]).unwrap_or_else(|why| panic!("{why}"));
+    fuses_with_the_block_on_the_seam_corner([-0.1, 0.0, 1.0], &Isometry::identity())
+        .unwrap_or_else(|why| panic!("{why}"));
 }
 
 /// The lean `(0.3, −0.2, 1)`, unturned, and the same block, whose floor
@@ -110,7 +111,44 @@ fn a_floor_touching_the_rim_at_the_seam_corner_fuses_under_every_rule() {
 /// refused on the order along a crossing of the floor (Q3228).
 #[test]
 fn a_floor_crossing_the_rim_at_the_seam_corner_fuses_under_every_rule() {
-    fuses_with_the_block_on_the_seam_corner([0.3, -0.2, 1.0]).unwrap_or_else(|why| panic!("{why}"));
+    fuses_with_the_block_on_the_seam_corner([0.3, -0.2, 1.0], &Isometry::identity())
+        .unwrap_or_else(|why| panic!("{why}"));
+}
+
+/// Every turn `step · 0.05` about `z` at which a rule was refused for the two
+/// leans whose cap's rim the floor `z = 1` crosses at the seam corner (Q2799):
+/// `CannotTellTheCellsOfAFaceApart`, `CannotMeshAFace`, or
+/// `Invalid(DynamicRangeTooWide)`. Turned, the seam corner is stored a rounding
+/// off where the turn puts it, and the cap's face took it as the place where
+/// the floor crosses the rim only where the two boxes share a point. Every one
+/// of these answers once that demand is dropped (Q3228).
+#[test]
+fn every_turn_a_floor_crossing_the_rim_at_the_seam_corner_was_refused_at_fuses() {
+    let refused: [([f64; 3], &[u8]); 2] = [
+        (
+            [0.1, 0.07, 1.0],
+            &[9, 18, 21, 30, 34, 39, 40, 41, 45, 49, 51, 56],
+        ),
+        (
+            [0.3, -0.2, 1.0],
+            &[
+                9, 10, 16, 18, 19, 21, 28, 30, 34, 35, 38, 39, 43, 44, 49, 50, 51, 53, 54, 59,
+            ],
+        ),
+    ];
+    let wrong: Vec<String> = refused
+        .into_iter()
+        .flat_map(|(lean, steps)| {
+            steps.iter().filter_map(move |&step| {
+                let angle = f64::from(step) * 0.05;
+                let turn = Isometry::rotation(&Axis::z(), angle).expect("a finite angle");
+                fuses_with_the_block_on_the_seam_corner(lean, &turn)
+                    .err()
+                    .map(|why| format!("turned {angle}: {why}"))
+            })
+        })
+        .collect();
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// How far a solid's volume may move because its turned corners are each a
@@ -194,18 +232,25 @@ fn the_plate_as_it_should_be(lean: [f64; 3], angle: f64) -> Result<(), String> {
     Ok(())
 }
 
-/// The plate of `lean` and the block `[6, 12]² × [1, 3]`, unturned, fused under
-/// certified by the union either way round, the intersection, and the
-/// difference either way round. Each answer must validate, and the volumes
-/// must add up within the meshes' own volume errors: the union and the
-/// intersection to the plate and the block, and each difference and the
-/// intersection to the one it was taken from.
-fn fuses_with_the_block_on_the_seam_corner(lean: [f64; 3]) -> Result<(), String> {
+/// The plate of `lean` and the block `[6, 12]² × [1, 3]`, both placed by
+/// `turn`, fused under certified by the union either way round, the
+/// intersection, and the difference either way round. Each answer must
+/// validate, and the volumes must add up within the meshes' own volume errors:
+/// the union and the intersection to the plate and the block, and each
+/// difference and the intersection to the one it was taken from.
+fn fuses_with_the_block_on_the_seam_corner(lean: [f64; 3], turn: &Isometry) -> Result<(), String> {
+    let the_block = |model: &mut Model| {
+        let block = a_block(model, [6.0, 6.0, 1.0], [12.0, 12.0, 3.0]);
+        model
+            .place_solid(block, turn)
+            .expect("this model made the key");
+        block
+    };
     let measure = |rule: Rule, plate_first: bool| -> Result<(f64, f64), String> {
         let policy = Policy::certified();
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-        let plate = a_plate_with_a_leaning_tab(&mut model, &Isometry::identity(), lean)?;
-        let block = a_block(&mut model, [6.0, 6.0, 1.0], [12.0, 12.0, 3.0]);
+        let plate = a_plate_with_a_leaning_tab(&mut model, turn, lean)?;
+        let block = the_block(&mut model);
         let (one, other) = if plate_first {
             (plate, block)
         } else {
@@ -228,8 +273,8 @@ fn fuses_with_the_block_on_the_seam_corner(lean: [f64; 3]) -> Result<(), String>
     let alone = |which: usize| -> Result<(f64, f64), String> {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
         let solids = [
-            a_plate_with_a_leaning_tab(&mut model, &Isometry::identity(), lean)?,
-            a_block(&mut model, [6.0, 6.0, 1.0], [12.0, 12.0, 3.0]),
+            a_plate_with_a_leaning_tab(&mut model, turn, lean)?,
+            the_block(&mut model),
         ];
         measured(&model, solids[which])
     };
