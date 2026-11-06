@@ -337,6 +337,15 @@ impl SolidView<'_> {
     /// face whose corners and plane part about the point is found first
     /// ([`its_corners_and_plane_part_at`]), whatever the line meets.
     ///
+    /// **But not a face the point's box is further off the plane of than any
+    /// of its corners** ([`is_further_off_its_plane_than_its_corners`]). Such a
+    /// box is in none of that face's sliver, which lies between its triangles
+    /// and its plane, so it is in the slab the corners span. What parts there is
+    /// a triangle's own plane, far past the triangle's sides, and a fan
+    /// triangle of almost no area tips its plane far enough to: taken as
+    /// parted, two such faces refused every point of a turned union's floor
+    /// `0.04` to `0.09` off them (Q3224).
+    ///
     /// **Such a face matters only beside the point.** Its plane runs on past
     /// its edges, and so does the sliver between that plane and its triangles'
     /// planes. A point in that sliver far from the face, as the cap a turned
