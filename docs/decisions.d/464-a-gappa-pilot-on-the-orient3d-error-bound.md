@@ -49,7 +49,8 @@ with each component up to `1 + 64u`, and 464.40 is Q2837, which has Coq check
 and 464.42 is Q2858, on a distance off a plane and a plane's shift with two or
 three products below the normals. 464.43 is Q2862, which runs block 1 with one
 or more of the differences at zero and one or two minors cancelling, past
-464.26's one of each.*
+464.26's one of each. 464.44 is Q2863, which runs it where `t1 + t2` cancels
+to zero with differences at zero.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -94,6 +95,7 @@ or more of the differences at zero and one or two minors cancelling, past
   464.41  The two directions on a parabola
   464.42  A distance off a plane, and a plane's shift, with two or three products below the normals
   464.43  Differences at zero with minors cancelling, past one of each
+  464.44  The first two terms cancelling, with differences at zero
 
 ### 464.1 The bugs a bound prover is for
 
@@ -638,7 +640,9 @@ leaves `y` not zero is run too, and proves at the code's bound. Since 464.26
 each branch with one difference at zero and one minor cancelling to zero is
 run too, and proves at the code's bound. Since 464.43 each branch with two or
 more differences at zero, or two minors cancelling, is run too, and proves at
-the code's bound. The step from `y` to the sign is still on paper.
+the code's bound. Since 464.44 each branch where `t1 + t2` cancels to zero with
+differences at zero is run too, and proves at the code's bound. The step from
+`y` to the sign is still on paper.
 
 ### 464.7 value past the bound, and every minor at zero run
 
@@ -17709,7 +17713,8 @@ main()
   464.4 runs it with no difference at zero, and it proves at `6u + 13u²`;
   464.11 and this section keep the hypothesis wherever `t1` and `t2` are both
   alive. Where `t3` is zero too, `y` is zero (464.7), so nothing is left to
-  run there. A row.
+  run there. A row. That row is Q2863, done in 464.44: each of its 12 branches
+  proves at the code's `B`.
 - The row that moves the scripts into `proofs/gappa/`, Q2700, now waits on
   those two as well, since they append here too.
 
@@ -31779,5 +31784,698 @@ main()
 - With 464.26 and this, every set of one or more differences at zero with one
   or two minors cancelling is run, or shown to leave `y` zero or to be another
   set's branch. Of the zero branches block 1 assumes away, Q2863's `t1 + t2`
-  cancelling with all three terms not zero is left, and the step from `y` to
-  the sign is still on paper (464.6). No new row.
+  cancelling with all three terms not zero was left. It is run in 464.44, and
+  each of its 12 branches proves at the code's `B`. The step from `y` to the
+  sign is still on paper (464.6). No new row.
+
+### 464.44 The first two terms cancelling, with differences at zero
+
+Q2863 ran block 1 where `t1 + t2` cancels to zero while neither `t1` nor `t2`
+is zero, with one or more of the nine differences `adx` to `cdz` at zero, in
+two lanes on 2026-11-06. Of the 511 sets of differences, 12 are branches. Each
+proves at the code's `B` and fails below the bound it proves, and so does
+464.4's run with no difference zero, run again here. Coq checks each proof,
+modulo its hints. Nothing in `orient3d.rs` needs to change for it. This is the
+branch 464.43 left of those block 1 assumes away.
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, with `block1.g` 464.5's first `gappa` block and
+`make_differences_zero.py` 464.25's, each as `extract.py` below writes it from
+this file, against `on_floats` as 464.4 read it at `d9f931e8`: no commit
+touches `orient3d.rs` after `c827c89b`, 464.7's, up to `e0b3e1a2`.
+
+**How the branch is written.** As 464.5 says 464.4 wrote it: `s12 = S;` in
+place of `s12 = rnd(S);`, `rs` taken out of `W1` to `W4`, and `rs`'s
+definition, its hint `s12 / S -> 1 + (s12 - S) / S;` and the hypothesis
+`|t1 + t2| >= 1b-1074` deleted. A sum that is zero rounds to itself, so
+wherever `t1 + t2` is zero `s12` is `S`, and the script's `y` is the code's.
+The script does not ask `S` to be zero: it proves the bound on every input
+where `s12` is `S`, and the branch is among them. Each double is a whole
+multiple of `2⁻¹⁰⁷⁴`, so two of them add to zero or to at least `2⁻¹⁰⁷⁴` in
+size, and block 1's hypothesis and this branch between them take every input.
+The hint has to go: in Coq's reals `x / 0` is 0, so where `S` is zero it says
+`0 = 1`, and Coq takes each hint on trust (464.4).
+`make_first_two_cancelling.py` below writes `ds_<set>.g` as the `dz_<set>.g`
+464.25's generator writes for the set, with that change, and `ds_none.g` as
+block 1 with it.
+
+Given one difference, 464.25's generator writes the same code as 464.11's
+`make_one_difference_zero.py`: `zd_check.py` below finds the two the same for
+each of the nine, comments and blank lines aside. The 12 `ds_` scripts carry
+the `dz_` comment `Each of  is zero.`, naming nothing, that 464.26 notes. It
+is a Gappa comment and moves no proof.
+
+**Which sets are branches.** `summarize.py` below counts each of the 511 sets
+of one or more differences by the first of these that holds of it:
+
+- **265 with every term zero by its shape.** `y` is zero, and `decide`
+  certifies no sign (464.25).
+- **213 with `t1` or `t2` zero by its shape.** `t1 + t2` is then the other
+  term, or zero, and cannot cancel while neither is zero. In the 57 with both
+  zero, 464.25's scripts drop block 1's hypothesis already. In the other 156
+  it asks the live term to be at least `2⁻¹⁰⁷⁴`, which the term's own
+  `|t| >= 1b-1022` gives, and the `dk_` runs below show Gappa does not need it.
+- **21 with `t3` zero by its shape, and `t1` and `t2` not.** Where `t1 + t2`
+  cancels, `y` is zero, and `decide` certifies no sign (464.7). That is what
+  their `dz_` scripts' hypothesis leaves out.
+- **12 with no term zero by its shape**: the branches. Six are one x or y
+  difference alone, `adx`, `ady`, `bdx`, `bdy`, `cdx` and `cdy`, and six are
+  pairs of them, `adx_bdy`, `adx_cdy`, `ady_bdx`, `ady_cdx`, `bdx_cdy` and
+  `bdy_cdx`.
+
+A z difference zeroes its own term, so none is in a branch. Each x or y
+difference zeroes two products, of two different minors. A pair can leave each
+minor one product, as the six pairs above do, or take both of one, as `adx`
+and `ady` take both of `second`'s and of `third`'s. `every_branch` in the
+generator tries every set and finds no branch of three or more.
+
+**What runs, at the code's `B`.** Each of the 13 proves, with `(y − Ex) / P6`
+within:
+
+- `5.55112e-16`, `5u + 14u²` and some `u³`, for the six pairs. At `6u` each
+  proves, and at `5u` each fails with best `±1`.
+- `6.66134e-16`, `6u + 13u²` and some `u³`, for the six single differences
+  and for none, which is 464.4's `6u + 13u²` again. At `6u` each fails with
+  best `±1`, and at `5u` with `±1.2`.
+
+Each control that fails, fails at `BND((y - Ex) / eb)`. The count of `u` is
+the count of roundings on the longest path through a term of `y`, counted as
+464.25 counts it, with `s12` rounding nothing: the three differences, the
+product, the minor where its other product is not zero, and the term. In a
+pair every minor has a product zero, so five. A single x or y difference
+leaves one minor both its products, so six, and so does none. `summarize.py`
+works the count out from the set alone, and its groups split the 13 the same
+way the printed bounds do.
+
+Beside the `dz_` script it starts from, which rounds `s12` (`run_dz.sh`
+below), each pair is a `u` lower: `6.66134e-16` there. So are `adx`, `ady`,
+`bdx` and `bdy`, `7.77156e-16` there, as in 464.11. `cdx` and `cdy` are not,
+`6.66134e-16` in both: their longest path runs through `t3`, which `s12` does
+not touch.
+
+`P −/ Phat` is within `4.44089e-16` in all 13.
+
+Every one of the 13 fails at `5u`, and the 7 whose bound is above `6u` fail
+there too, so each fails below the bound it proves, and none proves its goal
+from hypotheses that contradict each other (464.7). The 12 `dsq_` scripts,
+each a `ds_` script with its `q` hypotheses taken out and only its `|q|` goals
+left, each prove: no goal leans on the hypothesis it backs. `ds_none.g` has no
+`q` hypothesis to take out.
+
+**Nothing takes the cancelled sum to be nonzero.** Block 1's run prints 194
+"assumed to be nonzero when checking a rewriting rule" lines (464.4), and 11
+of them take `(t2) + (t1)`, which is `S`, to be nonzero. In the 13 `ds_` runs
+none of these lines names `t1`, `t2` or `s12`: there are 183 in `ds_none`,
+which is 194 less those 11, 138 in each single difference and 114 in each
+pair. No output says "not trivially equal".
+
+**Coq.** `gappa -Bcoq` writes each of the 13 proofs, and `coqc` under 464.5's
+commands accepts each, exit 0: 9040 to 10111 lines with 33 hints for a single
+difference and 30 for a pair, and 9727 lines with 38 hints for none, block 1's
+39 less `s12 / S`'s. `run_6u_coq.sh` below has `coqc` check the six pairs'
+proofs at `6u` too: exit 0 on each, 9491 to 10284 lines with 30 hints. At
+twelve at once, Gappa takes 3.24 to 3.74 s on a script and 2.43 s on none,
+and `-Bcoq` and `coqc` together 7.0 to 7.82 s, and 5.22 s on none. The
+controls and the `dsq_` checks take 2.44 to 11.71 s. `field` has not been run
+on these hints (464.10).
+
+**Where one of `t1` and `t2` is zero by its shape.** In those 156 sets the
+`dz_` script keeps `|t1 + t2| >= 1b-1074`, and its hint `t1 + t2 -> t1;` or
+`-> t2;` makes the sum the live term. `make_hypothesis_dropped.py` below
+writes each as `dk_<set>.g`, the `dz_` script with the hypothesis taken out,
+and `run_dk.sh` runs them, without `-Bcoq`. Each of the 156 proves, exit 0, in
+1.13 to 5.05 s at twelve at once. Of their "assumed to be nonzero" lines, the
+820 that name `t1` or `t2` each name the live term alone, never a sum, and the
+live term's own `|t| >= 1b-1022` keeps it from zero. `dk_check.py` splits
+them: 21 with `t1` live and `t3` alive, 57 with `t1` live and `t3` zero by its
+shape, and the same for `t2`. So the hypothesis costs nothing there, as 464.43
+found in its branches. A `dk_` script's hypotheses are its `dz_` script's less
+one, and 464.11 and 464.25 have each `dz_` script failing at `5u`, so these do
+not contradict each other either.
+
+**The scripts.** All of them ran in one directory. `extract.py`, run as
+`python3 extract.py <this file> <directory>`, writes the three files the runs
+start from:
+
+```python
+"""Write block1.g, make_differences_zero.py and one.sh from section 464's
+text, as 464.5, 464.25 and 464.13 quote them, into the directory named."""
+import os
+import re
+import sys
+
+doc, out = sys.argv[1], sys.argv[2]
+text = open(doc).read()
+
+
+def part(start, end):
+    a = text.index(start)
+    return text[a : text.index(end, a)]
+
+
+def block(where, mark):
+    for body in re.findall(r"```[a-z]*\n(.*?)```", where, re.S):
+        if body.startswith(mark):
+            return body
+    raise SystemExit(f"no block starting {mark!r}")
+
+
+files = {
+    "block1.g": block(part("### 464.5 ", "### 464.6 "), "# Orient3d::on_floats and ORIENT3D_ERROR_BOUND"),
+    "make_differences_zero.py": block(part("### 464.25 ", "### 464.26 "), '"""Write block 1 with two or more'),
+    "one.sh": block(part("### 464.13 ", "### 464.14 "), "#!/bin/bash\n# Run one Gappa script under 464.4's pin"),
+}
+for name, body in files.items():
+    with open(os.path.join(out, name), "w") as f:
+        f.write(body)
+    print(name, len(body.split("\n")) - 1, "lines")
+```
+
+`make_first_two_cancelling.py`, run by `write_all.sh` below:
+
+```python
+"""Write block 1 with t1 + t2 cancelling to zero while neither t1 nor t2 is
+zero, with one or more of the nine differences zero.
+
+Run beside block1.g and the dz_<differences>.g that make_differences_zero.py
+writes. Each argument is a set of differences such as adx_bdy, in the order
+DIFFERENCES gives them, or "none" for block 1 with no difference zero, as
+464.4 ran the branch. With no arguments, write "none" and every set of one or
+more differences that leaves none of t1, t2 and t3 zero by its shape, and
+print the names, one line each. With --sets, print those sets of
+differences, one line each, and write nothing: make_differences_zero.py takes
+them as its arguments.
+
+Each is ds_<set>.g, with the controls c_ds_<set>_6u.g and c_ds_<set>_5u.g,
+and, where a minor rounds a double less a zero, dsq_<set>.g: the script with
+its q hypotheses taken out and only its |q| goals left. In each, s12 is S, as
+464.4 writes the branch: a sum that is zero rounds to itself, and nothing
+there is rounded.
+"""
+import itertools
+import re
+import sys
+
+DIFFERENCES = ["adx", "ady", "adz", "bdx", "bdy", "bdz", "cdx", "cdy", "cdz"]
+PRODUCT = {
+    1: ("bdx", "cdy"),
+    2: ("cdx", "bdy"),
+    3: ("cdx", "ady"),
+    4: ("adx", "cdy"),
+    5: ("adx", "bdy"),
+    6: ("bdx", "ady"),
+}
+Z_OF = {1: "adz", 2: "bdz", 3: "cdz"}
+
+
+def main():
+    if sys.argv[1:] == ["--sets"]:
+        for zero in every_branch():
+            print("_".join(zero))
+        return
+    if sys.argv[1:]:
+        sets = [[] if arg == "none" else arg.split("_") for arg in sys.argv[1:]]
+    else:
+        sets = [[]] + every_branch()
+    for zero in sets:
+        assert not shape_zero_terms(set(zero)), zero
+        name = "_".join(zero) or "none"
+        src = open(f"dz_{name}.g" if zero else "block1.g").read()
+        src = cancel_first_two(src, zero)
+        write(f"ds_{name}.g", src)
+        write(f"c_ds_{name}_6u.g", sub(src, "B = 7b-53 + 7b-103;", "B = 6b-53;"))
+        write(f"c_ds_{name}_5u.g", sub(src, "B = 7b-53 + 7b-103;", "B = 5b-53;"))
+        if "  /\\ q" in src:
+            write(f"dsq_{name}.g", q_goals_alone(src))
+        print(name)
+
+
+def dead_products(zero):
+    return {k for k, (f, g) in PRODUCT.items() if f in zero or g in zero}
+
+
+def shape_zero_terms(zero):
+    dead = dead_products(zero)
+    return {m for m in (1, 2, 3) if Z_OF[m] in zero or {2 * m - 1, 2 * m} <= dead}
+
+
+def every_branch():
+    """Every set of one or more differences with none of the three terms zero
+    by its shape."""
+    return [
+        list(zero)
+        for n in range(1, 10)
+        for zero in itertools.combinations(DIFFERENCES, n)
+        if not shape_zero_terms(set(zero))
+    ]
+
+
+def write(path, text):
+    with open(path, "w") as f:
+        f.write(text)
+
+
+def cancel_first_two(src, zero):
+    """The script with s12 the exact sum t1 + t2: 464.4's branch, which
+    takes rs out of W1 to W4 and drops rs, its hint and the hypothesis that
+    t1 + t2 does not cancel."""
+    if zero:
+        differences = " and ".join(zero)
+        src = sub(
+            src,
+            f"# Block 1 where {differences} are zero. A zero rounds to itself,\n"
+            "# and so does a product with a zero factor.\n",
+            f"# Block 1 where {differences} are zero and t1 + t2 cancels to zero,\n"
+            "# so s12 rounds nothing. A zero rounds to itself, and so does a\n"
+            "# product with a zero factor.\n",
+        )
+    else:
+        src = sub(
+            src,
+            "# crates/rcad-predicates/src/orient3d.rs at d9f931e8.\n",
+            "# crates/rcad-predicates/src/orient3d.rs at d9f931e8, where t1 + t2\n"
+            "# cancels to zero, so s12 rounds nothing.\n",
+        )
+    alive = 4 - len(dead_products(set(zero)) & {1, 2, 3, 4})
+    src = sub(src, "s12 = rnd(S);", "s12 = S;")
+    src = sub(src, "rs = s12 / S;\n", "")
+    assert src.count(" * rs - 1") == alive, (zero, alive)
+    src = src.replace(" * rs - 1", " - 1")
+    src = sub(src, "  # The first two terms do not cancel to zero.\n  /\\ |t1 + t2| >= 1b-1074\n", "")
+    src = sub(src, "s12 / S -> 1 + (s12 - S) / S;\n", "")
+    assert not re.search(r"(?<![.\w])rs\b", src), zero
+    return src
+
+
+def q_goals_alone(src):
+    """The script with its q hypotheses out and its |q| goals alone left."""
+    lines = src.split("\n")
+    lines = [l for l in lines if not l.startswith("  /\\ q")]
+    start = lines.index("->")
+    end = lines.index("}", start)
+    goals = [l for l in lines[start + 1 : end] if l.startswith("  /\\ |q")]
+    goals[0] = "  " + goals[0][len("  /\\ ") :]
+    return "\n".join(lines[: start + 1] + goals + lines[end:])
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+main()
+```
+
+`write_all.sh` writes every script beside `block1.g`, 464.25's
+`make_differences_zero.py` and the generator above:
+
+```sh
+#!/bin/bash
+# Write the dz_ script for each set of differences that leaves no term zero by
+# its shape, and then each ds_ branch beside them.
+cd "$(dirname "$0")"
+set -e
+rm -f dz_*.g c_dz_*.g dzq_*.g ds_*.g c_ds_*.g dsq_*.g
+rm -f *.out *.v *.bcoq *.coqc *.vo *.vok *.vos *.glob .*.aux run_ds.txt run_c.txt
+python3 make_first_two_cancelling.py --sets > sets.txt
+xargs python3 make_differences_zero.py < sets.txt > /dev/null
+rm -f c_dz_*.g dzq_*.g
+python3 make_first_two_cancelling.py > names.txt
+wc -l sets.txt names.txt
+ls dz_*.g | wc -l
+ls ds_*.g | wc -l
+ls c_ds_*.g | wc -l
+ls dsq_*.g | wc -l
+```
+
+`run_all.sh` then runs them through 464.13's `one.sh`, in one call:
+
+```sh
+#!/bin/bash
+# Run every script write_all.sh wrote, twelve at a time: each ds_ script with
+# its proof checked by coqc, then each control and each dsq_ check without.
+# One line per run, as one.sh prints it.
+cd "$(dirname "$0")"
+ls ds_*.g | xargs -P 12 -I{} ./one.sh {} coq > run_ds.txt 2>&1
+ls c_ds_*.g dsq_*.g | xargs -P 12 -I{} ./one.sh {} > run_c.txt 2>&1
+echo finished
+```
+
+`run_6u_coq.sh`, run after it:
+
+```sh
+#!/bin/bash
+# Check by coqc the proof of each c_ds_ control at 6u that proved, in run_c.txt.
+# One line per run, as one.sh prints it.
+cd "$(dirname "$0")"
+grep '_6u exit 0 ' run_c.txt | awk '{print $1 ".g"}' | xargs -P 12 -I{} ./one.sh {} coq > run_6u_coq.txt 2>&1
+echo finished
+```
+
+`run_dz.sh`, which runs the 12 `dz_` scripts `write_all.sh` leaves beside the
+`ds_` ones:
+
+```sh
+#!/bin/bash
+# Run the 12 dz_ scripts the ds_ branches start from, twelve at a time and
+# without coq, to set each ds_ bound beside its dz_ one. One line per run, as
+# one.sh prints it.
+cd "$(dirname "$0")"
+ls dz_*.g | xargs -P 12 -I{} ./one.sh {} > run_dz.txt 2>&1
+grep -H '(y - Ex) / P6 in' dz_*.out
+echo finished
+```
+
+`make_hypothesis_dropped.py`, which `run_dk.sh` below copies into `dk/` and
+runs there:
+
+```python
+"""Write dk_<set>.g for every set of one or more differences that leaves
+exactly one of t1 and t2 zero by its shape: dz_<set>.g, which
+make_differences_zero.py writes beside it, with block 1's hypothesis that
+t1 + t2 does not cancel taken out. With no arguments, print the sets, one
+line each, and write nothing; with --write, write the scripts and print
+their names."""
+import itertools
+import sys
+
+DIFFERENCES = ["adx", "ady", "adz", "bdx", "bdy", "bdz", "cdx", "cdy", "cdz"]
+PRODUCT = {1: ("bdx", "cdy"), 2: ("cdx", "bdy"), 3: ("cdx", "ady"), 4: ("adx", "cdy"), 5: ("adx", "bdy"), 6: ("bdx", "ady")}
+Z_OF = {1: "adz", 2: "bdz", 3: "cdz"}
+HYPOTHESIS = "  # The first two terms do not cancel to zero.\n  /\\ |t1 + t2| >= 1b-1074\n"
+
+
+def shape_zero_terms(zero):
+    dead = {k for k, (f, g) in PRODUCT.items() if f in zero or g in zero}
+    return {m for m in (1, 2, 3) if Z_OF[m] in zero or {2 * m - 1, 2 * m} <= dead}
+
+
+sets = [
+    "_".join(zero)
+    for n in range(1, 10)
+    for zero in itertools.combinations(DIFFERENCES, n)
+    if len(shape_zero_terms(set(zero)) & {1, 2}) == 1
+]
+if sys.argv[1:] == ["--write"]:
+    for name in sets:
+        src = open(f"dz_{name}.g").read()
+        assert src.count(HYPOTHESIS) == 1, name
+        assert "t1 + t2 -> t" in src, name
+        with open(f"dk_{name}.g", "w") as f:
+            f.write(src.replace(HYPOTHESIS, ""))
+        print(f"dk_{name}")
+else:
+    print("\n".join(sets))
+```
+
+`run_dk.sh`:
+
+```sh
+#!/bin/bash
+# In dk/ beside this directory: write dz_ for every set with exactly one of t1
+# and t2 zero by its shape, then dk_, which drops |t1 + t2| >= 1b-1074, and
+# run each dk_ twelve at a time, without coq. One line per run, as one.sh
+# prints it.
+cd "$(dirname "$0")"
+set -e
+mkdir -p dk
+cp block1.g make_differences_zero.py make_hypothesis_dropped.py one.sh dk/
+cd dk
+rm -f dz_*.g c_dz_*.g dzq_*.g dk_*.g *.out run_dk.txt
+python3 make_hypothesis_dropped.py > sets.txt
+xargs python3 make_differences_zero.py < sets.txt > /dev/null
+rm -f c_dz_*.g dzq_*.g
+python3 make_hypothesis_dropped.py --write > names.txt
+wc -l sets.txt names.txt
+set +e
+ls dk_*.g | xargs -P 12 -I{} ./one.sh {} > run_dk.txt 2>&1
+echo finished
+```
+
+`dk_check.py`, run in the directory that holds `dk/`:
+
+```python
+"""For each dk_ run in dk/: whether Gappa took t1 or t2 to be nonzero, against
+which of t1 and t2 its set leaves alive; and the exits and seconds of the
+runs."""
+import collections
+import os
+
+os.chdir("dk")
+PRODUCT = {1: ("bdx", "cdy"), 2: ("cdx", "bdy"), 3: ("cdx", "ady"), 4: ("adx", "cdy"), 5: ("adx", "bdy"), 6: ("bdx", "ady")}
+Z_OF = {1: "adz", 2: "bdz", 3: "cdz"}
+
+
+def shape(zero):
+    dead = {k for k, (f, g) in PRODUCT.items() if f in zero or g in zero}
+    return {m for m in (1, 2, 3) if Z_OF[m] in zero or {2 * m - 1, 2 * m} <= dead}
+
+
+c = collections.Counter()
+for line in open("run_dk.txt"):
+    name, _, code, secs = line.split()
+    if not name.startswith("dk_"):
+        continue
+    zero = set(name[3:].split("_"))
+    (alive,) = {1, 2} - shape(zero)
+    text = open(f"{name}.out").read()
+    said = tuple(t for t in ("t1", "t2") if f"expression ({t}) has been assumed" in text)
+    c[(code, f"t{alive} alive", "t3 zero by its shape" if 3 in shape(zero) else "t3 alive", said)] += 1
+for key in sorted(c):
+    print("exit, alive, t3, taken nonzero:", key, c[key])
+```
+
+`summarize.py`, run once every run was done, prints each figure above but
+those of `run_6u_coq.sh`, `run_dz.sh` and the `dk_` runs, and those the `grep`
+after it counts:
+
+```python
+"""Count the sets of differences, read every run of the ds_ branches, and
+group them by what they printed.
+
+First, each of the 511 sets of one or more differences, counted by the first
+of these that holds of it: every term zero by its shape; t1 or t2 zero by its
+shape; t3 zero by its shape; none, a branch. The branches must be the names
+in names.txt, past "none". For each ds_ branch: the count of roundings on
+its longest path, worked out from the set alone; the exit codes of its
+script, -Bcoq and coqc; the bounds Gappa printed for (y - Ex) / P6 and for
+P -/ Phat, the first as a count of u and of u^2 too; each control's exit and
+the goal it failed at, with its best; its dsq_ exit. Then Gappa's "assumed to
+be nonzero" lines in each ds_ run, the outputs that say "not trivially", and
+the ranges of times, proof lines and hints.
+"""
+import collections
+import fractions
+import glob
+import itertools
+import re
+
+DIFFERENCES = ["adx", "ady", "adz", "bdx", "bdy", "bdz", "cdx", "cdy", "cdz"]
+PRODUCT = {
+    1: ("bdx", "cdy", 1),
+    2: ("cdx", "bdy", 1),
+    3: ("cdx", "ady", 2),
+    4: ("adx", "cdy", 2),
+    5: ("adx", "bdy", 3),
+    6: ("bdx", "ady", 3),
+}
+Z_OF = {1: "adz", 2: "bdz", 3: "cdz"}
+U = fractions.Fraction(1, 2**53)
+
+
+def main():
+    names = [l.strip() for l in open("names.txt") if l.strip()]
+    classify(names)
+    run, coq = exits("run_ds.txt")
+    c, _ = exits("run_c.txt")
+    groups = collections.defaultdict(list)
+    for set_name in names:
+        zero = set() if set_name == "none" else set(set_name.split("_"))
+        name = f"ds_{set_name}"
+        text = open(f"{name}.out").read()
+        c6, c5 = f"c_{name}_6u", f"c_{name}_5u"
+        row = (
+            longest_path(zero),
+            run[name][0],
+            coq[name][:2],
+            in_u(exact_upper(text, "(y - Ex) / P6 in")),
+            upper(text, "P -/ Phat in"),
+            c[c6][0],
+            failed(open(f"{c6}.out").read()),
+            c[c5][0],
+            failed(open(f"{c5}.out").read()),
+            c.get(f"dsq_{set_name}", ("no dsq",))[0],
+        )
+        groups[row].append(set_name)
+    print("roundings | exit | (-Bcoq, coqc) | (y-Ex)/P6 | P -/ Phat | 6u exit, failed | 5u exit, failed | dsq exit | count")
+    for row, members in sorted(groups.items(), key=lambda kv: tuple(str(x) for x in kv[0])):
+        print(" | ".join(str(x) for x in row), "|", len(members))
+        print("    " + " ".join(members))
+    print("ds total", sum(len(m) for m in groups.values()))
+    warnings = {n: open(f"ds_{n}.out").read().count("assumed to be nonzero") for n in names}
+    print("ds 'assumed to be nonzero' lines", warnings)
+    trivially = [p for p in glob.glob("*.out") if "not trivially" in open(p).read()]
+    print("outputs saying 'not trivially'", len(trivially), "of", len(glob.glob("*.out")))
+    for label, keep in (("past none", lambda k: k != "ds_none"), ("none", lambda k: k == "ds_none")):
+        g = [v for k, v in run.items() if keep(k)]
+        q = [v for k, v in coq.items() if keep(k)]
+        print(label, "gappa seconds", min(s for _, s in g), "to", max(s for _, s in g),
+              "coq seconds", min(r[2] for r in q), "to", max(r[2] for r in q),
+              "lines", min(r[3] for r in q), "to", max(r[3] for r in q),
+              "hints", min(r[4] for r in q), "to", max(r[4] for r in q))
+    kinds = collections.Counter()
+    for k, v in c.items():
+        kinds[("dsq" if k.startswith("dsq_") else "c_ds " + k.rsplit("_", 1)[1], "exit", v[0])] += 1
+    for key in sorted(kinds):
+        print("control", *key, "count", kinds[key])
+    print("control seconds", min(v[1] for v in c.values()), "to", max(v[1] for v in c.values()))
+
+
+def classify(names):
+    count = collections.Counter()
+    branches = []
+    for n in range(1, 10):
+        for zero in itertools.combinations(DIFFERENCES, n):
+            shape = shape_zero_terms(set(zero))
+            if shape == {1, 2, 3}:
+                count["every term zero by its shape"] += 1
+            elif shape & {1, 2}:
+                count["t1 or t2 zero by its shape"] += 1
+            elif shape:
+                count["t3 zero by its shape"] += 1
+            else:
+                count["branch"] += 1
+                branches.append("_".join(zero))
+    assert ["none"] + branches == names, "the branches are not names.txt"
+    print("sets of one or more differences", sum(count.values()))
+    for key in ("every term zero by its shape", "t1 or t2 zero by its shape", "t3 zero by its shape", "branch"):
+        print("sets:", key, count[key])
+
+
+def dead_products(zero):
+    return {k for k, (f, g, _) in PRODUCT.items() if f in zero or g in zero}
+
+
+def shape_zero_terms(zero):
+    dead = dead_products(zero)
+    return {m for m in (1, 2, 3) if Z_OF[m] in zero or {2 * m - 1, 2 * m} <= dead}
+
+
+def longest_path(zero):
+    """Roundings on the longest path through a term of y, with s12 rounding
+    nothing: the three differences, the product, the minor where its other
+    product is not zero, and the term."""
+    dead = dead_products(zero)
+    longest = 0
+    for k, (_, _, m) in PRODUCT.items():
+        if k in dead:
+            continue
+        other = 2 * m if k == 2 * m - 1 else 2 * m - 1
+        longest = max(longest, 3 + 1 + (other not in dead) + 1)
+    return longest
+
+
+def exits(path):
+    out = {}
+    coq = {}
+    for line in open(path):
+        w = line.split()
+        if w[1] == "exit":
+            out[w[0]] = (int(w[2]), float(w[3].rstrip("s")))
+        elif w[1] == "coq":
+            coq[w[0]] = (int(w[4]), int(w[7]), float(w[8].rstrip("s")), int(w[10]), int(w[12]))
+    return out, coq
+
+
+def line_of(text, start):
+    (line,) = [l for l in text.split("\n") if l.strip().startswith(start)]
+    return line
+
+
+def upper(text, start):
+    return re.findall(r"\{(-?[\d.]+(?:e[-+]?\d+)?),", line_of(text, start))[-1]
+
+
+def exact_upper(text, start):
+    m, e = re.findall(r"(-?\d+)b(-?\d+) \{", line_of(text, start))[-1]
+    return fractions.Fraction(int(m)) * fractions.Fraction(2) ** int(e)
+
+
+def in_u(v):
+    """v as n u + k u^2 and some u^3, with n and k whole: the decimal Gappa
+    prints, n, k, and whether the rest is below u^3."""
+    n = int(v / U)
+    k = int((v - n * U) / U**2)
+    rest = v - n * U - k * U**2
+    return f"{float(v):.6g} = {n}u + {k}u^2 + {float(rest / U**3):.3g}u^3"
+
+
+def failed(text):
+    m = re.search(r"\n  (\S.*), best: \[([^\]]*)\]", text)
+    return (m.group(1), m.group(2)) if m else ("-", "-")
+
+
+main()
+```
+
+The "assumed to be nonzero" lines were counted by these, run in the same
+directory, with `block1.out` what `one.sh block1.g` writes:
+
+```sh
+grep -c 'assumed to be nonzero' block1.out
+grep -h 'assumed to be nonzero' block1.out | grep 't1\|t2\|s12' | sort | uniq -c
+grep -h 'assumed to be nonzero' ds_*.out | grep -c 't1\|t2\|s12'
+cd dk && grep -h 'assumed to be nonzero' dk_*.out | grep 't1\|t2\|s12' | sort | uniq -c
+```
+
+The first prints block 1's 194, the second its 11 on `(t2) + (t1)`, the third
+`0`, and the last the 820, 410 on `(t1)` and 410 on `(t2)`.
+
+`zd_check.py`, run as `python3 zd_check.py <this file>` beside `block1.g` and
+`make_differences_zero.py`:
+
+```python
+"""Write 464.11's make_one_difference_zero.py from the section's text into
+zd/, run it for each of the nine differences beside block1.g, and say for
+each whether its zd_ script and make_differences_zero.py's dz_ script, which
+must be in dz/ beside it, are the same once comments and blank lines are
+taken out."""
+import os
+import re
+import subprocess
+import sys
+
+doc = sys.argv[1]
+text = open(doc).read()
+a = text.index("### 464.11 ")
+where = text[a : text.index("### 464.12 ", a)]
+(body,) = [b for b in re.findall(r"```python\n(.*?)```", where, re.S) if b.startswith('"""Write block 1 with one of the nine')]
+os.makedirs("zd", exist_ok=True)
+open("zd/make_one_difference_zero.py", "w").write(body)
+open("zd/block1.g", "w").write(open("block1.g").read())
+names = ["adx", "ady", "adz", "bdx", "bdy", "bdz", "cdx", "cdy", "cdz"]
+subprocess.run(["python3", "make_one_difference_zero.py", *names], cwd="zd", check=True)
+os.makedirs("dz", exist_ok=True)
+open("dz/block1.g", "w").write(open("block1.g").read())
+subprocess.run(["python3", "../make_differences_zero.py", *names], cwd="dz", check=True, stdout=subprocess.DEVNULL)
+
+
+def code(path):
+    lines = [l.split("#")[0].rstrip() for l in open(path).read().split("\n")]
+    return [l for l in lines if l.strip()]
+
+
+for n in names:
+    zd, dz = code(f"zd/zd_{n}.g"), code(f"dz/dz_{n}.g")
+    print(n, "same" if zd == dz else "differs", len(zd), len(dz))
+    if zd != dz:
+        for l in sorted(set(zd) ^ set(dz)):
+            print("   ", "zd" if l in zd else "dz", l)
+```
+
+**What this leaves.**
+
+- The row that moves the scripts into `proofs/gappa/`, Q2700, takes
+  `make_first_two_cancelling.py` and `make_hypothesis_dropped.py` and what they
+  write too. It already waits on Q2863.
+- The step from `y` to the sign is still on paper (464.6). No new row.
