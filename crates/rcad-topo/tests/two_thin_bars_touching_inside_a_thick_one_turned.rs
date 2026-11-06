@@ -28,7 +28,8 @@
 //! across such a side is the rest of the wall, which a point inside places,
 //! and the strip is placed with it.
 //!
-//! Without the block, the bars alone are still refused, `ResultIsNotManifold`.
+//! Without the block, the bars alone are still refused, `ResultIsNotManifold`
+//! at the thick bar's bottom rim (Q3244).
 
 use core::f64::consts::PI;
 
@@ -79,12 +80,17 @@ fn a_block_on_a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_in
             .solid(whole)
             .expect("this model made the key")
             .measure(
-                Deflection::of(0.001).expect("a fine mesh"),
+                Deflection::of(0.01).expect("a fine mesh"),
                 &Policy::certified(),
                 &mut ProvenanceLog::new(),
             )
             .unwrap_or_else(|refused| panic!("turned {turn}: {refused:?}"));
         let meant = the_volume();
+        println!(
+            "turned {turn}: {} ± {} against {meant}",
+            measured.volume(),
+            measured.volume_error()
+        );
         assert!(
             (measured.volume() - meant).abs() <= measured.volume_error(),
             "turned {turn}: {} ± {} against {meant}",
