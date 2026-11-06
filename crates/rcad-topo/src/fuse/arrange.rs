@@ -7477,15 +7477,11 @@ impl<'f> Arrangement<'f> {
         let the_curve = match &self.crossings[crossing].order {
             HowItRuns::RoundAClosedCurve { wound_as, .. } => [wound_as[0], wound_as[1]],
             HowItRuns::AlongAnAxis { .. } => {
-                let pair = [self.surface, self.crossings[crossing].partner];
-                if !matches!(
-                    pair,
-                    [Surface::Plane(_), Surface::Plane(_) | Surface::Cylinder(_)]
-                        | [Surface::Cylinder(_), Surface::Plane(_)]
-                ) {
+                let planes = [self.surface, self.crossings[crossing].partner];
+                if !matches!(planes, [Surface::Plane(_), Surface::Plane(_)]) {
                     return None;
                 }
-                pair
+                planes
             }
             HowItRuns::AlongABend { .. }
             | HowItRuns::RoundAPointOnItsChord { .. }
