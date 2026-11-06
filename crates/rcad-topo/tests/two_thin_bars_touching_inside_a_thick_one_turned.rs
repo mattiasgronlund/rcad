@@ -28,8 +28,11 @@
 //! across such a side is the rest of the wall, which a point inside places,
 //! and the strip is placed with it.
 //!
-//! Without the block, the bars alone are still refused, `ResultIsNotManifold`
-//! at the thick bar's bottom rim (Q3244).
+//! Without the block, the bars alone were refused `ResultIsNotManifold` at the
+//! thick bar's bottom rim, which went with the wrong piece of the bottom, until
+//! `side_off_a_curve_of_a_pipe_along_it` in `fuse/arrange.rs` read the rim's
+//! side of a thin bar's pipe off the circle that pipe cuts the bottom in
+//! (Q3244).
 
 use core::f64::consts::PI;
 
@@ -72,19 +75,39 @@ fn a_block_on_a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_in
         let [whole] = fused(&mut model, &with_the_left_bar, &[right], Rule::Union, last)[..] else {
             panic!("{}: the four unite into one solid", last());
         };
-        valid_and_of_volume(&model, whole, the_volume(), last);
+        let deflection = Deflection::of(0.01).expect("a fine mesh");
+        valid_and_of_volume(&model, whole, the_volume(), deflection, last);
     }
 }
 
-/// The thick bar united with the thin bar at `x = −1`, then fused with the one
-/// at `x = 1` by each rule, with no block.
+/// The union is the thick bar and the four ends of length 1, `16π + 4π`.
+#[test]
+fn a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_inside_it() {
+    the_bars_alone_fused_by(Rule::Union, 20.0 * PI, &TURNS);
+}
+
+/// The intersection is the thin bar at `x = 1` between the thick bar's ends,
+/// `4π`. At the turn `4.69` it is refused
+/// `Invalid(FacesDoNotAgreeWhichWayTheyFace)` once the rim's side is read off
+/// the thin circle, so that turn is left out (Q3244).
+#[test]
+fn a_thick_bar_and_a_thin_one_inside_it_meet_another_overlapping_it_by_a_rounding() {
+    the_bars_alone_fused_by(Rule::Intersection, 4.0 * PI, &[0.3, 3.0, 4.71]);
+}
+
+/// The difference is the thick bar and the two ends of the bar at `x = −1`,
+/// less the bar at `x = 1` between them, `16π + 2π − 4π`.
+#[test]
+fn a_thick_bar_and_a_thin_one_inside_it_less_another_overlapping_it_by_a_rounding() {
+    the_bars_alone_fused_by(Rule::Difference, 14.0 * PI, &TURNS);
+}
+
+/// Panics unless, at each of `turns`, the thick bar united with the thin bar
+/// at `x = −1` and then fused with the one at `x = 1` by `rule`, with no
+/// block, is one solid that validates and measures `meant`.
 ///
-/// The thin bars are inside the thick one from `z = −2` to 2, so the union is
-/// the thick bar and the four ends of length 1, `16π + 4π`; the intersection
-/// is the thin bar at `x = 1` between the thick bar's ends, `4π`; and the
-/// difference is the thick bar and the two ends of the bar at `x = −1`, less
-/// the bar at `x = 1` between them, `16π + 2π − 4π`. Where the two thin bars
-/// share their sliver past the ends there is no volume a measure can see.
+/// The thin bars are inside the thick one from `z = −2` to 2. Where they share
+/// their sliver past its ends there is no volume a measure can see.
 ///
 /// The thick bar's bottom rim is a circle of radius 2 round `z`, and the bar
 /// at `x = 1` cuts the bottom's plane in the circle of radius 1 round `c`,
@@ -94,44 +117,47 @@ fn a_block_on_a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_in
 /// corner, the rim went with the piece of the bottom inside the bar at
 /// `x = 1`, the piece outside both thin bars was left without it, and every
 /// rule was refused `ResultIsNotManifold` at the four turns (Q3244).
-#[test]
-fn a_thick_bar_fuses_with_two_thin_bars_overlapping_by_a_rounding_inside_it() {
-    for turn in TURNS {
-        for (rule, meant) in [
-            (Rule::Union, 20.0 * PI),
-            (Rule::Intersection, 4.0 * PI),
-            (Rule::Difference, 14.0 * PI),
-        ] {
-            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-            let thick = a_bar(&mut model, 2.0, 4.0, [0.0, 0.0, -2.0], turn);
-            let left = a_bar(&mut model, 1.0, 6.0, [-1.0, 0.0, -3.0], turn);
-            let right = a_bar(&mut model, 1.0, 6.0, [1.0, 0.0, -3.0], turn);
-            let with_the_left_bar = fused(&mut model, &[thick], &[left], Rule::Union, || {
-                format!("turned {turn}, the bar at x = −1")
-            });
-            let last = || format!("turned {turn}, {rule:?} with the bar at x = 1");
-            let [whole] = fused(&mut model, &with_the_left_bar, &[right], rule, last)[..] else {
-                panic!("{}: one solid", last());
-            };
-            valid_and_of_volume(&model, whole, meant, last);
-        }
+///
+/// **Measured at a deflection of `0.02`, not `0.01`.** At `0.01` and `0.03`
+/// the mesh of a cap of the union and of the difference is refused
+/// `BoundaryCrossesItself`: each thin circle's walk puts a point where it
+/// touches the rim, a rounding outside the rim's walk and a few ulp from its
+/// corner at `2c` or `−2c` (Q3244). At `0.013`, `0.02`, `0.05` and `0.1`
+/// every answer here measures.
+fn the_bars_alone_fused_by(rule: Rule, meant: f64, turns: &[f64]) {
+    let deflection = Deflection::of(0.02).expect("a fine mesh");
+    for &turn in turns {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let thick = a_bar(&mut model, 2.0, 4.0, [0.0, 0.0, -2.0], turn);
+        let left = a_bar(&mut model, 1.0, 6.0, [-1.0, 0.0, -3.0], turn);
+        let right = a_bar(&mut model, 1.0, 6.0, [1.0, 0.0, -3.0], turn);
+        let with_the_left_bar = fused(&mut model, &[thick], &[left], Rule::Union, || {
+            format!("turned {turn}, the bar at x = −1")
+        });
+        let last = || format!("turned {turn}, {rule:?} with the bar at x = 1");
+        let [whole] = fused(&mut model, &with_the_left_bar, &[right], rule, last)[..] else {
+            panic!("{}: one solid", last());
+        };
+        valid_and_of_volume(&model, whole, meant, deflection, last);
     }
 }
 
 /// Panics, saying `which`, unless the model validates and `solid` measures
-/// `meant` to within the measure's own error.
-fn valid_and_of_volume(model: &Model, solid: SolidKey, meant: f64, which: impl Fn() -> String) {
+/// `meant` at `deflection` to within the measure's own error.
+fn valid_and_of_volume(
+    model: &Model,
+    solid: SolidKey,
+    meant: f64,
+    deflection: Deflection,
+    which: impl Fn() -> String,
+) {
     model
         .validate(&Policy::certified(), &mut ProvenanceLog::new())
         .unwrap_or_else(|why| panic!("{}: {why}", which()));
     let measured = model
         .solid(solid)
         .expect("this model made the key")
-        .measure(
-            Deflection::of(0.01).expect("a fine mesh"),
-            &Policy::certified(),
-            &mut ProvenanceLog::new(),
-        )
+        .measure(deflection, &Policy::certified(), &mut ProvenanceLog::new())
         .unwrap_or_else(|refused| panic!("{}: {refused:?}", which()));
     println!(
         "{}: {} ± {} against {meant}",
