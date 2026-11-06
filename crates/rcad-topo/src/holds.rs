@@ -420,12 +420,26 @@ fn what_a_flat_face_holds(
                 || is_one_circle_cut_in_two(solid, face, wire)?,
         );
     }
-    let outlines: Vec<Vec<Point>> = face
-        .wires()
-        .zip(&round)
-        .filter(|(_, is_round)| !**is_round)
-        .map(|(wire, _)| wire.points().collect())
+    let polygons = || {
+        face.wires()
+            .zip(&round)
+            .filter(|(_, is_round)| !**is_round)
+            .map(|(wire, _)| wire)
+    };
+    let outlines: Vec<Vec<Point>> = polygons()
+        .map(|wire| {
+            wire.coedges()
+                .filter(|&coedge| !runs_right_round_at_one_corner(coedge))
+                .map(|coedge| coedge.start().point())
+                .collect()
+        })
         .collect();
+    let disks = polygons()
+        .flat_map(WireView::coedges)
+        .filter(|&coedge| runs_right_round_at_one_corner(coedge));
+    let Some(disks) = how_many_disks_hold(solid, face, disks, point, policy, log)? else {
+        return Ok(OnAFace::OnItsBoundary);
+    };
     let mut aims: Vec<Option<Point>> = outlines
         .iter()
         .flatten()
@@ -477,7 +491,7 @@ fn what_a_flat_face_holds(
             }
             Ok(Walked::WindsRound(winding)) => {
                 trial.drain_into(log);
-                return Ok(held_where_it_winds(winding));
+                return Ok(held_where_it_and_its_disks_wind(winding, disks));
             }
             Ok(Walked::OnASide) => {
                 trial.drain_into(log);
@@ -560,10 +574,38 @@ fn how_often_a_round_wire_winds_round(
     log: &mut ProvenanceLog,
 ) -> Result<Option<i64>> {
     let inwards = if position == 0 { 1 } else { -1 };
-    let mut disks_holding_it = 0usize;
-    for circle in the_circles_a_round_wire_is_made_of(solid, face, wire)? {
+    let circles = the_circles_a_round_wire_is_made_of(solid, face, wire)?;
+    let Some(disks_holding_it) = how_many_disks_hold(solid, face, circles, point, policy, log)?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(if disks_holding_it % 2 == 1 {
+        inwards
+    } else {
+        0
+    }))
+}
+
+/// How many of the disks of `circles`, sides of `face` that each run right
+/// round a whole closed curve, hold `point`, or `None` when `point` is on one
+/// of those curves. Each disk is read on its own by
+/// [`what_a_round_wire_encloses`], against the surface across its side.
+///
+/// # Errors
+///
+/// What [`what_a_round_wire_encloses`] gives.
+fn how_many_disks_hold<'m>(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    circles: impl IntoIterator<Item = CoedgeView<'m>>,
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<usize>> {
+    let mut holding_it = 0usize;
+    for circle in circles {
         match what_a_round_wire_encloses(solid, face, circle, point, policy, log)? {
-            Decision::Neg => disks_holding_it += 1,
+            Decision::Neg => holding_it += 1,
             Decision::Pos => {}
             Decision::Zero => return Ok(None),
             // A side nobody could settle came back as a refusal a moment ago,
@@ -572,11 +614,7 @@ fn how_often_a_round_wire_winds_round(
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
         }
     }
-    Ok(Some(if disks_holding_it % 2 == 1 {
-        inwards
-    } else {
-        0
-    }))
+    Ok(Some(holding_it))
 }
 
 /// Whether `wire` is several whole closed curves, each one edge: two round
@@ -592,6 +630,16 @@ fn is_several_whole_circles(wire: WireView<'_>) -> bool {
         && wire
             .coedges()
             .all(|coedge| matches!(coedge.edge().is_closed(), Ok(true)))
+}
+
+/// Whether `coedge` runs right round a whole closed curve, from one corner and
+/// back to it. Among a flat face's other sides it is a round hole or a round
+/// bump touching the rest of its wire at that corner: a pin through a plate
+/// that touches the plate's side leaves one in the plate's top
+/// (`tests/a_flat_face_with_a_round_hole_touching_its_outline.rs`, row Q3250).
+/// A kind of run this crate has never seen is not one.
+fn runs_right_round_at_one_corner(coedge: CoedgeView<'_>) -> bool {
+    coedge.start().key() == coedge.end().key() && matches!(coedge.edge().is_closed(), Ok(true))
 }
 
 /// The coedges whose circles make up a round wire, each to be read on its
@@ -995,11 +1043,15 @@ fn walk_one_outline(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Walked> {
-    let corners: Vec<Point> = wire.points().collect();
+    let polygon: Vec<CoedgeView<'_>> = wire
+        .coedges()
+        .filter(|&coedge| !runs_right_round_at_one_corner(coedge))
+        .collect();
+    let corners: Vec<Point> = polygon.iter().map(|side| side.start().point()).collect();
     if corners.is_empty() {
         return Ok(Walked::WindsRound(0));
     }
-    for coedge in wire.coedges() {
+    for coedge in polygon {
         let edge = coedge.edge();
         if edge.stored_run() != &EdgeRun::Straight && !is_a_piece_of_a_ruling(solid, face, edge)? {
             return Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() });
@@ -2275,10 +2327,12 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
     let Readings {
         sides: readings,
         whole_curves,
+        disks,
     } = every_reading_of_the_sides_of(solid, face)?;
-    let with_a_round_wire = face
-        .wires()
-        .any(|wire| is_a_round_wire_of_a_flat_face(face, wire));
+    let with_a_round_wire = !disks.is_empty()
+        || face
+            .wires()
+            .any(|wire| is_a_round_wire_of_a_flat_face(face, wire));
     let on_a_ball = matches!(surface, Surface::Sphere(_));
     if !with_a_round_wire && (whole_curves.is_empty() || on_a_ball) {
         let mut refused = None;
@@ -2307,7 +2361,7 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
         }
     }
     match surface {
-        Surface::Plane(flat) => {
+        Surface::Plane(_) => {
             let [sides] = readings.as_slice() else {
                 panic!(
                     "a flat face's sides are read one way, since only a ruling of a pipe is read more ways than one"
@@ -2317,7 +2371,9 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
                 whole_curves.is_empty(),
                 "only a cone or a ball face's sides are read as whole curves"
             );
-            what_a_flat_face_of_chords_and_arcs_holds(solid, face, &flat, sides, point, policy, log)
+            what_a_flat_face_of_chords_and_arcs_holds(
+                solid, face, sides, &disks, point, policy, log,
+            )
         }
         Surface::Cone(cone) => {
             let [sides] = readings.as_slice() else {
@@ -3950,15 +4006,18 @@ fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
 fn what_a_flat_face_of_chords_and_arcs_holds(
     solid: SolidView<'_>,
     face: FaceView<'_>,
-    flat: &Plane,
     sides: &[Side],
+    disks: &[CoedgeView<'_>],
     point: PredicatePoint,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<OnAFace> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
-    let Surface::Plane(placed) = face.surface() else {
-        unreachable!("a face stored on a plane sits on one once moved")
+    let (Surface::Plane(flat), Surface::Plane(placed)) = (face.stored_surface(), face.surface())
+    else {
+        unreachable!(
+            "the caller hands this only a face stored on a plane, and a movement keeps a plane one"
+        )
     };
     let target = a_point_off_the_plane(face, &placed)
         .ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })?;
@@ -3973,6 +4032,10 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
             None => return Ok(OnAFace::OnItsBoundary),
         }
     }
+    let Some(disks) = how_many_disks_hold(solid, face, disks.iter().copied(), point, policy, log)?
+    else {
+        return Ok(OnAFace::OnItsBoundary);
+    };
     let mut chords = Vec::new();
     let mut along = Vec::with_capacity(sides.len());
     for (index, side) in sides.iter().enumerate() {
@@ -3993,7 +4056,7 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
             continue;
         };
         let on_the_left =
-            is_the_arc_left_of_its_chord(flat, side, *into_the_arc).ok_or_else(cannot)?;
+            is_the_arc_left_of_its_chord(&flat, side, *into_the_arc).ok_or_else(cannot)?;
         let arcs_side = if on_the_left {
             Decision::Pos
         } else {
@@ -4017,7 +4080,7 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
             read
         };
         let inside = if matches!(read, Decision::Neg | Decision::Zero)
-            && is_on_the_other_nappe_from_the_arc(flat, side, point)?
+            && is_on_the_other_nappe_from_the_arc(&flat, side, point)?
         {
             Decision::Pos
         } else {
@@ -4107,7 +4170,7 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
         match wind_aiming_at(aim, &towards, &mut trial) {
             Ok(winding) => {
                 trial.drain_into(log);
-                return Ok(held_where_it_winds(winding));
+                return Ok(held_where_it_and_its_disks_wind(winding, disks));
             }
             Err(refused) => {
                 first_refusal.get_or_insert((refused, trial));
@@ -4130,7 +4193,7 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
     if one.arcs_side == other.arcs_side {
         winding += other.piece;
     }
-    Ok(held_where_it_winds(winding))
+    Ok(held_where_it_and_its_disks_wind(winding, disks))
 }
 
 /// An arc of a flat face, of a cone face seen down its axis, or of a ball face
