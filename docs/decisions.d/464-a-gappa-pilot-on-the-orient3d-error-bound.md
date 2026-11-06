@@ -30103,3 +30103,175 @@ column's largest.
 
 Nobody has run the kernel's walk on any of these, so none of them has a class
 (§360.5).
+
+### 464.42 A distance off a plane, and a plane's shift, with two or three products below the normals
+
+DRAFT, unfinished: Q2858's first lane stopped at its budget and handed over.
+The lane after it finishes this subsection, or rewrites it, before the row
+lands. Nothing below is a result yet but the two prints it quotes.
+
+Q2858 asks whether 464.9's `signed.g` holds with `L` at least `2⁻¹⁰²²` and
+two or three of its products below `2⁻¹⁰²²` or of a zero factor, and whether
+`shiftplane.g` does with `|n|·L` at least `2⁻¹⁰²²`, split by where each
+product lands as 464.18's `planeall.py` split `plane.g`.
+
+**What the first lane ran.**
+
+- `search.py` (below), `python3 search.py 1`, draws 400 000 inputs with `L`
+  within `2⁶` of `2⁻¹⁰²²`, runs the code's arithmetic in Python's `f64` and
+  prints the worst `|value − Ex|` by where the three products land. Its worst
+  over the 64 states was `5.292u` of `L` for `signed` (state `pnp`) and
+  `4.828u` of `|n|·L` for the shift (state `mmm`), against the code's `8u`
+  and `16u`. A search, not a proof.
+- `t_ppp.g` (below), every product below the normals and positive, the error
+  written as the sum of what each of the six roundings cost, exits 1 in 29 s
+  with best `±9.99201e-16`, `9u`: it prints `s01 − S01` in `[0, 0]`, so Gappa
+  finds a sum of two products below the normals exact by itself, `s012 −
+  S012` within `±2⁻¹⁰⁷⁴`, `(value − y) / y` within `±2⁻⁵³`, and `y / L` in
+  `[−1, 4]`. The `4` is what loses it: the hint bounds `s012 / L` by interval,
+  not by `|n₀| + |n₁| + |n₂|`.
+
+**What the first lane worked out on paper, not run.** 464.24's shares, each
+term's error within `4u` of `wᵢ·|nᵢ|·L` and what rounding a product below the
+normals cost paid out of a normal product's share:
+
+- one normal product, one below and one zero (`nsz` and its turns): the normal
+  product meets three roundings, so the amount fits its share; plain shares,
+  `7.93u`.
+- `ssn` (product 2 normal): weights `3/4, 3/4, 5/4`, so `(√43 + 1)u = 7.56u`
+  with the weighted Cauchy-Schwarz hypothesis as in 464.24's `k = 2`.
+- `nss` and `sns`: weights `6/4, 3/4, 2/4`, `(√49·√(1 + 64ε) + 1)u`, which is
+  `8u` and a little over. Shares alone cannot prove these at the code's `8u`;
+  the case needs a split on `|S01|`, below `2⁻¹⁰²¹`, where `s01` is exact and
+  the weights are `5, 2, 2` (`6.74u`), or at least it, where the two amounts
+  are within `u·|S01|`.
+
+`search.py`, whole:
+
+```python
+"""Search signed_distance_to's and a shift's arithmetic, in f64, for the worst
+error against L (signed) and |n| L (shift), with L near 2^-1022 and products
+landing in each state: n normal, p/m below the normals, z zero."""
+import math
+import random
+import sys
+from fractions import Fraction as F
+
+U = 2.0**-53
+TINY = 2.0**-1022
+random.seed(int(sys.argv[1]) if len(sys.argv) > 1 else 1)
+
+
+def unit():
+    while True:
+        v = [random.gauss(0, 1) * 2.0 ** random.choice([0, 0, 0, -3, -10, -30]) for _ in range(3)]
+        n = math.sqrt(sum(c * c for c in v))
+        if n > 0:
+            u = [c / n for c in v]
+            nn = sum(F(c) * F(c) for c in u)
+            if abs(nn - 1) <= 64 * F(2.0**-52):
+                return u
+
+
+def signed(n, p, off):
+    return (n[0] * p[0] + n[1] * p[1]) + n[2] * p[2] - off
+
+
+def shift(n, d, off):
+    return off + ((n[0] * d[0] + n[1] * d[1]) + n[2] * d[2])
+
+
+def state(x):
+    if x == 0:
+        return "z"
+    if abs(x) >= TINY:
+        return "n"
+    return "p" if x > 0 else "m"
+
+
+def coord(L):
+    k = random.random()
+    if k < 0.3:
+        return random.choice([1, -1]) * L
+    if k < 0.4:
+        return 0.0
+    return random.uniform(-L, L)
+
+
+best = {}
+for _ in range(400000):
+    n = unit()
+    L = TINY * 2.0 ** random.uniform(0, 6)
+    if random.random() < 0.3:
+        L = TINY * random.choice([1, 1.0000000000000002, 1.5, 2, 1.17])
+    p = [coord(L) for _ in range(3)]
+    off = random.choice([L, -L, random.uniform(-L, L), 0.0])
+    Lr = max([abs(c) for c in p] + [abs(off), TINY])
+    v = signed(n, p, off)
+    ex = sum(F(a) * F(b) for a, b in zip(n, p)) - F(off)
+    st = "".join(state(n[i] * p[i]) for i in range(3))
+    r = float(abs(F(v) - ex) / (F(U) * F(Lr)))
+    key = ("signed", st)
+    if r > best.get(key, (0,))[0]:
+        best[key] = (r, n, p, off)
+    # The shift with a short normal too.
+    scale = 2.0 ** random.choice([0, 0, -30, -60, 20])
+    ns = [c * scale for c in n]
+    N = math.sqrt(sum(F(c) * F(c) for c in ns))
+    NL = max([abs(c) for c in p] + [abs(off) / N if N else 0]) * N
+    if NL < TINY:
+        continue
+    offs = off * scale
+    NL = max([abs(c) for c in p] + [abs(offs) / N]) * N
+    if NL < TINY:
+        continue
+    v = shift(ns, p, offs)
+    ex = F(offs) + sum(F(a) * F(b) for a, b in zip(ns, p))
+    st = "".join(state(ns[i] * p[i]) for i in range(3))
+    r = float(abs(F(v) - ex) / (F(U) * F(NL)))
+    key = ("shift", st)
+    if r > best.get(key, (0,))[0]:
+        best[key] = (r, ns, p, offs)
+
+for key in sorted(best):
+    r, n, p, off = best[key]
+    print(key[0], key[1], f"{r:.3f}u", [c.hex() for c in n], [c.hex() for c in p], off.hex())
+```
+
+`t_ppp.g`, whole, run through 464.13's `one.sh`:
+
+```gappa
+@rnd = float<ieee_64, ne>;
+
+n0 = rnd(n0_); n1 = rnd(n1_); n2 = rnd(n2_);
+p0 = rnd(p0_); p1 = rnd(p1_); p2 = rnd(p2_);
+off = rnd(off_);
+
+X0 = n0 * p0; X1 = n1 * p1; X2 = n2 * p2;
+t0 = rnd(X0); t1 = rnd(X1); t2 = rnd(X2);
+S01 = t0 + t1;
+s01 = rnd(S01);
+S012 = s01 + t2;
+s012 = rnd(S012);
+y = s012 - off;
+value = rnd(y);
+
+Ex = X0 + X1 + X2 - off;
+
+{
+     |n0| <= 1b1024 /\ |n1| <= 1b1024 /\ |n2| <= 1b1024
+  /\ |p0| <= 1b1024 /\ |p1| <= 1b1024 /\ |p2| <= 1b1024
+  /\ |off| <= 1b1024
+  /\ |S01| >= 1b-1074 /\ |S012| >= 1b-1074 /\ |y| >= 1b-1074
+  /\ X0 in [1b-2148, 1b-1022] /\ X1 in [1b-2148, 1b-1022] /\ X2 in [1b-2148, 1b-1022]
+  /\ L in [1b-1022, 1b1024]
+  /\ p0 / L in [-1, 1] /\ p1 / L in [-1, 1] /\ p2 / L in [-1, 1]
+  /\ off / L in [-1, 1]
+->
+  s01 - S01 in ? /\ s012 - S012 in ? /\ (value - y) / y in ? /\ y / L in ?
+  /\ (value - Ex) / L in [-1b-50, 1b-50]
+}
+
+(value - Ex) / L -> ((t0 - X0) + (t1 - X1) + (t2 - X2) + (s01 - S01) + (s012 - S012)) / L + ((value - y) / y) * (y / L);
+y / L -> s012 / L - off / L;
+```
