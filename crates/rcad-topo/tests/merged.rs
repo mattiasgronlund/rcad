@@ -613,6 +613,8 @@ pub mod two_solids_in_the_same_place;
 pub mod two_spellings_of_one_pipe_mesh_each_face_on_its_own_side;
 #[path = "two_thin_bars_touching_inside_a_thick_one_turned.rs"]
 pub mod two_thin_bars_touching_inside_a_thick_one_turned;
+#[path = "two_touching_round_holes_one_touching_the_outline.rs"]
+pub mod two_touching_round_holes_one_touching_the_outline;
 #[path = "two_turned_cubes_a_rounding_apart.rs"]
 pub mod two_turned_cubes_a_rounding_apart;
 #[path = "validating_one_solid.rs"]

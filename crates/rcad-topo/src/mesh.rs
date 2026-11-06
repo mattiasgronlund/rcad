@@ -7948,27 +7948,44 @@ fn it_passes_each_of_its_points_once(around: &WalkedLoop) -> bool {
 /// passes twice, the loop that holds the most of the chart first: the outline
 /// before a hole that touches it.
 ///
-/// **Only a cut into loops that each pass every point once is taken.** A slit
-/// runs out along one edge and back from a corner that starts two of its
-/// coedges, and the loop out and back passes each point of the slit twice, so
-/// it stays whole for [`BuildingAMesh::open_a_slit`]. So does a wire that goes
-/// right round either way: a seam's corner starts two coedges a whole turn
-/// apart, and [`apart_at`] would not cut there anyway.
+/// **The cuts are taken only where every loop they leave passes each point
+/// once**, and otherwise the wire stays whole. A slit runs out along one edge
+/// and back from a corner that starts two of its coedges, and the loop out and
+/// back passes each point of the slit twice, so it stays whole for
+/// [`BuildingAMesh::open_a_slit`]. So does a wire that goes right round either
+/// way: a seam's corner starts two coedges a whole turn apart, and [`apart_at`]
+/// would not cut there anyway.
+///
+/// **A cut is taken on the way when each part passes twice only corners still
+/// to be cut at.** An outline touching a round hole at one point, and that
+/// hole touching a second at another, is one wire through both points twice.
+/// Cut at either, one part still passes the other twice, so a cut taken only
+/// where both parts pass every point once was taken at neither, and the
+/// triangulator was handed the wire whole and refused it `CornersCoincide`
+/// (Q3251).
 fn apart_where_it_passes_a_corner_twice(around: WalkedLoop, twice: &[u32]) -> Vec<WalkedLoop> {
-    if around.goes_right_round || around.goes_right_round_the_second_way {
+    if twice.is_empty() || around.goes_right_round || around.goes_right_round_the_second_way {
         return vec![around];
     }
-    let mut loops = vec![around];
-    for &at in twice {
+    let mut loops = vec![around.clone()];
+    for (step, &at) in twice.iter().enumerate() {
+        let still_to_cut = &twice[step + 1..];
         loops = loops
             .into_iter()
             .flat_map(|one| match apart_at(&one, at) {
-                Some(parts) if parts.iter().all(it_passes_each_of_its_points_once) => {
+                Some(parts)
+                    if parts
+                        .iter()
+                        .all(|part| it_passes_twice_only(part, still_to_cut)) =>
+                {
                     parts.to_vec()
                 }
                 Some(_) | None => vec![one],
             })
             .collect();
+    }
+    if !loops.iter().all(it_passes_each_of_its_points_once) {
+        return vec![around];
     }
     loops.sort_by(|one, other| {
         how_much_of_the_chart_this_loop_encloses(other)
@@ -7976,6 +7993,15 @@ fn apart_where_it_passes_a_corner_twice(around: WalkedLoop, twice: &[u32]) -> Ve
             .total_cmp(&how_much_of_the_chart_this_loop_encloses(one).abs())
     });
     loops
+}
+
+/// Whether every point a loop passes more than once is one of `these`.
+fn it_passes_twice_only(around: &WalkedLoop, these: &[u32]) -> bool {
+    let mut seen = HashSet::with_capacity(around.points.len());
+    around
+        .points
+        .iter()
+        .all(|&at| seen.insert(at) || these.contains(&at))
 }
 
 /// A piece between two holes that touch, cut apart where they touch into the
