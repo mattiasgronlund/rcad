@@ -16,12 +16,11 @@ use crate::{Error, Result};
 /// has to find and fix later.
 ///
 /// Serializes as a `([x, y, z], [w, i, j, k])` pair of translation and rotation.
-/// The stored rotation is scaled back to length one when it is read, so a file
-/// cannot hand us a movement that also stretches the part. That scaling can move
-/// the last bit or two of a rotation that was already very nearly unit length,
-/// so a movement that has been written and read back puts points in the same
-/// places to within rounding, not bit for bit — **except a turn of a cube**,
-/// which reads back as the very numbers it was written as (see
+/// A stored rotation as near length one as [`Isometry::rotation`] and
+/// [`Isometry::compose`] leave one reads back as the very numbers it was
+/// written as, and any other is scaled back to length one, so a file cannot
+/// hand us a movement that also stretches the part. A turn of a cube reads
+/// back as the numbers it was written as at any length (see
 /// [`Isometry::quarter_turns`]).
 ///
 /// The scale the four coefficients are written at makes no difference to the
@@ -97,10 +96,10 @@ impl Isometry {
     /// of 3072 coordinates past it, by up to 2.46 times
     /// (`a_turn_four_times_the_length_of_one_moves_points_past_the_published_roundoff`).
     /// So no route to a movement keeps such a turn. [`Isometry::compose`]
-    /// divides a product that has drifted, a movement read from stored parts
-    /// is divided, and so is one read from a nalgebra isometry whose turn is
-    /// not near length one, since nalgebra's `Unit::new_unchecked` stores a
-    /// quaternion of any length.
+    /// divides a product that has drifted, and a movement read from stored
+    /// parts or from a nalgebra isometry is divided where its turn is not
+    /// near length one, since a file holds any four numbers and nalgebra's
+    /// `Unit::new_unchecked` stores a quaternion of any length.
     ///
     /// Every step of the count is a relative argument, so it holds only while
     /// nothing overflows and nothing falls into the subnormals.
@@ -389,17 +388,14 @@ impl Default for Isometry {
     }
 }
 
-/// A nalgebra isometry, with its turn held near length one as
-/// [`Isometry::compose`] holds its own.
+/// A nalgebra isometry, read as its stored parts are.
 ///
 /// nalgebra's `Unit::new_unchecked` stores a quaternion of any length, and a
 /// turn longer or shorter than one stretches what it turns and is outside what
-/// [`Isometry::POINT_ROUNDOFF`] is proved for. So a turn that has not drifted
-/// past `TURN_LENGTH_DRIFT` keeps its bits, and any other is read as stored
-/// parts are: brought into range and divided by its length, so no length is
-/// too long or too short to read. Either way a turn of a cube is stored the one
-/// way every route stores it. So the movements this file builds come back
-/// from nalgebra bit for bit as they went
+/// [`Isometry::POINT_ROUNDOFF`] is proved for. Read as stored parts, a turn
+/// that has not drifted past `TURN_LENGTH_DRIFT` keeps its bits, and any other
+/// is divided by its length. So the movements this file builds come back from
+/// nalgebra bit for bit as they went
 /// (`a_movement_handed_to_nalgebra_and_back_keeps_its_bits`), and a turn of any
 /// other length comes back within `6 · f64::EPSILON` of length one
 /// (`a_turn_from_nalgebra_off_length_one_is_held_within_six_epsilon_of_it`).
@@ -412,18 +408,39 @@ impl TryFrom<na::Isometry3<f64>> for Isometry {
     type Error = Error;
 
     fn try_from(movement: na::Isometry3<f64>) -> Result<Self> {
-        let shift = movement.translation.vector;
         let turn = movement.rotation.into_inner();
-        if sits_near_length_one(&turn) && Vector::from(shift).is_finite() {
-            return Ok(turn_then_shift(movement.rotation, shift));
-        }
         Self::try_from((
-            Vector::from(shift).components(),
+            Vector::from(movement.translation.vector).components(),
             [turn.w, turn.i, turn.j, turn.k],
         ))
     }
 }
 
+/// A shift `[x, y, z]` after a turn `[w, i, j, k]`, with the turn held near
+/// length one as [`Isometry::compose`] holds its own: what a file hands back.
+///
+/// **A turn that has not drifted past `TURN_LENGTH_DRIFT` keeps its bits**,
+/// and so does one written at a power of two of that length
+/// (`the_turn_named_by`). Turns straight from [`Isometry::rotation`] sit that
+/// near
+/// (`TURN_LENGTH_DRIFT` says how near), and so do all 51 000 that
+/// [`Isometry::compose`] hands back in `rcad-geom`'s
+/// `a_turn_composed_of_hundreds_of_turns_comes_back_from_its_bytes_with_its_bits`,
+/// the ones it divided included. Until Q3234 this divided every turn by its
+/// length, which moved 34 043 of those 51 000, 200 of the 496 movements of
+/// `a_movement_comes_back_from_its_bytes_with_the_bits_it_was_written_with`,
+/// and with them 1 973 of the 5 038 planes of `rcad-topo`'s
+/// `a_read_moves_no_plane_and_no_placement`.
+///
+/// **Any other turn is brought into range and divided by its length**, so no
+/// length is too long or too short to read and a file cannot hand back a
+/// movement that also stretches the part. Either way a turn of a cube is
+/// stored the one way every route stores it.
+///
+/// # Errors
+///
+/// [`Error::NotFinite`] if the shift or the turn holds a number that is not
+/// finite, and [`Error::ZeroLength`] if the turn is four zeros.
 impl TryFrom<([f64; 3], [f64; 4])> for Isometry {
     type Error = Error;
 
@@ -440,12 +457,35 @@ impl TryFrom<([f64; 3], [f64; 4])> for Isometry {
         if stored.iter().all(|coefficient| *coefficient == 0.0) {
             return Err(Error::ZeroLength { what: "rotation" });
         }
-        let [w, i, j, k] = brought_into_the_range_its_squares_fit_in(stored);
-        Ok(turn_then_shift(
-            na::UnitQuaternion::from_quaternion(na::Quaternion::new(w, i, j, k)),
-            offset.into(),
-        ))
+        Ok(turn_then_shift(the_turn_named_by(stored), offset.into()))
     }
+}
+
+/// The turn `coefficients` name, with the bits they would have written at
+/// length one where those sit within [`TURN_LENGTH_DRIFT`] of it, and divided
+/// by their length otherwise.
+///
+/// **Whatever power of two they are written at.** Brought into range, the
+/// largest of them is in `[1, 2)`. A turn of length one has its largest in
+/// `[1/2, 1]`, or just under `1/2` where all four are about `1/2`, as in a
+/// third of a turn about `(1, 1, 1)`. A turn written at length one and brought
+/// into range is multiplied by one, two or four, which is exact, so one of the
+/// three tried here, as brought, halved and quartered, is its own bits again.
+/// At most one of the three is within the drift of length one, since each has
+/// a quarter of the `q·q` of the one before. So a turn written at any power of
+/// two of its length comes back with the bits it has at length one, as
+/// `a_rotation_written_at_any_scale_is_the_same_rotation` asks of every read.
+fn the_turn_named_by(coefficients: [f64; 4]) -> na::UnitQuaternion<f64> {
+    let [w, i, j, k] = brought_into_the_range_its_squares_fit_in(coefficients);
+    let in_range = na::Quaternion::new(w, i, j, k);
+    [1.0, 0.5, 0.25]
+        .map(|factor| in_range * factor)
+        .into_iter()
+        .find(sits_near_length_one)
+        .map_or_else(
+            || na::UnitQuaternion::from_quaternion(in_range),
+            na::Unit::new_unchecked,
+        )
 }
 
 /// `coefficients`, every one multiplied by the same power of two, chosen so the
@@ -505,7 +545,8 @@ fn brought_into_the_range_its_squares_fit_in(coefficients: [f64; 4]) -> [f64; 4]
 
 /// How far from one a composed turn's squared length `q·q` may sit, as `f64`
 /// works it out, before [`Isometry::compose`] divides the turn by its length —
-/// and a turn read from a nalgebra isometry, before it is divided too.
+/// and a turn read from stored parts or a nalgebra isometry, before it is
+/// divided too.
 ///
 /// **Not lower, so that a turn which has not drifted keeps its bits.** A turn
 /// straight from [`Isometry::rotation`] sits a few `ε` off by that sum — at
@@ -1227,8 +1268,8 @@ mod tests {
     /// [`Isometry::compose`] holds its own: a turn that had not drifted past
     /// [`TURN_LENGTH_DRIFT`] keeps its bits. So every movement this file
     /// builds — turned, composed 64 deep, turned by quarters, undone, and read
-    /// back from its stored parts, which divides its turn by its length —
-    /// comes back from nalgebra as the very movement it was.
+    /// back from its stored parts — comes back from nalgebra as the very
+    /// movement it was.
     #[test]
     fn a_movement_handed_to_nalgebra_and_back_keeps_its_bits() {
         let mut numbers = Numbers::seeded();

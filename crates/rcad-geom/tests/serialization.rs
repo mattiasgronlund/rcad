@@ -95,9 +95,11 @@ fn an_orientation_comes_back_the_same_way_round() {
     }
 }
 
-/// Not bit for bit: the stored rotation is scaled back to length one when it is
-/// read, and scaling something already very nearly unit length can move the
-/// last bit. What has to survive is where the movement puts things.
+/// What a caller rests on: a movement read back puts points where it put them.
+/// It is bit for bit as well, since Q3234: a stored turn as near length one as
+/// this one is kept as it was written, and the two tests after this one show
+/// it. Until then the read divided every turn by its length, which can move
+/// the last bit of a turn already that near.
 #[test]
 fn a_movement_comes_back_moving_points_to_the_same_places() {
     let movement = Isometry::rotation(&Axis::z(), FRAC_PI_3)
@@ -122,22 +124,16 @@ fn a_movement_comes_back_moving_points_to_the_same_places() {
 /// A movement comes back from its bytes with the bits it was written with: a
 /// turn that sits as near length one as `Isometry::rotation` and
 /// `Isometry::compose` leave one is kept as written, and not divided by its
-/// length again (Q3234).
+/// length again (Q3234). Written at twice its length it comes back the same,
+/// since the length a turn is written at changes nothing that is read.
 ///
 /// Turns about `x`, `y`, `z` and `(1, 2, 3)` by every tenth of a radian up to
 /// a whole turn, each after a shift, and each composed with all the turns
 /// about the same axis before it, the way a part placed again and again is
-/// placed. The same turn written at twice its length is one the read must
-/// divide, so it shows what dividing would have given: it moves the turn of
-/// 200 of the 496, and the bytes move none. Until Q3234 the bytes moved 200
-/// too.
+/// placed. Dividing each turn by its length would move 200 of the 496, and
+/// the bytes move none. Until Q3234 the bytes moved 200 too.
 #[test]
 fn a_movement_comes_back_from_its_bytes_with_the_bits_it_was_written_with() {
-    let bits = |movement: Isometry| {
-        let [x, y, z] = movement.translation_part().components();
-        let [w, i, j, k] = movement.rotation_quaternion();
-        [x, y, z, w, i, j, k].map(f64::to_bits)
-    };
     let shift = Isometry::translation(Vector::new(3.0, 5.0, 10.0)).expect("a finite offset");
     let about = [
         Axis::x(),
@@ -156,27 +152,100 @@ fn a_movement_comes_back_from_its_bytes_with_the_bits_it_was_written_with() {
             movements.push(shift.compose(&placed));
         }
     }
-    let (mut dividing_would_move, mut the_bytes_moved) = (0, 0);
+    let (mut dividing_would_move, mut the_bytes_moved, mut twice_as_long_moved) = (0, 0, 0);
     for &movement in &movements {
-        let twice_as_long = movement.rotation_quaternion().map(|number| 2.0 * number);
-        let divided = Isometry::try_from((movement.translation_part().components(), twice_as_long))
-            .expect("a finite turn that is not four zeros names a rotation");
-        if bits(divided) != bits(movement) {
+        let [w, i, j, k] = movement.rotation_quaternion();
+        let divided =
+            nalgebra::UnitQuaternion::from_quaternion(nalgebra::Quaternion::new(w, i, j, k));
+        if [divided.w, divided.i, divided.j, divided.k] != [w, i, j, k] {
             dividing_would_move += 1;
         }
-        if bits(there_and_back(movement)) != bits(movement) {
+        if bits_of_movement(there_and_back(movement)) != bits_of_movement(movement) {
             the_bytes_moved += 1;
+        }
+        let shift = movement.translation_part().components();
+        let twice_as_long = Isometry::try_from((shift, [w, i, j, k].map(|number| 2.0 * number)))
+            .expect("a finite turn that is not four zeros names a rotation");
+        if bits_of_movement(twice_as_long) != bits_of_movement(movement) {
+            twice_as_long_moved += 1;
         }
     }
     println!(
         "{} movements: dividing would move {dividing_would_move}, the bytes moved \
-         {the_bytes_moved}",
+         {the_bytes_moved}, written at twice the length {twice_as_long_moved}",
         movements.len()
     );
     assert_eq!(
-        (movements.len(), dividing_would_move, the_bytes_moved),
-        (496, 200, 0)
+        (
+            movements.len(),
+            dividing_would_move,
+            the_bytes_moved,
+            twice_as_long_moved
+        ),
+        (496, 200, 0, 0)
     );
+}
+
+/// A turn composed of up to 256 turns comes back from its bytes with its bits,
+/// whether `Isometry::compose` kept the bits of the product or divided it by
+/// its length: either way it leaves the turn near enough length one that the
+/// read keeps it (Q3234).
+///
+/// 200 chains of 256 turns, about axes and by angles from a fixed seed: 51 000
+/// composed turns, of which `compose` divided 1 633. Until Q3234 the bytes
+/// moved 34 043 of them. The floor on how many products `compose` divided is
+/// §14.7's: without it the divided ones would be tested on nothing.
+#[test]
+fn a_turn_composed_of_hundreds_of_turns_comes_back_from_its_bytes_with_its_bits() {
+    let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+    let mut between_minus_one_and_one = move || {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 11) as f64 / (1u64 << 52) as f64 * 2.0 - 1.0
+    };
+    let mut a_turn = move || {
+        let mut next = || 4.0 * between_minus_one_and_one();
+        let through = Point::new(next(), next(), next());
+        let axis = Axis::new(through, Vector::new(next(), next(), next()))
+            .expect("three numbers from a fixed seed are not all exactly zero");
+        Isometry::rotation(&axis, next()).expect("a finite angle about a unit axis")
+    };
+    let (mut composed, mut divided, mut moved) = (0, 0, 0);
+    for _ in 0..200 {
+        let mut placed = a_turn();
+        for _ in 1..256 {
+            let turn = a_turn();
+            let product = nalgebra::Isometry3::from(turn).rotation
+                * nalgebra::Isometry3::from(placed).rotation;
+            placed = turn.compose(&placed);
+            composed += 1;
+            let product = product.quaternion();
+            if placed.rotation_quaternion() != [product.w, product.i, product.j, product.k] {
+                divided += 1;
+            }
+            if bits_of_movement(there_and_back(placed)) != bits_of_movement(placed) {
+                moved += 1;
+            }
+        }
+    }
+    println!(
+        "of {composed} composed turns, compose divided {divided}, and the bytes moved {moved}"
+    );
+    assert_eq!(
+        moved, 0,
+        "the bytes moved {moved} of {composed} composed turns"
+    );
+    assert!(
+        divided > 1_000,
+        "compose divided only {divided} of {composed}, so those are barely tested"
+    );
+}
+
+fn bits_of_movement(movement: Isometry) -> [u64; 7] {
+    let [x, y, z] = movement.translation_part().components();
+    let [w, i, j, k] = movement.rotation_quaternion();
+    [x, y, z, w, i, j, k].map(f64::to_bits)
 }
 
 #[test]
