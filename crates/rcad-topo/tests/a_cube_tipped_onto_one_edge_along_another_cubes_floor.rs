@@ -859,9 +859,12 @@ fn the_block_and_the_tipped_cube(model: &mut Model, tilt: [f64; 4]) -> [SolidKey
 /// keeps a turn this near length one as it is handed, and dividing moves `s`
 /// and `c` one step up at 16 of the 28 tilts here, the two of [`TILTS`]
 /// among them. The cube's edge lies within a rounding of the floor, so that
-/// step can carry it to the floor's other side: at `t = 0.038` the edge is
-/// proved below the floor on these bits and above it on the kept ones, and
-/// the certified fuses refused for the range there answer. Dividing keeps
+/// step can carry it to the floor's other side: at `t = 0.024` the edge is
+/// proved below the floor on these bits and above it on the kept ones. At
+/// `t = 0.038` the certified intersection and the block less the cube,
+/// refused for the range on these bits, answer on the kept ones, and at
+/// `t = 0.0885` the tolerant union takes one shell as flat on these bits and
+/// none on the kept ones. Dividing keeps
 /// Q1688's figures as measured without sweeping the 400 tilts again.
 fn divided_by_its_length([w, i, j, k]: [f64; 4]) -> [f64; 4] {
     let length = ((i * i + k * k) + (j * j + w * w)).sqrt();

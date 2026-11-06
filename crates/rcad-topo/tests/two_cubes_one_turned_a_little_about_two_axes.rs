@@ -483,10 +483,11 @@ fn two_cubes(turn: [f64; 4], tx: f64) -> (Model, SolidKey, SolidKey) {
 ///
 /// **Every outcome this file pins was measured on these bits.** The read now
 /// keeps a turn this near length one as it is handed, and dividing moves each
-/// of the four parts of both turns one step up. The stored planes miss the
-/// corner by a rounding, so that step moves which fuses certified refuses:
-/// on the kept bits the union with the turn about `z` first, moved by
-/// exactly `5`, answers.
+/// of the four parts of both turns one step further from zero. The stored
+/// planes miss the corner by a rounding, so that step moves what the fuses
+/// meet: on the kept bits, with the turn about `z` first and the move by
+/// exactly `5`, the stored planes have no edge where the skins cross, and the
+/// certified union answers.
 fn divided_by_its_length([w, i, j, k]: [f64; 4]) -> [f64; 4] {
     let length = ((i * i + k * k) + (j * j + w * w)).sqrt();
     [w, i, j, k].map(|part| part / length)
