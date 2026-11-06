@@ -9656,4 +9656,86 @@ mod tests {
             }
         }
     }
+
+    /// Each arc of the lens two thin bars share at their tops is walked onto
+    /// its own side of the chord between its ends, and not onto its circle's
+    /// centre's side (Q3263).
+    ///
+    /// The numbers are the turn `4.69` of
+    /// `two_thin_bars_touching_inside_a_thick_one_turned.rs`: two pipes of
+    /// radius one with their axes at `c` and `−c`, `|c|` a rounding under one,
+    /// cut by the plane `z = 3` in two circles that cross at two places
+    /// `2e−8` apart. Each arc between them stands `5e−17` off its chord, under
+    /// the rounding of a point placed from its circle's centre one away, and
+    /// placed so the middle point of the right circle's arc came out at
+    /// `(−7.29e−17, 0, 3)`, on its centre's side. The lens's cap then ran the
+    /// wrong way round, and the intersection of those bars was refused
+    /// `Invalid(FacesDoNotAgreeWhichWayTheyFace)`.
+    #[test]
+    fn an_arc_of_a_lens_a_rounding_deep_is_walked_on_its_own_side_of_its_chord() {
+        let c = [-0.022_387_109_957_477_058, -0.999_749_377_247_994];
+        let corner = [-1.008_698_905_484_491_3e-8, 2.258_751_425_605_188_8e-10];
+        let other_corner = corner.map(|x| -x);
+        let ends = [corner, other_corner].map(|[x, y]| PredicatePoint::from([x, y, 3.0]));
+        let top = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 3.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("a unit normal"),
+        );
+
+        for centre in [c, c.map(|x| -x)] {
+            let pipe = Surface::Cylinder(
+                Cylinder::new(
+                    crate::Axis::new(
+                        Point::new(centre[0], centre[1], -3.0),
+                        Vector::new(0.0, 0.0, 1.0),
+                    )
+                    .expect("an axis"),
+                    1.0,
+                )
+                .expect("a pipe"),
+            );
+            let towards_the_other_centre = HalfSpace::through_a_point_facing(
+                Point::new(0.0, 0.0, 3.0),
+                Vector::new(-centre[0], -centre[1], 0.0),
+            )
+            .expect("a direction with length");
+            let centres_side = rcad_predicates::orient2d(corner, other_corner, centre);
+
+            for ends in [ends, [ends[1], ends[0]]] {
+                let run = NamedRun::new(
+                    EdgeRun::PartOfWhereItCrosses {
+                        and: pipe,
+                        picked_by: smallvec![Picker::from(towards_the_other_centre)],
+                    },
+                    ends,
+                )
+                .expect("a picked run");
+                let walked = walk(
+                    &run,
+                    [&top, &pipe],
+                    Deflection::of(0.01).expect("a length"),
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|refused| panic!("the arc round {centre:?} is {refused:?}"));
+
+                assert!(
+                    !walked.points().is_empty(),
+                    "the arc round {centre:?} has a point between its ends"
+                );
+                for point in walked.points() {
+                    let side =
+                        rcad_predicates::orient2d(corner, other_corner, [point.x(), point.y()]);
+                    assert!(
+                        matches!(
+                            (side, centres_side),
+                            (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos)
+                        ),
+                        "{point:?} on the arc round {centre:?} is {side:?} of the chord, \
+                         and the centre {centres_side:?}"
+                    );
+                }
+            }
+        }
+    }
 }
