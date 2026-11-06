@@ -56,9 +56,16 @@ model that **starts two of its coedges**
 (`corners_a_wire_sets_off_from_twice`), and only there — never at a point that
 merely turns up twice in a patch. The cut (`apart_at`) is taken only where the
 wire passes that point exactly twice, at **one corner of the chart** both
-times, with three corners or more each side, and only where **each part passes
-every point once** (`apart_where_it_passes_a_corner_twice`). Each condition
-keeps out a shape that already had a meaning:
+times, with three corners or more each side (`apart_where_it_passes_a_corner_twice`).
+The wire is cut at each such corner in turn, and a cut is taken on the way when
+each part passes twice **only corners still to be cut at**. The cuts are kept
+only when **every loop left passes each point once**; otherwise the wire stays
+whole. (Q3251: the first rule asked each part to pass every point once at each
+cut, so an outline touching round hole A, with A touching round hole B, took
+neither cut, since the part left after either cut still passed the other corner
+twice, and the triangulator was refused `CornersCoincide`. Now both corners
+are cut. `tests/two_touching_round_holes_one_touching_the_outline.rs` pins
+it.) Each condition keeps out a shape that already had a meaning:
 
 - a **seam**'s corner starts two coedges, but its two visits are a whole turn
   apart in the chart;
