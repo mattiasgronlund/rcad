@@ -48,15 +48,17 @@ fn the_rim_corner_two_ulps_off_the_rims_start_is_counted_first_round_it() {
 
 /// Every turn `step · 0.05` about `z` at which the union with the far block
 /// was refused (Q2797): `AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve` for the lean
-/// `(0.1, 0, 1)`, and the order along a crossing for the other two. All but
-/// one of them: the lean `(0, 0.1, 1)` turned `50 · 0.05` is still refused on
-/// the side of the cylinder at the box `[−16, 16] × [0, 32] × [1, 4]`, which
-/// Q2857 traces.
+/// `(0.1, 0, 1)`, and the order along a crossing for the other two, but for
+/// the lean `(0, 0.1, 1)` turned `50 · 0.05`, which was refused on the side
+/// of the cylinder at the box `[−16, 16] × [0, 32] × [1, 4]`.
 #[test]
 fn every_turn_the_union_with_the_far_block_was_refused_at_answers() {
     let refused: [([f64; 3], &[u8]); 3] = [
         ([0.1, 0.0, 1.0], &[1, 14, 27, 32, 35, 40, 52]),
-        ([0.0, 0.1, 1.0], &[29, 30, 34, 35, 40, 44, 49, 56, 57, 58]),
+        (
+            [0.0, 0.1, 1.0],
+            &[29, 30, 34, 35, 40, 44, 49, 50, 56, 57, 58],
+        ),
         ([-0.1, 0.0, 1.0], &[37, 42, 50, 55, 57, 59]),
     ];
     let wrong: Vec<String> = refused
