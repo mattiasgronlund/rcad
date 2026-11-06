@@ -970,8 +970,9 @@ impl BuildingAMesh {
 
     /// [`Self::again_with_its_outline_walked_finer`], with each side walked so
     /// that its chords sag no more than half the way the point of `face`'s
-    /// holes nearest the curved surface it runs along stands in from it, where
-    /// every point of the holes stands on one side of that surface.
+    /// holes nearest the curved surface it runs along stands in from it, of
+    /// the points of the holes near the side, where every one of those stands
+    /// on one side of that surface — see [`Self::how_far_its_holes_stand_in`].
     ///
     /// **Halving alone fell short where a hole comes a rounding from the
     /// outline** (Q2845). A chord of a side sags into the face, so a point of
@@ -1014,12 +1015,28 @@ impl BuildingAMesh {
     }
 
     /// How far the point of `face`'s holes nearest the curved surface `edge`
-    /// runs along stands from it, over the points the holes were walked into
-    /// and their corners, when every one of them stands on one side of it.
+    /// runs along stands from it, over those of the points the holes were
+    /// walked into and their corners that lie near `edge` itself, when every
+    /// one of those stands on one side of that surface.
     ///
-    /// `None` when one stands on it, when a side cannot be told, or when they
-    /// stand on both sides, as a hole poking out through the outline does,
-    /// which no walk of the outline clears.
+    /// **Near the side, and not only near its surface** (Q2861). The surface
+    /// runs on where the side does not. A bar's circle that a block covers
+    /// part of still bounds the face at an arc, and a hole `2⁻⁴⁰` inside that
+    /// circle where the block covers it, `1.6` from the arc, stands `9.1e−13`
+    /// in from the whole pipe. Read off every point, that capped the arc's
+    /// room under what placing the face rounds by, the walk was refused, and
+    /// the crossing was handed back where halving alone cleared. So a point
+    /// counts only when it lies within twice [`WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO`]
+    /// times the room the side was last walked at of a chord of that walk.
+    /// Those chords sag at most one such share from the side, and the next
+    /// walk, at half that room or less, sags at most half a share, so a point
+    /// further out than a share and a half lies between the side and none of
+    /// the next walk's chords. The rest of the two is a margin.
+    ///
+    /// `None` when none lies near the side, when one stands on the surface,
+    /// when a side cannot be told, or when they stand on both sides, as a hole
+    /// poking out through the outline does, which no walk of the outline
+    /// clears.
     fn how_far_its_holes_stand_in(&self, face: FaceView<'_>, edge: EdgeView<'_>) -> Option<f64> {
         let along: SmallVec<[Surface; 2]> = self
             .along_each_edge
@@ -1035,6 +1052,8 @@ impl BuildingAMesh {
         };
         let pair = which_two_surfaces_a_run_is_between(&edge.run(), pair);
         let curved = pair.iter().find(|surface| surface.as_plane().is_none())?;
+        let last_walked = self.the_side_as_it_was_last_walked(edge);
+        let near = 2.0 * WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO * self.room_it_was_last_walked_at(edge);
         let holes = || face.wires().skip(1);
         let walked = holes()
             .flat_map(WireView::coedges)
@@ -1044,7 +1063,11 @@ impl BuildingAMesh {
         let corners = holes().flat_map(WireView::points);
         let mut side = None;
         let mut nearest = f64::INFINITY;
-        for point in walked.chain(corners) {
+        for point in walked.chain(corners).filter(|&point| {
+            last_walked
+                .windows(2)
+                .any(|chord| how_far_from_the_side(point, [chord[0], chord[1]]) <= near)
+        }) {
             let here = side_of_surface(curved, PredicatePoint::from(point.coordinates()));
             let (Decision::Neg | Decision::Pos) = here else {
                 return None;
@@ -1056,6 +1079,28 @@ impl BuildingAMesh {
             nearest = nearest.min(point.distance_to(curved.point_at(u, v)));
         }
         side.map(|_| nearest)
+    }
+
+    /// `edge`'s ends and the points the last pass walked it into, where the
+    /// solid sits and in the order the edge is stored running.
+    fn the_side_as_it_was_last_walked(&self, edge: EdgeView<'_>) -> Vec<Point> {
+        let (from, to) = ends_in_the_stored_order(edge);
+        let walked = self
+            .along_edge
+            .get(&edge.key())
+            .expect("a crossed face is cut up only once every side of it was walked");
+        core::iter::once(from.point())
+            .chain(walked.iter().map(|&at| self.points[at as usize]))
+            .chain(core::iter::once(to.point()))
+            .collect()
+    }
+
+    /// The room `edge` was walked at on the last pass.
+    fn room_it_was_last_walked_at(&self, edge: EdgeView<'_>) -> f64 {
+        self.walked_finer
+            .get(&edge.key())
+            .copied()
+            .unwrap_or(self.deflection.length())
     }
 
     /// This building with every side of `face` back at the room the mesh was
@@ -13801,8 +13846,29 @@ mod tests {
     #[test]
     fn a_hole_by_the_circle_of_an_outline_arc_but_far_from_the_arc_does_not_stop_its_face_meshing()
     {
+        let meshed = the_union_with_a_bar_by_the_circle_of_an_outline_arc(4.69, 2f64.powi(-40));
+        assert!(meshed.is_ok(), "{meshed:?}");
+    }
+
+    /// Row Q2861, with the bar of radius `0.5` up `z` from `(0, −1.5, −3)`, so
+    /// that its hole touches the thick bar's circle where the block covers it,
+    /// and the rest turned `4.71`. A point of that hole stands on the thick
+    /// pipe, so `how_far_its_holes_stand_in` read every point and found no way
+    /// in at all, the arc was only halved, and the union with that bar was
+    /// refused `BoundaryCrossesItself` at 194.
+    #[test]
+    fn a_hole_on_the_circle_of_an_outline_arc_far_from_the_arc_does_not_stop_its_face_meshing() {
+        let meshed = the_union_with_a_bar_by_the_circle_of_an_outline_arc(4.71, 0.0);
+        assert!(meshed.is_ok(), "{meshed:?}");
+    }
+
+    /// The mesh at `0.1` of the union of the thick bar, the block and the thin
+    /// bar of `a_hole_by_the_circle_of_an_outline_arc_but_far_from_the_arc_does_not_stop_its_face_meshing`
+    /// turned `turn` about `z`, and its far bar `gap` inside the thick bar's
+    /// circle.
+    fn the_union_with_a_bar_by_the_circle_of_an_outline_arc(turn: f64, gap: f64) -> Result<Mesh> {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
-        let turn = Isometry::rotation(&Axis::z(), 4.69).expect("a finite turn");
+        let turn = Isometry::rotation(&Axis::z(), turn).expect("a finite turn");
         let bar = |model: &mut Model, radius: f64, at: [f64; 3], height: f64| {
             let placed =
                 Isometry::translation(Vector::new(at[0], at[1], at[2])).expect("a finite move");
@@ -13821,7 +13887,7 @@ mod tests {
                 &Isometry::translation(Vector::new(0.0, -1.5, -2.0)).expect("a finite move"),
             )
             .expect("a rectangle extrudes");
-        let far = bar(&mut model, 0.5, [0.0, -1.5 + 2f64.powi(-40), -3.0], 6.0);
+        let far = bar(&mut model, 0.5, [0.0, -1.5 + gap, -3.0], 6.0);
         for solid in [thick, thin, block] {
             model
                 .place_solid(solid, &turn)
@@ -13847,11 +13913,10 @@ mod tests {
             };
             union = *one;
         }
-        let meshed = model.solid(union).expect("the union's solid").mesh(
+        model.solid(union).expect("the union's solid").mesh(
             Deflection::of(0.1).expect("a deflection"),
             &Policy::certified(),
             &mut ProvenanceLog::new(),
-        );
-        assert!(meshed.is_ok(), "{meshed:?}");
+        )
     }
 }
