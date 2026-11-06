@@ -435,24 +435,34 @@ impl Predicate for HowFarFromTheSkin {
         // square below the normals, the axial term rounds to nothing and its
         // share of the permanent with it, and this level certifies `Pos` for a
         // point inside, such as `(2⁻⁴⁰, 0, 2⁵⁰¹)` with a slope of `2⁻⁵⁴⁰` about
-        // `z` (`docs/decisions.md` §464.31). Without the checks on the
-        // components' squares and on the axial term, Gappa proves the bound
-        // still holds with one, two or three of those four below the normals
-        // or rounding to zero, the other checks holding, where nothing
-        // cancels, no factor is zero and the first sum of `up` is normal.
-        // Without the checks on the six halves and the three up halves it has
-        // not been run. Every check stays either way.
+        // `z` (`docs/decisions.md` §464.31). So does the check on
+        // `up_reach`'s square: where `up` cancels to zero its own checks pass
+        // on the zero, and with `up_reach` squared rounding to zero as well,
+        // the permanent's axial term goes with it and this level certified
+        // `Pos` for a point inside, on a cone of slope `2⁵¹¹` (§464.16's 6).
+        // The check on `slope²` times that square is not needed there, since
+        // Gappa proves the bound with that product below the normals or zero
+        // (§464.16's 6). Without the checks on the components' squares and on
+        // `along`, Gappa proves the bound still holds with one, two or three
+        // of those four below the normals or rounding to zero, the other
+        // checks holding, where nothing cancels, no factor is zero and the
+        // first sum of `up` is normal. Without the checks on the six halves
+        // and the three up halves it has not been run. Every check stays
+        // either way.
         let halves = cross_product_halves_if_normal(from_apex, direction)?;
         let components = halves.map(|(left, right)| left - right);
         let up_halves: [f64; 3] = core::array::from_fn(|axis| from_apex[axis] * direction[axis]);
         let up = up_halves[0] + up_halves[1] + up_halves[2];
+        let up_reach = up_halves[0].abs() + up_halves[1].abs() + up_halves[2].abs();
         let stays_accurate = components
             .iter()
             .all(|&component| product_is_normal(component, component))
             && (0..3).all(|axis| product_is_normal(from_apex[axis], direction[axis]))
             && product_is_normal(slope, slope)
             && product_is_normal(up, up)
-            && product_is_normal(slope * slope, up * up);
+            && product_is_normal(slope * slope, up * up)
+            && product_is_normal(up_reach, up_reach)
+            && product_is_normal(slope * slope, up_reach * up_reach);
         if !stays_accurate {
             return None;
         }
@@ -464,12 +474,11 @@ impl Predicate for HowFarFromTheSkin {
         // its own magnitude says nothing about the rounding it carries. The
         // permanent has to use the sum of the two halves instead, squared
         // because the component is squared. The same goes for the dot product
-        // down the axis.
+        // down the axis, whose sum of halves is `up_reach`.
         let spread = halves.map(|(left, right)| {
             let reach = left.abs() + right.abs();
             reach * reach
         });
-        let up_reach = up_halves[0].abs() + up_halves[1].abs() + up_halves[2].abs();
         let permanent = spread[0] + spread[1] + spread[2] + slope * slope * (up_reach * up_reach);
 
         Some(Filtered {
@@ -676,7 +685,8 @@ fn cross_component(
 /// rather than twelve. Gappa proves the bound there at this constant
 /// (`docs/decisions.md` §464.16), whether or not a component of the cross
 /// product or the dot product down the axis cancels, but for the one case
-/// below. With nothing cancelling the least constant it proves is
+/// below, which [`HowFarFromTheSkin::on_floats`] refuses. With nothing
+/// cancelling the least constant it proves is
 /// `11·epsilon + 99·epsilon²`. Nobody has tried the claim on `value` itself.
 /// Where a difference or a direction component is zero, Gappa proves the bound
 /// on that sum at this constant too, in each of the 219 cases, and Coq checks
@@ -689,15 +699,22 @@ fn cross_component(
 /// this shape it holds only while nothing overflows or falls into the
 /// subnormals. `decide` keeps out the top end by refusing a bound that is not
 /// itself a normal number. [`HowFarFromTheSkin::on_floats`] checks the bottom
-/// end through [`product_is_normal`] for the products of `value`, but for none
-/// of the permanent's own: not the reach squares, not `up_reach` squared, and
-/// not `slope²` times that. A check passes on a zero, so a component of the
-/// cross product that cancels to zero lets its reach square fall below the
-/// normals or round to zero, and where the dot product down the axis cancels to
-/// zero, `up_reach` squared and `slope²` times it can too. The bound on the sum
-/// holds in each of those but one: where `up_reach` squared rounds to zero,
-/// level 1 certifies a wrong sign. A probe at a slope of `2⁵¹¹` shows one, and
-/// by hand the shape needs a slope of about `2⁷⁸` or more (§464.16's 6).
+/// end through [`product_is_normal`] for the products of `value` and for the
+/// permanent's axial term, `up_reach` squared and `slope²` times that, but not
+/// for the reach squares. A check passes on a zero, so a component of the cross
+/// product that cancels to zero lets its reach square fall below the normals or
+/// round to zero, and the bound on the sum holds there (§464.16's 6).
+///
+/// Where the dot product down the axis cancels to zero, `up`'s own checks pass
+/// on the zero and the axial term's are the ones left. Without them the bound
+/// on the sum holds with `up_reach` squared below the normals, or with `slope²`
+/// times it below the normals or zero, but not with `up_reach` squared rounding
+/// to zero: there level 1 certified a wrong sign on a cone of slope `2⁵¹¹`, and
+/// by hand the shape needs a slope of about `2⁷⁸` or more (§464.16's 6). The
+/// check on `up_reach` squared refuses that one, and the two checks together
+/// refuse the others too. Where `up` does not cancel they refuse nothing
+/// that `up`'s own checks let through, since `up_reach` is at least `|up|` by
+/// monotone rounding (§464.16's 2).
 ///
 /// Of the products of `value`, the checks on the slope's square and on `up`'s
 /// square are needed: a probe takes either out and level 1 certifies a wrong
@@ -984,6 +1001,46 @@ mod tests {
         let (round, along) = cone.coordinates_of(on_it);
         assert_eq!((round, along), (0.0, 3.0));
         assert_eq!(cone.point_at(round, along), on_it);
+    }
+
+    /// A cone `2⁵¹¹` times as wide as it is tall, and a point inside it whose
+    /// height up the axis cancels to zero in `f64`: `f0·d0` and `f1·d1` are
+    /// equal and opposite, so `up` is zero, and the true height is what the
+    /// rounding of `f0·d0` dropped, `2⁻⁵⁹⁴`. The true value is about
+    /// `2⁻⁹⁶⁰ − 2¹⁰²²·2⁻¹¹⁸⁸ = −2⁻¹⁶⁶`, inside. In `f64` the value is the
+    /// cross product's `2⁻⁹⁶⁰` alone, and the permanent's axial square,
+    /// `(|f0·d0| + |f1·d1|)²` at about `2⁻¹⁰⁷⁸`, rounds to zero, so level 1
+    /// sized its bound by the cross product alone and certified outside
+    /// (`docs/decisions.md` §464.16's 6).
+    ///
+    /// Exact arithmetic declines here as well, since the height's square is
+    /// below the subnormals, so the answer is a refusal and not `Neg`.
+    #[test]
+    fn a_point_inside_a_nearly_flat_cone_whose_height_cancels_is_not_called_outside() {
+        let d0 = 2f64.powi(-60) * (1.0 + 2f64.powi(-26));
+        let f0 = 2f64.powi(-480) * (1.0 + 2f64.powi(-28));
+        let axis =
+            Axis::new(Point::origin(), Vector::new(d0, 1.0, 0.0)).expect("a direction with length");
+        assert_eq!(axis.direction().components(), [d0, 1.0, 0.0]);
+        let cone = Cone::new(axis, 2f64.powi(511)).expect("a positive slope");
+        let inside = PredicatePoint::from([f0, -(f0 * d0), 0.0]);
+
+        assert_eq!(
+            HowFarFromTheSkin {
+                cone,
+                point: inside
+            }
+            .on_floats(),
+            None,
+            "level 1 has no bound worth the name once the axial square rounds to zero"
+        );
+        let decision = cone.side_of(inside);
+        let Decision::Undecidable { .. } = decision else {
+            panic!(
+                "the point is inside, and neither intervals nor exact arithmetic can place it: \
+                 {decision:?}"
+            );
+        };
     }
 
     /// The apex has no angle, and asking for one gives zero rather than a
