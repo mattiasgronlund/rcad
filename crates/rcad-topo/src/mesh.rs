@@ -13778,4 +13778,80 @@ mod tests {
             "the sliver holds {held} and was read as {enclosed}"
         );
     }
+
+    /// Row Q2861. A hole that stands `2⁻⁴⁰` inside the circle an arc of the
+    /// outline runs round, where that circle runs across the face well away
+    /// from the arc, leaves the arc walked as fine as the hole beside it needs
+    /// and no finer.
+    ///
+    /// The bar of radius 2 up `z` from `−2` to 2, the block `[0, 5] × [−1.5,
+    /// 1.5] × [−2, 2]` across its right half, and the bar of radius 1 up `z`
+    /// from `(−1, 0, −3)`, 6 long, a rounding inside the thick one where it
+    /// touches it, all turned `4.69` about `z`: the top of their union is
+    /// crossed on every rung that halves both its outline and its holes, and
+    /// clears on a rung that halves its outline alone. The bar of radius `0.5`
+    /// up `z` from `(0, −1.5 + 2⁻⁴⁰, −3)`, 6 long and not turned, stands that
+    /// far inside the thick bar's circle where the block covers it, `1.6` from
+    /// the arc that circle still bounds. `how_far_its_holes_stand_in` read the
+    /// way that hole stands in from the whole thick pipe, `9.1e−13`, so the
+    /// outline's second rung asked for a walk of the arc under what placing
+    /// the face rounds by, and the union with that bar was refused
+    /// `BoundaryCrossesItself` at 21. With the outline only halved, as before
+    /// Q2845, the same union answered with 338 mesh points at `0.1`.
+    #[test]
+    fn a_hole_by_the_circle_of_an_outline_arc_but_far_from_the_arc_does_not_stop_its_face_meshing()
+    {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let turn = Isometry::rotation(&Axis::z(), 4.69).expect("a finite turn");
+        let bar = |model: &mut Model, radius: f64, at: [f64; 3], height: f64| {
+            let placed =
+                Isometry::translation(Vector::new(at[0], at[1], at[2])).expect("a finite move");
+            model.add_round_bar(radius, height, &placed).expect("a bar")
+        };
+        let thick = bar(&mut model, 2.0, [0.0, 0.0, -2.0], 4.0);
+        let thin = bar(&mut model, 1.0, [-1.0, 0.0, -3.0], 6.0);
+        let rectangle =
+            crate::ProfileBuilder::new(vec![[0.0, 0.0], [5.0, 0.0], [5.0, 3.0], [0.0, 3.0]])
+                .build(&Policy::certified(), &mut ProvenanceLog::new())
+                .expect("a rectangle is a profile");
+        let block = model
+            .add_extrusion(
+                &rectangle,
+                4.0,
+                &Isometry::translation(Vector::new(0.0, -1.5, -2.0)).expect("a finite move"),
+            )
+            .expect("a rectangle extrudes");
+        let far = bar(&mut model, 0.5, [0.0, -1.5 + 2f64.powi(-40), -3.0], 6.0);
+        for solid in [thick, thin, block] {
+            model
+                .place_solid(solid, &turn)
+                .expect("this model made the key");
+        }
+        let mut union = thick;
+        for (other, what) in [
+            (block, "the block"),
+            (thin, "the thin bar"),
+            (far, "the far bar"),
+        ] {
+            let fused = model
+                .fuse(
+                    &[union],
+                    &[other],
+                    crate::Rule::Union,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|why| panic!("the union with {what} was refused: {why:?}"));
+            let [one] = fused.solids() else {
+                panic!("the union with {what} is one solid: {fused:?}");
+            };
+            union = *one;
+        }
+        let meshed = model.solid(union).expect("the union's solid").mesh(
+            Deflection::of(0.1).expect("a deflection"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        );
+        assert!(meshed.is_ok(), "{meshed:?}");
+    }
 }
