@@ -28991,3 +28991,622 @@ r_wide_5's, over vector.g's: 1 + 2^-5, times 1 + 7.17e-61
 c_wide_195: best on out - Ex 19.6000u
 r_wide_5: best on out - Ex 20.2125u
 ```
+
+### 464.40 stage_e0_1.g in Coq
+
+Q2837 asked why `coqc` refuses the `.v` that `gappa -Bcoq` writes for
+464.22's `stage_e0_1.g`, the small-`E` edge at `share = 1`, when `stage_1.g`
+has `rest` exactly 0 too and its `.v` passes; and asked for the edge checked
+by Coq, or a record of why it cannot be. Two lanes ran it on 2026-11-06. The
+first found the cause and the fix in a scratch directory and passed its
+budget before writing anything down (§416). The second wrote `fetch.py`,
+`coqedge.py`, `onebit.py`, `allcoq.sh` and `samecoq.py`, ran them, and wrote
+this.
+
+**Coq checks the edge, modulo its hints, with one hint dropped.**
+`stage_e0_1_coq.g` is `stage_e0_1.g` without the hint `z0 / M -> rest * (d0 /
+M)`. Gappa proves it and prints the same results, line for line, and `coqc`
+checks its `.v`, on each of six runs; on each of six runs of `stage_e0_1.g`
+beside them, `coqc` refuses its `.v` (3). Its control at `7u` fails, with best
+`7.0078u` (4). So each of 464.22's six goals is now checked by Coq, modulo
+the hints: five through 464.22's own scripts, as its 7 has them, and the
+sixth through `stage_e0_1_coq.g`.
+
+**Gappa 1.8.0 says the number 0 has 0 bits, and gappalib 1.8.0 cannot say
+it** (1). `stage_e0_1.v` is the only `.v` of the six whose proof counts
+`rest`'s bits, and it counts them by way of that hint (2). The fault is in
+what Gappa writes, not in the kernel or in the script: `stage_e0_1.v` with
+each count of 0 written as 1 passes `coqc` (5).
+
+The scripts restate `de_boor.rs` at `812503ed`, as 464.22's do. From
+`812503ed` to `e7eb55c3`, this lane's base, `de_boor.rs` changes
+`EVALUATION_ROUNDOFF`'s doc alone, each changed line a `///` line, and
+`knot_vector.rs` has no hunk (`git diff -U0`). Every run is Gappa 1.8.0 under
+464.4's pin at `-Eprecision=200`, through 464.13's `one.sh`, unchanged. `u` is
+`2⁻⁵³`.
+
+**1. Why `coqc` refuses.** Gappa's `FLT(x, n)` says `x` is a float whose
+integer significand has at most `n` bits. gappalib, the Coq library `one.sh`
+checks against, writes it `Definition FLT (x : R) (n : positive)`: `x = m·2ᵉ`
+with `|m| < 2ⁿ` (`Gappa_definitions.v:28-29`). A `positive` is at least 1, so
+Coq has no `FLT x 0`, though 0 holds `FLT x 1`, with `m = 0`. Gappa's rule
+`flt_of_singleton_bnd`, which gets `FLT` of a term whose interval holds one
+number, counts that number's significand's bits, and gives the number 0 a
+count of 0 (`src/proofs/basic_proof.cpp:1042-1055`, `if (s == 0) e = 0;`).
+`-Bcoq` writes the count as it is (`src/backends/coq_common.cpp:623-625`). So
+a proof that takes the bits of an exact zero from its interval comes out as
+`FLT x (0)`, and `coqc` stops at the `0`: line 468 of `stage_e0_1.v` is
+`Definition p49 := FLT _rest (0).`, and characters 29-30 are that `0`. The
+two sources were read from the tarballs in the nix store,
+`/nix/store/k6nsfw3zmfciq77jrsnxfhhymkf0ycsk-gappa-1.8.0.tar.gz` and
+`/nix/store/x1iyqhkpvw2rcs14jb03an9szgqy44i8-coq-gappalib-coq-1.8.0.tar.gz`.
+Whether a later Gappa counts 0 otherwise was not looked up.
+
+**2. Why `stage_e0_1.v` and not `stage_1.v`.** Both scripts have `rest`
+exactly 0, both hold the hint `z0 / M -> rest * (d0 / M)`, which
+`controls.py` keeps from `stage.g` and `stage_e0.g`, and both `.out` files
+print `(P0 − z0) / M in [0, 0]`. Their proofs of it differ, as the `FLT`
+facts each `.v` states show (`all.log`, in 7):
+
+- `stage_e0_1.v` states `FLT(1 − share, 0)`, `FLT(rest, 0)`, `FLT(d0, 53)`
+  and `FLT(z0, 53)`. `1 − share` is the one number 0, so
+  `flt_of_singleton_bnd` gives it 0 bits; `rest`, its rounding, gets the same
+  by `flt_float_of_flt`; and `mul_flt` gives `z0 = rest·d0` 53 bits. With
+  `z0`'s `FIX` at `−1074` that makes `z0`'s rounding exact, `EQL(P0, z0)`,
+  and with `LIN(z0, M, [0, 0])`, which comes from the hint, stated as
+  `EQL(z0 / M, rest * (d0 / M))`, Gappa has `LIN(P0, M, [0, 0])`.
+- `stage_1.v` states `FLT(share, 1)`, `FLT(d1, 53)` and `FLT(z1, 53)`, for
+  `z1 = share·d1`, and nothing for `rest` or `z0`.
+- `stage_e0_1_coq.v` states the same three as `stage_1.v`.
+
+Why Gappa counts `rest`'s bits in one script and not in the other was not
+traced. The two differ in hypotheses, `E / M`'s range in `stage_1.g` against
+`(d0 − t0) / M`'s in `stage_e0_1.g`, and in hints: `d0 / M`'s, and
+`stage_1.g`'s one hint for `XE / cE`. The Coq check does not wait on it. The
+first lane's probe dropped eight of `stage_e0_1.g`'s twelve hints and case
+splits one at a time: the hints for `(P0 − z0) / M`, `(P1 − z1) / M`, `(out −
+S) / M`, `z0 / M`, `d0 / M` and `S / M`, and the splits on `z0` and `S`. Only
+the one without `z0 / M`'s hint wrote no `FLT x (0)` and passed `coqc`; each of
+the other seven still wrote two, and `coqc` refused it. The probe and its
+print are not appended.
+
+**3. What they print.** `allcoq.sh` (7) ran from 11:05 to 11:06 UTC. Its
+print, `all.log`, is in 7:
+
+- 464.22's six give the lines and hints 464.22's 8 prints. `coqc` exits 0 on
+  five, and 1 on `stage_e0_1.v`, at line 468, characters 29-30, as 464.22's 7
+  has it.
+- `stage_e0_1_coq.g` proves, and `coqc` exits 0 on its `.v`, 1141 lines with
+  8 hints, where `stage_e0_1.v` has 1543 with 9.
+- The five copies of each run the same way. Each `stage_e0_1_again<k>.v` has
+  1543 lines and two `FLT x (0)`, and `coqc` refuses it at line 468; each
+  `stage_e0_1_coq_again<k>.v` has 1141 lines and none, and `coqc` exits 0.
+  `gappa -Bcoq` does not always write the same file (464.20's 7); here it
+  wrote the same sizes each time.
+- No `.v` but `stage_e0_1.v` and its copies has an `FLT` with 0 bits.
+
+`samecoq.py` (7) checks that `stage_e0_1_coq.g` is `stage_e0_1.g` with that
+one line replaced by a comment, and that the results of `stage_e0_1_coq.out`,
+of `c_e0_1_coq_7.out` and of every copy are `stage_e0_1.out`'s, line for
+line. The two `.out` files differ in two warnings only. `stage_e0_1.out` warns
+33 times that a divisor is "assumed to be nonzero", and `stage_e0_1_coq.out`
+31 times; the two it lacks are both for `M`, the divisor on each side of the
+dropped hint. As 464.22's 7 says of the others, each hint goes into the `.v`
+as a hypothesis, so the edge stands on its 8 hints and on the divisors Gappa
+took to be nonzero. 464.22's 7's argument for `z0`'s holds here, where `z0`
+is always 0: both sides of `(P0 − z0) / M -> ((P0 − z0) / z0) * (z0 / M)` are
+0 where `z0` is.
+
+**4. The control.** `c_e0_1_coq_7.g` asks `stage_e0_1_coq.g`'s question at
+`7u` and fails, with best `±7.78023e-16`, `7.0078u`: `XMM`'s `7u`, and the
+`2⁻⁶⁰`, `u/128`, that the incoming error `d1 − t1` brings at weight `share =
+1`. So the script's hypotheses do not contradict each other.
+
+**5. The one-bit probe.** `onebit.py` (7) writes `stage_e0_1.v` with each
+count of 0 bits written as 1, in the five places `all.log` lists: the two
+`Definition`s, and the steps by `flt_of_singleton_bnd`, `flt_float_of_flt` and
+`mul_flt`. `coqc` exits 0 on it. `FLT x 1` holds of 0 and says less than `FLT
+x 0`, and gappalib's `mul_flt` takes a factor with 1 bit as having none
+(`Gappa_pred_fixflt.v:280-284`, `if xn =? 1 then yn`), as Gappa's own
+`mul_fix_flt` does (`basic_proof.cpp:929-937`), so `z0` keeps its 53 bits.
+So the count of 0 is the only thing `coqc` refuses in `stage_e0_1.v`. This is
+a probe and not the route, since it edits what `-Bcoq` writes.
+
+**6. What this leaves.** No row.
+
+- Q2700, which moves 464's scripts into `proofs/gappa/`, should take
+  `stage_e0_1_coq.g` for the Coq check of the `share = 1` small-`E` edge, by
+  `coqedge.py`'s one edit, rather than `controls.py`'s `stage_e0_1.g`, which
+  Gappa proves and `coqc` refuses. Q2700 already takes every script a row of
+  §464 appended, and this is one.
+- The count of 0 bits is Gappa's (1), not rcad's. Whether to tell Gappa's
+  maintainers is Mattias's to decide.
+- Why Gappa counts `rest`'s bits in one script and not the other (2) is not
+  traced. The Coq check stands without it, and nothing in rcad waits on it.
+
+**7. The scripts and their prints, whole, as they ran.** `fetch.py` writes
+from this file what 464.40 runs unchanged: 464.13's `one.sh`, and 464.22's
+`stage.g`, `stage_e0.g` and `controls.py`. `coqedge.py` runs `controls.py` and
+writes `stage_e0_1_coq.g`, its control and the copies; `allcoq.sh` runs them
+and 464.22's six, and `onebit.py`; and `samecoq.py` checks this text against
+the files that ran, as 464.39's `samewide.py` does.
+
+To run them again, save `fetch.py`, `coqedge.py`, `onebit.py`, `allcoq.sh`
+and `samecoq.py` in one directory, and run there, in turn: `python3 fetch.py
+<464 file>`, with the file's absolute path, since it moves into its own
+directory first; `python3 coqedge.py`; and `./allcoq.sh > all.log 2>&1`,
+about a minute. Then `python3 samecoq.py <464 file> <directory>` checks them.
+The times move from one run to the next, so a run again prints other times
+than `all.log` here, and `samecoq.py` then says so.
+
+`fetch.py`:
+
+```python
+"""Write into this directory, from the 464 file, the scripts 464.40 runs
+unchanged: 464.13's one.sh, and 464.22's stage.g, stage_e0.g and controls.py,
+each the one block of its subsection that starts with its first lines.
+Run as: python3 fetch.py <464 file>"""
+import os
+import re
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+text = open(sys.argv[1]).read()
+FENCED = re.compile(r"^```(\w*)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+def block_of(n, first):
+    got = [body for lang, body in FENCED.findall(section(n)) if body.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+HEAD = ("# restates: crates/rcad-geom/src/de_boor.rs EVALUATION_ROUNDOFF at 812503ed\n"
+        "# restates: crates/rcad-geom/src/de_boor.rs de_boor at 812503ed\n"
+        "# restates: crates/rcad-geom/src/de_boor.rs blended at 812503ed\n")
+for name, n, first in (
+    ("one.sh", 13, "#!/bin/bash\n# Run one Gappa script under 464.4's pin"),
+    ("stage.g", 22, HEAD + "# One coordinate"),
+    ("stage_e0.g", 22, HEAD + "# stage.g's stage"),
+    ("controls.py", 22, '"""Write stage.g\'s and stage_e0.g\'s two share edges'),
+):
+    open(name, "w").write(block_of(n, first))
+    print(name, "written from 464." + str(n))
+os.chmod("one.sh", 0o755)
+```
+
+`fetch.py`'s whole print:
+
+```text
+one.sh written from 464.13
+stage.g written from 464.22
+stage_e0.g written from 464.22
+controls.py written from 464.22
+```
+
+`coqedge.py`:
+
+```python
+"""Run 464.22's controls.py, then write stage_e0_1_coq.g, its stage_e0_1.g
+without the hint z0 / M -> rest * (d0 / M), and c_e0_1_coq_7.g, that with
+its goal at 7u, under the 7u and 2^-60 the edge reaches, as a control. Also
+five copies each of stage_e0_1.g and stage_e0_1_coq.g, since gappa -Bcoq does
+not write the same proof on every run (464.20's 7).
+Run as: python3 coqedge.py, after fetch.py"""
+import os
+import shutil
+import subprocess
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+subprocess.run([sys.executable, "controls.py"], check=True)
+
+
+def sub(src, old, new):
+    assert src.count(old) == 1, old
+    return src.replace(old, new)
+
+
+HINT = "z0 / M -> rest * (d0 / M);\n"
+WHY = ("# Not z0 / M -> rest * (d0 / M), which stage_e0.g has. rest is 0 here, and\n"
+       "# with that hint Gappa 1.8.0 proves P0 = z0 by saying rest has 0 bits,\n"
+       "# FLT(rest, 0), which -Bcoq writes as it is and coqc refuses, since\n"
+       "# gappalib's FLT takes a positive count of bits (464.40).\n")
+GOAL = "/\\ (out - Ex) / M in [-9b-53, 9b-53]"
+
+edge = open("stage_e0_1.g").read()
+coq = sub(edge, HINT, WHY)
+open("stage_e0_1_coq.g", "w").write(coq)
+open("c_e0_1_coq_7.g", "w").write(sub(coq, GOAL, "/\\ (out - Ex) / M in [-7b-53, 7b-53]"))
+written = ["stage_e0_1_coq.g", "c_e0_1_coq_7.g"]
+for k in range(1, 6):
+    for name in ("stage_e0_1", "stage_e0_1_coq"):
+        shutil.copyfile(name + ".g", f"{name}_again{k}.g")
+        written.append(f"{name}_again{k}.g")
+print("written:", ", ".join(written))
+```
+
+`coqedge.py`'s whole print:
+
+```text
+written: stage_e0_1_coq.g, c_e0_1_coq_7.g, stage_e0_1_again1.g, stage_e0_1_coq_again1.g, stage_e0_1_again2.g, stage_e0_1_coq_again2.g, stage_e0_1_again3.g, stage_e0_1_coq_again3.g, stage_e0_1_again4.g, stage_e0_1_coq_again4.g, stage_e0_1_again5.g, stage_e0_1_coq_again5.g
+```
+
+`onebit.py`:
+
+```python
+"""Write stage_e0_1_onebit.v: stage_e0_1.v with each count of 0 bits written
+as 1, the fewest gappalib's FLT can say, and print each line it changed. The
+counts are the (0) on each line that states an FLT and on each line that
+refines by a lemma about FLT; FIX's (0) is an exponent, and stays. FLT x 1
+holds of the same zero, and gappalib's mul_flt takes a factor with 1 bit as
+Gappa takes one with 0, so coqc checks the same steps. A probe and not the
+route: it edits what gappa -Bcoq writes.
+Run as: python3 onebit.py, after allcoq.sh's gappa runs"""
+import os
+import re
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+COUNT = re.compile(r"^Definition p\d+ := FLT |^ refine \(\w*flt\w* ")
+lines = open("stage_e0_1.v").read().split("\n")
+changed = 0
+for k, line in enumerate(lines):
+    if COUNT.search(line) and " (0)" in line:
+        lines[k] = line.replace(" (0)", " (1)")
+        changed += 1
+        print(f"line {k + 1}: {lines[k].strip()}")
+assert changed > 0
+open("stage_e0_1_onebit.v", "w").write("\n".join(lines))
+```
+
+`allcoq.sh`:
+
+```bash
+#!/bin/bash
+# Run 464.22's six scripts, stage_e0_1_coq.g and the five copies of each of
+# stage_e0_1.g and stage_e0_1_coq.g all at once with coq, and c_e0_1_coq_7.g
+# without, each through 464.13's one.sh. Then write stage_e0_1_onebit.v with
+# onebit.py and check it with coqc under one.sh's pin. Then print, for each .v,
+# how many of its FLT facts say 0 bits and which FLT facts it states; the first
+# lines of each coqc print that is not empty; how many divisors each .out takes
+# to be nonzero; and the share = 1 edge's .out files less those warnings.
+cd "$(dirname "$0")"
+source <(grep -E '^(coqc=|export COQPATH=)' one.sh)
+coqed="stage stage_0 stage_1 stage_e0 stage_e0_0 stage_e0_1 stage_e0_1_coq"
+again=""
+for k in 1 2 3 4 5; do
+  again="$again stage_e0_1_again$k stage_e0_1_coq_again$k"
+done
+for f in $coqed $again; do
+  ./one.sh "$f.g" coq > "$f.run" 2>&1 &
+done
+./one.sh c_e0_1_coq_7.g > c_e0_1_coq_7.run 2>&1 &
+wait
+for f in $coqed c_e0_1_coq_7 $again; do
+  cat "$f.run"
+done
+python3 onebit.py
+"$coqc" stage_e0_1_onebit.v > stage_e0_1_onebit.coqc 2>&1
+echo "stage_e0_1_onebit coqc exit $?"
+for f in $coqed stage_e0_1_onebit $again; do
+  echo "$f.v FLT with 0 bits: $(grep -c 'FLT [^ ]* (0)\.' "$f.v");" \
+    "states: $(grep -o '(\* FLT([^*]*) \*)' "$f.v" | sed 's/^(\* \(.*\) \*)$/\1/' | sort -u | paste -sd ' ')"
+done
+for f in $coqed stage_e0_1_onebit $again; do
+  if [ -s "$f.coqc" ]; then
+    echo "== $f.coqc"
+    head -3 "$f.coqc"
+  fi
+done
+for f in $coqed c_e0_1_coq_7 $again; do
+  echo "$f.out assumed to be nonzero: $(grep -c 'assumed to be nonzero' "$f.out")"
+done
+for f in stage_e0_1 stage_e0_1_coq c_e0_1_coq_7; do
+  echo "== $f.out"
+  grep -v 'assumed to be nonzero' "$f.out"
+done
+```
+
+`allcoq.sh`'s whole print, saved as `all.log`, run from 11:05 UTC:
+
+```text
+stage exit 0 4.72s
+stage coq -Bcoq exit 0 coqc exit 0 9.81s lines 4529 hints 21
+stage_0 exit 0 2.76s
+stage_0 coq -Bcoq exit 0 coqc exit 0 5.26s lines 2572 hints 14
+stage_1 exit 0 1.01s
+stage_1 coq -Bcoq exit 0 coqc exit 0 4.08s lines 2479 hints 14
+stage_e0 exit 0 0.86s
+stage_e0 coq -Bcoq exit 0 coqc exit 0 2.03s lines 1825 hints 9
+stage_e0_0 exit 0 0.29s
+stage_e0_0 coq -Bcoq exit 0 coqc exit 0 2.61s lines 1388 hints 9
+stage_e0_1 exit 0 0.82s
+stage_e0_1 coq -Bcoq exit 0 coqc exit 1 3.70s lines 1543 hints 9
+stage_e0_1_coq exit 0 0.80s
+stage_e0_1_coq coq -Bcoq exit 0 coqc exit 0 4.24s lines 1141 hints 8
+c_e0_1_coq_7 exit 1 57.82s
+stage_e0_1_again1 exit 0 0.79s
+stage_e0_1_again1 coq -Bcoq exit 0 coqc exit 1 3.73s lines 1543 hints 9
+stage_e0_1_coq_again1 exit 0 0.85s
+stage_e0_1_coq_again1 coq -Bcoq exit 0 coqc exit 0 2.12s lines 1141 hints 8
+stage_e0_1_again2 exit 0 0.75s
+stage_e0_1_again2 coq -Bcoq exit 0 coqc exit 1 3.63s lines 1543 hints 9
+stage_e0_1_coq_again2 exit 0 0.73s
+stage_e0_1_coq_again2 coq -Bcoq exit 0 coqc exit 0 2.54s lines 1141 hints 8
+stage_e0_1_again3 exit 0 0.86s
+stage_e0_1_again3 coq -Bcoq exit 0 coqc exit 1 2.34s lines 1543 hints 9
+stage_e0_1_coq_again3 exit 0 0.75s
+stage_e0_1_coq_again3 coq -Bcoq exit 0 coqc exit 0 4.42s lines 1141 hints 8
+stage_e0_1_again4 exit 0 0.78s
+stage_e0_1_again4 coq -Bcoq exit 0 coqc exit 1 3.62s lines 1543 hints 9
+stage_e0_1_coq_again4 exit 0 0.84s
+stage_e0_1_coq_again4 coq -Bcoq exit 0 coqc exit 0 2.46s lines 1141 hints 8
+stage_e0_1_again5 exit 0 0.76s
+stage_e0_1_again5 coq -Bcoq exit 0 coqc exit 1 3.13s lines 1543 hints 9
+stage_e0_1_coq_again5 exit 0 0.86s
+stage_e0_1_coq_again5 coq -Bcoq exit 0 coqc exit 0 3.69s lines 1141 hints 8
+line 468: Definition p49 := FLT _rest (1). (* FLT(rest, 0) *)
+line 469: Definition p50 := FLT r8 (1). (* FLT(1 - share, 0) *)
+line 498: refine (flt_of_singleton_bnd r8 i9 (1) h0 _) ; finalize.
+line 509: refine (flt_float_of_flt _ _ _ (1) (1) r8 h0 _) ; finalize.
+line 530: refine (mul_flt _rest _d0 (1) (53) (53) h0 h1 _) ; finalize.
+stage_e0_1_onebit coqc exit 0
+stage.v FLT with 0 bits: 0; states: FLT(1, 1) FLT(1 - share, 53) FLT(share, 53)
+stage_0.v FLT with 0 bits: 0; states: FLT(1 - share, 1) FLT(d0, 53) FLT(rest, 1) FLT(z0, 53)
+stage_1.v FLT with 0 bits: 0; states: FLT(d1, 53) FLT(share, 1) FLT(z1, 53)
+stage_e0.v FLT with 0 bits: 0; states: FLT(1, 1) FLT(1 - share, 53) FLT(share, 53)
+stage_e0_0.v FLT with 0 bits: 0; states: FLT(1 - share, 1) FLT(d0, 53) FLT(rest, 1) FLT(z0, 53)
+stage_e0_1.v FLT with 0 bits: 2; states: FLT(1 - share, 0) FLT(d0, 53) FLT(d1, 53) FLT(rest, 0) FLT(share, 1) FLT(z0, 53) FLT(z1, 53)
+stage_e0_1_coq.v FLT with 0 bits: 0; states: FLT(d1, 53) FLT(share, 1) FLT(z1, 53)
+stage_e0_1_onebit.v FLT with 0 bits: 0; states: FLT(1 - share, 0) FLT(d0, 53) FLT(d1, 53) FLT(rest, 0) FLT(share, 1) FLT(z0, 53) FLT(z1, 53)
+stage_e0_1_again1.v FLT with 0 bits: 2; states: FLT(1 - share, 0) FLT(d0, 53) FLT(d1, 53) FLT(rest, 0) FLT(share, 1) FLT(z0, 53) FLT(z1, 53)
+stage_e0_1_coq_again1.v FLT with 0 bits: 0; states: FLT(d1, 53) FLT(share, 1) FLT(z1, 53)
+stage_e0_1_again2.v FLT with 0 bits: 2; states: FLT(1 - share, 0) FLT(d0, 53) FLT(d1, 53) FLT(rest, 0) FLT(share, 1) FLT(z0, 53) FLT(z1, 53)
+stage_e0_1_coq_again2.v FLT with 0 bits: 0; states: FLT(d1, 53) FLT(share, 1) FLT(z1, 53)
+stage_e0_1_again3.v FLT with 0 bits: 2; states: FLT(1 - share, 0) FLT(d0, 53) FLT(d1, 53) FLT(rest, 0) FLT(share, 1) FLT(z0, 53) FLT(z1, 53)
+stage_e0_1_coq_again3.v FLT with 0 bits: 0; states: FLT(d1, 53) FLT(share, 1) FLT(z1, 53)
+stage_e0_1_again4.v FLT with 0 bits: 2; states: FLT(1 - share, 0) FLT(d0, 53) FLT(d1, 53) FLT(rest, 0) FLT(share, 1) FLT(z0, 53) FLT(z1, 53)
+stage_e0_1_coq_again4.v FLT with 0 bits: 0; states: FLT(d1, 53) FLT(share, 1) FLT(z1, 53)
+stage_e0_1_again5.v FLT with 0 bits: 2; states: FLT(1 - share, 0) FLT(d0, 53) FLT(d1, 53) FLT(rest, 0) FLT(share, 1) FLT(z0, 53) FLT(z1, 53)
+stage_e0_1_coq_again5.v FLT with 0 bits: 0; states: FLT(d1, 53) FLT(share, 1) FLT(z1, 53)
+== stage_e0_1.coqc
+File "./stage_e0_1.v", line 468, characters 29-30:
+Error: Cannot interpret this number as a value of type positive
+
+== stage_e0_1_again1.coqc
+File "./stage_e0_1_again1.v", line 468, characters 29-30:
+Error: Cannot interpret this number as a value of type positive
+
+== stage_e0_1_again2.coqc
+File "./stage_e0_1_again2.v", line 468, characters 29-30:
+Error: Cannot interpret this number as a value of type positive
+
+== stage_e0_1_again3.coqc
+File "./stage_e0_1_again3.v", line 468, characters 29-30:
+Error: Cannot interpret this number as a value of type positive
+
+== stage_e0_1_again4.coqc
+File "./stage_e0_1_again4.v", line 468, characters 29-30:
+Error: Cannot interpret this number as a value of type positive
+
+== stage_e0_1_again5.coqc
+File "./stage_e0_1_again5.v", line 468, characters 29-30:
+Error: Cannot interpret this number as a value of type positive
+
+stage.out assumed to be nonzero: 46
+stage_0.out assumed to be nonzero: 41
+stage_1.out assumed to be nonzero: 41
+stage_e0.out assumed to be nonzero: 33
+stage_e0_0.out assumed to be nonzero: 33
+stage_e0_1.out assumed to be nonzero: 33
+stage_e0_1_coq.out assumed to be nonzero: 31
+c_e0_1_coq_7.out assumed to be nonzero: 31
+stage_e0_1_again1.out assumed to be nonzero: 33
+stage_e0_1_coq_again1.out assumed to be nonzero: 31
+stage_e0_1_again2.out assumed to be nonzero: 33
+stage_e0_1_coq_again2.out assumed to be nonzero: 31
+stage_e0_1_again3.out assumed to be nonzero: 33
+stage_e0_1_coq_again3.out assumed to be nonzero: 31
+stage_e0_1_again4.out assumed to be nonzero: 33
+stage_e0_1_coq_again4.out assumed to be nonzero: 31
+stage_e0_1_again5.out assumed to be nonzero: 33
+stage_e0_1_coq_again5.out assumed to be nonzero: 31
+== stage_e0_1.out
+Warning: case split on z0 has no range to split.
+Warning: case split on S has not produced any interesting new result.
+Results:
+  (out - S) / M in [-1152921504606846977b-113 {-1.11022e-16, -2^(-53)}, 1152921504606846977b-113 {1.11022e-16, 2^(-53)}]
+  (P0 - z0) / M in [0, 0]
+  (P1 - z1) / M in [0, 0]
+  rest - (1 - share) in [0, 0]
+  share - A in [0, 267608942382367428180827047856577038688190465b-199 {3.33067e-16, 2^(-51.415)}]
+  XMM in [-312210432779428674502584110629541895290748929b-198 {-7.77156e-16, -2^(-50.1926)}, 312210432779428674502584110629541895290748929b-198 {7.77156e-16, 2^(-50.1926)}]
+== stage_e0_1_coq.out
+Warning: case split on z0 has no range to split.
+Warning: case split on S has not produced any interesting new result.
+Results:
+  (out - S) / M in [-1152921504606846977b-113 {-1.11022e-16, -2^(-53)}, 1152921504606846977b-113 {1.11022e-16, 2^(-53)}]
+  (P0 - z0) / M in [0, 0]
+  (P1 - z1) / M in [0, 0]
+  rest - (1 - share) in [0, 0]
+  share - A in [0, 267608942382367428180827047856577038688190465b-199 {3.33067e-16, 2^(-51.415)}]
+  XMM in [-312210432779428674502584110629541895290748929b-198 {-7.77156e-16, -2^(-50.1926)}, 312210432779428674502584110629541895290748929b-198 {7.77156e-16, 2^(-50.1926)}]
+== c_e0_1_coq_7.out
+Warning: case split on z0 has no range to split.
+Warning: case split on S has not produced any interesting new result.
+Results:
+  (out - S) / M in [-1152921504606846977b-113 {-1.11022e-16, -2^(-53)}, 1152921504606846977b-113 {1.11022e-16, 2^(-53)}]
+  (P0 - z0) / M in [0, 0]
+  (P1 - z1) / M in [0, 0]
+  rest - (1 - share) in [0, 0]
+  share - A in [0, 267608942382367428180827047856577038688190465b-199 {3.33067e-16, 2^(-51.415)}]
+  XMM in [-312210432779428674502584110629541895290748929b-198 {-7.77156e-16, -2^(-50.1926)}, 312210432779428674502584110629541895290748929b-198 {7.77156e-16, 2^(-50.1926)}]
+Error: some properties were not satisfied:
+  BND((out - Ex) / M), best: [-7.78023e-16, 7.78023e-16]
+```
+
+`samecoq.py`:
+
+```python
+"""Check 464.40 against the directory it ran in: each script the text holds
+whole is the file that ran; fetch.py, coqedge.py and onebit.py, run from the
+text in a scratch directory, print what the text says and write the files
+that ran, byte for byte; all.log is allcoq.sh's print in the text; and
+stage_e0_1_coq.g is stage_e0_1.g but for the one hint, and proves the same
+results.
+Run as: python3 samecoq.py <464 file> <run directory>"""
+import difflib
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from collections import Counter
+
+text = open(sys.argv[1]).read()
+run = os.path.abspath(sys.argv[2])
+FENCED = re.compile(r"^```(\w*)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+def block_of(n, first):
+    got = [body for lang, body in FENCED.findall(section(n)) if body.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+SCRIPTS = (
+    ("fetch.py", '"""Write into this directory, from the 464 file'),
+    ("coqedge.py", '"""Run 464.22\'s controls.py, then write stage_e0_1_coq.g'),
+    ("onebit.py", '"""Write stage_e0_1_onebit.v'),
+    ("allcoq.sh", "#!/bin/bash\n# Run 464.22's six scripts"),
+    ("samecoq.py", '"""Check 464.40'),
+)
+for name, first in SCRIPTS:
+    print(name, "in the text is the file that ran:", block_of(40, first) == open(os.path.join(run, name)).read())
+
+scratch = tempfile.mkdtemp()
+for name, first in SCRIPTS[:3]:
+    open(os.path.join(scratch, name), "w").write(block_of(40, first))
+
+
+def printed(script, *args):
+    return subprocess.run([sys.executable, os.path.join(scratch, script), *args],
+                          check=True, capture_output=True, text=True).stdout
+
+
+def same(name):
+    return filecmp.cmp(os.path.join(scratch, name), os.path.join(run, name), shallow=False)
+
+
+print("fetch.py run from the text prints what the text says:",
+      printed("fetch.py", os.path.abspath(sys.argv[1])) == block_of(40, "one.sh written from 464.13"))
+for name in ("one.sh", "stage.g", "stage_e0.g", "controls.py"):
+    print(name, "in the run directory is the one fetch.py writes from the text:", same(name))
+print("coqedge.py run from the text prints what the text says:",
+      printed("coqedge.py") == block_of(40, "written: stage_e0_1_coq.g"))
+mine = sorted(f for f in os.listdir(scratch) if f.endswith(".g"))
+print(f"fetch.py and coqedge.py run from the text write {len(mine)} .g files;",
+      "differing from the ones that ran:", ", ".join(f for f in mine if not same(f)) or "none")
+print(".g files in the run directory that they do not write:",
+      ", ".join(sorted(f for f in os.listdir(run) if f.endswith(".g") and f not in mine)) or "none")
+shutil.copyfile(os.path.join(run, "stage_e0_1.v"), os.path.join(scratch, "stage_e0_1.v"))
+printed("onebit.py")
+print("onebit.py run from the text writes the stage_e0_1_onebit.v that ran:", same("stage_e0_1_onebit.v"))
+shutil.rmtree(scratch)
+
+print("all.log is allcoq.sh's print in the text:",
+      open(os.path.join(run, "all.log")).read() == block_of(40, "stage exit 0"))
+
+
+def lines(name):
+    return open(os.path.join(run, name)).read().splitlines(keepends=True)
+
+
+print("stage_e0_1_coq.g against stage_e0_1.g:")
+for line in difflib.unified_diff(lines("stage_e0_1.g"), lines("stage_e0_1_coq.g"), n=0):
+    print("  " + line, end="")
+
+
+def results(name):
+    out = lines(name + ".out")
+    start = out.index("Results:\n")
+    end = next((k for k in range(start, len(out)) if out[k].startswith("Error:")), len(out))
+    return out[start:end]
+
+
+edge = results("stage_e0_1")
+for name in ["stage_e0_1_coq", "c_e0_1_coq_7"] + [f"{name}_again{k}" for k in range(1, 6)
+                                                 for name in ("stage_e0_1", "stage_e0_1_coq")]:
+    print(f"{name}.out's results are stage_e0_1.out's, line for line:", results(name) == edge)
+gone = Counter(lines("stage_e0_1.out")) - Counter(lines("stage_e0_1_coq.out"))
+added = Counter(lines("stage_e0_1_coq.out")) - Counter(lines("stage_e0_1.out"))
+print("lines of stage_e0_1.out that stage_e0_1_coq.out does not have, and how often:")
+for line, times in sorted(gone.items()):
+    print(f"  {times}: {line}", end="")
+print("lines of stage_e0_1_coq.out that stage_e0_1.out does not have:", sum(added.values()))
+BEST = re.compile(r"^  BND\(\(out - Ex\) / M\), best: \[\S+, (\S+)\]$")
+best = [m for m in map(BEST.match, lines("c_e0_1_coq_7.out")) if m]
+assert len(best) == 1
+print(f"c_e0_1_coq_7: best on (out - Ex) / M {float(best[0][1]) * 2**53:.4f}u")
+```
+
+`samecoq.py`'s whole print, run in the tree of the lane that wrote this up,
+whose `target/q2837/` is the run directory, as `python3 samecoq.py <464 file>
+target/q2837`:
+
+```text
+fetch.py in the text is the file that ran: True
+coqedge.py in the text is the file that ran: True
+onebit.py in the text is the file that ran: True
+allcoq.sh in the text is the file that ran: True
+samecoq.py in the text is the file that ran: True
+fetch.py run from the text prints what the text says: True
+one.sh in the run directory is the one fetch.py writes from the text: True
+stage.g in the run directory is the one fetch.py writes from the text: True
+stage_e0.g in the run directory is the one fetch.py writes from the text: True
+controls.py in the run directory is the one fetch.py writes from the text: True
+coqedge.py run from the text prints what the text says: True
+fetch.py and coqedge.py run from the text write 33 .g files; differing from the ones that ran: none
+.g files in the run directory that they do not write: none
+onebit.py run from the text writes the stage_e0_1_onebit.v that ran: True
+all.log is allcoq.sh's print in the text: True
+stage_e0_1_coq.g against stage_e0_1.g:
+  --- 
+  +++ 
+  @@ -49 +49,4 @@
+  -z0 / M -> rest * (d0 / M);
+  +# Not z0 / M -> rest * (d0 / M), which stage_e0.g has. rest is 0 here, and
+  +# with that hint Gappa 1.8.0 proves P0 = z0 by saying rest has 0 bits,
+  +# FLT(rest, 0), which -Bcoq writes as it is and coqc refuses, since
+  +# gappalib's FLT takes a positive count of bits (464.40).
+stage_e0_1_coq.out's results are stage_e0_1.out's, line for line: True
+c_e0_1_coq_7.out's results are stage_e0_1.out's, line for line: True
+stage_e0_1_again1.out's results are stage_e0_1.out's, line for line: True
+stage_e0_1_coq_again1.out's results are stage_e0_1.out's, line for line: True
+stage_e0_1_again2.out's results are stage_e0_1.out's, line for line: True
+stage_e0_1_coq_again2.out's results are stage_e0_1.out's, line for line: True
+stage_e0_1_again3.out's results are stage_e0_1.out's, line for line: True
+stage_e0_1_coq_again3.out's results are stage_e0_1.out's, line for line: True
+stage_e0_1_again4.out's results are stage_e0_1.out's, line for line: True
+stage_e0_1_coq_again4.out's results are stage_e0_1.out's, line for line: True
+stage_e0_1_again5.out's results are stage_e0_1.out's, line for line: True
+stage_e0_1_coq_again5.out's results are stage_e0_1.out's, line for line: True
+lines of stage_e0_1.out that stage_e0_1_coq.out does not have, and how often:
+  2: Warning: the expression (M) has been assumed to be nonzero when checking a rewriting rule.
+lines of stage_e0_1_coq.out that stage_e0_1.out does not have: 0
+c_e0_1_coq_7: best on (out - Ex) / M 7.0078u
+```
