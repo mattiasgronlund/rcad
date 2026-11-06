@@ -6100,8 +6100,8 @@ impl<'f> Arrangement<'f> {
     /// images held apart
     /// ([`Arrangement::as_a_line_in_the_cut_halfway_between_mirror_cones_says`]),
     /// a meet of two planes' line with a ball, a pipe or a cone against the
-    /// crossing's meet with another of those, read off the sign of the other's
-    /// expression at the first
+    /// crossing's meet with another of those, or a pipe's against a plane's,
+    /// read off the sign of the other's expression at the first
     /// ([`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`]),
     /// two meets of a branch two cones cross in with two planes, read off which
     /// side of the second's plane the first is
@@ -7353,17 +7353,21 @@ impl<'f> Arrangement<'f> {
 
     /// Which of two nodes on a crossing comes first along it, where one is a
     /// meet of two planes' line with a ball, a pipe or a cone and the other is
-    /// the crossing's meet with another of those: `None` everywhere else.
+    /// the crossing's meet with another of those, or with a plane where the
+    /// first is a pipe's: `None` everywhere else.
     ///
-    /// **Which side of the second quadric the first meet is says which way to
+    /// **Which side of the second surface the first meet is says which way to
     /// go from the second meet to reach it.** Call the node on the line `Y`,
-    /// its quadric `Q_Y`, the other node `X` and its quadric `Q_X`. The sign of
+    /// its quadric `Q_Y`, the other node `X` and its surface `Q_X`. The sign of
     /// `Q_X`'s own expression at `Y` is worked out exactly, from the line and
-    /// the two quadrics and never from `Y`'s box
-    /// ([`MeetOfThree::how_one_quadric_leans_where_the_line_meets_another`]).
-    /// Where `∇Q_X` keeps one sign along the crossing over the arc from `X` to
-    /// `Y`, `Q_X` is nothing at `X` and climbs or falls the whole way, so `Y`
-    /// lies forward of `X` just where the two signs agree.
+    /// the two surfaces, with `Y`'s box saying only which of the line's two
+    /// meets with `Q_Y` it is
+    /// ([`MeetOfThree::how_one_quadric_leans_where_the_line_meets_another`],
+    /// and for a plane against a pipe
+    /// [`Arrangement::side_of_a_plane_where_a_line_crosses_a_pipe`]). Where
+    /// `∇Q_X` keeps one sign along the crossing over the arc from `X` to `Y`,
+    /// `Q_X` is nothing at `X` and climbs or falls the whole way, so `Y` lies
+    /// forward of `X` just where the two signs agree.
     ///
     /// **Along a line** the arc is the stretch between the two, inside the box
     /// round both. **Round a closed curve** of a plane and a ball, a pipe or a
@@ -7385,6 +7389,15 @@ impl<'f> Arrangement<'f> {
     /// order along that line, nor the meet with both caps against the meet
     /// with both cones round the leaning cap's rim, and every fuse of the two
     /// was refused (Q2961, `tests/a_funnel_with_a_leaning_spout.rs`).
+    ///
+    /// A bar of radius 3 up `z` from `(10, 10, 0)`, capped by the plane
+    /// through `(13, 10, 1)` with the normal `(0.3, −0.2, 1)`, has its seam
+    /// corner there, where the cap, the pipe and the plane `y = 10` through
+    /// the axis meet. A block whose floor is `z = 1` puts that corner on the
+    /// floor too, and on the floor the line `y = 10` meets the pipe exactly at
+    /// `(13, 10, 1)` and the cap in a box `5.3e−15` wide round it. Every fuse
+    /// of the two was refused (Q3228,
+    /// `tests/a_bar_with_a_leaning_cap_cut_beside_its_rim_corner.rs`).
     fn as_the_sign_of_a_quadric_at_a_meet_of_a_line_says(
         &self,
         crossing: usize,
@@ -7403,8 +7416,9 @@ impl<'f> Arrangement<'f> {
     }
 
     /// [`Decision::Pos`] where `on_the_line`, a meet of two planes and a ball,
-    /// a pipe or a cone, is proved to lie forward of `other` along the
-    /// crossing, [`Decision::Neg`] behind it, and [`Decision::Zero`] at it, as
+    /// a pipe or a cone, is proved to lie forward of `other`, its meet with
+    /// another of those or, for a pipe, with a plane, along the crossing,
+    /// [`Decision::Neg`] behind it, and [`Decision::Zero`] at it, as
     /// [`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`]
     /// reads it.
     fn lies_forward_of_the_other(
@@ -7444,12 +7458,13 @@ impl<'f> Arrangement<'f> {
         let (Some(asked), None) = (theirs.next(), theirs.next()) else {
             return None;
         };
-        if *asked == round
-            || !matches!(
-                asked,
-                Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
-            )
-        {
+        let a_quadric = matches!(
+            asked,
+            Surface::Sphere(_) | Surface::Cylinder(_) | Surface::Cone(_)
+        );
+        let a_plane_on_a_pipe =
+            matches!((asked, &round), (Surface::Plane(_), Surface::Cylinder(_)));
+        if *asked == round || !(a_quadric || a_plane_on_a_pipe) {
             return None;
         }
         let ways =
@@ -7461,12 +7476,22 @@ impl<'f> Arrangement<'f> {
         ]
         .into_iter()
         .find_map(|near| {
-            MeetOfThree::how_one_quadric_leans_where_the_line_meets_another(
-                [one, other_plane],
-                &round,
-                asked,
-                near,
-            )
+            if let (Surface::Plane(flat), Surface::Cylinder(pipe)) = (asked, &round) {
+                Self::side_of_a_plane_where_a_line_crosses_a_pipe(
+                    flat,
+                    one,
+                    other_plane,
+                    pipe,
+                    near,
+                )
+            } else {
+                MeetOfThree::how_one_quadric_leans_where_the_line_meets_another(
+                    [one, other_plane],
+                    &round,
+                    asked,
+                    near,
+                )
+            }
         })?;
         match leans {
             Decision::Zero => Some(Decision::Zero),
