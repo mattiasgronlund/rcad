@@ -22,7 +22,8 @@ use crate::error::walking_along_this_edge_refused;
 use crate::fuse::name_of_surface_bits;
 use crate::holds::{
     Trimming, how_the_axis_lies_on, lie_along_one_line, the_face_across,
-    the_picker_naming_the_circle_through, the_side_this_face_lies_on, what_trims_this_face,
+    the_picker_naming_the_circle_through, the_side_of_one_pipe_past_the_picker_of_another,
+    the_side_this_face_lies_on, the_side_this_face_lies_on_past_its_picker, what_trims_this_face,
 };
 use crate::key::{CoedgeSlot, EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::measure::signed_volume_over_and_how_far_it_rounded;
@@ -238,7 +239,7 @@ impl Model {
         self.check_coedges(scope)?;
         self.check_wires(scope)?;
         self.check_faces(scope, policy, log)?;
-        self.check_which_side_of_its_trimming_each_curved_face_lies_on(scope)?;
+        self.check_which_side_of_its_trimming_each_curved_face_lies_on(scope, policy, log)?;
         self.check_closed_edges_are_walked_the_way_their_surfaces_wind(scope, policy, log)?;
         self.check_no_flat_face_is_used_reversed(scope)?;
         self.check_no_face_use_carries_a_placement(scope)?;
@@ -889,16 +890,33 @@ impl Model {
     /// model can be mutated between a sweep and a query and a check that was
     /// trusted afterwards would be a cache with no invalidation (§4.3).
     ///
+    /// **So a corner is read the way the query path reads it**, past the
+    /// half-space picking out the face's edge where the trimming crosses the
+    /// face's surface in a second curve that is no edge of it
+    /// ([`the_side_this_face_lies_on_past_its_picker`]). A pin from a bar's
+    /// axis crosses the bar's wall in two loops, and the wall of their union
+    /// runs along the pin's own loop alone. A steep pin's pipe runs on behind
+    /// its start to the bar's seam corner, inside the other loop: read by its
+    /// own sign that corner is inside the pin and the top corner outside it,
+    /// and the union was refused [`Invalid::AFaceStraddlesSomethingTrimmingIt`]
+    /// (Q3217).
+    ///
     /// # Errors
     ///
     /// [`Invalid::AFaceStraddlesSomethingTrimmingIt`], and
-    /// [`Error::Undecidable`] when a corner's side could not be settled.
+    /// [`Error::Undecidable`] when a corner's side, or its side of the
+    /// half-space, could not be settled or [`rcad_geom::intersect`] could not
+    /// settle the two surfaces.
     fn check_which_side_of_its_trimming_each_curved_face_lies_on(
         &self,
         scope: &Scope,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
     ) -> Result<()> {
         for slot in scope.solids.keys() {
-            self.check_which_side_of_its_trimming_each_curved_face_of_this_solid_lies_on(slot)?;
+            self.check_which_side_of_its_trimming_each_curved_face_of_this_solid_lies_on(
+                slot, policy, log,
+            )?;
         }
         Ok(())
     }
@@ -906,6 +924,8 @@ impl Model {
     fn check_which_side_of_its_trimming_each_curved_face_of_this_solid_lies_on(
         &self,
         slot: SolidSlot,
+        policy: &Policy,
+        log: &mut ProvenanceLog,
     ) -> Result<()> {
         let solid = SolidView::new(self, slot, Isometry::identity(), Orientation::Forward);
         for face in solid.faces() {
@@ -923,7 +943,7 @@ impl Model {
                 Err(why) => return Err(why),
             };
             for one in &trimming {
-                the_side_this_face_lies_on(face, one)?;
+                the_side_this_face_lies_on_past_its_picker(solid, face, one, policy, log)?;
             }
         }
         Ok(())
@@ -5087,6 +5107,18 @@ impl PastThePicker {
 /// countersink on a turned bore comes back from a file, has no half-space, and
 /// its corners say their own signs as they always did.
 ///
+/// **So are two pipes, where the fat one swallows the thin one's whole
+/// cross-section** and they cross in two loops round the thin pipe's axis, as
+/// `holds.rs`'s `what_lies_past_the_picker` reads them (Q1717). The half-space
+/// naming each loop holds the fat pipe's axis and faces across it, not along
+/// the fat wall's axis as the rule above asks, and the side is which of the
+/// two the face is on
+/// ([`the_side_of_one_pipe_past_the_picker_of_another`]). Read by its own
+/// sign, the seam corner of a bar inside a steep pin's pipe behind where the
+/// pin starts, which is inside the loop the bar's wall does not run along,
+/// refused their union [`Invalid::AFaceStraddlesSomethingTrimmingIt`]
+/// (Q3217).
+///
 /// The side is the partner's gradient against the step from `at` towards the
 /// flat surface, laid onto the surface: `|g|²·d − (g·d)·g` for the surface's
 /// gradient `g` and `d` the half-space's normal turned round, and `d` itself on
@@ -5132,6 +5164,10 @@ fn what_a_corner_past_the_picker_says(
     let Some(Picker::InFrontOf(picker)) = named else {
         return Ok(None);
     };
+    if let (Surface::Cylinder(this), Surface::Cylinder(other)) = (surface, partner) {
+        return Ok(the_side_of_one_pipe_past_the_picker_of_another(this, other)
+            .map(|side| PastThePicker { picker, side }));
+    }
     if !lie_along_one_line(picker.normal().components(), axis.direction().components()) {
         return Ok(None);
     }

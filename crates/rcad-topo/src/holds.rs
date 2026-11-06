@@ -74,10 +74,10 @@
 //! rather than off a corner, because every corner sits on every cut.
 
 use rcad_geom::{
-    EdgeRun, HalfSpace, Orientation, Picker, Plane, PlaneAgreement, Point, SIDE_OF_A_HALF_SPACE,
-    Surface, SurfaceMeet, Vector, WHERE_A_PLANE_AND_A_PIPE_CROSS, WHERE_A_PLANE_AND_A_TORUS_CROSS,
-    how_a_plane_leans_against_a_cone, intersect, where_a_cones_apex_stands_against_a_plane,
-    which_two_surfaces_a_run_is_between,
+    Cylinder, EdgeRun, HalfSpace, Orientation, Picker, Plane, PlaneAgreement, Point,
+    SIDE_OF_A_HALF_SPACE, Surface, SurfaceMeet, Vector, WHERE_A_PLANE_AND_A_PIPE_CROSS,
+    WHERE_A_PLANE_AND_A_TORUS_CROSS, how_a_plane_leans_against_a_cone, intersect,
+    where_a_cones_apex_stands_against_a_plane, which_two_surfaces_a_run_is_between,
 };
 use rcad_predicates::expansion::{
     difference_of_two_products, expansion_sign, expansion_sum, product_is_exact, scale_expansion,
@@ -10035,18 +10035,8 @@ fn what_lies_past_the_picker(
         return Ok(None);
     };
     if let (Surface::Cylinder(this), Surface::Cylinder(other)) = (surface, partner) {
-        if lie_along_one_line(
-            this.axis().direction().components(),
-            other.axis().direction().components(),
-        ) {
-            return Ok(None);
-        }
-        let side = match this.radius().partial_cmp(&other.radius()) {
-            Some(core::cmp::Ordering::Greater) => Decision::Pos,
-            Some(core::cmp::Ordering::Less) => Decision::Neg,
-            Some(core::cmp::Ordering::Equal) | None => return Ok(None),
-        };
-        return Ok(Some(PastThePicker { picker, side }));
+        return Ok(the_side_of_one_pipe_past_the_picker_of_another(this, other)
+            .map(|side| PastThePicker { picker, side }));
     }
     if !lie_along_one_line(picker.normal().components(), axis.direction().components()) {
         return Ok(None);
@@ -10075,6 +10065,32 @@ fn what_lies_past_the_picker(
         Decision::Zero => Ok(None),
         Decision::Undecidable { enclosure } => Err(gave_up_on_a_side(partner, corner, enclosure)),
         other => panic!("a step came back with a decision nothing here knows: {other:?}"),
+    }
+}
+
+/// Which side of pipe `other` a face on pipe `this` lies on past the
+/// half-space [`intersect`] names either loop the two cross in by: outside
+/// on the fat wall and inside on the thin one ([`what_lies_past_the_picker`]
+/// says why, Q1717). `None` where the two cross in no two loops, their axes
+/// lying along one line or the two being one width.
+///
+/// `validate.rs`'s `what_a_corner_past_the_picker_says` reads two pipes by
+/// this too, so a corner `Model::validate` reads and a point a query reads
+/// say one side (Q3217).
+pub(crate) fn the_side_of_one_pipe_past_the_picker_of_another(
+    this: &Cylinder,
+    other: &Cylinder,
+) -> Option<Decision> {
+    if lie_along_one_line(
+        this.axis().direction().components(),
+        other.axis().direction().components(),
+    ) {
+        return None;
+    }
+    match this.radius().partial_cmp(&other.radius()) {
+        Some(core::cmp::Ordering::Greater) => Some(Decision::Pos),
+        Some(core::cmp::Ordering::Less) => Some(Decision::Neg),
+        Some(core::cmp::Ordering::Equal) | None => None,
     }
 }
 
@@ -10107,7 +10123,9 @@ fn what_lies_past_the_picker(
 /// asked with no half-space this refuses the union (Q2673).
 /// [`what_a_curved_face_holds`] reads such a corner past
 /// [`the_picker_this_face_is_read_past`] instead, through
-/// [`the_side_this_face_lies_on_reading_past`].
+/// [`the_side_this_face_lies_on_reading_past`], and so does `Model::validate`'s
+/// sweep over each curved face's trimming, through
+/// [`the_side_this_face_lies_on_past_its_picker`] (Q3217).
 ///
 /// `Ok(None)` when no corner is off `partner` at all. That is not a broken model
 /// — a disk cut out of a ball has its one corner on the pipe that cut it — it is
@@ -10119,6 +10137,44 @@ pub(crate) fn the_side_this_face_lies_on(
     trimming: &Trimming,
 ) -> Result<Option<Decision>> {
     the_side_this_face_lies_on_reading_past(face, trimming, None)
+}
+
+/// [`the_side_this_face_lies_on`], with a corner past the half-space picking
+/// out the face's edge along `trimming` saying the side that half-space says,
+/// wherever `trimming` crosses the face's surface in a curve that is no edge
+/// of the face: what [`what_a_curved_face_holds`] reads of a corner.
+///
+/// Where no half-space picks the edge out, every corner says its own sign:
+/// where [`intersect`] does not name how the two surfaces cross, which a model
+/// read from a file can trim a face by, and where the face has more than one
+/// edge along `trimming`. [`what_a_curved_face_holds`] refuses such a face,
+/// since it has to say whether the face holds a point; this is asked only
+/// whether two corners say opposite sides.
+///
+/// # Errors
+///
+/// Those of [`the_side_this_face_lies_on_reading_past`] and
+/// [`the_picker_this_face_is_read_past`], and [`Error::Undecidable`] when
+/// [`intersect`] cannot settle the two surfaces.
+pub(crate) fn the_side_this_face_lies_on_past_its_picker(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    trimming: &Trimming,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<Decision>> {
+    let past = match every_piece_of_that_crossing_is_an_edge(
+        &face.surface(),
+        &trimming.surface,
+        trimming.corners_on_it.len(),
+        policy,
+        log,
+    ) {
+        Ok(true) | Err(Error::Geometry(_)) => None,
+        Ok(false) => the_picker_this_face_is_read_past(solid, face, trimming, policy, log)?,
+        Err(other) => return Err(other),
+    };
+    the_side_this_face_lies_on_reading_past(face, trimming, past.as_ref())
 }
 
 /// [`the_side_this_face_lies_on`], with a corner past `past`'s half-space

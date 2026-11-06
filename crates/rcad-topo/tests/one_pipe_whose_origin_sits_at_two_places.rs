@@ -531,6 +531,78 @@ fn a_slanted_pin_from_a_bars_axis_unites_with_the_bar_wherever_the_bar_ends() {
     }
 }
 
+/// **A steep pin from a bar's axis unites with a bar whose seam corner is
+/// inside the pin's pipe, behind where the pin starts.**
+///
+/// The pin is `0.5` in radius, from `(0, 0, 4)` on the bar's axis along
+/// `(−0.6, 0, 0.8)`, `10` long. The bar is `2` in radius up to `z = 10`, its
+/// wall naming its axis at `z = 4`. The pin's pipe crosses the bar's wall in
+/// two loops, one round `(−2, 0, 6.67)` where the pin leaves the bar and one
+/// round `(2, 0, 1.33)` behind where the pin starts. With the bar from `1.5`
+/// its seam corner `(2, 0, 1.5)` is `0.1` from the pin's axis, and with it
+/// from `1` its corner `(2, 0, 1)` is `0.2` from it: both inside the second
+/// loop, which is no edge of the union's wall.
+///
+/// `Model::validate` read that corner by its own sign, inside the pin's pipe,
+/// against the wall's top corner outside it, so the union was refused
+/// `TheFuseWroteABrokenAnswer` `AFaceStraddlesSomethingTrimmingIt` in both
+/// orders. The sweep over each curved face's trimming asked with no
+/// half-space where `holds.rs` reads such a corner past the one picking out
+/// the first loop, and the closed-edge check named no such half-space for two
+/// pipes (Q3217).
+///
+/// The union and the intersection hold each solid once between them, so their
+/// volumes add up to the bar's, `4π` per unit of height, and the pin's,
+/// `2.5π`.
+#[test]
+fn a_steep_pin_from_a_bars_axis_unites_with_a_bar_whose_seam_corner_is_inside_the_pins_pipe() {
+    let policy = Policy::certified();
+    for bottom in [1.5, 1.0] {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let bar = a_bar_whose_wall_names_its_axis_at(&mut model, bottom, 10.0, 4.0);
+        let pin = a_bar_along(
+            &mut model,
+            a_pin_wall(Point::new(0.0, 0.0, 4.0), Vector::new(-0.6, 0.0, 0.8)),
+            0.0,
+            10.0,
+        );
+        let one_solid = |rule: Rule, what: &str, [arguments, tools]: [SolidKey; 2]| {
+            let route = format!(
+                "the {what} with the bar from {bottom}, bar first {}",
+                arguments == bar
+            );
+            let mut model = model.clone();
+            let fused = model
+                .fuse(
+                    &[arguments],
+                    &[tools],
+                    rule,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|refused| panic!("{route}: {refused:?}"));
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|broken| panic!("{route} came back broken: {broken:?}"));
+            let [solid] = fused.solids() else {
+                panic!("{route} is one solid: {:?}", fused.solids());
+            };
+            volume_of(&model, *solid)
+        };
+
+        let (common, common_bound) = one_solid(Rule::Intersection, "intersection", [bar, pin]);
+        let both = std::f64::consts::PI * (RADIUS * RADIUS * (10.0 - bottom) + 2.5);
+        for order in [[bar, pin], [pin, bar]] {
+            let (union, bound) = one_solid(Rule::Union, "union", order);
+            assert!(
+                (union + common - both).abs() <= bound + common_bound,
+                "the bar from {bottom}: the union, {union} ± {bound}, and the intersection, \
+                 {common} ± {common_bound}, against {both}"
+            );
+        }
+    }
+}
+
 /// **A thin slanted disc whose seam corner sits on a pin's pipe behind the
 /// pin's start unites with the pin.**
 ///
