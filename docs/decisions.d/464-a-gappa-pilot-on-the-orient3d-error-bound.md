@@ -14175,7 +14175,8 @@ bound fails (§16.10): the three shares need not reach their worst at once.
 The test that searches,
 `a_corner_read_out_of_a_model_and_moved_is_a_box_around_where_it_lands.rs`,
 finds about `5ε` (its lines 44-46), and nobody has searched for a corner on a
-cone past `256u`. One of the rows 9 files is that search.
+cone past `256u`. One of the rows 9 files is that search. 464.38 is that
+search, and the worst it finds is `0.234` of the bound, about `60u`.
 
 **4. What the doc counts wrong.** The doc (`moved_corner.rs:38-97`) counts
 one `POINT_ROUNDOFF · L` for the point, one more for a ball, three for a pipe
@@ -28245,3 +28246,101 @@ mod q2826_probe {
     }
 }
 ```
+
+### 464.38 A corner on a cone, searched for past CORNER_AFTER_MOVING_ROUNDOFF
+
+Q2830 searched on 2026-11-06 for a corner on a cone that a move puts past
+`CORNER_AFTER_MOVING_ROUNDOFF`'s `128ε · L`, `256u · L`, where 464.21's 3
+argues on paper that a cone can get to about `290u`. Two lanes ran it on
+`cc18f9c0`. The first wrote the search. The second ran it, made it print the
+turn's length and the drift beside its worst, and wrote this. **A search is
+not a proof**: it finds what it looks at, and nothing here is proved.
+
+**The search finds no corner past the bound.** Its worst is `0.234` of the
+bound, about `60u · L`, on a corner turned half a turn by a turn stored off
+length one. For that reading `2|q·q − 1|ρ`, the drift 464.21's 3 counts, is
+`0.248` of the bound, so the move took the corner off its cone by nearly the
+whole drift, and the rest of the move took `0.014` of the bound back. Every
+other placing takes a cone's corner at most `0.056` of the bound off. The
+stretched turns' `q·q` is up to `4.98ε` off one, worked out without
+rounding. As it printed:
+
+```text
+$ mise exec -- just t a_moved_corner_far_out_on_a_wide_cone_stays_inside_the_box_published_for_it --no-capture
+moved corners on cones: 1940 readings; the furthest a move took one off its cone was 0.234 of the bound published for it turned half a turn about the halfway line by a stretched turn, where 2 |q.q - 1| rho is 0.248 of it, and 0.056 placed any other way; the stretched turns' q.q was up to 4.98 eps off one, worked out exactly
+```
+
+**1. What is measured.**
+`a_moved_corner_far_out_on_a_wide_cone_stays_inside_the_box_published_for_it`,
+in `crates/rcad-geom/tests/a_corner_read_out_of_a_model_and_moved_is_a_box_around_where_it_lands.rs`,
+moves a corner on a cone with `where_a_corner_lands_after_moving`. It works out
+how far the moved corner is off the moved cone, as `Cone::transformed` stores
+it, and takes away how far the stored corner was off the stored cone. Both are
+summed without rounding up to the last few divisions
+(`how_far_off_a_cone_exactly`). That difference over the box's half-width is
+the share printed. The box meets the moved cone while the share is under one,
+since a ball of the half-width lies inside the box (464.21's 1). Each reading
+also asserts that the box is certified on neither side of the moved cone, and
+that the same cone moved comfortably clear is decided. A move that rounds
+nothing must leave the corner exactly as far off as it was.
+
+**2. The corners.** There are ten. Each is about as far from its axis as `L`
+lets it be, since the drift grows with that distance `ρ`:
+
+- A cone about `z` with apex `(−60m, −60m, −h)` and the corner `(59m, 60m,
+  h)`, where `h = 84.5m / s`, for slope `s` of 1 and 4 and `m` of 1 and
+  `2³⁰`. The corner is `169m` from the axis, and `119² + 120² = 169²`, so it
+  is exactly on the cone. The stored apex and corner make `L` `84.5m` at
+  slope 1 and `60m` at slope 4.
+- A cube's long diagonal, apex `(−L, −L, −L)` and corner `(L, L, L)`, on the
+  cone about each of the cube's other diagonals, `(1, 1, −1)`, `(1, −1, 1)`
+  and `(−1, 1, 1)`, with slope `√8` as `f64` rounds it, for `L` of 4 and
+  `2³⁰`. The corner is `√(32/3) · L`, about `3.27 L`, from the axis, against
+  the most `2√3 L ≈ 3.46 L` any corner can be. A half turn about the line
+  halfway between the two diagonals takes the cube onto itself, so the move
+  hardly grows `L`. `√8` is not an `f64`, so this corner is a rounding off its
+  cone, and that is why the search measures the difference. `L` starts at 4
+  because `how_big_a_surface_is` counts the slope into `L`.
+
+**3. The turns.** By 464.21's 3, to first order, a turn with `q·q = 1 + η`
+takes a corner on a cone off it by `2ηρ(v₂² − v₀² + 2s v₀v₂) / h`, in the
+frame with the axis along `z` and the corner in the `xz` plane. The form is
+largest, `h`, where `(h + 1)v₀ = s v₂`: along the line at half the cone's
+angle from its axis, towards the corner. And `v·v` is all of `q·q` only for
+half a turn. So each corner is turned half a turn about the line through the
+middle of apex and corner, halfway between the axis and the corner as seen
+from the apex. It is also turned about the line halfway to the axis's other
+way, which is not the worst and costs nothing. Each line gets the longest and
+the shortest turn a movement keeps without dividing it by its length, which
+makes 40 stretched turns. To find them, each component of the unit direction
+is nudged by up to 8 ulps either way, 4913 candidates. Each candidate is read
+in through `Isometry::try_from(na::Isometry3::rotation_wrt_point(..))`, and
+kept only if it comes back bit for bit. It does while `q·q`, worked out in
+`f64`, is within `TURN_LENGTH_DRIFT`, `4ε`, of one. A candidate that is a turn
+of a cube is skipped, since the move is then exact. Of the ones kept, the
+search takes the one whose `q·q − 1`, worked out exactly, is largest, or
+smallest. Each corner also gets the 190 placings of `every_way_of_placing_it`:
+the identity, three shifts, and 31 turns about each of three axes, each alone
+and then shifted.
+
+**4. What it says and what it does not.** The search aims at the drift and
+reaches it, `0.234` found against `0.248` predicted at the worst reading. At
+464.21's worst, `η` of `6ε` and `ρ` of `2√3 L`, the drift alone is `83.1u`,
+`0.325` of the bound. This search gets `η` to `4.98ε` and `ρ` to `3.27 L`.
+The slips and the tilt come from rounding, and the search does not aim at
+them. 464.21's sum takes them at their worst together, `86.6u` and `120u`.
+At the worst reading here they did not add to the drift. So the `290u` is
+neither reached nor refuted. No corner here gets past a quarter of the bound,
+but the sum of the three worsts is still past it. Only a proof can say
+whether the three can meet, and that is the row 5 files. There is no defect
+to class.
+
+**5. What this leaves.**
+
+- A proof for the cone, or a corner past the bound: a Gappa script for the
+  moved cone in the shape of 464.21's `pipe.g`, whose `DR` is the cone's
+  `|ρ' − s t'| / h` for a corner with `ρ = s t`, and `ρ` up to `2√3 L`. It
+  is a row. 464.16's `cone.g` is the side of a cone and not this.
+- `CORNER_AFTER_MOVING_ROUNDOFF`'s doc in `moved_corner.rs` says nobody has
+  searched for a corner on a cone past `256u` (Q2830). That file is outside
+  Q2830's write set, so pointing it at this section is a small row.
