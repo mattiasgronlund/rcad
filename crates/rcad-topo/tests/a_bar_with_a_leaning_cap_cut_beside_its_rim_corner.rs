@@ -17,8 +17,8 @@
 //! at `(10, 13, 1.3)` for `(0.1, 0, 1)`. Turned, that corner is a rounding off
 //! the walked start, and its box misses it.
 
-use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Vector};
-use rcad_predicates::{Policy, ProvenanceLog};
+use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Surface, Vector};
+use rcad_predicates::{Policy, ProvenanceLog, side_of_a_plane_where_three_planes_meet};
 use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
 /// The lean `(0, 0.1, 1)` turned `29 · 0.05`: the ellipse is walked from
@@ -149,6 +149,218 @@ fn every_turn_a_floor_crossing_the_rim_at_the_seam_corner_was_refused_at_fuses()
         })
         .collect();
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The lean whose cap's plane holds the line where the wall `y = 10` meets the
+/// floor `z = 1` of the block `[6, 12]² × [1, 3]`, so the cap's straight edge
+/// from `(7, 10, 1)` to `(10, 10, 1)` lies in that floor (Q3229).
+const THE_CAP_THROUGH_THE_FLOORS_LINE: [f64; 3] = [0.0, 0.1, 1.0];
+
+#[test]
+fn probe3229_signs() {
+    let shift = 2.0_f64.powi(-43);
+    let mut lines = Vec::new();
+    for (name, turn) in the_turns_the_sweep_tries() {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let plate = a_plate_with_a_leaning_tab(&mut model, &turn, THE_CAP_THROUGH_THE_FLOORS_LINE)
+            .expect("the plate");
+        let block = a_block(&mut model, [6.0, 6.0, 1.0], [12.0, 12.0, 3.0]);
+        model
+            .place_solid(block, &turn)
+            .expect("this model made the key");
+        let [along_x, along_y, up] = THE_CAP_THROUGH_THE_FLOORS_LINE;
+        let lean = Vector::new(along_x, along_y, up)
+            .normalized()
+            .expect("a lean with a length");
+        let wall = a_stored_plane(&model, plate, &turn, Vector::new(0.0, 1.0, 0.0), 10.0);
+        let floor = a_stored_plane(&model, block, &turn, Vector::new(0.0, 0.0, -1.0), -1.0);
+        let cap = a_stored_plane(&model, plate, &turn, lean, 2.0 / 1.01_f64.sqrt());
+        let ends = [
+            a_stored_plane(&model, block, &turn, Vector::new(-1.0, 0.0, 0.0), -6.0),
+            a_stored_plane(&model, block, &turn, Vector::new(1.0, 0.0, 0.0), 12.0),
+        ];
+        let side = |plane: [f64; 4], end: [f64; 4]| {
+            side_of_a_plane_where_three_planes_meet([wall, floor, end], plane)
+                .expect("the wall, the floor and a side of the block meet in a point")
+        };
+        let [a, b, c, d] = cap;
+        let sides = ends.map(|end| {
+            (
+                side(cap, end),
+                side([a, b, c, d - shift], end),
+                side([a, b, c, d + shift], end),
+            )
+        });
+        lines.push(format!(
+            "PROBE3229 {name}: {sides:?} cap {cap:?} wall {wall:?} floor {floor:?}"
+        ));
+    }
+    panic!("{}", lines.join("\n"));
+}
+
+#[test]
+fn probe3229_tolerant() {
+    let mut lines = Vec::new();
+    let mut refused = 0;
+    for (name, turn) in the_turns_the_sweep_tries() {
+        for (policy_name, policy) in [
+            ("tolerant", Policy::tolerant(100.0)),
+            ("certified", Policy::certified()),
+        ] {
+            for (rule_name, rule, plate_first) in [
+                ("union", Rule::Union, true),
+                ("union block first", Rule::Union, false),
+                ("intersection", Rule::Intersection, true),
+                ("plate less block", Rule::Difference, true),
+                ("block less plate", Rule::Difference, false),
+            ] {
+                let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+                let plate =
+                    a_plate_with_a_leaning_tab(&mut model, &turn, THE_CAP_THROUGH_THE_FLOORS_LINE)
+                        .expect("the plate");
+                let block = a_block(&mut model, [6.0, 6.0, 1.0], [12.0, 12.0, 3.0]);
+                model.place_solid(block, &turn).expect("key");
+                let (one, other) = if plate_first {
+                    (plate, block)
+                } else {
+                    (block, plate)
+                };
+                let mut log = ProvenanceLog::new();
+                let answer = model.fuse(&[one], &[other], rule, &policy, &mut log);
+                let named: Vec<String> = log
+                    .records()
+                    .iter()
+                    .map(|record| format!("{record:?}").chars().take(300).collect())
+                    .collect();
+                let outcome = match answer {
+                    Ok(_) => {
+                        match model.validate(&Policy::certified(), &mut ProvenanceLog::new()) {
+                            Ok(()) => "answers, validates".to_string(),
+                            Err(why) => format!("answers, validate {why}"),
+                        }
+                    }
+                    Err(why) => format!("refused {why:?}").chars().take(300).collect(),
+                };
+                if policy_name == "certified" && outcome != "answers, validates" {
+                    refused += 1;
+                }
+                lines.push(format!(
+                    "PROBE3229 {policy_name} {name} {rule_name}: {outcome} log {named:?}"
+                ));
+            }
+        }
+    }
+    lines.push(format!("PROBE3229 certified {refused} of 305"));
+    std::fs::write(
+        "/tmp/claude-1000/-home-mattias-git-mattiasgronlund-rcad-worktrees-clean-up-dead-sessions/d396fe66-1e1a-45c1-87e7-028262ea1610/scratchpad/tolerant.txt",
+        lines.join("\n"),
+    )
+    .expect("write");
+}
+
+#[test]
+fn probe3229_short_edges() {
+    let mut lines = Vec::new();
+    let turn = Isometry::rotation(&Axis::z(), 2.1).expect("a finite angle");
+    let back = turn.inverse();
+    for (rule_name, rule, plate_first) in [
+        ("union", Rule::Union, true),
+        ("intersection", Rule::Intersection, true),
+        ("plate less block", Rule::Difference, true),
+        ("block less plate", Rule::Difference, false),
+    ] {
+        let policy = Policy::tolerant(100.0);
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let plate = a_plate_with_a_leaning_tab(&mut model, &turn, THE_CAP_THROUGH_THE_FLOORS_LINE)
+            .expect("the plate");
+        let block = a_block(&mut model, [6.0, 6.0, 1.0], [12.0, 12.0, 3.0]);
+        model.place_solid(block, &turn).expect("key");
+        let (one, other) = if plate_first {
+            (plate, block)
+        } else {
+            (block, plate)
+        };
+        let fused = model
+            .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+            .expect("tolerant answers at 2.1");
+        for solid in fused.solids() {
+            for face in model.solid(*solid).expect("key").faces() {
+                for wire in face.wires() {
+                    for coedge in wire.coedges() {
+                        let edge = coedge.edge();
+                        let length = edge.distance_between_its_ends();
+                        if length < 1e-9 && !edge.is_closed().unwrap_or(true) {
+                            lines.push(format!(
+                                "PROBE3229 {rule_name}: face {:?} edge {:?} {length:e} from {:?} to {:?} run {:?}",
+                                face.surface(),
+                                edge.key(),
+                                back.apply_to_point(edge.start().point()),
+                                back.apply_to_point(edge.end().point()),
+                                edge.run()
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    panic!("{}", lines.join("\n"));
+}
+
+/// The 61 turns the sweep of Q2799 and Q3229 placed the plate and the block
+/// by: `step · 0.05` about `z` for the 60 steps from `0`, and `0.4` about `x`.
+fn the_turns_the_sweep_tries() -> Vec<(String, Isometry)> {
+    (0..=59u8)
+        .map(|step| (Axis::z(), f64::from(step) * 0.05))
+        .chain([(Axis::x(), 0.4)])
+        .map(|(axis, angle)| {
+            let about = if axis.direction().components()[2] == 1.0 {
+                "z"
+            } else {
+                "x"
+            };
+            (
+                format!("turned {angle} about {about}"),
+                Isometry::rotation(&axis, angle).expect("a finite angle"),
+            )
+        })
+        .collect()
+}
+
+/// The stored plane, as `[a, b, c, d]`, of the faces of `solid` whose plane
+/// is the one through the normal `normal` at `offset` before `turn` placed
+/// it. Every such face must share that one plane.
+fn a_stored_plane(
+    model: &Model,
+    solid: SolidKey,
+    turn: &Isometry,
+    normal: Vector,
+    offset: f64,
+) -> [f64; 4] {
+    let normal = turn.apply_to_vector(normal).components();
+    let planes: Vec<[f64; 4]> = model
+        .solid(solid)
+        .expect("this model made the key")
+        .faces()
+        .filter_map(|face| {
+            let Surface::Plane(plane) = face.surface() else {
+                return None;
+            };
+            let along: f64 = (0..3)
+                .map(|axis| plane.normal().components()[axis] * normal[axis])
+                .sum();
+            (along > 1.0 - 1e-12 && (plane.offset() - offset).abs() < 1e-12)
+                .then(|| plane.coefficients())
+        })
+        .collect();
+    let [first, ..] = planes[..] else {
+        panic!("no face of {solid:?} lies on the plane {normal:?} at {offset}");
+    };
+    assert!(
+        planes.iter().all(|plane| *plane == first),
+        "the faces on {normal:?} at {offset} lie on {planes:?}"
+    );
+    first
 }
 
 /// How far a solid's volume may move because its turned corners are each a
