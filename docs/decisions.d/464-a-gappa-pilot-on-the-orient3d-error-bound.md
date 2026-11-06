@@ -39,7 +39,13 @@ normals. 464.30 is Q2781, on the side of rcad-geom's cone with a zero factor.
 464.32 is Q2786, on the side of rcad-geom's torus with a zero factor. 464.33
 is Q2787, on that torus with a checked product below the normals, and 464.34
 is Q2801, on `Isometry::POINT_ROUNDOFF` in the zero branches. 464.35 is
-Q2802, on it with products below the normals.*
+Q2802, on it with products below the normals. 464.36 is Q2825 and Q3211, on
+`Plane::NORMAL_LENGTH_ROUNDOFF`'s `vector.g` below the normals and in the zero
+branches, and 464.37 is Q2826, on that constant for a normal that does not
+come straight from a constructor. 464.38 is Q2830, which searched for a corner
+on a cone past `CORNER_AFTER_MOVING_ROUNDOFF`. 464.39 is Q2831, on `vector.g`
+with each component up to `1 + 64u`, and 464.40 is Q2837, which has Coq check
+464.22's `stage_e0_1.g`.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -76,6 +82,11 @@ Q2802, on it with products below the normals.*
   464.33  The side of rcad-geom's torus with a checked product below the normals
   464.34  Isometry::POINT_ROUNDOFF in the zero branches
   464.35  Isometry::POINT_ROUNDOFF with products below the normals
+  464.36  Plane::NORMAL_LENGTH_ROUNDOFF's vector.g below the normals and in the zero branches
+  464.37  Plane::NORMAL_LENGTH_ROUNDOFF for a normal that does not come straight from a constructor
+  464.38  A corner on a cone, searched for past CORNER_AFTER_MOVING_ROUNDOFF
+  464.39  vector.g with each component up to 1 + 64u
+  464.40  stage_e0_1.g in Coq
 
 ### 464.1 The bugs a bound prover is for
 
@@ -15266,8 +15277,9 @@ from 0 to `2⁻⁴⁰ M` and for each of the three things the computed coefficie
 can be (2). Gappa's count of the `M` part is `8.5u`, so the doc's `9u` holds
 with `0.5u` to spare, but by another split than the doc's (3, 4). Coq checks
 five of the six scripts, modulo their hints, and `stage_e0_1.g` is proved by
-Gappa and not checked by Coq (7). The sum over fifteen stages is not here: it
-stays Lean's (464.9).
+Gappa and refused by `coqc` (7). 464.40 has Coq check that edge with the hint
+`z0 / M -> rest * (d0 / M)` dropped, which proves the same results. The sum
+over fifteen stages is not here: it stays Lean's (464.9).
 
 Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
 464.13's `one.sh`, unchanged, against `de_boor.rs` and `knot_vector.rs` at
@@ -15448,9 +15460,15 @@ characters 29-30 are that `0`, which Coq will not read as a `positive`.
 `p_e0_1_inline.g`, with `rest` written in place, gave the same error at its
 line 468, at `FLT r7 (0)`, and printed `p_e0_1_inline coq -Bcoq exit 0 coqc
 exit 1 0.79s lines 1543 hints 9`; it is not appended. `stage_1.g` has `rest`
-exactly 0 too, and its `.v` passes; why was not looked for. So that edge is
-proved by Gappa and not checked by Coq. The fault is in what `-Bcoq` writes,
-not in the kernel, and a row in 9 asks for the check.
+exactly 0 too, and its `.v` passes. 464.40 found why. Gappa 1.8.0 says the
+number 0 has 0 bits, gappalib's `FLT` takes a count of at least 1 and so
+cannot hold that, and of the six `.v` files only `stage_e0_1.v` counts
+`rest`'s bits, by way of the hint `z0 / M -> rest * (d0 / M)`. So
+`stage_e0_1.g` as it stands is proved by Gappa and not checked by Coq. The
+fault is in what `-Bcoq` writes, not in the kernel. 464.40's
+`stage_e0_1_coq.g` is `stage_e0_1.g` without that hint: Gappa proves the same
+results from it, and `coqc` checks its `.v`. The row in 9 that asked for the
+check is Q2837, and 464.40 is its answer.
 
 As in 464.21's 7, each hint enters the `.v` as a hypothesis with no
 condition, so a proof stands on its hints and on the divisors Gappa took to be
@@ -15922,7 +15940,8 @@ from Q2692:
   _rest (0).` at `stage_e0_1.v` line 468, and `coqc` says `Error: Cannot
   interpret this number as a value of type positive` (7). `stage_1.g` has
   `rest` exactly 0 too, and its `.v` passes. Find why, and get the edge
-  checked by Coq or record why it cannot be.
+  checked by Coq or record why it cannot be. This is Q2837, and 464.40 does
+  it: it finds why, and has Coq check the edge as `stage_e0_1_coq.g`.
 
 And what is not a row: the sum over fifteen stages, which is Q2696's, in Lean
 (464.9); a stage whose running values overflow, which no script here models,
@@ -28997,11 +29016,12 @@ r_wide_5: best on out - Ex 20.2125u
 Q2837 asked why `coqc` refuses the `.v` that `gappa -Bcoq` writes for
 464.22's `stage_e0_1.g`, the small-`E` edge at `share = 1`, when `stage_1.g`
 has `rest` exactly 0 too and its `.v` passes; and asked for the edge checked
-by Coq, or a record of why it cannot be. Two lanes ran it on 2026-11-06. The
+by Coq, or a record of why it cannot be. Three lanes ran it on 2026-11-06. The
 first found the cause and the fix in a scratch directory and passed its
 budget before writing anything down (§416). The second wrote `fetch.py`,
 `coqedge.py`, `onebit.py`, `allcoq.sh` and `samecoq.py`, ran them, and wrote
-this.
+this. The third ran `samecoq.py` again, found its print the same as 7's byte
+for byte, and pointed 464.22 and 464's index at this.
 
 **Coq checks the edge, modulo its hints, with one hint dropped.**
 `stage_e0_1_coq.g` is `stage_e0_1.g` without the hint `z0 / M -> rest * (d0 /
