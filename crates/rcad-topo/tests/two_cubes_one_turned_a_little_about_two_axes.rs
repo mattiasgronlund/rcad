@@ -4,8 +4,9 @@
 //! The block is `add_cube(10.0)`, `[0, 10]³`, at `Scale::millimetres(100.0)`.
 //! The turned cube is a second `add_cube(10.0)` placed by
 //! `Isometry::try_from(([tx, 0, 0], q))`: `q` is the turn `0.0043` about `z`
-//! and the turn `0.0081` about `x`, put together either way round, and `tx` is
-//! `5` or `5.0000001`. Its corner at the origin is stored at `(tx, 0, 0)`, on
+//! and the turn `0.0081` about `x`, put together either way round and divided
+//! by its length ([`divided_by_its_length`]) as every read divided it until
+//! queue row Q3234, and `tx` is `5` or `5.0000001`. Its corner at the origin is stored at `(tx, 0, 0)`, on
 //! the block's bottom front edge, where `y = 0` meets `z = 0`. As meant, the
 //! turned cube's bottom, front and left planes pass through that point too,
 //! the two skins cross there at one corner, and no answer has anything small
@@ -468,11 +469,41 @@ fn two_cubes(turn: [f64; 4], tx: f64) -> (Model, SolidKey, SolidKey) {
     let mut model = Model::new(Scale::millimetres(100.0).expect("a scale"));
     let block = a_cube(&mut model);
     let turned = a_cube(&mut model);
-    let placement = Isometry::try_from(([tx, 0.0, 0.0], turn)).expect("a placement");
+    let placement =
+        Isometry::try_from(([tx, 0.0, 0.0], divided_by_its_length(turn))).expect("a placement");
     model
         .place_solid(turned, &placement)
         .expect("this model made the key");
     (model, block, turned)
+}
+
+/// [`divided_by_its_length`] moves each of the four parts of both turns one
+/// step further from zero.
+#[test]
+fn dividing_either_turn_by_its_length_moves_every_part_one_step_further_from_zero() {
+    for turn in [TURNED_ABOUT_X_FIRST, TURNED_ABOUT_Z_FIRST] {
+        assert_eq!(
+            divided_by_its_length(turn).map(f64::to_bits),
+            turn.map(|part| part.to_bits() + 1),
+            "{turn:?}"
+        );
+    }
+}
+
+/// `turn` divided by its length, as `Isometry::try_from` divided every turn
+/// until queue row Q3234, by nalgebra's `UnitQuaternion::from_quaternion`,
+/// which adds the squares as `(i² + k²) + (j² + w²)`.
+///
+/// **Every outcome this file pins was measured on these bits.** The read now
+/// keeps a turn this near length one as it is handed, and dividing moves each
+/// of the four parts of both turns one step further from zero. The stored
+/// planes miss the corner by a rounding, so that step moves what the fuses
+/// meet: on the kept bits, with the turn about `z` first and the move by
+/// exactly `5`, the stored planes have no edge where the skins cross, and the
+/// certified union answers.
+fn divided_by_its_length([w, i, j, k]: [f64; 4]) -> [f64; 4] {
+    let length = ((i * i + k * k) + (j * j + w * w)).sqrt();
+    [w, i, j, k].map(|part| part / length)
 }
 
 fn a_cube(model: &mut Model) -> SolidKey {
