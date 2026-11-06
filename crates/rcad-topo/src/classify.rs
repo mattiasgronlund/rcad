@@ -337,6 +337,15 @@ impl SolidView<'_> {
     /// face whose corners and plane part about the point is found first
     /// ([`its_corners_and_plane_part_at`]), whatever the line meets.
     ///
+    /// **But not a face the point's box is further off the plane of than any
+    /// of its corners** ([`is_further_off_its_plane_than_its_corners`]). Such a
+    /// box is in none of that face's sliver, which lies between its triangles
+    /// and its plane, so it is in the slab the corners span. What parts there is
+    /// a triangle's own plane, far past the triangle's sides, and a fan
+    /// triangle of almost no area tips its plane far enough to: taken as
+    /// parted, two such faces refused every point of a turned union's floor
+    /// `0.04` to `0.09` off them (Q3224).
+    ///
     /// **Such a face matters only beside the point.** Its plane runs on past
     /// its edges, and so does the sliver between that plane and its triangles'
     /// planes. A point in that sliver far from the face, as the cap a turned
@@ -362,6 +371,7 @@ impl SolidView<'_> {
                 let surface = face.surface();
                 surface.as_plane().is_some_and(|flat| {
                     every_side_of_it_is_straight(face)
+                        && !is_further_off_its_plane_than_its_corners(face, flat, point)
                         && its_corners_and_plane_part_at(face, flat, point)
                 })
             })
@@ -1052,6 +1062,49 @@ fn its_corners_and_plane_part_at(face: FaceView<'_>, flat: &Plane, point: Predic
         };
     });
     parted
+}
+
+/// Whether every point of `point`'s box is further off `flat`, on one side,
+/// than any corner of `face`'s fan, read as `normal · x - offset` over
+/// outward-rounded intervals.
+///
+/// **Every triangle of the fan lies in the slab its corners span**, since that
+/// value is affine and a triangle is made of its corners. A box outside that
+/// slab is between no triangle and the plane, so no ray reads it differently
+/// by the triangles than by the plane: where its line passes through a
+/// triangle, that point is in the slab and on the segment exactly when the
+/// plane separates the point from the target. A fan triangle with almost no
+/// area, as a fused face's two nearly collinear corners and a third make, has
+/// an own plane that cannot settle a box `0.077` off the face's stored plane,
+/// and that read as a parting and refused a union of cubes turned about a
+/// slanted axis (Q3224).
+///
+/// **Not yet shown: that a box this leaves out never needs the face by its
+/// edge.** Where the ray's line meets this face it reads the box right, but
+/// beside the edge the line can meet the neighbour instead (Q997), and only a
+/// face that parts sends such a box to a plane. Read by hand across the edge,
+/// a box just past a fan triangle's side, by the corner furthest off the
+/// plane, can be outside the triangles' solid and inside the stored planes'
+/// one while it lies outside this slab, by up to twice the furthest corner,
+/// where that triangle is tipped from the plane by more than the two faces
+/// bend. No probe has built that box.
+fn is_further_off_its_plane_than_its_corners(
+    face: FaceView<'_>,
+    flat: &Plane,
+    point: PredicatePoint,
+) -> bool {
+    let normal = flat.normal().components().map(Interval::exactly);
+    let off_the_plane =
+        |at: [Interval; 3]| dot_enclosing(normal, at) - Interval::exactly(flat.offset());
+    let mut furthest_corner = 0.0f64;
+    face.for_each_triangle(|corners| {
+        for corner in corners {
+            let off = off_the_plane(exactly(corner.coordinates()));
+            furthest_corner = furthest_corner.max(off.lo().abs()).max(off.hi().abs());
+        }
+    });
+    let off = off_the_plane(point.enclosure());
+    off.lo() > furthest_corner || off.hi() < -furthest_corner
 }
 
 /// What one plane says of a point, against the sign it gives a point in
