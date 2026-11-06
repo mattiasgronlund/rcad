@@ -28347,24 +28347,175 @@ to class.
 
 ### 464.39 vector.g with each component up to 1 + 64u
 
-DRAFT. Q2831's second lane ran what is below on 2026-11-06 and passed its
-budget before writing the prose, so it handed over (§416). The scripts and
-prints are whole and as they ran, in its tree's `target/q2831/`.
+Q2831 asked whether 464.20's `vector.g` keeps its `20u` when each component
+of the vector it turns is up to about `1 + 64u`, as a stored axis
+direction's can be. `vector.g` takes each component at most one, and
+464.21's `pipe.g` and `torus.g` take their `da` from it all the same: the
+first of the two hypotheses 464.21's 5 leaves unproved. Q2831's lanes ran it
+on 2026-11-06. One wrote `fetch.py`, `widen.py`, `allwide.sh` and
+`samewide.py`, ran the first three and 464.36's `startvm.sh`, and passed its
+budget before writing this up (§416); the next ran `samewide.py` and wrote
+this.
 
-What it found: `wide.g`, 464.20's `vector.g` with each component of the
-vector up to `1 + 64u` (`9007199254741056b-53`), proves `out − Ex` within
-`20u`, and so do its `y` and `z`, each checked by Coq; its control at `19.5u`
-fails with best `19.6000u`. `(out − Ex) / D`'s upper end is `vector.g`'s
-times `1 + 2⁻⁴⁷`, to Gappa's 200 bits. With each component up to `1 + 2⁻⁶`
-it still proves, at `19.90625u`; with `1 + 2⁻⁵` it fails, best `20.2125u`.
-464.36's 88 zero-branch cases, widened the same way, each prove, and their
-88 controls each fail. The width: `Axis::as_written` keeps a direction whose
-`a·a`, worked out exactly, is within `64ε`, `128u`, of one
-(`has_length_one_to_within_a_turn`), so each `|aᵢ| ≤ √(1 + 128u) < 1 + 64u`,
-and `Axis::transformed` does not scale it (`point.rs:706-716`, `784-789`,
-`plane.rs:789-821` at `2b2c90e3`). `git diff -U0 c40cc82e 2b2c90e33` on
-`isometry.rs`, `point.rs`, `plane.rs` and `Cargo.lock` changes `///` lines
-alone, so the cases restate `2b2c90e3`.
+**The `20u` holds with each component up to `1 + 64u`.** `wide.g`, which is
+`vector.g` with each `|nᵢ| ≤ 1 + 64u`, proves the turned vector's `x` within
+`20u` of what the turn's own numbers give without rounding, and `wide1.g`
+and `wide2.g` prove its `y` and `z`. Coq checks all three, modulo their
+hints, and their control at `19.5u` fails with best `19.6000u`, which is
+464.20's `c_vector_195`'s (3, 4). 464.36's 88 cases in the zero branches,
+widened the same way, each prove, Coq checks each, and each of their 88
+controls fails. So `pipe.g`'s and `torus.g`'s `da` is within `20u` for a
+direction as an axis keeps it (1), which proves that hypothesis of 464.21's
+5. It also settles 464.37's `kept_10`, which takes `vector.g`'s `20u` for
+components up to `1 + 5u`: that is under `1 + 64u`, so its proof stands.
+
+**The bound grows with the components, and has room to spare.** `D`, the
+sum 464.20's 2 bounds by `19.6`, has that upper end in each of the seven
+`.out` files of 3, since 464.20's 2 builds it from the turn alone. `(out − Ex) / D`'s upper end
+is `vector.g`'s times the bound on the components, and more by a factor of
+at most `1 + 10⁻⁶⁰`, Gappa's 200 bits, as `samewide.py` reads them off each
+`.out` (6). So the argument reaches `19.6u` times that bound, and by it
+`20u` holds while the bound is under `20 / 19.6`, about `1.0204`.
+`r_wide_6.g`, each component up to `1 + 2⁻⁶`, proves, at `19.6u · 65/64 =
+19.906u`, and `r_wide_5.g`, up to `1 + 2⁻⁵`, fails, best `20.2125u`, which is
+`19.6u · 33/32`. A direction with `a·a ≤ 1 + 2⁻⁵` has each component within
+`r_wide_6`'s bound, since `(1 + 2⁻⁶)²` is more than that. So `vector.g`'s
+part holds, under its other hypotheses, far past the `64ε` an axis is kept
+to; a direction a turn walks past `64ε` breaks `pipe.g`'s and `torus.g`'s own
+hypothesis on `a·a`, not this one (5).
+
+The cases restate `2b2c90e3`, this lane's base. 464.36's opening argues
+`vector.g`'s code from `4b642567`, where 464.20 restates it, to `c40cc82e`,
+where 464.36's cases do. From `c40cc82e` to `2b2c90e3`, `point.rs`,
+`plane.rs` and `Cargo.lock` have no hunk and `isometry.rs` changes
+`POINT_ROUNDOFF`'s doc alone (`git diff -U0`). `u` is `2⁻⁵³` and `ε` is
+`f64::EPSILON = 2u`.
+
+**1. The width.** An axis's direction is private and set only through
+`Axis::holding`, which adds `0.0` to each component and rounds nothing. Its
+callers, in `point.rs` at `2b2c90e3`:
+
+- `Axis::new` (`662-672`) scales the direction with
+  `scaled_to_length_one_from_anywhere`, so each component is at most one, as
+  a constructor's normal is (464.20's 5);
+- `Axis::x`, `Axis::y` and `Axis::z` are exact;
+- `Axis::as_written` (`706-716`), and `TryFrom<(Point, Vector)>` through it,
+  keeps a direction whose `a·a`, worked out exactly, is within
+  `NORMAL_LENGTH_ROUNDOFF` of one, `64ε` or `128u` (`plane.rs:177`), by
+  `has_length_one_to_within_a_turn` (`plane.rs:789-819`), and hands any other
+  to `Axis::new`;
+- `Axis::reversed` and `Axis::moved_to` keep each component's size;
+- `Axis::transformed` (`784-789`) turns the direction with
+  `Isometry::apply_to_vector`, which is `vector.g`'s arithmetic, and does not
+  scale what it gets.
+
+So each `|aᵢ|` of a direction that has not been turned is at most `√(1 +
+128u)`, which is under `1 + 64u`, since `(1 + 64u)² = 1 + 128u + 4096u²`.
+`1 + 64u` is an `f64`, `9007199254741056b-53`, and is the bound `widen.py`
+writes. A turned direction is within `64ε` of length one by 464.20's
+`square.g`, under its hypotheses, for a direction `Axis::new` made, turned
+once, and 464.37 found
+that a normal kept near the edge and turned, or turned again and again, can
+leave it. `Axis::transformed` stores the turned direction as it comes,
+inside the bound or not (5).
+
+**2. The cases.** `widen.py` (6) writes them by replacing lines of 464.20's
+`vector.g`, `vector1.g` and `vector2.g` and of 464.36's 88 cases and
+controls, each line asserted found as often as its script has it, as
+464.36's `squarezero.py` does. It replaces `nᵢ in [-1, 1]` with `nᵢ in
+[-9007199254741056b-53, 9007199254741056b-53]` and the comment above it,
+moves each `restates` line to `2b2c90e3`, and adds three, for `as_written`,
+`transformed` and `has_length_one_to_within_a_turn`. Everything else is the
+script's own: the turn's `q·q` within `6ε` of one, worked out exactly, and
+the products on a live path normal in 464.20's three, or normal, below the
+normals or zero in 464.36's 88, where only the components that are not zero
+widen. The cases:
+
+- `wide.g`, `wide1.g` and `wide2.g`, from `vector.g`, `vector1.g` and
+  `vector2.g`: the turned vector's `x`, `y` and `z`, with the same
+  hypotheses and the coordinates renamed;
+- `c_wide_195.g`, `wide.g` with its goal at `19.5u`, as `c_vector_195.g` is
+  `vector.g`'s (4);
+- `r_wide_6.g` and `r_wide_5.g`, `vector.g` with each component up to `1 +
+  2⁻⁶` and `1 + 2⁻⁵`, past what a stored direction has, to show how far the
+  `20u` reaches;
+- in `zero/`, 464.36's 88 cases `vm_<zeros>.g` and their controls
+  `c_vm_<zeros>_half.g`. 11 of them have every component of the vector zero,
+  and nothing to widen.
+
+**3. What they print.** `allwide.sh` (6) runs the six scripts and 464.20's
+`vector.g` beside them at once, each through 464.13's `one.sh`, Gappa 1.8.0
+under 464.4's pin at `-Eprecision=200`: `wide.g`, `wide1.g` and `wide2.g`
+with `gappa -Bcoq` and `coqc`, the rest without. Its print, `all.log`, is
+in 6. `wide`, `wide1` and `wide2` each exit 0, and so does `coqc` on each,
+at 6754, 6609 and 6426 lines of Coq with 33 hints each, where 464.20's
+`vector.v` came to 6740 with 33; 464.20 ran `vector1.g` and `vector2.g`
+without `-Bcoq`. As there, each hint goes into the Coq file as a hypothesis, and each of the
+seven `.out` files warns 134 times that a divisor is "assumed to be
+nonzero", as 464.20's 7 counts in `vector.out` (`grep -c 'assumed to be
+nonzero'`). Each says there is "no need for the rewriting at line 140", or
+139 in the two `r_wide`: the hint `out - Ex -> ((out - Ex) / D) * D`, which
+464.20's 7 finds at line 136 of `vector.g`. `widen.py`'s added comment and
+`restates` lines move it down.
+
+464.36's `startvm.sh`, unchanged, ran the 88 cases in `zero/` with `gappa
+-Bcoq` and `coqc`, and their controls, through 464.34's `runpz.sh`, from
+10:13 to 10:16 UTC, and 464.36's `tallyvm.py` counts the run (6). Its print
+is 464.36's line for line but for two: the Gappa times, and the Coq sizes,
+436 to 9247 lines where 464.36 had 427 to 9338, with the same 6 to 41 hints.
+So each of the 88 proves and Coq checks it, and the terms' errors reach at
+most `19.5999u` (`vm_wv2n2`), as there, to the four decimals `tallyvm.py`
+prints.
+
+**4. The controls.** A script whose hypotheses contradict each other proves
+every goal (464.7's 3). `c_wide_195` asks `wide.g`'s question at `19.5u` and
+fails with best `±2.17604e-15`, `19.6000u`, which is `c_vector_195`'s, so
+`wide.g`'s hypotheses do not contradict each other. `wide1.g` and `wide2.g`
+need no control of their own, since their hypotheses are `wide.g`'s with the
+coordinates renamed, and 464.20's `vector1.g` and `vector2.g` have none.
+`r_wide_5` fails at the code's own `20u`, best `20.2125u`. Each of the 88
+controls in `zero/` fails, with the bests 464.36's 4 lists: `u` in four,
+`13u` to `19.6u` in 63, and "no contradiction was found" in the 21 where
+nothing is live. Gappa's best for a goal it does not prove can change from
+one run to the next (464.26); these are this run's.
+
+**5. What this leaves.** One row, filed from this write-up when it merges,
+from Q2831:
+
+- `Axis::transformed` (`point.rs:784-789` at `2b2c90e3`) does not scale
+  what it turns, as `Plane::transformed` does not, so a stored axis turned
+  again and again may walk its direction's `a·a` past
+  `NORMAL_LENGTH_ROUNDOFF`, as Q3219 has a normal do (464.37), and
+  `Axis::as_written` would then scale it when a file is read. That would
+  break `pipe.g`'s and `torus.g`'s own hypothesis that `a·a` is within `64ε`
+  of one, though not `vector.g`'s `20u`, which holds up to `1 + 2⁻⁶`. A fuse
+  stores `along.transformed(&mine.movement)` for a curved surface
+  (`fuse/bake.rs:2822` at `2b2c90e3`). Read, not run, so no class (§360.5).
+  It waits on Q3219, which decides the same for a normal.
+
+And what is not a row: Q3219, the normal's walk, open; Q3213, `square.g`
+with a component of `m` below `2⁻¹⁰¹²`, open beside this one; and Q2700,
+which moves these scripts into `proofs/gappa/` with the rest of 464's.
+
+**6. The scripts and their prints, whole, as they ran.** `fetch.py` writes
+from this file the scripts 464.39 runs unchanged: 464.13's `one.sh`,
+464.20's `vector.g` and `turn.py`, 464.34's `runpz.sh`, and 464.36's
+`vectorsub.py`, `tallyvm.py` and `startvm.sh`. `widen.py` runs `turn.py` and
+writes the cases of 2; `allwide.sh` runs the six and `vector.g`;
+`startvm.sh` runs the 88 in `zero/` and `tallyvm.py` counts them; and
+`samewide.py` checks this text against the files that ran, as 464.37's
+`samekept.py` does.
+
+To run them again, save `fetch.py`, `widen.py`, `allwide.sh` and
+`samewide.py` in one directory, and run there, in turn: `python3 fetch.py
+<464 file>`, with the file's absolute path, since it moves into its own
+directory first; `python3 widen.py`; `./allwide.sh > all.log 2>&1`, about
+65 s; `zero/startvm.sh`, started with `setsid -f nohup`, waiting on the pid
+it writes to `zero/startvm.pid`, about four minutes; and `python3
+zero/tallyvm.py`. Then `python3 samewide.py <464 file> <directory>` checks
+them. `gappa -Bcoq` does not write the same file each time (464.20's 7), and
+the times move too, so a run again prints other times and Coq sizes than
+`all.log` and the tally here, and `samewide.py` then says so.
 
 `fetch.py`:
 
@@ -28691,7 +28842,7 @@ bests within 0.01% of their case's terms' part: 51 of 67
 the others, best and terms' part in u: vm_wv1n0 15.6860 15.8710, vm_wv2n0 15.6860 15.8710, vm_wn0n1 18.5951 18.5999, vm_wn0n2 18.5951 18.5999, vm_v0v1n0 18.5567 18.5999, vm_v0v2n0 18.5567 18.5999, vm_v0n0n1 18.5650 18.5999, vm_v0n0n2 18.5650 18.5999, vm_v1n0n1 15.6865 15.8710, vm_v1n0n2 18.5616 18.5999, vm_v2n0n1 18.5616 18.5999, vm_v2n0n2 15.6865 15.8710, vm_wv1n0n1 15.6860 15.8710, vm_wv2n0n2 15.6860 15.8710, vm_v0v1n0n2 18.5567 18.5999, vm_v0v2n0n1 18.5567 18.5999
 ```
 
-`samewide.py`, written and not yet run:
+`samewide.py`:
 
 ```python
 """Check 464.39 against the directory it ran in: each script the text holds
@@ -28802,4 +28953,37 @@ for name in ("c_wide_195", "r_wide_5"):
     got = [BEST.match(line) for line in open(os.path.join(run, name + ".out"))]
     got = [m for m in got if m]
     print(f"{name}: best on out - Ex {float(got[0][1]) / float(U):.4f}u")
+```
+
+`samewide.py`'s whole print, run in the tree of the lane that wrote this up,
+whose `target/q2831/` held a copy of the run directory, as `python3
+samewide.py <464 file> target/q2831`:
+
+```text
+fetch.py in the text is the file that ran: True
+widen.py in the text is the file that ran: True
+allwide.sh in the text is the file that ran: True
+samewide.py in the text is the file that ran: True
+fetch.py run from the text prints what the text says: True
+one.sh in the run directory is the one fetch.py writes from the text: True
+vector.g in the run directory is the one fetch.py writes from the text: True
+turn.py in the run directory is the one fetch.py writes from the text: True
+runpz.sh in the run directory is the one fetch.py writes from the text: True
+vectorsub.py in the run directory is the one fetch.py writes from the text: True
+tallyvm.py in the run directory is the one fetch.py writes from the text: True
+startvm.sh in the run directory is the one fetch.py writes from the text: True
+widen.py run from the text prints what the text says: True
+fetch.py and widen.py run from the text write 185 .g files and 5 more; differing from the ones that ran: none
+.g files in the run directory that they do not write: none
+all.log is allwide.sh's print in the text: True
+tallyvm.py prints what the text says: True
+vector.g's (out - Ex) / D, upper end: 1.000000u
+wide's, over vector.g's: 1 + 64u, times 1 + 2.05e-61
+wide1's, over vector.g's: 1 + 64u, times 1 + 2.05e-61
+wide2's, over vector.g's: 1 + 64u, times 1 + 2.05e-61
+c_wide_195's, over vector.g's: 1 + 64u, times 1 + 2.05e-61
+r_wide_6's, over vector.g's: 1 + 2^-6, times 1 + 9.77e-61
+r_wide_5's, over vector.g's: 1 + 2^-5, times 1 + 7.17e-61
+c_wide_195: best on out - Ex 19.6000u
+r_wide_5: best on out - Ex 20.2125u
 ```
