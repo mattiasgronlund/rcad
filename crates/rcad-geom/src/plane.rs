@@ -30,10 +30,11 @@ pub const SIDE_OF_PLANE: &str = "side of plane";
 /// (`docs/decisions.md` §3.1): a real cube, with volume, area and centroid
 /// summed face by face from the divergence theorem.
 ///
-/// Serializes as its four [`Plane::coefficients`], and is re-checked and scaled
-/// back to a unit normal on the way in. Scaling a normal that is already very
-/// nearly unit length can move the last bit or two, so a plane that has been
-/// written and read back is the same plane to within rounding, not bit for bit.
+/// Serializes as its four [`Plane::coefficients`], and is checked again on the
+/// way in. A normal within [`Plane::NORMAL_LENGTH_ROUNDOFF`] of length one keeps
+/// its bits, so a plane any constructor or turn stored comes back from its
+/// bytes bit for bit, and one further off is scaled as
+/// [`Plane::from_coefficients`] scales it (`impl TryFrom<[f64; 4]> for Plane`).
 ///
 /// # No stored number is `-0.0`
 ///
@@ -210,7 +211,8 @@ impl Plane {
     /// handed, and for most such normals no vector of length exactly one lies
     /// within half an ulp of each component, so no direction a file could hold
     /// reads back as them. The file carries the bits exactly and this keeps
-    /// them (`docs/decisions.md` §313.3).
+    /// them (`docs/decisions.md` §313.3). A plane read back from saved bytes
+    /// keeps its normal on the same check.
     ///
     /// `n·n − 1` is worked out exactly, and a normal is kept only when it is
     /// proved inside. A component so small that its square cannot be formed
@@ -418,8 +420,9 @@ impl Plane {
     /// [`Plane::from_point_and_normal_as_written`] and
     /// [`Plane::from_coefficients`], checks it — the second keeps only a
     /// normal whose squared length it measured within a hair of one — and
-    /// `Deserialize` goes through the last one — `#[serde(try_from = "[f64; 4]")]` makes it the only
-    /// route in on the wire. `a_plane_stored_with_no_normal_is_refused_on_the_way_in`
+    /// `Deserialize`, which `#[serde(try_from = "[f64; 4]")]` makes the only
+    /// route in on the wire, keeps a normal on the second's check and hands any
+    /// other to the last. `a_plane_stored_with_no_normal_is_refused_on_the_way_in`
     /// (`crates/rcad-geom/tests/serialization.rs`) shows the bytes refused
     /// before a `Plane` exists to ask.
     ///
@@ -1112,11 +1115,41 @@ const SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND: f64 = {
 /// Six exact products of two entries each, each two numbers long.
 const LONGEST_TOTAL_THROUGH_A_POINT: usize = 12;
 
+/// What `Deserialize` builds a plane with, from the four
+/// [`Plane::coefficients`] it reads.
+///
+/// **A normal within [`Plane::NORMAL_LENGTH_ROUNDOFF`] of length one keeps its
+/// bits, and the offset is the fourth number negated**, so a plane comes back
+/// from its bytes as it was written. That is the check
+/// [`Plane::from_point_and_normal_as_written`] makes and `Axis`'s
+/// `Deserialize` makes too (`docs/decisions.md` §355.6), and it holds every
+/// normal a constructor stores and every one a turn of it leaves. Until Q3226
+/// this went through [`Plane::from_coefficients`], which scales an already
+/// scaled normal again: a model fused, placed and fused again lost the bits of
+/// 2 320 of its planes on a read, and a second read moved three of them again
+/// (`a_plane_fused_placed_and_fused_again_reads_back_as_written.rs` in
+/// `rcad-topo`).
+///
+/// **Any other normal is handed to [`Plane::from_coefficients`]**, which
+/// scales it, refuses one with no length and names a number that is not
+/// finite. A stored normal turned again and again can be past the bound
+/// (`docs/decisions.md` §464.37), and bytes from elsewhere can hold any
+/// length. What [`Plane::from_coefficients`] stores is within the bound, so a
+/// second read keeps what the first gave back.
 impl TryFrom<[f64; 4]> for Plane {
     type Error = Error;
 
-    fn try_from(coefficients: [f64; 4]) -> Result<Self> {
-        Self::from_coefficients(coefficients)
+    fn try_from([a, b, c, d]: [f64; 4]) -> Result<Self> {
+        let normal = Vector::new(a, b, c);
+        if !has_length_one_to_within_a_turn(normal) {
+            return Self::from_coefficients([a, b, c, d]);
+        }
+        if !d.is_finite() {
+            return Err(Error::NotFinite {
+                what: "plane coefficient",
+            });
+        }
+        Ok(Self::holding(normal, -d))
     }
 }
 
@@ -1675,8 +1708,159 @@ mod tests {
         )
         .unwrap();
         let recovered = Plane::try_from(plane.coefficients()).unwrap();
-        assert!((recovered.normal() - plane.normal()).length() < 1e-15);
-        assert!((recovered.offset() - plane.offset()).abs() < 1e-15);
+        assert_eq!(bits_of(recovered), bits_of(plane));
+    }
+
+    /// A plane a turn left an ulp or two off length one comes back from its
+    /// bytes with the bits it was stored with, because the way in keeps a
+    /// normal within [`Plane::NORMAL_LENGTH_ROUNDOFF`] and does not scale it
+    /// again as [`Plane::from_coefficients`] does.
+    ///
+    /// Planes facing `x`, `y`, `z` and `(1, 2, 3)` through `(1, 2, 3)`, each
+    /// turned about `x`, `y`, `z` and `(1, 2, 3)` by every tenth of a radian
+    /// up to a whole turn and moved off the origin, as `rcad-geom`'s
+    /// `an_axis_a_turn_left_comes_back_from_its_bytes_with_the_bits_it_was_stored_with`
+    /// turns an axis: [`Plane::from_coefficients`] would move the bits of 251
+    /// of the 992, which is what the bytes did until Q3226, and the bytes move
+    /// none.
+    #[test]
+    fn a_turned_plane_comes_back_from_its_bytes_with_the_bits_it_was_stored_with() {
+        let about = [
+            Axis::x(),
+            Axis::y(),
+            Axis::z(),
+            Axis::new(Point::origin(), Vector::new(1.0, 2.0, 3.0)).expect("a direction"),
+        ];
+        let facing = [
+            Vector::new(1.0, 0.0, 0.0),
+            Vector::new(0.0, 1.0, 0.0),
+            Vector::new(0.0, 0.0, 1.0),
+            Vector::new(1.0, 2.0, 3.0),
+        ];
+        let (mut turned, mut rebuilding_would_move, mut the_bytes_moved) = (0, 0, 0);
+        for normal in facing {
+            let plane = Plane::from_point_and_normal(Point::new(1.0, 2.0, 3.0), normal)
+                .expect("a finite point and a normal with a length");
+            for spin in &about {
+                for tenths in 1..63 {
+                    let turn = Isometry::translation(Vector::new(3.0, 5.0, 10.0))
+                        .expect("a finite offset")
+                        .compose(
+                            &Isometry::rotation(spin, f64::from(tenths) * 0.1)
+                                .expect("a finite angle about a unit axis"),
+                        );
+                    let stored = plane.transformed(&turn);
+                    turned += 1;
+                    let rebuilt = Plane::from_coefficients(stored.coefficients())
+                        .expect("a stored plane's coefficients are a plane");
+                    if bits_of(rebuilt) != bits_of(stored) {
+                        rebuilding_would_move += 1;
+                    }
+                    if bits_of(there_and_back(stored)) != bits_of(stored) {
+                        the_bytes_moved += 1;
+                    }
+                }
+            }
+        }
+        println!(
+            "{turned} turned planes: Plane::from_coefficients would move \
+             {rebuilding_would_move}, the bytes moved {the_bytes_moved}"
+        );
+        assert_eq!(
+            (turned, rebuilding_would_move, the_bytes_moved),
+            (992, 251, 0)
+        );
+    }
+
+    /// Bytes that hold a normal far from length one are scaled on the first
+    /// read, as [`Plane::from_coefficients`] scales them, and what that stores
+    /// is kept on every read after.
+    #[test]
+    fn a_normal_far_from_length_one_is_scaled_on_the_first_read_and_kept_on_the_second() {
+        for coefficients in [[0.0, 0.0, 2.0, -4.0], [1.0, 2.0, 3.0, 4.0]] {
+            let first = Plane::try_from(coefficients).expect("a plane");
+            let scaled = Plane::from_coefficients(coefficients).expect("a plane");
+            assert_eq!(bits_of(first), bits_of(scaled), "{coefficients:?}");
+            let second = Plane::try_from(first.coefficients()).expect("a plane");
+            assert_eq!(bits_of(second), bits_of(first), "{coefficients:?}");
+        }
+        assert_eq!(
+            Plane::try_from([0.0, 0.0, 2.0, -4.0]).map(|plane| plane.coefficients()),
+            Ok([0.0, 0.0, 1.0, -2.0])
+        );
+    }
+
+    /// Whatever coefficients a first read is handed, a second read of what it
+    /// stored gives back the same bits: [`Plane::from_coefficients`] stores a
+    /// normal within [`Plane::NORMAL_LENGTH_ROUNDOFF`], and the way in keeps
+    /// one of those. The sets run from `2⁻²⁰` to `2²⁰` in each number, so the
+    /// offsets are as spread as the normals. Until Q3226 the way in was
+    /// [`Plane::from_coefficients`] alone, which is no fixed point: the second
+    /// read moved 147 of these.
+    #[test]
+    fn a_second_read_of_any_plane_gives_back_what_the_first_stored() {
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let mantissa = (state >> 11) as f64 / (1u64 << 53) as f64;
+            let octave = ((state >> 3) % 40) as i32 - 20;
+            let sign = if state & 1 == 0 { 1.0 } else { -1.0 };
+            sign * (1.0 + mantissa) * 2.0f64.powi(octave)
+        };
+        let mut moved = 0;
+        for _ in 0..100_000 {
+            let coefficients = [next(), next(), next(), next()];
+            let first = Plane::try_from(coefficients).expect("a finite set with a normal");
+            assert!(
+                has_length_one_to_within_a_turn(first.normal()),
+                "{coefficients:?} stored {first:?}"
+            );
+            let second = Plane::try_from(first.coefficients()).expect("a stored plane");
+            if bits_of(second) != bits_of(first) {
+                moved += 1;
+            }
+        }
+        assert_eq!(moved, 0);
+    }
+
+    /// The way in refuses what [`Plane::from_coefficients`] refuses, and names
+    /// it the same, whether or not the normal is one it would keep.
+    #[test]
+    fn bytes_that_hold_no_plane_are_refused_as_the_coefficients_would_be() {
+        for coefficients in [
+            [0.0, 0.0, 1.0, f64::INFINITY],
+            [0.0, 0.0, 1.0, f64::NAN],
+            [0.0, 0.0, 2.0, f64::NEG_INFINITY],
+            [f64::NAN, 0.0, 1.0, 1.0],
+            [0.0, f64::INFINITY, 0.0, 1.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ] {
+            let read = Plane::try_from(coefficients);
+            assert!(read.is_err(), "{coefficients:?} read as {read:?}");
+            assert_eq!(
+                read,
+                Plane::from_coefficients(coefficients),
+                "{coefficients:?}"
+            );
+        }
+        assert_eq!(
+            Plane::try_from([0.0, 0.0, 1.0, f64::INFINITY]),
+            Err(Error::NotFinite {
+                what: "plane coefficient"
+            })
+        );
+    }
+
+    fn bits_of(plane: Plane) -> [u64; 4] {
+        let [x, y, z] = plane.normal().components();
+        [x, y, z, plane.offset()].map(f64::to_bits)
+    }
+
+    fn there_and_back(plane: Plane) -> Plane {
+        let bytes = postcard::to_allocvec(&plane).expect("a plane writes out");
+        postcard::from_bytes(&bytes).expect("what was just written reads back")
     }
 
     /// [`Plane::offset_of`] rounds once, and dividing before multiplying
