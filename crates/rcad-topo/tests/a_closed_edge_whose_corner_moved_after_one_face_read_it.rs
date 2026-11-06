@@ -86,6 +86,19 @@
 //! it reads the leaning pipe (Q2723) and was refused the same way
 //! ([`leaning_0_6_and_turned_0_3_the_two_bars_answer_all_three_either_way_round`]).
 //!
+//! # The leaning bar's ends past the upright caps' planes (Q2708, Q2726)
+//!
+//! Leaning 0.4 or more, the leaning bar reaches past the planes `z = 11` and
+//! `z = −1` of the upright bar's caps, and the union came back with 8 faces
+//! and the leaning bar less the upright one with 6, where each pipe with its
+//! hole and the caps make 6 and 4. Every face is cut by every plane, so each
+//! cap's plane cut the end of the leaning pipe off along an arc that runs
+//! from rim to rim, and the joining took the pieces back but kept the arc:
+//! the joined pipe was two rims right round, each in two arcs, and the hole
+//! where the upright bar meets it, one closed edge that does not go right
+//! round, and a pipe face with a ring that did not go right round was not
+//! let close up its rims. It is now, and the ends come back on their pipe.
+//!
 //! The fuses run certified, in a model of 100 mm.
 
 use std::f64::consts::PI;
@@ -289,38 +302,20 @@ impl TwoBars {
 }
 
 /// All three rules answer either way round, and measure what the formula
-/// says: the piece the two share, the union and each bar less the other.
+/// says: the piece the two share, in 2 faces; the union, each pipe with its
+/// hole and the four caps, in 6; and each bar less the other, its pipe with
+/// its hole, its two caps and the dent, in 4.
 fn all_three_answer_either_way_round(bars: &TwoBars) {
     let shared = what_the_two_bars_share(bars.lean);
     let upright_first = answer(bars, Rule::Intersection, true, shared, 2);
     let leaning_first = answer(bars, Rule::Intersection, false, shared, 2);
     the_same_volume(upright_first, leaning_first, "the intersection");
     let whole = UPRIGHT + LEANING - shared;
-    let ends = faces_cut_off_the_leaning_ends(bars.lean);
-    let upright_first = answer(bars, Rule::Union, true, whole, 6 + ends);
-    let leaning_first = answer(bars, Rule::Union, false, whole, 6 + ends);
+    let upright_first = answer(bars, Rule::Union, true, whole, 6);
+    let leaning_first = answer(bars, Rule::Union, false, whole, 6);
     the_same_volume(upright_first, leaning_first, "the union");
     answer(bars, Rule::Difference, true, UPRIGHT - shared, 4);
-    answer(bars, Rule::Difference, false, LEANING - shared, 4 + ends);
-}
-
-/// How many faces the fuse adds to an answer holding the leaning bar's ends,
-/// by cutting them along the planes of the upright bar's two caps, `z = 11`
-/// and `z = −1`: two when the leaning bar reaches past those planes, and none
-/// when it does not. Each end comes off its pipe as a face of its own, though
-/// the cap whose plane cut it is a disc of radius 2 about nine away. The
-/// answer measures right and validates all the same.
-///
-/// The leaning bar's highest point is its upper cap's centre, `10 sin lean`
-/// above the `z = 5` its axis crosses at, plus that cap's radius of 3 tilted
-/// by the lean. So its ends pass the planes when `10 sin lean + 3 cos lean >
-/// 6`, which is from a lean of about 0.32.
-fn faces_cut_off_the_leaning_ends(lean: f64) -> usize {
-    if 10.0 * lean.sin() + 3.0 * lean.cos() > 6.0 {
-        2
-    } else {
-        0
-    }
+    answer(bars, Rule::Difference, false, LEANING - shared, 4);
 }
 
 /// What a measured volume is, and how far its mesh may miss it.
