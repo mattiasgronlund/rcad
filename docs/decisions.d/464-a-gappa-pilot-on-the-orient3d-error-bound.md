@@ -12681,15 +12681,18 @@ The `6ε` is what the record says of each route by which a turn reaches
   (`isometry.rs:440-461`) measures that at most `2ε` off by the `f64` sum over
   100 000 draws, and `3ε` over the 100 000 of a probe, and the sum is within
   about `2ε` of the exact `q·q`. Measured, not proved.
-- Reading a movement back (`TryFrom`, `isometry.rs:364-382`) divides the turn
-  by its length (`from_quaternion`, at 379), about `4ε` off by
-  `held_near_length_one`'s count.
+- Reading a movement back (`TryFrom` of a shift and a turn, `isometry.rs`) used
+  to divide every turn by its length, about `4ε` off by
+  `held_near_length_one`'s count. Since Q3234 it keeps a turn within
+  `TURN_LENGTH_DRIFT` of length one bit for bit, at any power of two it is
+  written at (`the_turn_named_by`), and divides any other, so the `6ε`
+  hypothesis holds on it.
 - `inverse` (`isometry.rs:283-286`) turns by the conjugate, whose `q·q` is
   the same.
 - Since Q2803, the public route is `TryFrom<na::Isometry3<f64>>`
   (`isometry.rs:401-414`), not `From`: it keeps a turn within
-  `TURN_LENGTH_DRIFT` of one bit for bit, and divides any other by its length
-  as stored parts are read (`isometry.rs:417-436`), refusing four zeros. The
+  `TURN_LENGTH_DRIFT` of one bit for bit (at any power of two it is written at,
+  since Q3234), and divides any other by its length, refusing four zeros. The
   `6ε` hypothesis holds on it too.
 
 **6. A turn of a cube.** When the turn is one of a cube's 24, `turned_by`
@@ -13316,8 +13319,9 @@ and Gappa derives it. What it does not derive is the `6ε` itself, the same
 hypothesis as 464.19's 5: `compose` holds its turns there by
 `held_near_length_one`'s count, `Isometry::rotation`'s is measured
 (`TURN_LENGTH_DRIFT`), and since Q2803 `TryFrom<na::Isometry3<f64>>` keeps a
-turn within `TURN_LENGTH_DRIFT` of one bit for bit and divides any other by
-its length as stored parts are read, so the `6ε` hypothesis holds on it too.
+turn within `TURN_LENGTH_DRIFT` of one bit for bit, and since Q3234 so does
+one written at a power of two of that length, and divides any other by its
+length, so the `6ε` hypothesis holds on it too.
 
 The 64 holds for a turn within `7ε` of length one and not by this argument at
 `7.5ε`: `r_square_14.g`, `|q·q − 1| ≤ 14u`, proves, and `r_square_15.g`,
