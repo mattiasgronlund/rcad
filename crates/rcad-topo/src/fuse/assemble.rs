@@ -2705,7 +2705,7 @@ impl Assembly {
     /// 25 pieces, and where one did it kept that chain as a seam, though the
     /// block met no face of the frustum (Q2170). **Only on a cone or a pipe,
     /// and only where every ring goes right round**, but for a ring of one
-    /// side on a cone. A cone face with a ring right round beside a hole is
+    /// side. A cone face with a ring right round beside a hole is
     /// refused by the mesher outside two cases it now takes islands in: a
     /// pipe's ring or a cone's band clear of its apex, and a ball's cap or a
     /// cone's cap round its apex (`a_ring_on_a_pipe_or_a_cone_with_islands_in_it`
@@ -2725,34 +2725,37 @@ impl Assembly {
     /// back with a seam kept along the ruling at `x = −1.977, y = −0.3`, where
     /// the pocket's side plane, run on past the pocket, crosses it, and the
     /// seam's corners stayed on the rim circles
-    /// (`a_stepped_shaft_cut_in_half_and_turned.rs`). **A pipe face with a
-    /// ring that does not go right round is left as before.** Let through
-    /// with a ring of one side, as on a cone, the slanted pin of
-    /// `one_pipe_whose_origin_sits_at_two_places.rs` on the bar from 1.9375
-    /// kept the bar's input corner `(2, 0, 1.9375)`, which lies inside the
-    /// pin's pipe where it runs on behind its cap, and was refused
-    /// `AFaceStraddlesSomethingTrimmingIt`. With every pipe let through by
-    /// the cone's rule, 3 tests of the bar files failed, an answer
-    /// `TheFuseWroteABrokenAnswer` among them.
+    /// (`a_stepped_shaft_cut_in_half_and_turned.rs`).
     ///
-    /// **That refusal is `Model::validate`'s, not the band's** (Q2673). The
-    /// corner belongs in the answer: it is the bar's own seam corner, and the
-    /// pin, which starts on the bar's axis, never reaches it. The pin's pipe
-    /// crosses the bar's wall in two loops, and the wall runs along only the
-    /// pin's own. `holds.rs`'s `what_a_curved_face_holds` reads a corner past
-    /// the half-space picking that loop out as outside the pin, but
-    /// `validate.rs` read it by its own sign twice: the sweep over every
-    /// face's trimming asks `the_side_this_face_lies_on` with no half-space,
-    /// and the closed-edge check's `what_a_corner_past_the_picker_says` names
-    /// none for two pipes. Read the way `holds.rs` reads them, both pass, and
-    /// with a pipe's ring of one side let through every `rcad-topo` test
-    /// passed but the 8 and 6 faces that `two_bars_of_one_radius_leaning_across_each_other.rs`
-    /// and `a_closed_edge_whose_corner_moved_after_one_face_read_it.rs` pin,
-    /// which came back 6 and 4. The fuse reaches the same refusal without the
-    /// band: a pin leaning along `(−0.6, 0, 0.8)` from the bar's axis at
-    /// `z = 4`, with the bar from `1.5` to `10`, joins the wall without a ring
-    /// of pieces, and its seam corner `(2, 0, 1.5)` lies inside the pin's pipe
-    /// behind its cap too.
+    /// **And beside rings of one side since Q2726**, as a cone's band does.
+    /// Every face is cut by every plane (`fuse/cuts.rs`), so where a round bar
+    /// leans across an upright one and reaches past the planes of its caps,
+    /// each plane cuts an end of the leaning pipe off along an arc from rim to
+    /// rim, far off the cap whose plane it is. Joined back, the leaning pipe
+    /// is its two rims right round, each in two arcs, and the hole where the
+    /// upright bar meets it, one closed edge. Kept apart for that hole, the
+    /// union came back with 8 faces where it has 6, and the leaning bar less
+    /// the upright one with 6 where it has 4
+    /// (`two_bars_of_one_radius_leaning_across_each_other.rs` and
+    /// `a_closed_edge_whose_corner_moved_after_one_face_read_it.rs`, Q2708).
+    /// All 576 fuses of the second file's bars of radius 3 and 2, at leans
+    /// from 0.1 to 0.6, eight turns and two rolls, all three rules either way
+    /// round, now answer in 2, 6, 4 and 4 faces, validate and measure right.
+    ///
+    /// **Before `Model::validate` read a corner past the picker as `holds.rs`
+    /// does** (Q3217), the slanted pin of
+    /// `one_pipe_whose_origin_sits_at_two_places.rs` on the bar from 1.9375,
+    /// let through so, kept the bar's input corner `(2, 0, 1.9375)`, inside
+    /// the pin's pipe where it runs on behind its cap, and was refused
+    /// `AFaceStraddlesSomethingTrimmingIt`. The refusal was `validate.rs`'s
+    /// and not the band's (Q2673): the corner belongs in the answer, as the
+    /// bar's own seam corner, which the pin, starting on the bar's axis, never
+    /// reaches. The pin's pipe crosses the bar's wall in two loops and the
+    /// wall runs along only the pin's own; `what_a_curved_face_holds` reads
+    /// the corner past the half-space picking that loop out, and `validate.rs`
+    /// read it by its own sign. The fuse reached the same refusal without the
+    /// band, a pin leaning along `(−0.6, 0, 0.8)` from the bar's axis at
+    /// `z = 4` with the bar from `1.5` to `10`.
     fn needs_no_seam(
         &self,
         members: &[usize],
@@ -2767,12 +2770,10 @@ impl Assembly {
         {
             return true;
         }
-        let on_a_cone = matches!(surface, Surface::Cone(_));
-        let may_close_up = (on_a_cone || matches!(surface, Surface::Cylinder(_)))
+        let may_close_up = matches!(surface, Surface::Cone(_) | Surface::Cylinder(_))
             && !self.joined_only_across_whole_rings(inside, along)
             && rings.iter().all(|ring| {
-                (on_a_cone && ring.len() == 1)
-                    || self.a_ring_goes_right_round(ring, &surface) == Some(true)
+                ring.len() == 1 || self.a_ring_goes_right_round(ring, &surface) == Some(true)
             });
         rings.iter().all(|ring| {
             ring.len() == 1
@@ -5168,8 +5169,9 @@ impl Assembly {
     /// tests across the ball-and-block files failed (§400.5). A crossing of a
     /// plane and a pipe made here does not close up here. It was left out when
     /// [`Assembly::needs_no_seam`] left every pipe out (Q2170), and since
-    /// Q2657 that closes up a pipe band whose rings go right round only
-    /// where they are pieces of input edges, as the bored shaft's rims are.
+    /// Q2657 that closes up a pipe band whose rings go right round, beside
+    /// rings of one side since Q2726, only where they are pieces of input
+    /// edges, as the bored shaft's rims and the leaning bar's are.
     /// Its pieces are joined back up only on a run that leaves a kept corner
     /// and comes back round to it, where every face along the run holds it
     /// whole ([`Assembly::runs_back_round_one_closed_crossing`], Q2654); closing
