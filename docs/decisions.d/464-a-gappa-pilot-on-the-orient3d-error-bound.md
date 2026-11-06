@@ -28344,3 +28344,462 @@ to class.
 - `CORNER_AFTER_MOVING_ROUNDOFF`'s doc in `moved_corner.rs` says nobody has
   searched for a corner on a cone past `256u` (Q2830). That file is outside
   Q2830's write set, so pointing it at this section is a small row.
+
+### 464.39 vector.g with each component up to 1 + 64u
+
+DRAFT. Q2831's second lane ran what is below on 2026-11-06 and passed its
+budget before writing the prose, so it handed over (§416). The scripts and
+prints are whole and as they ran, in its tree's `target/q2831/`.
+
+What it found: `wide.g`, 464.20's `vector.g` with each component of the
+vector up to `1 + 64u` (`9007199254741056b-53`), proves `out − Ex` within
+`20u`, and so do its `y` and `z`, each checked by Coq; its control at `19.5u`
+fails with best `19.6000u`. `(out − Ex) / D`'s upper end is `vector.g`'s
+times `1 + 2⁻⁴⁷`, to Gappa's 200 bits. With each component up to `1 + 2⁻⁶`
+it still proves, at `19.90625u`; with `1 + 2⁻⁵` it fails, best `20.2125u`.
+464.36's 88 zero-branch cases, widened the same way, each prove, and their
+88 controls each fail. The width: `Axis::as_written` keeps a direction whose
+`a·a`, worked out exactly, is within `64ε`, `128u`, of one
+(`has_length_one_to_within_a_turn`), so each `|aᵢ| ≤ √(1 + 128u) < 1 + 64u`,
+and `Axis::transformed` does not scale it (`point.rs:706-716`, `784-789`,
+`plane.rs:789-821` at `2b2c90e3`). `git diff -U0 c40cc82e 2b2c90e33` on
+`isometry.rs`, `point.rs`, `plane.rs` and `Cargo.lock` changes `///` lines
+alone, so the cases restate `2b2c90e3`.
+
+`fetch.py`:
+
+```python
+"""Write into this directory, from the 464 file, the scripts 464.39 runs
+unchanged: 464.13's one.sh, 464.20's vector.g and turn.py, 464.34's runpz.sh,
+and 464.36's vectorsub.py, tallyvm.py and startvm.sh, each the one block of
+its subsection that starts with its first line.
+Run as: python3 fetch.py <464 file>"""
+import os
+import re
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+text = open(sys.argv[1]).read()
+FENCED = re.compile(r"^```(\w*)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+def block_of(n, first):
+    got = [body for lang, body in FENCED.findall(section(n)) if body.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+for name, n, first in (
+    ("one.sh", 13, "#!/bin/bash\n# Run one Gappa script under 464.4's pin"),
+    ("vector.g", 20, "# restates: crates/rcad-geom/src/isometry.rs apply_to_vector at 4b642567\n"),
+    ("turn.py", 20, '"""Write vector1.g and vector2.g'),
+    ("runpz.sh", 34, "#!/bin/bash\n# Run each case named on stdin, one a line, through 464.13's one.sh"),
+    ("vectorsub.py", 36, '"""Write 464.20\'s vector.g in 464.35\'s form'),
+    ("tallyvm.py", 36, '"""Count what runvm.txt and the files beside it say'),
+    ("startvm.sh", 36, "#!/bin/bash\n# Run every case in casesv.txt through runpz.sh"),
+):
+    open(name, "w").write(block_of(n, first))
+    print(name, "written from 464." + str(n))
+for name in ("one.sh", "runpz.sh", "startvm.sh"):
+    os.chmod(name, 0o755)
+```
+
+`fetch.py`'s whole print:
+
+```text
+one.sh written from 464.13
+vector.g written from 464.20
+turn.py written from 464.20
+runpz.sh written from 464.34
+vectorsub.py written from 464.36
+tallyvm.py written from 464.36
+startvm.sh written from 464.36
+```
+
+`widen.py`:
+
+```python
+"""Write 464.20's vector.g and its y and z, and 464.36's 88 cases of it and
+their controls, with each component of the vector it turns up to 1 + 64u
+where they take it at most one, by replacing lines, each asserted found as
+often as the script it comes from has it.
+
+A stored axis direction is what Axis::as_written keeps: a.a, worked out
+exactly, within NORMAL_LENGTH_ROUNDOFF, 64 eps or 128u, of one. So each
+|a_i| is at most sqrt(1 + 128u), under 1 + 64u, which is
+9007199254741056b-53. Axis::transformed turns it without scaling it.
+
+Also wide.g's control at 19.5u, c_wide_195.g, as 464.20's c_vector_195.g is
+vector.g's, and two runs past what a direction can have, r_wide_6.g and
+r_wide_5.g, with each component up to 1 + 2^-6 and 1 + 2^-5.
+
+The 88 go in zero/, with casesv.txt and 464.36's one.sh, runpz.sh,
+startvm.sh and tallyvm.py beside them.
+Run as: python3 widen.py, after fetch.py"""
+import os
+import shutil
+import subprocess
+import sys
+
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+subprocess.run([sys.executable, "turn.py"], check=True)
+import vectorsub  # noqa: E402
+
+AT_MOST_ONE = ("  # Every component of the vector is at most one: a constructor's normal is\n"
+               "  # the nearest f64 to a unit vector's components.\n")
+WHY = {
+    "9007199254741056b-53": (
+        "  # Every component of the vector is at most 1 + 64u: Axis::as_written keeps a\n"
+        "  # direction whose a.a is within 64 eps of one, so each |a_i| is at most\n"
+        "  # sqrt(1 + 128u), and Axis::transformed turns it without scaling it.\n",
+        "1 + 64u"),
+    "65b-6": (
+        "  # Every component of the vector is at most 1 + 2^-6, past what a stored\n"
+        "  # axis direction can have, to show how far the 20u reaches.\n",
+        "1 + 2^-6"),
+    "33b-5": (
+        "  # Every component of the vector is at most 1 + 2^-5, past what a stored\n"
+        "  # axis direction can have, to show how far the 20u reaches.\n",
+        "1 + 2^-5"),
+}
+DIRECTION = "9007199254741056b-53"
+VECTOR = ("n0", "n1", "n2")
+LAST_RESTATES = "# restates: Cargo.lock nalgebra at 2b2c90e3\n"
+AXIS_RESTATES = ("# restates: crates/rcad-geom/src/point.rs as_written at 2b2c90e3\n"
+                 "# restates: crates/rcad-geom/src/point.rs transformed at 2b2c90e3\n"
+                 "# restates: crates/rcad-geom/src/plane.rs has_length_one_to_within_a_turn at 2b2c90e3\n")
+
+
+def replace(src, old, new, times):
+    assert src.count(old) == times, (old, src.count(old), times)
+    return src.replace(old, new)
+
+
+def widen(src, bound, sha, shas, kept):
+    """src with each component of the vector that is not zero, those named in
+    kept, up to bound, restating the base 2b2c90e3 and the axis's code."""
+    why, size = WHY[bound]
+    src = replace(src, f"at {sha}", "at 2b2c90e3", shas)
+    src = replace(src, LAST_RESTATES, LAST_RESTATES + AXIS_RESTATES, 1)
+    src = replace(src, AT_MOST_ONE, why, 1 if kept else 0)
+    for f in VECTOR:
+        src = replace(src, f" {f} in [-1, 1]", f" {f} in [-{bound}, {bound}]", 1 if f in kept else 0)
+    return src, size
+
+
+written = []
+for name, base in (("wide.g", "vector.g"), ("wide1.g", "vector1.g"), ("wide2.g", "vector2.g")):
+    src, size = widen(open(base).read(), DIRECTION, "4b642567", 6, VECTOR)
+    src = replace(src, "# a vector of components at most one.", f"# a vector of components at most {size}.", 1)
+    open(name, "w").write(src)
+    written.append(name)
+wide = open("wide.g").read()
+GOAL = "out - Ex in [-20b-53, 20b-53]"
+open("c_wide_195.g", "w").write(replace(wide, GOAL, "out - Ex in [-39b-54, 39b-54]", 1))
+written.append("c_wide_195.g")
+for name, bound in (("r_wide_6.g", "65b-6"), ("r_wide_5.g", "33b-5")):
+    src, size = widen(open("vector.g").read(), bound, "4b642567", 6, VECTOR)
+    src = replace(src, "# a vector of components at most one.", f"# a vector of components at most {size}.", 1)
+    open(name, "w").write(src)
+    written.append(name)
+print("written:", ", ".join(written))
+
+os.makedirs("zero", exist_ok=True)
+seen = []
+for zero, state in vectorsub.cases():
+    name = vectorsub.name_of(zero)
+    kept = [f for f in VECTOR if f not in zero]
+    for out, goal in ((name + ".g", vectorsub.GOAL), ("c_" + name + "_half.g", vectorsub.HALF)):
+        src, size = widen(vectorsub.make(zero, state, goal), DIRECTION, "c40cc82e", 5, kept)
+        src = replace(src, "# 464.20's vector.g, the turned vector's x,",
+                      f"# 464.20's vector.g, the turned vector's x, each component up to {size},", 1)
+        open(os.path.join("zero", out), "w").write(src)
+    seen.append(name)
+open("zero/casesv.txt", "w").write("\n".join(seen) + "\n")
+for name in ("one.sh", "runpz.sh", "startvm.sh", "tallyvm.py"):
+    shutil.copy2(name, "zero")
+print(len(seen), "cases and their controls written to zero/,",
+      sum(1 for z, s in vectorsub.cases() if {"n0", "n1", "n2"} <= z), "with every component zero")
+```
+
+`widen.py`'s whole print:
+
+```text
+vector1.g written, 446 names
+vector2.g written, 446 names
+written: wide.g, wide1.g, wide2.g, c_wide_195.g, r_wide_6.g, r_wide_5.g
+88 cases and their controls written to zero/, 11 with every component zero
+```
+
+`allwide.sh`:
+
+```bash
+#!/bin/bash
+# Run every script widen.py writes in this directory, and 464.20's vector.g
+# beside them, all at once, each through 464.13's one.sh: wide.g, wide1.g and
+# wide2.g with coq, and vector.g, c_wide_195.g, r_wide_6.g and r_wide_5.g
+# without. Then print each one's .run, and each .out less its warnings that a
+# divisor has been assumed to be nonzero.
+cd "$(dirname "$0")"
+for f in wide wide1 wide2; do
+  ./one.sh "$f.g" coq > "$f.run" 2>&1 &
+done
+for f in vector c_wide_195 r_wide_6 r_wide_5; do
+  ./one.sh "$f.g" > "$f.run" 2>&1 &
+done
+wait
+names="wide wide1 wide2 vector c_wide_195 r_wide_6 r_wide_5"
+for f in $names; do
+  cat "$f.run"
+done
+for f in $names; do
+  echo "== $f.out"
+  grep -v 'assumed to be nonzero' "$f.out"
+done
+```
+
+`allwide.sh`'s whole print, saved as `all.log`, run at 10:11 UTC:
+
+```text
+wide exit 0 11.24s
+wide coq -Bcoq exit 0 coqc exit 0 15.04s lines 6754 hints 33
+wide1 exit 0 13.75s
+wide1 coq -Bcoq exit 0 coqc exit 0 15.49s lines 6609 hints 33
+wide2 exit 0 11.11s
+wide2 coq -Bcoq exit 0 coqc exit 0 14.08s lines 6426 hints 33
+vector exit 0 12.63s
+c_wide_195 exit 1 63.23s
+r_wide_6 exit 0 10.54s
+r_wide_5 exit 1 60.97s
+== wide.out
+Warning: no need for the rewriting at line 140 column 33
+  if all the following properties can be proved
+  D != 0 
+Results:
+  W1 in [-892029807941224806819184959509414875783757827b-200 {-5.55112e-16, -2^(-50.6781)}, 446014903970612601479998765415586606123843587b-199 {5.55112e-16, 2^(-50.6781)}]
+  W3 in [-1070435769529469692916267562860192970041196547b-200 {-6.66134e-16, -2^(-50.415)}, 535217884764735143563743209921406441275523075b-199 {6.66134e-16, 2^(-50.415)}]
+  W7 in [-1b-53 {-1.11022e-16, -2^(-53)}, 1b-53 {1.11022e-16, 2^(-53)}]
+  D in [1, 492124776054316394075516929783866695868964473735266322664653b-194 {19.6, 2^(4.29279)}]
+  (out - Ex) / D in [-803469022129501114825811501329173372444785937664519051501801b-252 {-1.11022e-16, -2^(-53)}, 803469022129501114825811501329173372444785937664519051501801b-252 {1.11022e-16, 2^(-53)}]
+== wide1.out
+Warning: no need for the rewriting at line 140 column 33
+  if all the following properties can be proved
+  D != 0 
+Results:
+  W1 in [-892029807941224806819184959509414875783757827b-200 {-5.55112e-16, -2^(-50.6781)}, 446014903970612601479998765415586606123843587b-199 {5.55112e-16, 2^(-50.6781)}]
+  W3 in [-1070435769529469692916267562860192970041196547b-200 {-6.66134e-16, -2^(-50.415)}, 535217884764735143563743209921406441275523075b-199 {6.66134e-16, 2^(-50.415)}]
+  W7 in [-1b-53 {-1.11022e-16, -2^(-53)}, 1b-53 {1.11022e-16, 2^(-53)}]
+  D in [1, 492124776054316394075516929783866695868964473735266322664653b-194 {19.6, 2^(4.29279)}]
+  (out - Ex) / D in [-803469022129501114825811501329173372444785937664519051501801b-252 {-1.11022e-16, -2^(-53)}, 803469022129501114825811501329173372444785937664519051501801b-252 {1.11022e-16, 2^(-53)}]
+== wide2.out
+Warning: no need for the rewriting at line 140 column 33
+  if all the following properties can be proved
+  D != 0 
+Results:
+  W1 in [-892029807941224806819184959509414875783757827b-200 {-5.55112e-16, -2^(-50.6781)}, 446014903970612601479998765415586606123843587b-199 {5.55112e-16, 2^(-50.6781)}]
+  W3 in [-1070435769529469692916267562860192970041196547b-200 {-6.66134e-16, -2^(-50.415)}, 535217884764735143563743209921406441275523075b-199 {6.66134e-16, 2^(-50.415)}]
+  W7 in [-1b-53 {-1.11022e-16, -2^(-53)}, 1b-53 {1.11022e-16, 2^(-53)}]
+  D in [1, 492124776054316394075516929783866695868964473735266322664653b-194 {19.6, 2^(4.29279)}]
+  (out - Ex) / D in [-803469022129501114825811501329173372444785937664519051501801b-252 {-1.11022e-16, -2^(-53)}, 803469022129501114825811501329173372444785937664519051501801b-252 {1.11022e-16, 2^(-53)}]
+== vector.out
+Warning: no need for the rewriting at line 136 column 33
+  if all the following properties can be proved
+  D != 0 
+Results:
+  W1 in [-892029807941224806819184959509414875783757827b-200 {-5.55112e-16, -2^(-50.6781)}, 446014903970612601479998765415586606123843587b-199 {5.55112e-16, 2^(-50.6781)}]
+  W3 in [-1070435769529469692916267562860192970041196547b-200 {-6.66134e-16, -2^(-50.415)}, 535217884764735143563743209921406441275523075b-199 {6.66134e-16, 2^(-50.415)}]
+  W7 in [-1b-53 {-1.11022e-16, -2^(-53)}, 1b-53 {1.11022e-16, 2^(-53)}]
+  D in [1, 492124776054316394075516929783866695868964473735266322664653b-194 {19.6, 2^(4.29279)}]
+  (out - Ex) / D in [-803469022129495405835040677487744429598014192381045700704845b-252 {-1.11022e-16, -2^(-53)}, 803469022129495405835040677487744429598014192381045700704845b-252 {1.11022e-16, 2^(-53)}]
+== c_wide_195.out
+Warning: no need for the rewriting at line 140 column 33
+  if all the following properties can be proved
+  D != 0 
+Results:
+  W1 in [-892029807941224806819184959509414875783757827b-200 {-5.55112e-16, -2^(-50.6781)}, 446014903970612601479998765415586606123843587b-199 {5.55112e-16, 2^(-50.6781)}]
+  W3 in [-1070435769529469692916267562860192970041196547b-200 {-6.66134e-16, -2^(-50.415)}, 535217884764735143563743209921406441275523075b-199 {6.66134e-16, 2^(-50.415)}]
+  W7 in [-1b-53 {-1.11022e-16, -2^(-53)}, 1b-53 {1.11022e-16, 2^(-53)}]
+  D in [1, 492124776054316394075516929783866695868964473735266322664653b-194 {19.6, 2^(4.29279)}]
+  (out - Ex) / D in [-803469022129501114825811501329173372444785937664519051501801b-252 {-1.11022e-16, -2^(-53)}, 803469022129501114825811501329173372444785937664519051501801b-252 {1.11022e-16, 2^(-53)}]
+Error: some properties were not satisfied:
+  BND(out - Ex), best: [-2.17604e-15, 2.17604e-15]
+== r_wide_6.out
+Warning: no need for the rewriting at line 139 column 33
+  if all the following properties can be proved
+  D != 0 
+Results:
+  W1 in [-892029807941224806819184959509414875783757827b-200 {-5.55112e-16, -2^(-50.6781)}, 446014903970612601479998765415586606123843587b-199 {5.55112e-16, 2^(-50.6781)}]
+  W3 in [-1070435769529469692916267562860192970041196547b-200 {-6.66134e-16, -2^(-50.415)}, 535217884764735143563743209921406441275523075b-199 {6.66134e-16, 2^(-50.415)}]
+  W7 in [-1b-53 {-1.11022e-16, -2^(-53)}, 1b-53 {1.11022e-16, 2^(-53)}]
+  D in [1, 492124776054316394075516929783866695868964473735266322664653b-194 {19.6, 2^(4.29279)}]
+  (out - Ex) / D in [-816023225600268771551213188073490436310483164136999539778359b-252 {-1.12757e-16, -2^(-52.9777)}, 816023225600268771551213188073490436310483164136999539778359b-252 {1.12757e-16, 2^(-52.9777)}]
+== r_wide_5.out
+Warning: no need for the rewriting at line 139 column 33
+  if all the following properties can be proved
+  D != 0 
+Results:
+  W1 in [-892029807941224806819184959509414875783757827b-200 {-5.55112e-16, -2^(-50.6781)}, 446014903970612601479998765415586606123843587b-199 {5.55112e-16, 2^(-50.6781)}]
+  W3 in [-1070435769529469692916267562860192970041196547b-200 {-6.66134e-16, -2^(-50.415)}, 535217884764735143563743209921406441275523075b-199 {6.66134e-16, 2^(-50.415)}]
+  W7 in [-1b-53 {-1.11022e-16, -2^(-53)}, 1b-53 {1.11022e-16, 2^(-53)}]
+  D in [1, 492124776054316394075516929783866695868964473735266322664653b-194 {19.6, 2^(4.29279)}]
+  (out - Ex) / D in [-25893044658470066789605803083101138844467254246654793089121b-247 {-1.14492e-16, -2^(-52.9556)}, 25893044658470066789605803083101138844467254246654793089121b-247 {1.14492e-16, 2^(-52.9556)}]
+Error: some properties were not satisfied:
+  BND(out - Ex), best: [-2.24404e-15, 2.24404e-15]
+```
+
+464.36's `startvm.sh`, unchanged, ran the 88 widened cases with `gappa
+-Bcoq` and `coqc`, and their 88 controls, in `zero/` from 10:13 UTC, started
+with `setsid -f nohup ./zero/startvm.sh`. `tallyvm.py`'s whole print, run as
+`python3 zero/tallyvm.py`:
+
+```text
+88 cases, 176 exit lines, 88 coq lines
+lines of runvm.txt that are neither: none
+problems: 0
+cases that exit 0: 88 of 88; controls that exit 1: 88 of 88
+gappa time per case: 0.03 s (vm_wn0n1n2) to 12.90 s (vm_n)
+coq: 436 lines 6 hints 2.52 s (vm_v1v2n1n2) to 9247 lines 41 hints 15.54 s (vm_n)
+cases where nothing is live, so out and Ex are 0: 21 of 88
+  they are the cases where n0 is zero and every term has a zero factor: True
+cases with a rounded product on a live path: 63 of 88
+terms' error / D, upper end in u: [(1.0, 67)]
+D upper end: [(1.0, 4), (13.0, 10), (15.871, 6), (18.6, 17), (19.6, 30)]
+Asum / G, upper end in u: [(1.0, 63)]
+G / Lo upper end: [(3.0, 26), (4.8286, 18), (5.0, 7), (6.4643, 2), (6.4722, 4), (7.6569, 1), (7.8992, 4), (9.9286, 1)]
+hints Gappa had no need of, while D is not zero, and how often:
+  189: E -> (E / D) * D;
+  12: out - Ex -> ((out - Ex) / D) * D;
+largest terms' part: 19.5999u (vm_wv2n2), against vector.g's 20u
+largest amounts' part: 9.9285u * 2^-1022 (vm_n)
+control best on out - Ex, in u, and how many controls:
+  1.0u: 4 vm_v1v2, vm_v1v2n1, vm_v1v2n2, vm_v1v2n1n2
+  13.0u: 10 vm_wv1n2, vm_wv2n1, vm_v0v1n1, vm_v0v2n2, vm_v1n1n2, vm_v2n1n2, vm_wv1n1n2, vm_wv2n1n2, vm_v0v1n1n2, vm_v0v2n1n2
+  15.69u: 6 vm_wv1n0, vm_wv2n0, vm_v1n0n1, vm_v2n0n2, vm_wv1n0n1, vm_wv2n0n2
+  18.56u: 6 vm_v0v1n0, vm_v0v2n0, vm_v1n0n2, vm_v2n0n1, vm_v0v1n0n2, vm_v0v2n0n1
+  18.57u: 2 vm_v0n0n1, vm_v0n0n2
+  18.6u: 9 vm_n0, vm_wn0, vm_v0n0, vm_v1n0, vm_v2n0, vm_n0n1, vm_n0n2, vm_wn0n1, vm_wn0n2
+  19.6u: 30 
+largest best: 19.6000u (vm_wv2n2), against vector.g's 20u
+each best at most its case's terms' part, and a little more: True
+bests within 0.01% of their case's terms' part: 51 of 67
+the others, best and terms' part in u: vm_wv1n0 15.6860 15.8710, vm_wv2n0 15.6860 15.8710, vm_wn0n1 18.5951 18.5999, vm_wn0n2 18.5951 18.5999, vm_v0v1n0 18.5567 18.5999, vm_v0v2n0 18.5567 18.5999, vm_v0n0n1 18.5650 18.5999, vm_v0n0n2 18.5650 18.5999, vm_v1n0n1 15.6865 15.8710, vm_v1n0n2 18.5616 18.5999, vm_v2n0n1 18.5616 18.5999, vm_v2n0n2 15.6865 15.8710, vm_wv1n0n1 15.6860 15.8710, vm_wv2n0n2 15.6860 15.8710, vm_v0v1n0n2 18.5567 18.5999, vm_v0v2n0n1 18.5567 18.5999
+```
+
+`samewide.py`, written and not yet run:
+
+```python
+"""Check 464.39 against the directory it ran in: each script the text holds
+whole is the file that ran; fetch.py and widen.py, run from the text in a
+scratch directory, print what the text says and write the files that ran,
+byte for byte; all.log and tallyvm.py's print are the text's; and each
+widened script's (out - Ex) / D is vector.g's times its bound on the
+vector's components.
+Run as: python3 samewide.py <464 file> <run directory>"""
+import filecmp
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from fractions import Fraction
+
+text = open(sys.argv[1]).read()
+run = os.path.abspath(sys.argv[2])
+FENCED = re.compile(r"^```(\w*)\n(.*?)^```$", re.S | re.M)
+
+
+def section(n):
+    start = text.index(f"### 464.{n} ")
+    end = text.find("\n### ", start + 1)
+    return text[start:] if end < 0 else text[start:end + 1]
+
+
+def block_of(n, first):
+    got = [body for lang, body in FENCED.findall(section(n)) if body.startswith(first)]
+    assert len(got) == 1, (n, first, len(got))
+    return got[0]
+
+
+SCRIPTS = (
+    ("fetch.py", '"""Write into this directory, from the 464 file'),
+    ("widen.py", '"""Write 464.20\'s vector.g and its y and z'),
+    ("allwide.sh", "#!/bin/bash\n# Run every script widen.py writes"),
+    ("samewide.py", '"""Check 464.39'),
+)
+for name, first in SCRIPTS:
+    print(name, "in the text is the file that ran:", block_of(39, first) == open(os.path.join(run, name)).read())
+
+scratch = tempfile.mkdtemp()
+for name, first in SCRIPTS[:2]:
+    open(os.path.join(scratch, name), "w").write(block_of(39, first))
+
+
+def printed(script, *args):
+    return subprocess.run([sys.executable, os.path.join(scratch, script), *args],
+                          check=True, capture_output=True, text=True).stdout
+
+
+def same(name):
+    return filecmp.cmp(os.path.join(scratch, name), os.path.join(run, name), shallow=False)
+
+
+print("fetch.py run from the text prints what the text says:",
+      printed("fetch.py", os.path.abspath(sys.argv[1])) == block_of(39, "one.sh written from 464.13"))
+for name in ("one.sh", "vector.g", "turn.py", "runpz.sh", "vectorsub.py", "tallyvm.py", "startvm.sh"):
+    print(name, "in the run directory is the one fetch.py writes from the text:", same(name))
+print("widen.py run from the text prints what the text says:",
+      printed("widen.py") == block_of(39, "vector1.g written, 446 names"))
+
+
+def written(top):
+    names = [f for f in os.listdir(top) if f.endswith(".g")]
+    names += [os.path.join("zero", f) for f in os.listdir(os.path.join(top, "zero")) if f.endswith(".g")]
+    return sorted(names)
+
+
+mine = written(scratch)
+also = [os.path.join("zero", f) for f in ("casesv.txt", "one.sh", "runpz.sh", "startvm.sh", "tallyvm.py")]
+differ = [f for f in mine + also if not same(f)]
+print(f"fetch.py and widen.py run from the text write {len(mine)} .g files and {len(also)} more;",
+      "differing from the ones that ran:", ", ".join(differ) or "none")
+print(".g files in the run directory that they do not write:",
+      ", ".join(sorted(set(written(run)) - set(mine))) or "none")
+shutil.rmtree(scratch)
+
+print("all.log is allwide.sh's print in the text:",
+      open(os.path.join(run, "all.log")).read() == block_of(39, "wide exit 0"))
+tally = subprocess.run([sys.executable, os.path.join(run, "zero", "tallyvm.py")],
+                       check=True, capture_output=True, text=True).stdout
+print("tallyvm.py prints what the text says:", tally == block_of(39, "88 cases, 176 exit lines"))
+
+RESULT = re.compile(r"^  \(out - Ex\) / D in \[-?\S+ \{.*\}, (\d+)b(-\d+) \{")
+BEST = re.compile(r"^  BND\(out - Ex\), best: \[\S+, (\S+)\]$")
+U = Fraction(1, 2**53)
+
+
+def upper(name):
+    got = [RESULT.match(line) for line in open(os.path.join(run, name + ".out"))]
+    got = [m for m in got if m]
+    assert len(got) == 1, name
+    return Fraction(int(got[0][1])) * Fraction(2) ** int(got[0][2])
+
+
+narrow = upper("vector")
+print(f"vector.g's (out - Ex) / D, upper end: {float(narrow / U):.6f}u")
+for name, bound, said in (("wide", 1 + U * 64, "1 + 64u"), ("wide1", 1 + U * 64, "1 + 64u"),
+                          ("wide2", 1 + U * 64, "1 + 64u"), ("c_wide_195", 1 + U * 64, "1 + 64u"),
+                          ("r_wide_6", Fraction(65, 64), "1 + 2^-6"), ("r_wide_5", Fraction(33, 32), "1 + 2^-5")):
+    off = upper(name) / narrow / bound - 1
+    print(f"{name}'s, over vector.g's: {said}, times 1 + {float(off):.3g}")
+for name in ("c_wide_195", "r_wide_5"):
+    got = [BEST.match(line) for line in open(os.path.join(run, name + ".out"))]
+    got = [m for m in got if m]
+    print(f"{name}: best on out - Ex {float(got[0][1]) / float(U):.4f}u")
+```
