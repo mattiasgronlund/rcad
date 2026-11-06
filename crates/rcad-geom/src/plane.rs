@@ -30,10 +30,11 @@ pub const SIDE_OF_PLANE: &str = "side of plane";
 /// (`docs/decisions.md` §3.1): a real cube, with volume, area and centroid
 /// summed face by face from the divergence theorem.
 ///
-/// Serializes as its four [`Plane::coefficients`], and is re-checked and scaled
-/// back to a unit normal on the way in. Scaling a normal that is already very
-/// nearly unit length can move the last bit or two, so a plane that has been
-/// written and read back is the same plane to within rounding, not bit for bit.
+/// Serializes as its four [`Plane::coefficients`], and is checked again on the
+/// way in. A normal within [`Plane::NORMAL_LENGTH_ROUNDOFF`] of length one keeps
+/// its bits, so a plane any constructor or turn stored comes back from its
+/// bytes bit for bit, and one further off is scaled as
+/// [`Plane::from_coefficients`] scales it (`impl TryFrom<[f64; 4]> for Plane`).
 ///
 /// # No stored number is `-0.0`
 ///
@@ -210,7 +211,8 @@ impl Plane {
     /// handed, and for most such normals no vector of length exactly one lies
     /// within half an ulp of each component, so no direction a file could hold
     /// reads back as them. The file carries the bits exactly and this keeps
-    /// them (`docs/decisions.md` §313.3).
+    /// them (`docs/decisions.md` §313.3). A plane read back from saved bytes
+    /// keeps its normal on the same check.
     ///
     /// `n·n − 1` is worked out exactly, and a normal is kept only when it is
     /// proved inside. A component so small that its square cannot be formed
@@ -418,8 +420,9 @@ impl Plane {
     /// [`Plane::from_point_and_normal_as_written`] and
     /// [`Plane::from_coefficients`], checks it — the second keeps only a
     /// normal whose squared length it measured within a hair of one — and
-    /// `Deserialize` goes through the last one — `#[serde(try_from = "[f64; 4]")]` makes it the only
-    /// route in on the wire. `a_plane_stored_with_no_normal_is_refused_on_the_way_in`
+    /// `Deserialize`, which `#[serde(try_from = "[f64; 4]")]` makes the only
+    /// route in on the wire, keeps a normal on the second's check and hands any
+    /// other to the last. `a_plane_stored_with_no_normal_is_refused_on_the_way_in`
     /// (`crates/rcad-geom/tests/serialization.rs`) shows the bytes refused
     /// before a `Plane` exists to ask.
     ///
@@ -1112,11 +1115,41 @@ const SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND: f64 = {
 /// Six exact products of two entries each, each two numbers long.
 const LONGEST_TOTAL_THROUGH_A_POINT: usize = 12;
 
+/// What `Deserialize` builds a plane with, from the four
+/// [`Plane::coefficients`] it reads.
+///
+/// **A normal within [`Plane::NORMAL_LENGTH_ROUNDOFF`] of length one keeps its
+/// bits, and the offset is the fourth number negated**, so a plane comes back
+/// from its bytes as it was written. That is the check
+/// [`Plane::from_point_and_normal_as_written`] makes and `Axis`'s
+/// `Deserialize` makes too (`docs/decisions.md` §355.6), and it holds every
+/// normal a constructor stores and every one a turn of it leaves. Until Q3226
+/// this went through [`Plane::from_coefficients`], which scales an already
+/// scaled normal again: a model fused, placed and fused again lost the bits of
+/// 2 320 of its planes on a read, and a second read moved three of them again
+/// (`a_plane_fused_placed_and_fused_again_reads_back_as_written.rs` in
+/// `rcad-topo`).
+///
+/// **Any other normal is handed to [`Plane::from_coefficients`]**, which
+/// scales it, refuses one with no length and names a number that is not
+/// finite. A stored normal turned again and again can be past the bound
+/// (`docs/decisions.md` §464.37), and bytes from elsewhere can hold any
+/// length. What [`Plane::from_coefficients`] stores is within the bound, so a
+/// second read keeps what the first gave back.
 impl TryFrom<[f64; 4]> for Plane {
     type Error = Error;
 
-    fn try_from(coefficients: [f64; 4]) -> Result<Self> {
-        Self::from_coefficients(coefficients)
+    fn try_from([a, b, c, d]: [f64; 4]) -> Result<Self> {
+        let normal = Vector::new(a, b, c);
+        if !has_length_one_to_within_a_turn(normal) {
+            return Self::from_coefficients([a, b, c, d]);
+        }
+        if !d.is_finite() {
+            return Err(Error::NotFinite {
+                what: "plane coefficient",
+            });
+        }
+        Ok(Self::holding(normal, -d))
     }
 }
 

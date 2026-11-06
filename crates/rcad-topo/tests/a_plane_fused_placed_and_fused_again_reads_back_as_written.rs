@@ -1,28 +1,29 @@
 //! A plane that a fuse bakes, a placement turns and a second fuse bakes again
-//! comes back from its bytes with the four numbers the file wrote, and a
-//! second read moves it no more than the first (Q3220 and Q3226, from Q2826
-//! and `docs/decisions.md` §464.37).
+//! comes back from its bytes as the file wrote it, but where the read moves
+//! the placement the plane sits under, and a second read moves nothing (Q3220
+//! and Q3226, from Q2826 and `docs/decisions.md` §464.37).
 //!
 //! A cube is united with a second cube, the answer is placed turned about a
 //! slanted axis, and the next round unites it with another cube. After each
 //! round the model is written with `postcard` and read back. A normal that the
 //! placements turned again and again is not exactly length one. Until Q3226
-//! `Deserialize` took a plane through `Plane::from_coefficients`, which scales
-//! the first three numbers to length one again, so the first read moved 2 320
-//! planes by up to three last digits, and a second read moved three planes of
-//! axis `(1, 2, 3)` again from its fourth round on. It keeps a normal that is
-//! within `Plane::NORMAL_LENGTH_ROUNDOFF` of length one now, as `Axis`'s
-//! `Deserialize` keeps a direction (§355.6).
+//! `Deserialize` took a stored plane through `Plane::from_coefficients`, which
+//! scales the first three numbers to length one again, so the first read moved
+//! 2 320 planes, and a second read moved three planes of axis `(1, 2, 3)` again
+//! from its fourth round on. It keeps a normal within
+//! `Plane::NORMAL_LENGTH_ROUNDOFF` of length one now, as `Axis`'s `Deserialize`
+//! keeps a direction (§355.6).
 //!
 //! Every one of the 24 rounds answers, and any refusal fails. Until Q3224 each
 //! axis stopped at its second or third round, refused `Undecidable` for a point
 //! in the new cube's floor that a fan triangle of almost no area could not
 //! place, so 7 of the 24 answered.
 //!
-//! The first test shows a read gives back every plane as written, at each of
-//! eight rounds on each of three slanted axes. The second shows a second read
-//! gives back what the first did. The third shows each union takes up what its
-//! two solids do less their overlap.
+//! The first test shows a read moves a plane only where it moves the placement
+//! under it, and that by no more than [`MOST_STEPS_A_READ_MOVES_A_NUMBER`], at
+//! each of eight rounds on each of three slanted axes. The second shows a
+//! second read moves nothing. The third shows each union takes up what its two
+//! solids do less their overlap.
 
 use rcad_geom::{Axis, Deflection, Isometry, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
@@ -32,6 +33,11 @@ const ROUNDS: usize = 8;
 
 const AXES: [(f64, f64, f64); 3] = [(1.0, 2.0, 3.0), (0.3, -0.7, 0.2), (1.0, 1.0, 1.0)];
 
+/// The largest move of any one number of a placed plane seen over the 24
+/// rounds, in [`steps_apart`]'s steps. It was `3` until Q3226, when the read
+/// scaled the stored plane's normal again too.
+const MOST_STEPS_A_READ_MOVES_A_NUMBER: f64 = 1.0;
+
 /// How far a union and its overlap may add up to other than its two solids, in
 /// `f64::EPSILON`s of what the two solids take up together. The worst of the 24
 /// rounds is `3.73`, at axis `(1, 1, 1)`, round 3. It is not `0` because the
@@ -39,20 +45,43 @@ const AXES: [(f64, f64, f64); 3] = [(1.0, 2.0, 3.0), (0.3, -0.7, 0.2), (1.0, 1.0
 /// union and the overlap round theirs apart.
 const MOST_A_UNION_AND_ITS_OVERLAP_ARE_OUT: f64 = 8.0;
 
-/// Until Q3226 this read moved 2 320 of the planes, a number of one by up to
-/// three steps between neighbouring `f64`s at one.
+/// **A read moves a face's plane only where it moves the face's placement.**
+/// A face's plane is its stored plane moved by its placement, and the stored
+/// plane comes back as written. `Isometry`'s `Deserialize` divides every turn
+/// by its length, though, which can move its last bits, and a plane under a
+/// placement that moved moves with it.
 #[test]
-fn a_read_gives_back_every_plane_a_turn_left_as_written() {
-    let (mut planes, mut moved) = (0, 0);
+fn a_read_moves_a_plane_only_where_it_moves_the_placement_under_it() {
+    let (mut kept, mut moved_under_kept) = (0, 0);
+    let (mut placements_moved, mut moved, mut most) = (0, 0, 0.0f64);
     for_each_round(|axis, round, model, _| {
         let read_back = written_and_read(model);
         let (written, read) = (its_planes(model), its_planes(&read_back));
         assert_eq!(written.len(), read.len(), "{axis:?}, round {round}");
-        planes += written.len();
-        moved += planes_that_differ(&written, &read);
+        for ((written, written_at), (read, read_at)) in written.iter().zip(&read) {
+            let plane_moved = bits_of_plane(written) != bits_of_plane(read);
+            if bits_of_placement(written_at) == bits_of_placement(read_at) {
+                kept += 1;
+                moved_under_kept += usize::from(plane_moved);
+            } else {
+                placements_moved += 1;
+                moved += usize::from(plane_moved);
+                most = most.max(steps_apart(written, read));
+            }
+        }
     });
-    println!("the read moved {moved} of {planes} planes");
-    assert_eq!(moved, 0, "a read moved {moved} of {planes} planes");
+    println!(
+        "the read moved {moved_under_kept} of {kept} planes under a placement it kept, and \
+         {moved} of {placements_moved} under one it moved, a number by at most {most} steps"
+    );
+    assert_eq!(
+        moved_under_kept, 0,
+        "a read moved {moved_under_kept} of {kept} planes whose placement it kept"
+    );
+    assert!(
+        most <= MOST_STEPS_A_READ_MOVES_A_NUMBER,
+        "a read moved a number by {most} steps"
+    );
 }
 
 /// **A plane read back is read back the same again.** Until Q3226 three
@@ -67,9 +96,13 @@ fn a_second_read_moves_no_plane() {
     for_each_round(|axis, round, model, _| {
         let once = written_and_read(model);
         let twice = written_and_read(&once);
+        let moved = its_planes(&once)
+            .iter()
+            .zip(&its_planes(&twice))
+            .filter(|((one, _), (two, _))| bits_of_plane(one) != bits_of_plane(two))
+            .count();
         assert_eq!(
-            planes_that_differ(&its_planes(&once), &its_planes(&twice)),
-            0,
+            moved, 0,
             "{axis:?}, round {round}: planes moved on the second read"
         );
     });
@@ -195,7 +228,8 @@ fn volume_of(model: &Model, solid: SolidKey) -> f64 {
         .volume()
 }
 
-fn its_planes(model: &Model) -> Vec<Plane> {
+/// Every flat face's plane, where its placement puts it, beside that placement.
+fn its_planes(model: &Model) -> Vec<(Plane, Isometry)> {
     model
         .solids()
         .flat_map(|solid| solid.faces())
@@ -203,17 +237,35 @@ fn its_planes(model: &Model) -> Vec<Plane> {
             let Surface::Plane(plane) = face.surface() else {
                 return None;
             };
-            Some(plane)
+            Some((plane, face.location()))
         })
         .collect()
 }
 
-/// How many of the planes in `one` hold other bits than the one in `other`
-/// in the same place.
-fn planes_that_differ(one: &[Plane], other: &[Plane]) -> usize {
-    let bits = |plane: &Plane| plane.coefficients().map(f64::to_bits);
+fn bits_of_plane(plane: &Plane) -> [u64; 4] {
+    plane.coefficients().map(f64::to_bits)
+}
+
+fn bits_of_placement(placement: &Isometry) -> [u64; 7] {
+    let [x, y, z] = placement.translation_part().components();
+    let [w, i, j, k] = placement.rotation_quaternion();
+    [x, y, z, w, i, j, k].map(f64::to_bits)
+}
+
+/// The most that any of the four numbers of `one` is from the same number of
+/// `other`, in steps between neighbouring `f64`s as large as one, or as large
+/// as the number where it is larger.
+///
+/// **Not in the number's own steps.** A face's plane is its stored plane moved
+/// by the solid's placement, so a number of it near zero is a sum of numbers
+/// about one and is rounded in their steps, not its own.
+fn steps_apart(one: &Plane, other: &Plane) -> f64 {
+    let (one, other) = (one.coefficients(), other.coefficients());
     one.iter()
-        .zip(other)
-        .filter(|(one, other)| bits(one) != bits(other))
-        .count()
+        .zip(&other)
+        .map(|(&one, &other)| {
+            let size = one.abs().max(other.abs()).max(1.0);
+            (one - other).abs() / (size.next_up() - size)
+        })
+        .fold(0.0, f64::max)
 }
