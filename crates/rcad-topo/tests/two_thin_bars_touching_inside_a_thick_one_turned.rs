@@ -119,11 +119,11 @@ fn a_thick_bar_and_a_thin_one_inside_it_less_another_overlapping_it_by_a_roundin
 /// rule was refused `ResultIsNotManifold` at the four turns (Q3244).
 ///
 /// **Measured at a deflection of `0.01`.** There, and at `0.03`, the mesh of a
-/// cap of the union and of the difference was refused
-/// `BoundaryCrossesItself`: each thin circle's walk puts a point where it
-/// touches the rim, a rounding outside the rim's walk and a few ulp from its
-/// corner at `2c` or `−2c`, while `0.013`, `0.02`, `0.05` and `0.1` measured
-/// (Q3244, Q3248).
+/// cap of the union and of the difference was refused `BoundaryCrossesItself`,
+/// while `0.013`, `0.02`, `0.05` and `0.1` measured (Q3244). Each thin circle's
+/// walk puts a point where it touches the rim, a rounding outside the rim's
+/// walk and a few ulp from its corner at `2c` or `−2c`. Both measure since a
+/// hole point within a rounding of the rim is pinched onto it (Q3248).
 fn the_bars_alone_fused_by(rule: Rule, meant: f64, turns: &[f64]) {
     let deflection = Deflection::of(0.01).expect("a fine mesh");
     for &turn in turns {

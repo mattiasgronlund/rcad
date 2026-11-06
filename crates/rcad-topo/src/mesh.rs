@@ -382,6 +382,14 @@ impl SolidView<'_> {
     ///   of the solid on a straight side of another loop touches it however fine
     ///   the bent sides are walked, since neither is moved, and every rung costs
     ///   a whole mesh.
+    /// - **First, a hole a rounding from the outline is pinched onto it.** A
+    ///   hole that touches its outline from inside can put a point a rounding
+    ///   outside the outline's chords, and no rung moves it. So the first time
+    ///   a face is refused so, when a point one of its holes was walked into
+    ///   lies within a rounding of the curved surface a side of its outline
+    ///   runs along, and near that side's walk, the solid is cut up again with
+    ///   each such point put on the outline, and so after every walk from then
+    ///   on. That uses up no rung (`pinch_its_holes_onto_its_outline`, Q3248).
     /// - **The first rung starts under half the face's width.** It halves the
     ///   smaller of the room the side was walked at and half the widest side of
     ///   the box round the face's corners and walked points. A walk never steps
