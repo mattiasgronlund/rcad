@@ -1617,3 +1617,138 @@ fn moving_a_cone_and_its_plane_together_moves_the_walked_parabola_and_nothing_el
         );
     }
 }
+
+/// Planes along a cone's side where neither the cone's axis nor the plane's
+/// normal runs along a coordinate axis, so the cross product of the two has to
+/// round, and the exact `E` still sums to zero (Q3233, `docs/decisions.md`
+/// §464.41's third item).
+///
+/// Each row is `(slope, normal, axis)` as whole numbers over `2^53`. Found by
+/// arithmetic: `normal = h·(m² − n², 2mn, 0)` has a whole-number length, and
+/// `axis` is that normal's direction turned about it by a rational angle, with
+/// `‖axis‖²` equal to `(1 + slope²)` times a square. Then `(n·w)²` is exactly
+/// `slope²‖n × w‖²`, and both lengths sit within the `64 ε` of one that
+/// `as_written` keeps bit for bit. The test checks the bits are kept and that
+/// the branch taken is the parabola; no hyperbola or ellipse is one run of this
+/// kind. Slope 32 has no row among the small multipliers tried.
+const PARABOLAS_WHOSE_CROSS_PRODUCT_ROUNDS: [(f64, [u64; 3], [u64; 3]); 5] = [
+    (
+        5.0,
+        [5_404_319_552_844_591, 7_205_759_403_792_788, 0],
+        [
+            3_962_592_968_095_265,
+            8_068_412_188_049_395,
+            572_905_007_435_460,
+        ],
+    ),
+    (
+        8.0,
+        [3_464_307_405_669_605, 8_314_337_773_607_052, 0],
+        [
+            3_040_914_566_383_440,
+            8_415_400_528_274_172,
+            1_031_266_679_034_384,
+        ],
+    ),
+    (
+        12.0,
+        [5_404_319_552_844_591, 7_205_759_403_792_788, 0],
+        [
+            4_886_065_276_924_120,
+            7_555_558_806_030_135,
+            411_747_073_898_100,
+        ],
+    ),
+    (
+        16.0,
+        [7_947_528_754_183_215, 4_238_682_002_231_048, 0],
+        [
+            7_707_559_540_235_760,
+            4_651_350_049_402_794,
+            296_828_344_753_416,
+        ],
+    ),
+    (
+        24.0,
+        [3_464_307_405_669_605, 8_314_337_773_607_052, 0],
+        [
+            3_305_322_588_930_600,
+            8_372_122_148_568_822,
+            334_741_283_912_672,
+        ],
+    ),
+];
+
+#[test]
+fn a_plane_along_a_cones_ruling_whose_cross_product_rounds_still_takes_the_parabola_branch_and_stays_inside_the_bound()
+ {
+    let over = |whole: [u64; 3]| {
+        Vector::new(
+            whole[0] as f64 / 9_007_199_254_740_992.0,
+            whole[1] as f64 / 9_007_199_254_740_992.0,
+            whole[2] as f64 / 9_007_199_254_740_992.0,
+        )
+    };
+    let mut worst = 0.0f64;
+    for (slope, normal_whole, axis_whole) in PARABOLAS_WHOSE_CROSS_PRODUCT_ROUNDS {
+        let normal = over(normal_whole);
+        let axis_direction = over(axis_whole);
+        let rounds = {
+            let (n, w) = (normal.components(), axis_direction.components());
+            [(1, 2), (2, 0), (0, 1)]
+                .iter()
+                .any(|&(a, b)| two_product(w[a], n[b]).1 != 0.0 || two_product(w[b], n[a]).1 != 0.0)
+        };
+        assert!(rounds, "slope {slope}: the cross product rounds a product");
+
+        for reach in [0.1, 0.3, -0.7] {
+            let flat = Plane::from_point_and_normal_as_written(
+                Point::new(reach, reach * 0.5, reach * 0.25),
+                normal,
+            )
+            .expect("a normal");
+            assert_eq!(
+                flat.normal().components(),
+                normal.components(),
+                "slope {slope}: the plane keeps the normal's own bits"
+            );
+            let axis = Axis::as_written(Point::origin(), axis_direction).expect("a direction");
+            assert_eq!(
+                axis.direction().components(),
+                axis_direction.components(),
+                "slope {slope}: the axis keeps the direction's own bits"
+            );
+            let cone = Cone::new(axis, slope).expect("a positive slope");
+
+            let SurfaceMeet::Curves(runs) = crossed(&flat, &cone).expect("a crossing is named")
+            else {
+                panic!("slope {slope}: a plane along a ruling cuts a curve");
+            };
+            assert_eq!(runs.len(), 1, "slope {slope}: a parabola is one run");
+            assert!(
+                matches!(runs[0].run(), EdgeRun::PartOfWhereItCrosses { .. }),
+                "slope {slope}: the run bends endlessly"
+            );
+
+            for deflection in [1.0 / 64.0, 1.0 / 1024.0] {
+                let drawn = walked(
+                    &Surface::Plane(flat),
+                    &Surface::Cone(cone),
+                    &runs[0],
+                    deflection,
+                );
+                let (share, at) = the_worst_share_of_its_own_bound(&drawn, &flat, &cone);
+                println!(
+                    "slope {slope}, reach {reach}, deflection {deflection}: {} points, worst {share:.4} of the published bound, at {at:?}",
+                    drawn.points().len()
+                );
+                worst = worst.max(share);
+                assert!(
+                    share <= 1.0,
+                    "slope {slope}: a point is {share} times the published bound off"
+                );
+            }
+        }
+    }
+    println!("worst of all: {worst:.4}");
+}
