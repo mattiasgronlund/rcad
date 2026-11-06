@@ -127,6 +127,8 @@ gate_steps := "check-plugins \
     check-where-the-work-is \
     check-src-selftest \
     check-recipe-selftest \
+    check-proofs-selftest \
+    check-proofs \
     check-questions-selftest \
     check-corpus \
     check-corpus-selftest \
@@ -367,6 +369,8 @@ gate_reusable_steps := "check \
     check-claim-section-selftest \
     check-src-selftest \
     check-recipe-selftest \
+    check-proofs-selftest \
+    check-proofs \
     check-corpus-selftest \
     check-coverage-selftest \
     check-fuzz-overnight-selftest \
@@ -6368,8 +6372,8 @@ check-gate-runs-every-check:
     listed=$(printf '%s\n' "$steps" | grep '^check-' | sort -u); \
     others=$(printf '%s\n' "$steps" | grep -v '^check-' | grep . | sort -u | tr '\n' ' '); \
     n=$(printf '%s\n' "$defined" | grep -c .); \
-    if [ "$n" != "65" ]; then \
-        echo "found $n check-* recipes, expected 65"; \
+    if [ "$n" != "67" ]; then \
+        echo "found $n check-* recipes, expected 67"; \
         echo "if you added or removed one, change the number here in the same commit"; \
         echo "if you found none, the parse broke and this recipe just compared nothing"; \
         exit 1; \
@@ -7562,13 +7566,14 @@ check-proofs-selftest:
     [ -n "$restated" ] || { echo "no script in proofs/gappa/ has a restates line"; exit 1; }
 
     fresh() {
+        local file
         rm -rf "$repo"
         mkdir -p "$repo/proofs"
         cp proofs/bounds.py proofs/gappalib18.nix "$repo/proofs/"
         cp -r proofs/gappa "$repo/proofs/"
-        for path in $restated; do
-            mkdir -p "$repo/$(dirname "$path")"
-            cp "$path" "$repo/$path"
+        for file in $restated; do
+            mkdir -p "$repo/$(dirname "$file")"
+            cp "$file" "$repo/$file"
         done
     }
     check() { python3 "$repo/proofs/bounds.py" check 2>&1; }
@@ -7626,14 +7631,17 @@ check-proofs-selftest:
     rm "$repo/proofs/gappa/${name%.g}.stamp"
     fails "a script with no stamp" "$name"
 
+    extents=0
     for line in $(grep -h '^# restates: ' proofs/gappa/*.g | awk '$3 != "Cargo.lock" { print $3 "|" $4 }' | sort -u); do
-        path=${line%|*}
-        item=${line#*|}
-        want=$({{ just_executable() }} --justfile {{ justfile() }} --working-directory "$root" src "$item" "$path" | tail -n +2)
-        got=$(python3 proofs/bounds.py extent "$path" "$item")
-        [ "$got" = "$want" ] || { echo "the extent check-proofs hashes for $path $item is not just src's:"; \
+        file=${line%|*}
+        named=${line#*|}
+        want=$({{ just_executable() }} --justfile {{ justfile() }} --working-directory "$root" src "$named" "$file" | tail -n +2)
+        got=$(python3 proofs/bounds.py extent "$file" "$named")
+        [ "$got" = "$want" ] || { echo "the extent check-proofs hashes for $file $named is not just src's:"; \
             diff <(echo "$want") <(echo "$got") || true; exit 1; }
+        extents=$((extents + 1))
     done
+    echo "check-proofs-selftest: a comment and a blank line in $item pass; its code, its name, $name, ${control:+a control, }the pin and a stamp fail; $extents extents are just src's"
 
 # Which file `recipe` below reads. A variable so `check-recipe-selftest` can
 # point it at a fixture: the subject here is a justfile, and a selftest that
