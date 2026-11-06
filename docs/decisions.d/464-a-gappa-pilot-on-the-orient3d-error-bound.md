@@ -31779,5 +31779,140 @@ main()
 - With 464.26 and this, every set of one or more differences at zero with one
   or two minors cancelling is run, or shown to leave `y` zero or to be another
   set's branch. Of the zero branches block 1 assumes away, Q2863's `t1 + t2`
-  cancelling with all three terms not zero is left, and the step from `y` to
-  the sign is still on paper (464.6). No new row.
+  cancelling with all three terms not zero was left. It is run in 464.44, and
+  each of its 12 branches proves at the code's `B`. The step from `y` to the
+  sign is still on paper (464.6). No new row.
+
+### 464.44 The first two terms cancelling, with differences at zero
+
+Q2863 ran block 1 where `t1 + t2` cancels to zero while neither `t1` nor `t2`
+is zero, with one or more of the nine differences `adx` to `cdz` at zero, in
+two lanes on 2026-11-06. Of the 511 sets of differences, 12 are branches. Each
+proves at the code's `B` and fails below the bound it proves, and so does
+464.4's run with no difference zero, run again here. Coq checks each proof,
+modulo its hints. Nothing in `orient3d.rs` needs to change for it. This is the
+branch 464.43 left of those block 1 assumes away.
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, with `block1.g` 464.5's first `gappa` block and
+`make_differences_zero.py` 464.25's, each as `extract.py` below writes it from
+this file, against `on_floats` as 464.4 read it at `d9f931e8`: no commit
+touches `orient3d.rs` after `c827c89b`, 464.7's, up to `e0b3e1a2`.
+
+**How the branch is written.** As 464.5 says 464.4 wrote it: `s12 = S;` in
+place of `s12 = rnd(S);`, `rs` taken out of `W1` to `W4`, and `rs`'s
+definition, its hint `s12 / S -> 1 + (s12 - S) / S;` and the hypothesis
+`|t1 + t2| >= 1b-1074` deleted. A sum that is zero rounds to itself, so
+wherever `t1 + t2` is zero `s12` is `S`, and the script's `y` is the code's.
+The script does not ask `S` to be zero: it proves the bound on every input
+where `s12` is `S`, and the branch is among them. Each double is a whole
+multiple of `2⁻¹⁰⁷⁴`, so two of them add to zero or to at least `2⁻¹⁰⁷⁴` in
+size, and block 1's hypothesis and this branch between them take every input.
+The hint has to go: in Coq's reals `x / 0` is 0, so where `S` is zero it says
+`0 = 1`, and Coq takes each hint on trust (464.4).
+`make_first_two_cancelling.py` below writes `ds_<set>.g` as the `dz_<set>.g`
+464.25's generator writes for the set, with that change, and `ds_none.g` as
+block 1 with it.
+
+Given one difference, 464.25's generator writes the same code as 464.11's
+`make_one_difference_zero.py`: `zd_check.py` below finds the two the same for
+each of the nine, comments and blank lines aside. The 12 `ds_` scripts carry
+the `dz_` comment `Each of  is zero.`, naming nothing, that 464.26 notes. It
+is a Gappa comment and moves no proof.
+
+**Which sets are branches.** `summarize.py` below counts each of the 511 sets
+of one or more differences by the first of these that holds of it:
+
+- **265 with every term zero by its shape.** `y` is zero, and `decide`
+  certifies no sign (464.25).
+- **213 with `t1` or `t2` zero by its shape.** `t1 + t2` is then the other
+  term, or zero, and cannot cancel while neither is zero. In the 57 with both
+  zero, 464.25's scripts drop block 1's hypothesis already. In the other 156
+  it asks the live term to be at least `2⁻¹⁰⁷⁴`, which the term's own
+  `|t| >= 1b-1022` gives, and the `dk_` runs below show Gappa does not need it.
+- **21 with `t3` zero by its shape, and `t1` and `t2` not.** Where `t1 + t2`
+  cancels, `y` is zero, and `decide` certifies no sign (464.7). That is what
+  their `dz_` scripts' hypothesis leaves out.
+- **12 with no term zero by its shape**: the branches. Six are one x or y
+  difference alone, `adx`, `ady`, `bdx`, `bdy`, `cdx` and `cdy`, and six are
+  pairs of them, `adx_bdy`, `adx_cdy`, `ady_bdx`, `ady_cdx`, `bdx_cdy` and
+  `bdy_cdx`.
+
+A z difference zeroes its own term, so none is in a branch. Each x or y
+difference zeroes two products, of two different minors. A pair can leave each
+minor one product, as the six pairs above do, or take both of one, as `adx`
+and `ady` take both of `second`'s and of `third`'s. `every_branch` in the
+generator tries every set and finds no branch of three or more.
+
+**What runs, at the code's `B`.** Each of the 13 proves, with `(y − Ex) / P6`
+within:
+
+- `5.55112e-16`, `5u + 14u²` and some `u³`, for the six pairs. At `6u` each
+  proves, and at `5u` each fails with best `±1`.
+- `6.66134e-16`, `6u + 13u²` and some `u³`, for the six single differences
+  and for none, which is 464.4's `6u + 13u²` again. At `6u` each fails with
+  best `±1`, and at `5u` with `±1.2`.
+
+Each control that fails, fails at `BND((y - Ex) / eb)`. The count of `u` is
+the count of roundings on the longest path through a term of `y`, counted as
+464.25 counts it, with `s12` rounding nothing: the three differences, the
+product, the minor where its other product is not zero, and the term. In a
+pair every minor has a product zero, so five. A single x or y difference
+leaves one minor both its products, so six, and so does none. `summarize.py`
+works the count out from the set alone, and its groups split the 13 the same
+way the printed bounds do.
+
+Beside the `dz_` script it starts from, which rounds `s12` (`run_dz.sh`
+below), each pair is a `u` lower: `6.66134e-16` there. So are `adx`, `ady`,
+`bdx` and `bdy`, `7.77156e-16` there, as in 464.11. `cdx` and `cdy` are not,
+`6.66134e-16` in both: their longest path runs through `t3`, which `s12` does
+not touch.
+
+`P −/ Phat` is within `4.44089e-16` in all 13.
+
+Every one of the 13 fails at `5u`, and the 7 whose bound is above `6u` fail
+there too, so each fails below the bound it proves, and none proves its goal
+from hypotheses that contradict each other (464.7). The 12 `dsq_` scripts,
+each a `ds_` script with its `q` hypotheses taken out and only its `|q|` goals
+left, each prove: no goal leans on the hypothesis it backs. `ds_none.g` has no
+`q` hypothesis to take out.
+
+**Nothing takes the cancelled sum to be nonzero.** Block 1's run prints 194
+"assumed to be nonzero when checking a rewriting rule" lines (464.4), and 11
+of them take `(t2) + (t1)`, which is `S`, to be nonzero. In the 13 `ds_` runs
+none of these lines names `t1`, `t2` or `s12`: there are 183 in `ds_none`,
+which is 194 less those 11, 138 in each single difference and 114 in each
+pair. No output says "not trivially equal".
+
+**Coq.** `gappa -Bcoq` writes each of the 13 proofs, and `coqc` under 464.5's
+commands accepts each, exit 0: 9040 to 10111 lines with 33 hints for a single
+difference and 30 for a pair, and 9727 lines with 38 hints for none, block 1's
+39 less `s12 / S`'s. `run_6u_coq.sh` below has `coqc` check the six pairs'
+proofs at `6u` too: exit 0 on each, 9491 to 10284 lines with 30 hints. At
+twelve at once, Gappa takes 3.24 to 3.74 s on a script and 2.43 s on none,
+and `-Bcoq` and `coqc` together 7.0 to 7.82 s, and 5.22 s on none. The
+controls and the `dsq_` checks take 2.44 to 11.71 s. `field` has not been run
+on these hints (464.10).
+
+**Where one of `t1` and `t2` is zero by its shape.** In those 156 sets the
+`dz_` script keeps `|t1 + t2| >= 1b-1074`, and its hint `t1 + t2 -> t1;` or
+`-> t2;` makes the sum the live term. `make_hypothesis_dropped.py` below
+writes each as `dk_<set>.g`, the `dz_` script with the hypothesis taken out,
+and `run_dk.sh` runs them, without `-Bcoq`. Each of the 156 proves, exit 0, in
+1.13 to 5.05 s at twelve at once. Of their "assumed to be nonzero" lines, the
+820 that name `t1` or `t2` each name the live term alone, never a sum, and the
+live term's own `|t| >= 1b-1022` keeps it from zero. `dk_check.py` splits
+them: 21 with `t1` live and `t3` alive, 57 with `t1` live and `t3` zero by its
+shape, and the same for `t2`. So the hypothesis costs nothing there, as 464.43
+found in its branches. A `dk_` script's hypotheses are its `dz_` script's less
+one, and 464.11 and 464.25 have each `dz_` script failing at `5u`, so these do
+not contradict each other either.
+
+RELAY: QUOTE THE SCRIPTS HERE, EACH IN FULL, AS 464.43 DOES (see the handoff).
+
+**What this leaves.**
+
+- The row that moves the scripts into `proofs/gappa/`, Q2700, takes
+  `make_first_two_cancelling.py` and `make_hypothesis_dropped.py` and what they
+  write too. It already waits on Q2863.
+- The step from `y` to the sign is still on paper (464.6). No new row.
