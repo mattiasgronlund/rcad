@@ -246,7 +246,7 @@ use crate::{Containment, Error, FaceKey, FaceView, Model, Result, SolidView, Ver
 
 use super::arrange::{
     ACornerReadAsOnePoint, ANodeReadRoundACorner, Piece, a_plane_rests_along_a_pipe,
-    agreement_of_two_planes, name_of_surface_bits,
+    agreement_of_two_planes, name_of_surface_bits, two_pipes_run_along_one_line,
 };
 use super::assemble::{
     NamedSide, the_edge_each_side_of_every_piece_is, the_pieces_of_each_flat_shell_of_both_groups,
@@ -2381,9 +2381,10 @@ fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
 ///
 /// **Why a neighbour can place a piece here.** `P` and `P′` are pieces of one
 /// face that share a side `s`, and `m` is where `s` starts, or the middle of
-/// `s` where `s` runs where two planes meet and so is the straight segment
-/// between its ends, whose middle lies in the box halfway between theirs
-/// ([`midway_between`]). Each was cut by
+/// `s` where `s` runs where two planes meet, or where two pipes along one
+/// direction cross, and so is the straight segment between its ends
+/// ([`runs_between_its_ends_in_a_straight_line`]), whose middle lies in the
+/// box halfway between theirs ([`midway_between`]). Each was cut by
 /// every surface of a solid `S`, so each lies all inside `S`, all outside it
 /// or all on its skin (§17.4). Every neighbourhood of `m` meets the inside of
 /// `P` and of `P′`. When `m` is off every face of `S`, it is off `S`'s skin,
@@ -2446,6 +2447,18 @@ fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
 /// No face of the other quarter reaches `z = 4`, so the sliver shares no side
 /// with a piece of it and [`SidesItShares`] cannot place it: without the
 /// middle it is refused `a point inside a piece of a face` again (Q2562).
+///
+/// The middle of a side two pipes cross along is asked for a strip of a thin
+/// bar's wall, the thin bar united with a thick bar that already holds another
+/// thin bar overlapping it by a rounding, all turned about `z`. The other thin
+/// bar's pipe cuts this one's wall in two rulings `2e−8` apart, each from the
+/// thick bar's floor to its top, and the point search finds no point between
+/// them. Each ruling starts on the floor or the top, a face of the thick bar,
+/// and its middle is clear of every face, since inside the thick bar the other
+/// thin bar has no wall left. The rest of the wall across the ruling is placed
+/// inside, and without the middle the strip was refused `a point inside a
+/// piece of a face` (Q3243,
+/// `tests/two_thin_bars_touching_inside_a_thick_one_turned.rs`).
 fn by_the_piece_across_a_side_clear_of_every_face(
     model: &Model,
     scratch: &Scratch,
@@ -2466,7 +2479,8 @@ fn by_the_piece_across_a_side_clear_of_every_face(
         .find_map(|side| {
             let across = &scratch.pieces[the_piece_across(scratch, piece, side)?];
             let start = side.ends[0].point();
-            let middle = is_straight(side).then(|| midway_between(start, side.ends[1].point()));
+            let middle = runs_between_its_ends_in_a_straight_line(side)
+                .then(|| midway_between(start, side.ends[1].point()));
             let mut trial = [Some(start), middle]
                 .into_iter()
                 .flatten()
@@ -2499,6 +2513,31 @@ fn by_the_piece_across_a_side_clear_of_every_face(
             trial.drain_into(log);
             Some(placement)
         })
+}
+
+/// Whether `side` is the straight segment between its two ends: where two
+/// planes meet ([`is_straight`]), or where two pipes whose axes run along one
+/// line cross.
+///
+/// **Two such pipes cross in rulings and in nothing else.** Seen down their
+/// common axis direction each is a circle, and two circles that are not one
+/// meet in at most two points, each of which is a whole ruling of both pipes;
+/// `rcad-geom`'s `where_two_pipes_side_by_side_cross` builds one line or two
+/// for exactly that pair, and calls one pipe twice `SurfaceMeet::SameSurface`,
+/// which is no crossing and carries no side. A side is one piece of one such
+/// line, from its start to its end.
+///
+/// Whether the axes run along one line is [`two_pipes_run_along_one_line`],
+/// proved and not rounded, the same question the arrangement asks before it
+/// orders the run along an axis. [`Decision::Pos`] is two pipes that cross in
+/// a closed loop, and an undecided reading proves neither; either way the box
+/// halfway between the ends is not known to be on the side, and only the side's
+/// start is asked.
+fn runs_between_its_ends_in_a_straight_line(side: &FaceMeet) -> bool {
+    if let [Surface::Cylinder(one), Surface::Cylinder(other)] = &side.carried_by {
+        return matches!(two_pipes_run_along_one_line(one, other), Decision::Zero);
+    }
+    is_straight(side)
 }
 
 /// Whether no face of `solid` holds any point of `point`'s box, each face
