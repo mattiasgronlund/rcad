@@ -47,7 +47,9 @@ on a cone past `CORNER_AFTER_MOVING_ROUNDOFF`. 464.39 is Q2831, on `vector.g`
 with each component up to `1 + 64u`, and 464.40 is Q2837, which has Coq check
 464.22's `stage_e0_1.g`. 464.41 is Q2851, on the two directions on a parabola,
 and 464.42 is Q2858, on a distance off a plane and a plane's shift with two or
-three products below the normals.*
+three products below the normals. 464.43 is Q2862, which runs block 1 with one
+or more of the differences at zero and one or two minors cancelling, past
+464.26's one of each.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
@@ -91,6 +93,7 @@ three products below the normals.*
   464.40  stage_e0_1.g in Coq
   464.41  The two directions on a parabola
   464.42  A distance off a plane, and a plane's shift, with two or three products below the normals
+  464.43  Differences at zero with minors cancelling, past one of each
 
 ### 464.1 The bugs a bound prover is for
 
@@ -633,8 +636,9 @@ paper, as 464.4 argues them; since 464.11 each is run, and proves at the code's
 bound. Since 464.25 each set of two or more differences at zero at once that
 leaves `y` not zero is run too, and proves at the code's bound. Since 464.26
 each branch with one difference at zero and one minor cancelling to zero is
-run too, and proves at the code's bound. The step from `y` to the sign is
-still on paper.
+run too, and proves at the code's bound. Since 464.43 each branch with two or
+more differences at zero, or two minors cancelling, is run too, and proves at
+the code's bound. The step from `y` to the sign is still on paper.
 
 ### 464.7 value past the bound, and every minor at zero run
 
@@ -17698,7 +17702,8 @@ main()
 - One or two of `first`, `second` and `third` cancelling to zero, their two
   products the same double as in 464.7, together with one or more of the
   differences at zero, past the one minor with one difference that 464.26
-  runs. A row after Q2748.
+  runs. A row after Q2748. That row is Q2862, done in 464.43: each of its 45
+  branches proves at the code's `B`.
 - `t1 + t2` cancelling to zero while neither is zero, with one or more of the
   differences at zero. Block 1 assumes it away with `|t1 + t2| ≥ 2⁻¹⁰⁷⁴`.
   464.4 runs it with no difference at zero, and it proves at `6u + 13u²`;
@@ -18225,7 +18230,9 @@ main()
 
 - One or two of `first`, `second` and `third` cancelling to zero together with
   one or more of the differences at zero, past the one minor with one
-  difference run here. Q2862, filed after Q2748.
+  difference run here. Q2862, filed after Q2748. Done, in 464.43: each of the
+  45 branches proves at the code's `B`, and each of the 414 minors that cannot
+  cancel is proved not to.
 - Nothing more for `t1 + t2` cancelling while neither is zero (Q2863, from
   464.25): in these pairs block 1's hypothesis on it costs nothing, as above.
 - The row that moves the scripts into `proofs/gappa/`, Q2700, takes
