@@ -7540,12 +7540,14 @@ impl Edge {
         at_the_ends: [&[Surface]; 2],
     ) -> Picker {
         let stored = ends.map(|end| PredicatePoint::from(end.coordinates()));
+        let with_room =
+            stored.map(|end| grown_by(end, what_writing_the_corner_down_cost(end.enclosure())));
         let into_the_arc = exactly(facing.components());
         let reads = |candidate: Picker| {
             the_way_into_an_arc(
                 &self.carried_by[0],
                 &self.carried_by[1],
-                stored,
+                with_room,
                 &[candidate],
             )
             .is_some_and(|way| dot(way, into_the_arc).sign() == Decision::Pos)
