@@ -1034,11 +1034,13 @@ mod tests {
             None,
             "level 1 has no bound worth the name once the axial square rounds to zero"
         );
-        match cone.side_of(inside) {
-            Decision::Undecidable { .. } => {}
-            Decision::Pos => panic!("the point is inside, and Pos says outside"),
-            other => panic!("neither intervals nor exact arithmetic can place this: {other:?}"),
-        }
+        let decision = cone.side_of(inside);
+        let Decision::Undecidable { .. } = decision else {
+            panic!(
+                "the point is inside, and neither intervals nor exact arithmetic can place it: \
+                 {decision:?}"
+            );
+        };
     }
 
     /// The apex has no angle, and asking for one gives zero rather than a
