@@ -30,7 +30,7 @@
 //! it.
 
 use proptest::prelude::*;
-use rcad_geom::{Plane, Point, Vector};
+use rcad_geom::{Isometry, Plane, Point, SURFACE_AFTER_SHIFTING_ROUNDOFF, Vector};
 use rcad_predicates::expansion::{expansion_sum, product_is_exact, two_product};
 
 /// How far `plane.signed_distance_to(point)` landed from the true value of the
@@ -131,6 +131,42 @@ fn a_corner_of_a_face_reads_as_being_on_its_own_plane_to_within_the_bound() {
     ] {
         assert_within_the_bound(&plane, corner);
     }
+}
+
+/// The bound needs `L`, the largest coordinate, to be a normal number
+/// (`f64::MIN_POSITIVE` or more). Below that a product rounds by an amount
+/// that is no longer a share of what it rounds, and the bound is false: the
+/// plane through the origin with normal `(0.6, 0.8, 0)` reads the point
+/// `(2⁻¹⁰⁷⁴, 0, 0)` at `2⁻¹⁰⁷⁴` where the true value is `0.6` times that
+/// (`docs/decisions.md` §464.9 item 4, §464.42). The case is outside the
+/// condition the doc comments state, and is pinned so that the condition is
+/// not dropped.
+#[test]
+fn a_point_below_the_normal_numbers_is_outside_the_bound_and_outside_its_condition() {
+    let smallest = f64::from_bits(1);
+    assert!(smallest < f64::MIN_POSITIVE);
+
+    let plane = Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.0), Vector::new(0.6, 0.8, 0.0))
+        .expect("a slanted plane through the origin");
+    let normal = plane.normal().components();
+    assert_eq!(normal, [0.6, 0.8, 0.0]);
+
+    let computed = plane.signed_distance_to(Point::new(smallest, 0.0, 0.0));
+    let missed_by = (computed / smallest - normal[0]).abs();
+    assert!(
+        missed_by > 0.39,
+        "expected a miss of about 0.4 L, got {missed_by} L"
+    );
+    assert!(missed_by > Plane::SIGNED_DISTANCE_ROUNDOFF);
+
+    let shifted = plane
+        .transformed(&Isometry::translation(Vector::new(smallest, 0.0, 0.0)).expect("a shift"));
+    let slipped_by = (shifted.offset() / smallest - normal[0]).abs();
+    assert!(
+        slipped_by > 0.39,
+        "expected a slip of about 0.4 L, got {slipped_by} L"
+    );
+    assert!(slipped_by > SURFACE_AFTER_SHIFTING_ROUNDOFF);
 }
 
 proptest! {

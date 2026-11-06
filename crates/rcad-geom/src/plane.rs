@@ -104,6 +104,15 @@ impl Plane {
     /// the coordinates and the offset, the whole thing comes to
     /// `u·(4√3 + 1)·L ≈ 3.97·u·2·L`, which is under `4 · f64::EPSILON · L`.
     ///
+    /// **`L` must be a normal number**, at least `f64::MIN_POSITIVE`
+    /// (`2⁻¹⁰²²`). Gappa proves the bound under that condition alone, however
+    /// many of the three products fall below `2⁻¹⁰²²` (§464.42). Without it the
+    /// bound is false: the plane through the origin with normal `(0.6, 0.8, 0)`
+    /// reads the point `(2⁻¹⁰⁷⁴, 0, 0)` at `2⁻¹⁰⁷⁴` against a true `0.6` times
+    /// that, a miss of `0.4·L` against `4ε·L` (§464.9 item 4).
+    /// `a_point_below_the_normal_numbers_is_outside_the_bound_and_outside_its_condition`
+    /// pins it.
+    ///
     /// This bounds the *reading* and nothing else. It says nothing about how
     /// well the stored plane matches the one a caller meant — a normal is
     /// scaled to unit length on the way in, and that rounds too. A caller

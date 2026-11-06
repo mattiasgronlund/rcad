@@ -156,6 +156,18 @@ pub const CORNER_AFTER_MOVING_ROUNDOFF: f64 = 128.0 * f64::EPSILON;
 /// second-order terms — a rounding is a relative slip of the *computed* value
 /// rather than of the true one.
 ///
+/// **A plane's or a half-space's offset needs `|n|·L` to be a normal number**,
+/// at least `f64::MIN_POSITIVE` (`2⁻¹⁰²²`), which for a plane is `L` normal to
+/// within `NORMAL_LENGTH_ROUNDOFF`; Gappa proves the bound under that alone
+/// (§464.42). A half-space's `|n|` is any length, so `L` normal is not enough
+/// there: a normal `2⁻⁶⁰` long shifted by `2⁻¹⁰²²` slips `0.6·|n|·L`
+/// (§464.24). Without the condition the bound is false for a plane too: the
+/// plane through the origin with normal `(0.6, 0.8, 0)`, shifted by
+/// `(2⁻¹⁰⁷⁴, 0, 0)`, gets offset `2⁻¹⁰⁷⁴` against a true `0.6` times that, a
+/// slip of `0.4·L` against `8ε·L` (§464.9 item 4). A ball or a pipe needs no
+/// such condition (§464.9 item 3). `a_point_below_the_normal_numbers_is_outside_the_bound_and_outside_its_condition`
+/// pins the plane's case.
+///
 /// **Nothing here holds for a movement that turns.** Both rows rest on the
 /// normal, the direction and the radius being carried over untouched, which is
 /// what a shift does and a turn does not.
