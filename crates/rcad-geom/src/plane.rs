@@ -1794,7 +1794,9 @@ mod tests {
     /// stored gives back the same bits: [`Plane::from_coefficients`] stores a
     /// normal within [`Plane::NORMAL_LENGTH_ROUNDOFF`], and the way in keeps
     /// one of those. The sets run from `2⁻²⁰` to `2²⁰` in each number, so the
-    /// offsets are as spread as the normals.
+    /// offsets are as spread as the normals. Until Q3226 the way in was
+    /// [`Plane::from_coefficients`] alone, which is no fixed point: the second
+    /// read moved 147 of these.
     #[test]
     fn a_second_read_of_any_plane_gives_back_what_the_first_stored() {
         let mut state = 0x2545_f491_4f6c_dd1d_u64;
