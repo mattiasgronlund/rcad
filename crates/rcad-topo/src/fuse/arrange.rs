@@ -14302,6 +14302,16 @@ impl<'f> Arrangement<'f> {
     /// `z = 8` is a node `4e-16` below the plane of that wall's own cap, and
     /// asked its box alone every fuse of the two was refused `Undecidable`
     /// (Q3133).
+    ///
+    /// **On a flat face, a walk along the curve the plane cuts a pipe in is
+    /// read against another pipe along the same axis off the two circles,
+    /// before any node** ([`Arrangement::side_off_a_curve_of_a_pipe_along_it`]),
+    /// where the two circles are clear of each other or one is inside the
+    /// other. A node can sit a rounding off that curve and across the other
+    /// pipe. A thick bar's bottom rim, whose one node is its seam corner
+    /// stored at exactly `2c`, was read inside a thin bar round `c` that the
+    /// rim lies clear of everywhere, and every fuse of the thick bar with two
+    /// thin bars at `c` and `−c` was refused `ResultIsNotManifold` (Q3244).
     fn which_side_of_everything(
         &self,
         cycle: usize,
