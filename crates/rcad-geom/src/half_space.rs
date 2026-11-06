@@ -1158,8 +1158,9 @@ mod tests {
         }
     }
 
-    /// The four numbers survive being written out and read back, which a plane's
-    /// do not.
+    /// The four numbers survive being written out and read back. A plane's do
+    /// too when its normal is within `Plane::NORMAL_LENGTH_ROUNDOFF` of length
+    /// one, which every plane a constructor stores is.
     #[test]
     fn a_half_space_writes_out_and_reads_back_bit_for_bit() {
         let written = HalfSpace::new(Vector::new(3.0, -1.0, 0.0), 7.0).expect("a normal");
