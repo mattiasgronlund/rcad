@@ -2194,7 +2194,12 @@ impl<'f> Arrangement<'f> {
     /// the rim there, is boxed with the cap and the pipe at `z = 1` exactly.
     /// Told apart, the bar united with a square plate and then fused with the
     /// block `[6, 12]² × [1, 3]` on that floor was refused at that turn, and
-    /// at 31 more turns of that lean and of `(0.1, 0.07, 1)` (Q3228).
+    /// at 31 more turns of that lean and of `(0.1, 0.07, 1)` (Q3228). The
+    /// pole of a half ball `x ≥ 0`, stored at `(0, 0, ±r)` exactly, was told
+    /// apart the same way from where a second knife through the polar axis
+    /// crosses the circle of `x = 0`, boxed a rounding off it in `y`, and nine
+    /// wedges cut by two such knives were refused for the range
+    /// (`tests/a_narrow_lune_from_a_pole_corner.rs`).
     ///
     /// **Every face round the corner asks the same three in the same order**,
     /// the two round it and `partner` sorted by name, so they all take the
