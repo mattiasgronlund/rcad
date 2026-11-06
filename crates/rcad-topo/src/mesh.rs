@@ -382,14 +382,15 @@ impl SolidView<'_> {
     ///   of the solid on a straight side of another loop touches it however fine
     ///   the bent sides are walked, since neither is moved, and every rung costs
     ///   a whole mesh.
-    /// - **First, a hole a rounding from the outline is pinched onto it.** A
-    ///   hole that touches its outline from inside can put a point a rounding
+    /// - **First, a hole that touches the outline is pinched onto it.** A hole
+    ///   that touches its outline from inside can put a point a rounding
     ///   outside the outline's chords, and no rung moves it. So the first time
     ///   a face is refused so, when a point one of its holes was walked into
     ///   lies within a rounding of the curved surface a side of its outline
-    ///   runs along, and near that side's walk, the solid is cut up again with
-    ///   each such point put on the outline, and so after every walk from then
-    ///   on. That uses up no rung (`pinch_its_holes_onto_its_outline`, Q3248).
+    ///   runs along, and near that side's walk, and the points either side of
+    ///   it along the hole do not, the solid is cut up again with each such
+    ///   point put on the outline, and so after every walk from then on. That
+    ///   uses up no rung (`pinch_its_holes_onto_its_outline`, Q3248).
     /// - **The first rung starts under half the face's width.** It halves the
     ///   smaller of the room the side was walked at and half the widest side of
     ///   the box round the face's corners and walked points. A walk never steps
@@ -550,7 +551,7 @@ impl SolidView<'_> {
             let crossed = a_flat_face_whose_bent_sides_crossed(self, &why);
             if let Some(face) = crossed {
                 if !building.pinched.contains(&face.key())
-                    && building.a_hole_comes_within_a_rounding_of_its_outline(face)
+                    && building.a_hole_touches_its_outline(face)
                 {
                     building = building.again_with_its_holes_pinched_onto_its_outline(face);
                     last_crossing = Some((why, said));
@@ -925,7 +926,7 @@ struct BuildingAMesh {
     /// `deflection`, which it is always under — see [`SolidView::mesh`].
     walked_finer: HashMap<EdgeKey, f64>,
     /// The crossed flat faces whose holes are pinched onto their outline
-    /// wherever a hole's walk comes within a rounding of it — see
+    /// wherever a hole touches it — see
     /// [`BuildingAMesh::pinch_its_holes_onto_its_outline`].
     pinched: HashSet<FaceKey>,
 }
@@ -984,10 +985,11 @@ impl BuildingAMesh {
         Ok(())
     }
 
-    /// Put each point the holes of `face` were walked into that lies within a
-    /// rounding of its outline on the outline: onto the point of the outline's
-    /// walk within a rounding of it where there is one, and into the outline's
-    /// walk where there is none. Each move is charged.
+    /// Put each point where a hole of `face` touches its outline on the
+    /// outline, as [`Self::where_a_hole_touches_its_outline`] finds them: onto
+    /// the point of the outline's walk within a rounding of it where there is
+    /// one, and into the outline's walk where there is none. Each move is
+    /// charged.
     ///
     /// **A hole that touches its outline from inside puts a point on it**, and
     /// no walk of the outline clears that point. A thick bar of radius 2 holding
@@ -1010,8 +1012,8 @@ impl BuildingAMesh {
     /// lists, so they see the same points.
     ///
     /// **Only on a crossed flat face** ([`SolidView::mesh`]), once one of its
-    /// holes was seen to come within a rounding of its outline, since this asks
-    /// it of every point of every hole.
+    /// holes was seen to touch its outline, since this asks it of every point
+    /// of every hole.
     ///
     /// What a move costs is charged on top of the worst any walk strayed, which
     /// is all `worst` holds before a face is cut up: a side through a point
@@ -1023,8 +1025,7 @@ impl BuildingAMesh {
             if outline.iter().any(|side| side.key() == hole.key()) {
                 continue;
             }
-            let count = self.along_edge.get(&hole.key()).map_or(0, Vec::len);
-            for at in 0..count {
+            for at in self.where_a_hole_touches_its_outline(&outline, hole) {
                 let point = self.points[self.along_edge[&hole.key()][at] as usize];
                 let Some(pinch) = self.where_a_hole_point_is_pinched(&outline, point) else {
                     continue;
@@ -1034,7 +1035,7 @@ impl BuildingAMesh {
                         let entry = self.the_entry_of_a_point_of_the_side(pinch.side, corner);
                         self.along_edge
                             .get_mut(&hole.key())
-                            .expect("its length was just read")[at] = entry;
+                            .expect("the hole's walk was just read")[at] = entry;
                     }
                     None => {
                         let entry = self.along_edge[&hole.key()][at];
@@ -1048,6 +1049,42 @@ impl BuildingAMesh {
             }
         }
         self.worst += moved;
+    }
+
+    /// The places in the walk of `hole`, a bent side of one of a face's holes,
+    /// of the points where it touches the outline `outline` lists: each lies
+    /// within a rounding of it as [`Self::where_a_hole_point_is_pinched`]
+    /// reads it, and the points either side of it along `hole`, its ends
+    /// among them, do not.
+    ///
+    /// **Either side clear, since a touch is at a point.** A ring a rounding
+    /// wide has a hole that runs within a rounding of its outline all the way
+    /// round, and the union of a half ball with a bowl a rounding bigger kept
+    /// below its floor has such a ring
+    /// (`a_piece_grazed_by_a_trimming_nothing_follows.rs`). Both rims are
+    /// walked from one angle, so the hole's points lie within a rounding of the
+    /// outline's. Pinched onto them, the hole closed up onto the outline and
+    /// the ring was refused `BoundaryCrossesItself`, where walking both rims
+    /// finer clears it (Q2384).
+    fn where_a_hole_touches_its_outline(
+        &self,
+        outline: &[EdgeView<'_>],
+        hole: EdgeView<'_>,
+    ) -> Vec<usize> {
+        if !self.along_edge.contains_key(&hole.key()) {
+            return Vec::new();
+        }
+        let within: Vec<bool> = self
+            .the_side_as_it_was_last_walked(hole)
+            .into_iter()
+            .map(|point| self.where_a_hole_point_is_pinched(outline, point).is_some())
+            .collect();
+        within
+            .windows(3)
+            .enumerate()
+            .filter(|(_, three)| matches!(three, [false, true, false]))
+            .map(|(at, _)| at)
+            .collect()
     }
 
     /// Where `point`, a point a hole was walked into, goes on the bent sides
@@ -1115,19 +1152,17 @@ impl BuildingAMesh {
         }
     }
 
-    /// Whether a point one of `face`'s holes was walked into lies within a
-    /// rounding of its outline, as
-    /// [`Self::pinch_its_holes_onto_its_outline`] reads it.
-    fn a_hole_comes_within_a_rounding_of_its_outline(&self, face: FaceView<'_>) -> bool {
+    /// Whether one of `face`'s holes touches its outline, as
+    /// [`Self::where_a_hole_touches_its_outline`] reads it.
+    fn a_hole_touches_its_outline(&self, face: FaceView<'_>) -> bool {
         let outline = Self::the_bent_sides_of(face.wires().take(1));
         Self::the_bent_sides_of(face.wires().skip(1))
             .into_iter()
             .filter(|hole| outline.iter().all(|side| side.key() != hole.key()))
-            .filter_map(|hole| self.along_edge.get(&hole.key()))
-            .flatten()
-            .any(|&at| {
-                self.where_a_hole_point_is_pinched(&outline, self.points[at as usize])
-                    .is_some()
+            .any(|hole| {
+                !self
+                    .where_a_hole_touches_its_outline(&outline, hole)
+                    .is_empty()
             })
     }
 
