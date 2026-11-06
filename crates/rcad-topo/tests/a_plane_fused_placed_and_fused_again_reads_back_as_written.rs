@@ -143,9 +143,11 @@ fn its_planes(model: &Model) -> Vec<Plane> {
     model
         .solids()
         .flat_map(|solid| solid.faces())
-        .filter_map(|face| match face.surface() {
-            Surface::Plane(plane) => Some(plane),
-            _ => None,
+        .filter_map(|face| {
+            let Surface::Plane(plane) = face.surface() else {
+                return None;
+            };
+            Some(plane)
         })
         .collect()
 }
