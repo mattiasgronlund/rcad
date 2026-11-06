@@ -14401,6 +14401,16 @@ impl<'f> Arrangement<'f> {
     /// `z = 8` is a node `4e-16` below the plane of that wall's own cap, and
     /// asked its box alone every fuse of the two was refused `Undecidable`
     /// (Q3133).
+    ///
+    /// **On a flat face, a walk along the curve the plane cuts a pipe in is
+    /// read against another pipe along the same axis off the two circles,
+    /// before any node** ([`Arrangement::side_off_a_curve_of_a_pipe_along_it`]),
+    /// where the two circles are clear of each other or one is inside the
+    /// other. A node can sit a rounding off that curve and across the other
+    /// pipe. A thick bar's bottom rim, whose one node is its seam corner
+    /// stored at exactly `2c`, was read inside a thin bar round `c` that the
+    /// rim lies clear of everywhere, and every fuse of the thick bar with two
+    /// thin bars at `c` and `−c` was refused `ResultIsNotManifold` (Q3244).
     fn which_side_of_everything(
         &self,
         cycle: usize,
@@ -14424,6 +14434,10 @@ impl<'f> Arrangement<'f> {
                 continue;
             }
             let partner = self.crossings[crossing].partner;
+            if let Some(apart) = self.side_off_a_curve_of_a_pipe_along_it(cycle, &partner) {
+                *side = Some(apart);
+                continue;
+            }
             let mut first_undecided = None;
             for &half_edge in &self.cycles[cycle] {
                 let at_node = self.arcs[half_edge / 2].ends[half_edge % 2];
@@ -14536,6 +14550,102 @@ impl<'f> Arrangement<'f> {
             }
         }
         Ok(sides)
+    }
+
+    /// On a flat face: which side of `partner`, a pipe, a walk is on, read off
+    /// a half-edge of it along the curve the face's plane cuts another pipe
+    /// in, whose axis runs along `partner`'s; `None` where `partner` is no
+    /// pipe, the face is not flat, or no half-edge is along such a curve clear
+    /// of `partner` ([`Arrangement::side_of_a_pipe_all_round_another_along_it`]).
+    ///
+    /// **The whole curve is on one side of `partner`, and so is the region
+    /// beside it that the walk goes round.** The plane is not along the pipes'
+    /// axes, so it cuts each in one closed curve, and seen down the axes each
+    /// curve is its pipe's circle. Where the two circles are clear of each
+    /// other, or one is inside the other, neither curve meets the other pipe.
+    ///
+    /// **A node of the walk can sit a rounding off the curve, and across
+    /// `partner`**, where the curve passes `partner` closer than that, so it
+    /// is not read first. A thick bar of radius 2 round `z` and a thin one of
+    /// radius 1 round `c`, `|c|` a rounding under 1, both turned about `z`:
+    /// the thin bar's circle on the thick bar's bottom is inside the rim and
+    /// clear of it by `1 − |c|`, about `5e−17`. The rim's one node is the
+    /// thick bar's seam corner, stored at exactly `2c` and so `|c|` from the
+    /// thin circle's centre, inside it. Read off that corner, the rim went
+    /// with the piece of the bottom inside the thin bar, and every fuse of the
+    /// thick bar with two such thin bars at `c` and `−c` was refused
+    /// `ResultIsNotManifold` at the turns `0.3`, `3`, `4.69` and `4.71`
+    /// (Q3244).
+    fn side_off_a_curve_of_a_pipe_along_it(
+        &self,
+        cycle: usize,
+        partner: &Surface,
+    ) -> Option<Decision> {
+        let (Surface::Plane(face), Surface::Cylinder(theirs)) = (&self.surface, partner) else {
+            return None;
+        };
+        self.cycles[cycle].iter().find_map(|&half_edge| {
+            let Surface::Cylinder(mine) = self.crossings[self.arcs[half_edge / 2].crossing].partner
+            else {
+                return None;
+            };
+            let across = matches!(
+                a_plane_lies_along_a_pipes_axis(face, &mine),
+                Decision::Pos | Decision::Neg
+            );
+            if !across || two_pipes_run_along_one_line(&mine, theirs) != Decision::Zero {
+                return None;
+            }
+            Self::side_of_a_pipe_all_round_another_along_it(&mine, theirs)
+        })
+    }
+
+    /// Which side of `theirs` every point of `mine` is, for two pipes whose
+    /// axes run along one line: `Pos` where the two are clear of each other or
+    /// `theirs` is inside `mine`, `Neg` where `mine` is inside `theirs`, and
+    /// `None` where they cross or touch, or a product would round.
+    ///
+    /// **Each answer is a sign of stored numbers.** For `mine`'s origin `o₁`,
+    /// direction `w` and radius `R`, and `theirs`'s origin `o₂` and radius
+    /// `r`, the axes are `δ` apart with `δ²·|w|² = |(o₂ − o₁) × w|²`, which is
+    /// `A`. Seen down the axes, the points of `mine` are from `|δ − R|` to
+    /// `δ + R` off `theirs`'s axis. So all are outside `theirs` where
+    /// `δ > R + r`, the sign of `A − |w|²·(R + r)²`, or where `R > r` and
+    /// `δ < R − r`; and all are inside it where `R < r` and `δ < r − R`. The
+    /// last two are the sign of `A − |w|²·(R − r)²`. A pipe is `r` wide
+    /// whatever length its stored direction is (§118.11), and the two
+    /// directions are along one line, so `w` measures both.
+    fn side_of_a_pipe_all_round_another_along_it(
+        mine: &Cylinder,
+        theirs: &Cylinder,
+    ) -> Option<Decision> {
+        let (origin, along) = (
+            mine.axis().origin().coordinates(),
+            mine.axis().direction().components(),
+        );
+        let other_origin = theirs.axis().origin().coordinates();
+        let gap: [Vec<f64>; 3] =
+            core::array::from_fn(|axis| exactly_added(&[other_origin[axis]], &[-origin[axis]]));
+        let sideways = exactly_crossed(&gap, &along.map(|part| vec![part]))?;
+        let apart = exactly_dotted_across(&sideways, &sideways)?;
+        let squared_direction = exactly_dotted(along, along)?;
+        let against = |width: &[f64]| {
+            let squared = exactly_multiplied(width, width)?;
+            let reach = exactly_multiplied(&squared, &squared_direction)?;
+            Some(expansion_sign(&exactly_added(&apart, &negated(&reach))))
+        };
+        let [my_radius, their_radius] = [mine, theirs].map(Cylinder::radius);
+        if against(&exactly_added(&[my_radius], &[their_radius]))? == Decision::Pos {
+            return Some(Decision::Pos);
+        }
+        if against(&exactly_added(&[my_radius], &[-their_radius]))? == Decision::Neg {
+            return Some(if my_radius > their_radius {
+                Decision::Pos
+            } else {
+                Decision::Neg
+            });
+        }
+        None
     }
 
     /// Which side of `partner`, a pipe, a point is that lies on a ball among
