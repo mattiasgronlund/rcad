@@ -91,6 +91,28 @@ fn every_turn_the_plate_was_refused_at_answers_as_the_plate() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// The lean `(−0.1, 0, 1)`, unturned, and the block `[6, 12]² × [1, 3]`, whose
+/// floor `z = 1` touches the cap's rim at its highest point: the bar's seam
+/// corner `(13, 10, 1)`, where the cap, the pipe and the wall plane `y = 10`
+/// through the bar's axis meet. The corner was stored at `(13, 10,
+/// 1.0000000000000002)`, the floor's touch of the rim split into two places a
+/// rounding either side of it, and every rule was refused on the order along a
+/// crossing of the cap's face (Q3228).
+#[test]
+fn a_floor_touching_the_rim_at_the_seam_corner_fuses_under_every_rule() {
+    fuses_with_the_block_on_the_seam_corner([-0.1, 0.0, 1.0]).unwrap_or_else(|why| panic!("{why}"));
+}
+
+/// The lean `(0.3, −0.2, 1)`, unturned, and the same block, whose floor
+/// crosses the rim at the seam corner. On the floor the line `y = 10` meets
+/// the pipe and the cap there a rounding apart, nothing put a line's meet
+/// with a pipe in order against its meet with a plane, and every rule was
+/// refused on the order along a crossing of the floor (Q3228).
+#[test]
+fn a_floor_crossing_the_rim_at_the_seam_corner_fuses_under_every_rule() {
+    fuses_with_the_block_on_the_seam_corner([0.3, -0.2, 1.0]).unwrap_or_else(|why| panic!("{why}"));
+}
+
 /// How far a solid's volume may move because its turned corners are each a
 /// rounding off where the turn puts them. The block's mesh is its own flat
 /// faces, so its volume error is about `1.3e-14`, and turned `0.05` it
@@ -170,6 +192,97 @@ fn the_plate_as_it_should_be(lean: [f64; 3], angle: f64) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// The plate of `lean` and the block `[6, 12]² × [1, 3]`, unturned, fused under
+/// certified by the union either way round, the intersection, and the
+/// difference either way round. Each answer must validate, and the volumes
+/// must add up within the meshes' own volume errors: the union and the
+/// intersection to the plate and the block, and each difference and the
+/// intersection to the one it was taken from.
+fn fuses_with_the_block_on_the_seam_corner(lean: [f64; 3]) -> Result<(), String> {
+    let measure = |rule: Rule, plate_first: bool| -> Result<(f64, f64), String> {
+        let policy = Policy::certified();
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let plate = a_plate_with_a_leaning_tab(&mut model, &Isometry::identity(), lean)?;
+        let block = a_block(&mut model, [6.0, 6.0, 1.0], [12.0, 12.0, 3.0]);
+        let (one, other) = if plate_first {
+            (plate, block)
+        } else {
+            (block, plate)
+        };
+        let fused = model
+            .fuse(&[one], &[other], rule, &policy, &mut ProvenanceLog::new())
+            .map_err(|why| format!("refused {why:?}"))?;
+        model
+            .validate(&policy, &mut ProvenanceLog::new())
+            .map_err(|why| format!("does not validate: {why}"))?;
+        fused
+            .solids()
+            .iter()
+            .try_fold((0.0, 0.0), |(volume, error), solid| {
+                let (more, more_error) = measured(&model, *solid)?;
+                Ok((volume + more, error + more_error))
+            })
+    };
+    let alone = |which: usize| -> Result<(f64, f64), String> {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let solids = [
+            a_plate_with_a_leaning_tab(&mut model, &Isometry::identity(), lean)?,
+            a_block(&mut model, [6.0, 6.0, 1.0], [12.0, 12.0, 3.0]),
+        ];
+        measured(&model, solids[which])
+    };
+    let mut wrong = Vec::new();
+    let mut answers = Vec::new();
+    for (name, rule, plate_first) in [
+        ("the union", Rule::Union, true),
+        ("the union, the block first", Rule::Union, false),
+        ("the intersection", Rule::Intersection, true),
+        ("the plate less the block", Rule::Difference, true),
+        ("the block less the plate", Rule::Difference, false),
+    ] {
+        match measure(rule, plate_first) {
+            Ok(answer) => answers.push(answer),
+            Err(why) => wrong.push(format!("lean {lean:?}, {name}: {why}")),
+        }
+    }
+    if !wrong.is_empty() {
+        return Err(wrong.join("\n"));
+    }
+    let (plate, block) = (alone(0)?, alone(1)?);
+    let [
+        union,
+        union_block_first,
+        intersection,
+        plate_less,
+        block_less,
+    ] = answers[..]
+    else {
+        unreachable!("five rules, five answers");
+    };
+    let both = [plate, block];
+    for (what, answer, whole) in [
+        ("the union", union, &both[..]),
+        ("the union, the block first,", union_block_first, &both[..]),
+        ("the plate less the block", plate_less, &both[..1]),
+        ("the block less the plate", block_less, &both[1..]),
+    ] {
+        let parts = answer.0 + intersection.0;
+        let wholes: f64 = whole.iter().map(|(volume, _)| volume).sum();
+        let room = answer.1 + intersection.1 + whole.iter().map(|(_, error)| error).sum::<f64>();
+        if (parts - wholes).abs() > room {
+            wrong.push(format!(
+                "lean {lean:?}: {what} and the intersection measure {parts}, not {wholes} within \
+                 {room}"
+            ));
+        }
+    }
+    if wrong.is_empty() {
+        Ok(())
+    } else {
+        Err(wrong.join("\n"))
+    }
 }
 
 /// The plate's volume: the square's `200`, and the tab's, less the quarter of
