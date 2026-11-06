@@ -7524,7 +7524,7 @@ impl Edge {
     ///
     /// **A pipe through both corners can.** The other pipe runs through the true
     /// corners, so its wall cuts this edge's curve there and nowhere else, as
-    /// two circles seen down their common axis meet in two points at most. Each
+    /// two circles seen down their parallel axes meet in two points at most. Each
     /// arc between the corners is then wholly outside that pipe or wholly inside
     /// it, and the reader reads the one outside off its outside and the one
     /// inside off its inside, each without asking which the edge is. Where that
