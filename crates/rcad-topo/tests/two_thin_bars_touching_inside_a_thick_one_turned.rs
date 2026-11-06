@@ -62,42 +62,90 @@ fn a_block_on_a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_in
             "turned {turn}: the thin bars' axes at {c:?} are under 2 apart, so the bars overlap"
         );
 
-        let with_the_block = united(&mut model, &[thick], &[block], || {
+        let with_the_block = fused(&mut model, &[thick], &[block], Rule::Union, || {
             format!("turned {turn}, the block")
         });
-        let with_the_left_bar = united(&mut model, &with_the_block, &[left], || {
+        let with_the_left_bar = fused(&mut model, &with_the_block, &[left], Rule::Union, || {
             format!("turned {turn}, the bar at x = −1")
         });
         let last = || format!("turned {turn}, the bar at x = 1");
-        let [whole] = united(&mut model, &with_the_left_bar, &[right], last)[..] else {
+        let [whole] = fused(&mut model, &with_the_left_bar, &[right], Rule::Union, last)[..] else {
             panic!("{}: the four unite into one solid", last());
         };
-        model
-            .validate(&Policy::certified(), &mut ProvenanceLog::new())
-            .unwrap_or_else(|why| panic!("turned {turn}: {why}"));
-
-        let measured = model
-            .solid(whole)
-            .expect("this model made the key")
-            .measure(
-                Deflection::of(0.01).expect("a fine mesh"),
-                &Policy::certified(),
-                &mut ProvenanceLog::new(),
-            )
-            .unwrap_or_else(|refused| panic!("turned {turn}: {refused:?}"));
-        let meant = the_volume();
-        println!(
-            "turned {turn}: {} ± {} against {meant}",
-            measured.volume(),
-            measured.volume_error()
-        );
-        assert!(
-            (measured.volume() - meant).abs() <= measured.volume_error(),
-            "turned {turn}: {} ± {} against {meant}",
-            measured.volume(),
-            measured.volume_error()
-        );
+        valid_and_of_volume(&model, whole, the_volume(), last);
     }
+}
+
+/// The thick bar united with the thin bar at `x = −1`, then fused with the one
+/// at `x = 1` by each rule, with no block.
+///
+/// The thin bars are inside the thick one from `z = −2` to 2, so the union is
+/// the thick bar and the four ends of length 1, `16π + 4π`; the intersection
+/// is the thin bar at `x = 1` between the thick bar's ends, `4π`; and the
+/// difference is the thick bar and the two ends of the bar at `x = −1`, less
+/// the bar at `x = 1` between them, `16π + 2π − 4π`. Where the two thin bars
+/// share their sliver past the ends there is no volume a measure can see.
+///
+/// The thick bar's bottom rim is a circle of radius 2 round `z`, and the bar
+/// at `x = 1` cuts the bottom's plane in the circle of radius 1 round `c`,
+/// which is inside the rim and clear of it by `1 − |c|`, about `5e−17`. The
+/// rim's one node is the thick bar's seam corner, stored at exactly `2c`,
+/// which is `|c|` from that circle's centre and so inside it. Read off that
+/// corner, the rim went with the piece of the bottom inside the bar at
+/// `x = 1`, the piece outside both thin bars was left without it, and every
+/// rule was refused `ResultIsNotManifold` at the four turns (Q3244).
+#[test]
+fn a_thick_bar_fuses_with_two_thin_bars_overlapping_by_a_rounding_inside_it() {
+    for turn in TURNS {
+        for (rule, meant) in [
+            (Rule::Union, 20.0 * PI),
+            (Rule::Intersection, 4.0 * PI),
+            (Rule::Difference, 14.0 * PI),
+        ] {
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let thick = a_bar(&mut model, 2.0, 4.0, [0.0, 0.0, -2.0], turn);
+            let left = a_bar(&mut model, 1.0, 6.0, [-1.0, 0.0, -3.0], turn);
+            let right = a_bar(&mut model, 1.0, 6.0, [1.0, 0.0, -3.0], turn);
+            let with_the_left_bar = fused(&mut model, &[thick], &[left], Rule::Union, || {
+                format!("turned {turn}, the bar at x = −1")
+            });
+            let last = || format!("turned {turn}, {rule:?} with the bar at x = 1");
+            let [whole] = fused(&mut model, &with_the_left_bar, &[right], rule, last)[..] else {
+                panic!("{}: one solid", last());
+            };
+            valid_and_of_volume(&model, whole, meant, last);
+        }
+    }
+}
+
+/// Panics, saying `which`, unless the model validates and `solid` measures
+/// `meant` to within the measure's own error.
+fn valid_and_of_volume(model: &Model, solid: SolidKey, meant: f64, which: impl Fn() -> String) {
+    model
+        .validate(&Policy::certified(), &mut ProvenanceLog::new())
+        .unwrap_or_else(|why| panic!("{}: {why}", which()));
+    let measured = model
+        .solid(solid)
+        .expect("this model made the key")
+        .measure(
+            Deflection::of(0.01).expect("a fine mesh"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|refused| panic!("{}: {refused:?}", which()));
+    println!(
+        "{}: {} ± {} against {meant}",
+        which(),
+        measured.volume(),
+        measured.volume_error()
+    );
+    assert!(
+        (measured.volume() - meant).abs() <= measured.volume_error(),
+        "{}: {} ± {} against {meant}",
+        which(),
+        measured.volume(),
+        measured.volume_error()
+    );
 }
 
 /// The thick bar and the block, `4` tall: the disk of radius 2 and the
@@ -112,18 +160,20 @@ fn the_volume() -> f64 {
     4.0 * (disk + rectangle - both) + 4.0 * PI
 }
 
-/// The union of `one` and `other`, panicking with `which` when it is refused.
-fn united(
+/// `one` and `other` fused by `rule`, panicking with `which` when it is
+/// refused.
+fn fused(
     model: &mut Model,
     one: &[SolidKey],
     other: &[SolidKey],
+    rule: Rule,
     which: impl Fn() -> String,
 ) -> Vec<SolidKey> {
     model
         .fuse(
             one,
             other,
-            Rule::Union,
+            rule,
             &Policy::certified(),
             &mut ProvenanceLog::new(),
         )
