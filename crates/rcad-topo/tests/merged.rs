@@ -327,6 +327,8 @@ pub mod a_plane_across_a_cone;
 pub mod a_plane_cut_along_a_cones_other_nappe;
 #[path = "a_plane_face_cut_by_a_cone_it_crosses_in_an_ellipse.rs"]
 pub mod a_plane_face_cut_by_a_cone_it_crosses_in_an_ellipse;
+#[path = "a_plane_fused_placed_and_fused_again_reads_back_as_written.rs"]
+pub mod a_plane_fused_placed_and_fused_again_reads_back_as_written;
 #[path = "a_plane_is_never_one_surface_with_a_curved_face.rs"]
 pub mod a_plane_is_never_one_surface_with_a_curved_face;
 #[path = "a_plane_leaning_through_a_bars_rim_start.rs"]
