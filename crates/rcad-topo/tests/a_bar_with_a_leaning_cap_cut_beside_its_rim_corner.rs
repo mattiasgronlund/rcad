@@ -466,9 +466,17 @@ fn the_plate_as_it_should_be(lean: [f64; 3], angle: f64) -> Result<(), String> {
 /// The plate of `lean` and the block `[6, 12]² × [1, 3]`, both placed by
 /// `turn`, fused under certified by the union either way round, the
 /// intersection, and the difference either way round. Each answer must
-/// validate, and the volumes must add up within the meshes' own volume errors:
-/// the union and the intersection to the plate and the block, and each
-/// difference and the intersection to the one it was taken from.
+/// validate, and the volumes must add up within the meshes' own volume errors
+/// and [`TURNED_A_ROUNDING_OFF`]: the union and the intersection to the plate
+/// and the block, and each difference and the intersection to the one it was
+/// taken from.
+///
+/// **A wholly flat answer is charged nothing for its turned corners**, so the
+/// meshes' errors alone do not hold it. Leaning `(−0.1, 0, 1)` and turned
+/// `0.85` about `z`, the plate's tab stays below the block, the intersection
+/// and the block less the plate are flat, and they measured `16` and
+/// `55.99999999999997` against the block's `72`, each within about `5e-15`
+/// (Q3236).
 fn fuses_with_the_block_on_the_seam_corner(lean: [f64; 3], turn: &Isometry) -> Result<(), String> {
     let measure = |rule: Rule, plate_first: bool| -> Result<(f64, f64), String> {
         let policy = Policy::certified();
@@ -523,7 +531,10 @@ fn fuses_with_the_block_on_the_seam_corner(lean: [f64; 3], turn: &Isometry) -> R
     ] {
         let parts = answer.0 + intersection.0;
         let wholes: f64 = whole.iter().map(|(volume, _)| volume).sum();
-        let room = answer.1 + intersection.1 + whole.iter().map(|(_, error)| error).sum::<f64>();
+        let room = answer.1
+            + intersection.1
+            + whole.iter().map(|(_, error)| error).sum::<f64>()
+            + TURNED_A_ROUNDING_OFF;
         if (parts - wholes).abs() > room {
             wrong.push(format!(
                 "lean {lean:?}: {what} and the intersection measure {parts}, not {wholes} within \
