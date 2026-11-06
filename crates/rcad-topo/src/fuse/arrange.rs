@@ -6276,6 +6276,13 @@ impl<'f> Arrangement<'f> {
     /// asked.** The boxes hold the true points, and the order they prove for
     /// two of them a rounding from the corner can be the one no straight
     /// drawing of the face keeps beside the others.
+    ///
+    /// **An order the boxes prove for a corner and a meet beside it is taken
+    /// only where the meet the corner stands for is not proved on the other
+    /// side** ([`Arrangement::as_a_corner_written_down_off_its_meet_says`]).
+    /// The boxes put the corner where it was written down, which can be a
+    /// rounding off that meet, and the other crossings through the corner are
+    /// drawn through the meet.
     fn as_proved_before_any_policy(
         &self,
         crossing: usize,
@@ -6286,6 +6293,12 @@ impl<'f> Arrangement<'f> {
             return Ok((read, Measures::Length));
         }
         let (mut decided, measures) = self.as_the_boxes_say(crossing, first, second)?;
+        if matches!(decided, Decision::Pos | Decision::Neg)
+            && let Some(proved) =
+                self.as_a_corner_written_down_off_its_meet_says(crossing, first, second)
+        {
+            decided = proved;
+        }
         if matches!(decided, Decision::Undecidable { .. })
             && let Some(proved) = self.as_the_planes_say(crossing, first, second)
         {
@@ -6450,6 +6463,71 @@ impl<'f> Arrangement<'f> {
                     (None, None) => None,
                 }
             })
+    }
+
+    /// Which of two nodes on a crossing comes first along it, where one is a
+    /// corner of the input that stands for one meet of two planes' line and a
+    /// pipe, and the other is the crossing's meet with a plane, inside the
+    /// room writing the corner down cost: `None` everywhere else, and where
+    /// the corner's meet is on that plane.
+    ///
+    /// **The corner is put in order as the meet it stands for**, read as
+    /// [`Arrangement::lies_forward_of_the_other`] reads it with
+    /// [`TheOtherNodesSurface::APlaneAgainstAPipe`]. The meet was folded into
+    /// the corner, so the curves through the corner are drawn through the
+    /// meet, but the boxes put it where it was written down.
+    ///
+    /// The plate of `tests/a_bar_with_a_leaning_cap_cut_beside_its_rim_corner.rs`,
+    /// a bar of radius 3 up `z` from `(10, 10, 0)` capped by the plane through
+    /// `(13, 10, 1)` with the normal `(0.1, 0, 1)`, has its rim at its lowest
+    /// at the seam corner, where the cap, the pipe and the plane `y = 10`
+    /// through the axis meet. Built turned `1.45` about `z`, that corner is
+    /// written down at `z = 1 − 2⁻⁵³`, and the meet it stands for is above
+    /// the floor `z = 1` of the block it is fused with: in the stored numbers
+    /// the line the cap and the floor cross in misses the pipe, so the floor's
+    /// circle on the pipe never meets the rim. On the pipe face, along the
+    /// seam, the boxes put the corner below the meet of the seam's plane, the
+    /// floor and the pipe, and every fuse of the two was refused
+    /// `CannotTellTheCellsOfAFaceApart` (Q3236).
+    ///
+    /// **Asked only where the boxes already prove an order.** Where they
+    /// cannot, a tolerant policy reads the two as one point, and a plane
+    /// against a pipe is asked only after the policy, for the reason
+    /// [`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`]
+    /// gives.
+    fn as_a_corner_written_down_off_its_meet_says(
+        &self,
+        crossing: usize,
+        first: usize,
+        second: usize,
+    ) -> Option<Decision> {
+        let lies_forward = |corner: usize, other: usize| {
+            let Node {
+                point,
+                vertex: Some(_),
+                ..
+            } = self.nodes[corner]
+            else {
+                return None;
+            };
+            let room = super::bake::grown_by(
+                point,
+                super::bake::what_writing_the_corner_down_cost(point.enclosure()),
+            );
+            if !the_room_holds(room, self.nodes[other].point) {
+                return None;
+            }
+            match self.lies_forward_of_the_other(
+                crossing,
+                corner,
+                other,
+                TheOtherNodesSurface::APlaneAgainstAPipe,
+            )? {
+                proved @ (Decision::Pos | Decision::Neg) => Some(proved),
+                Decision::Zero | Decision::Undecidable { .. } | _ => None,
+            }
+        };
+        lies_forward(second, first).or_else(|| lies_forward(first, second).map(the_other_way))
     }
 
     /// Which of two nodes on a crossing comes first along it, by the readings
@@ -7462,6 +7540,21 @@ impl<'f> Arrangement<'f> {
     /// [`Decision::Neg`] behind it, and [`Decision::Zero`] at it, as
     /// [`Arrangement::as_the_sign_of_a_quadric_at_a_meet_of_a_line_says`]
     /// reads it.
+    ///
+    /// **A straight crossing is two planes' line or, for a plane against a
+    /// pipe, a pipe's ruling where a plane along its axis cuts it.** Along a
+    /// ruling the pipe's gradient is the same at every point, so the way
+    /// `∇S × ∇Q` the crossing runs is one over the whole line, as it is along
+    /// two planes' line, and the other node's plane climbs one way all along
+    /// it. The plate of
+    /// `tests/a_bar_with_a_leaning_cap_cut_beside_its_rim_corner.rs` leaning
+    /// `(0.1, 0, 1)` or `(−0.1, 0, 1)` and turned `0.4` about `x` was refused
+    /// `Undecidable` "order along a crossing" on its pipe face, along the
+    /// seam, between the seam corner and the meet of the seam's plane, the
+    /// block's floor and the pipe, which the boxes do not tell apart. Turned
+    /// about `z`, the same two are put in order along
+    /// the seam by this reading too, from
+    /// [`Arrangement::as_a_corner_written_down_off_its_meet_says`] (Q3236).
     fn lies_forward_of_the_other(
         &self,
         crossing: usize,
@@ -7477,11 +7570,17 @@ impl<'f> Arrangement<'f> {
         let the_curve = match &self.crossings[crossing].order {
             HowItRuns::RoundAClosedCurve { wound_as, .. } => [wound_as[0], wound_as[1]],
             HowItRuns::AlongAnAxis { .. } => {
-                let planes = [self.surface, self.crossings[crossing].partner];
-                if !matches!(planes, [Surface::Plane(_), Surface::Plane(_)]) {
+                let pair = [self.surface, self.crossings[crossing].partner];
+                let a_ruling_of_a_pipe = matches!(which, TheOtherNodesSurface::APlaneAgainstAPipe)
+                    && matches!(
+                        pair,
+                        [Surface::Cylinder(_), Surface::Plane(_)]
+                            | [Surface::Plane(_), Surface::Cylinder(_)]
+                    );
+                if !(matches!(pair, [Surface::Plane(_), Surface::Plane(_)]) || a_ruling_of_a_pipe) {
                     return None;
                 }
-                planes
+                pair
             }
             HowItRuns::AlongABend { .. }
             | HowItRuns::RoundAPointOnItsChord { .. }

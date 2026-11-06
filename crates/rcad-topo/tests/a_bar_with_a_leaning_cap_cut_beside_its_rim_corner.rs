@@ -163,6 +163,40 @@ fn every_turn_a_floor_crossing_the_rim_at_the_seam_corner_was_refused_at_fuses()
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Every turn at which a rule was refused for the two leans whose cap's rim
+/// the floor `z = 1` touches at the seam corner `(13, 10, 1)`, lowest for
+/// `(0.1, 0, 1)` and highest for `(−0.1, 0, 1)` (Q3236): `step · 0.05` about
+/// `z`, refused `CannotTellTheCellsOfAFaceApart`, and `0.4` about `x`, refused
+/// on the order along a crossing. The block's floor stops at `x = 12`, a unit
+/// short of the seam corner, so wherever the turned numbers put the touch, no
+/// face of the answer reaches it.
+#[test]
+fn every_turn_a_floor_touching_the_rim_at_the_seam_corner_was_refused_at_fuses() {
+    let refused: [([f64; 3], &[u8]); 2] = [
+        ([0.1, 0.0, 1.0], &[29, 30, 31, 34, 37, 47, 49, 51, 59]),
+        (
+            [-0.1, 0.0, 1.0],
+            &[4, 14, 17, 18, 23, 24, 29, 34, 40, 41, 42, 47, 52, 59],
+        ),
+    ];
+    let wrong: Vec<String> = refused
+        .into_iter()
+        .flat_map(|(lean, steps)| {
+            steps
+                .iter()
+                .map(|&step| (Axis::z(), "z", f64::from(step) * 0.05))
+                .chain([(Axis::x(), "x", 0.4)])
+                .filter_map(move |(axis, about, angle)| {
+                    let turn = Isometry::rotation(&axis, angle).expect("a finite angle");
+                    fuses_with_the_block_on_the_seam_corner(lean, &turn)
+                        .err()
+                        .map(|why| format!("turned {angle} about {about}: {why}"))
+                })
+        })
+        .collect();
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// The lean whose cap's plane holds the line where the wall `y = 10` meets the
 /// floor `z = 1` of the block `[6, 12]² × [1, 3]`, so the cap's straight edge
 /// from `(7, 10, 1)` to `(10, 10, 1)` lies in that floor (Q3229).
@@ -432,9 +466,17 @@ fn the_plate_as_it_should_be(lean: [f64; 3], angle: f64) -> Result<(), String> {
 /// The plate of `lean` and the block `[6, 12]² × [1, 3]`, both placed by
 /// `turn`, fused under certified by the union either way round, the
 /// intersection, and the difference either way round. Each answer must
-/// validate, and the volumes must add up within the meshes' own volume errors:
-/// the union and the intersection to the plate and the block, and each
-/// difference and the intersection to the one it was taken from.
+/// validate, and the volumes must add up within the meshes' own volume errors
+/// and [`TURNED_A_ROUNDING_OFF`]: the union and the intersection to the plate
+/// and the block, and each difference and the intersection to the one it was
+/// taken from.
+///
+/// **A wholly flat answer is charged nothing for its turned corners**, so the
+/// meshes' errors alone do not hold it. Leaning `(−0.1, 0, 1)` and turned
+/// `0.85` about `z`, the plate's tab stays below the block, the intersection
+/// and the block less the plate are flat, and they measured `16` and
+/// `55.99999999999997` against the block's `72`, each within about `5e-15`
+/// (Q3236).
 fn fuses_with_the_block_on_the_seam_corner(lean: [f64; 3], turn: &Isometry) -> Result<(), String> {
     let measure = |rule: Rule, plate_first: bool| -> Result<(f64, f64), String> {
         let policy = Policy::certified();
@@ -489,7 +531,10 @@ fn fuses_with_the_block_on_the_seam_corner(lean: [f64; 3], turn: &Isometry) -> R
     ] {
         let parts = answer.0 + intersection.0;
         let wholes: f64 = whole.iter().map(|(volume, _)| volume).sum();
-        let room = answer.1 + intersection.1 + whole.iter().map(|(_, error)| error).sum::<f64>();
+        let room = answer.1
+            + intersection.1
+            + whole.iter().map(|(_, error)| error).sum::<f64>()
+            + TURNED_A_ROUNDING_OFF;
         if (parts - wholes).abs() > room {
             wrong.push(format!(
                 "lean {lean:?}: {what} and the intersection measure {parts}, not {wholes} within \
