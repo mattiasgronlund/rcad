@@ -50,7 +50,8 @@ and 464.42 is Q2858, on a distance off a plane and a plane's shift with two or
 three products below the normals. 464.43 is Q2862, which runs block 1 with one
 or more of the differences at zero and one or two minors cancelling, past
 464.26's one of each. 464.44 is Q2863, which runs it where `t1 + t2` cancels
-to zero with differences at zero.*
+to zero with differences at zero. §483 weighs what all of this paid off, and
+parks the case runs still open.*
 
   464.1   The bugs a bound prover is for
   464.2   What each tool is expected to do, untried here
