@@ -219,6 +219,8 @@ pub mod a_face_bounded_by_two_steps;
 pub mod a_face_flush_against_another_solids_face;
 #[path = "a_flat_cap_cut_by_a_cones_rim.rs"]
 pub mod a_flat_cap_cut_by_a_cones_rim;
+#[path = "a_flat_face_with_a_round_hole_touching_its_outline.rs"]
+pub mod a_flat_face_with_a_round_hole_touching_its_outline;
 #[path = "a_flat_face_with_an_arc_holds_a_box_on_a_diagonal.rs"]
 pub mod a_flat_face_with_an_arc_holds_a_box_on_a_diagonal;
 #[path = "a_flat_solid_publishes_the_rounding_of_its_measure.rs"]
