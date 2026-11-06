@@ -30116,11 +30116,13 @@ Nobody has run the kernel's walk on any of these, so none of them has a class
 Q2858 asked whether 464.9's `signed.g` holds with `L` at least `2⁻¹⁰²²` and
 two or three of its products below `2⁻¹⁰²²` or of a zero factor, and whether
 `shiftplane.g` does with `|n|·L` at least `2⁻¹⁰²²`, split by where each
-product lands as 464.18's `planeall.py` split `plane.g`. Three lanes took it
+product lands as 464.18's `planeall.py` split `plane.g`. Four lanes took it
 on 2026-11-06, one after another. The first ran a search and one script that
 failed (5). The second wrote `signedall.py`, which writes the cases. The third
 ran them, fixed the two things that stopped 14 of them (6), ran the controls
-and `coqc`, and wrote this.
+and `coqc`, and wrote this. The fourth ran the cases, the controls, `coqc`,
+`allreach.sh` and `alllower.sh` again, and each printed what is written here
+but for times, which script was slowest, and the length of a `.v` (4).
 
 Both bounds hold, however the three products land. With `L` at least
 `2⁻¹⁰²²`, `signed_distance_to` is within `7.71u·L`, under the code's `8u·L`;
@@ -30222,7 +30224,11 @@ algebra.
 **4. Coq checks all 220, modulo their hints.** `allcoq.sh` runs `gappa -Bcoq`
 and `coqc` through `one.sh` on the 220 and on the 188 `_anyl` controls that
 prove, and both exit 0 on all 408. The `.v` files came to 285 to 4739 lines,
-with 6 to 18 hints, and the two steps took 0.52 to 4.99 s a script. As in
+with 6 to 18 hints, and the two steps took 0.52 to 4.99 s a script. The fourth
+lane ran `allcoq.sh` again and all 408 passed, at 285 to 4778 lines: a `.v`'s
+length moves from one run of the same script to the next, and
+`c_signed_sns_big_anyl.g`, the longest, gave 4778, 4753 and 4484 lines in three
+runs, each passing `coqc`. As in
 464.24's 4, each hint enters the `.v` as a hypothesis with no condition, so a
 proof stands on its hints and on the divisors Gappa took to be nonzero: the
 rounded sums and `y`, which a hypothesis keeps from zero, and `L`, `N`,
