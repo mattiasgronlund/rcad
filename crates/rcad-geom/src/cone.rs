@@ -986,6 +986,44 @@ mod tests {
         assert_eq!(cone.point_at(round, along), on_it);
     }
 
+    /// A cone `2⁵¹¹` times as wide as it is tall, and a point inside it whose
+    /// height up the axis cancels to zero in `f64`: `f0·d0` and `f1·d1` are
+    /// equal and opposite, so `up` is zero, and the true height is what the
+    /// rounding of `f0·d0` dropped, `2⁻⁵⁹⁴`. The true value is about
+    /// `2⁻⁹⁶⁰ − 2¹⁰²²·2⁻¹¹⁸⁸ = −2⁻¹⁶⁶`, inside. In `f64` the value is the
+    /// cross product's `2⁻⁹⁶⁰` alone, and the permanent's axial square,
+    /// `(|f0·d0| + |f1·d1|)²` at about `2⁻¹⁰⁷⁸`, rounds to zero, so level 1
+    /// sized its bound by the cross product alone and certified outside
+    /// (`docs/decisions.md` §464.16's 6).
+    ///
+    /// Exact arithmetic declines here as well, since the height's square is
+    /// below the subnormals, so the answer is a refusal and not `Neg`.
+    #[test]
+    fn a_point_inside_a_nearly_flat_cone_whose_height_cancels_is_not_called_outside() {
+        let d0 = 2f64.powi(-60) * (1.0 + 2f64.powi(-26));
+        let f0 = 2f64.powi(-480) * (1.0 + 2f64.powi(-28));
+        let axis =
+            Axis::new(Point::origin(), Vector::new(d0, 1.0, 0.0)).expect("a direction with length");
+        assert_eq!(axis.direction().components(), [d0, 1.0, 0.0]);
+        let cone = Cone::new(axis, 2f64.powi(511)).expect("a positive slope");
+        let inside = PredicatePoint::from([f0, -(f0 * d0), 0.0]);
+
+        assert_eq!(
+            HowFarFromTheSkin {
+                cone,
+                point: inside
+            }
+            .on_floats(),
+            None,
+            "level 1 has no bound worth the name once the axial square rounds to zero"
+        );
+        match cone.side_of(inside) {
+            Decision::Undecidable { .. } => {}
+            Decision::Pos => panic!("the point is inside, and Pos says outside"),
+            other => panic!("neither intervals nor exact arithmetic can place this: {other:?}"),
+        }
+    }
+
     /// The apex has no angle, and asking for one gives zero rather than a
     /// division by nothing.
     #[test]
