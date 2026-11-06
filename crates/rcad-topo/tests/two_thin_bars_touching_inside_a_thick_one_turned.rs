@@ -33,6 +33,11 @@
 //! `side_off_a_curve_of_a_pipe_along_it` in `fuse/arrange.rs` read the rim's
 //! side of a thin bar's pipe off the circle that pipe cuts the bottom in
 //! (Q3244).
+//!
+//! With a block 50 long the last union was refused `Undecidable` where three
+//! surfaces meet at 32 of the 63 turns `f64::from(n) * 0.1` up to 6.2, until
+//! `the_place_the_model_points_at` in `fuse/bake.rs` told two places of one
+//! corner apart by the corner's own rounding (Q3255).
 
 use core::f64::consts::PI;
 
@@ -44,12 +49,16 @@ use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 /// The turns at which Q3241 found the last fuse refused.
 const TURNS: [f64; 4] = [0.3, 3.0, 4.69, 4.71];
 
+/// The block of the tests here is 5 long, from `x = 0` to 5 before it is
+/// turned.
+const BLOCK: f64 = 5.0;
+
 #[test]
 fn a_block_on_a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_inside_it() {
     for turn in TURNS {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
         let thick = a_bar(&mut model, 2.0, 4.0, [0.0, 0.0, -2.0], turn);
-        let block = the_block(&mut model, turn);
+        let block = the_block(&mut model, BLOCK, turn);
         let left = a_bar(&mut model, 1.0, 6.0, [-1.0, 0.0, -3.0], turn);
         let right = a_bar(&mut model, 1.0, 6.0, [1.0, 0.0, -3.0], turn);
 
@@ -76,7 +85,54 @@ fn a_block_on_a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_in
             panic!("{}: the four unite into one solid", last());
         };
         let deflection = Deflection::of(0.01).expect("a fine mesh");
-        valid_and_of_volume(&model, whole, the_volume(), deflection, last);
+        valid_and_of_volume(&model, whole, the_volume(BLOCK), deflection, last);
+    }
+}
+
+/// Tenths of a turn, `n` for the turn `f64::from(n) * 0.1`, at which the block
+/// 50 long was refused `Undecidable` where three surfaces meet and now unites
+/// (Q3255).
+const TENTHS_THE_LONG_BLOCK_UNITES_AT: [u8; 25] = [
+    1, 5, 7, 10, 11, 12, 14, 20, 22, 26, 35, 40, 42, 45, 46, 47, 50, 51, 52, 53, 55, 56, 58, 59, 60,
+];
+
+/// The block 50 long rather than 5, at the turns its last union was refused
+/// at and now is not.
+///
+/// In the last union the `x = −1` bar's circle on the thick bar's bottom
+/// crosses the thick bar's rim at two places a few nanometres apart, close to
+/// where the two touch. The room `validate` grants a corner off a plane is
+/// `1e-9` of the solid's largest coordinate, so a block 50 long grants ten
+/// times what one 5 long does, `4.93e-8` against `5.198e-9`, and at these turns
+/// that held both places. The corner was stored inside the box of one of them,
+/// and its own rounding holds that one alone.
+///
+/// Seven more of the 32 turns it was refused at go on to be refused further
+/// along, as the block 5 long is: `0.2` and the six of Q3265.
+#[test]
+fn a_block_fifty_long_on_a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_inside_it()
+{
+    let length = 50.0;
+    for tenths in TENTHS_THE_LONG_BLOCK_UNITES_AT {
+        let turn = f64::from(tenths) * 0.1;
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let thick = a_bar(&mut model, 2.0, 4.0, [0.0, 0.0, -2.0], turn);
+        let block = the_block(&mut model, length, turn);
+        let left = a_bar(&mut model, 1.0, 6.0, [-1.0, 0.0, -3.0], turn);
+        let right = a_bar(&mut model, 1.0, 6.0, [1.0, 0.0, -3.0], turn);
+
+        let with_the_block = fused(&mut model, &[thick], &[block], Rule::Union, || {
+            format!("turned {turn}, the block 50 long")
+        });
+        let with_the_left_bar = fused(&mut model, &with_the_block, &[left], Rule::Union, || {
+            format!("turned {turn}, the bar at x = −1 on the block 50 long")
+        });
+        let last = || format!("turned {turn}, the bar at x = 1 on the block 50 long");
+        let [whole] = fused(&mut model, &with_the_left_bar, &[right], Rule::Union, last)[..] else {
+            panic!("{}: the four unite into one solid", last());
+        };
+        let deflection = Deflection::of(0.01).expect("a fine mesh");
+        valid_and_of_volume(&model, whole, the_volume(length), deflection, last);
     }
 }
 
@@ -88,7 +144,7 @@ fn a_block_on_a_thick_bar_unites_with_two_thin_bars_touching_exactly_inside_it()
     let turn = 0.0;
     let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
     let thick = a_bar(&mut model, 2.0, 4.0, [0.0, 0.0, -2.0], turn);
-    let block = the_block(&mut model, turn);
+    let block = the_block(&mut model, BLOCK, turn);
     let left = a_bar(&mut model, 1.0, 6.0, [-1.0, 0.0, -3.0], turn);
     let right = a_bar(&mut model, 1.0, 6.0, [1.0, 0.0, -3.0], turn);
 
@@ -115,7 +171,7 @@ fn a_block_on_a_thick_bar_unites_with_two_thin_bars_touching_exactly_inside_it()
         panic!("{}: the four unite into one solid", last());
     };
     let deflection = Deflection::of(0.01).expect("a fine mesh");
-    valid_and_of_volume(&model, whole, the_volume(), deflection, last);
+    valid_and_of_volume(&model, whole, the_volume(BLOCK), deflection, last);
 }
 
 /// The union is the thick bar and the four ends of length 1, `16π + 4π`.
@@ -212,14 +268,14 @@ fn valid_and_of_volume(
     );
 }
 
-/// The thick bar and the block, `4` tall: the disk of radius 2 and the
-/// rectangle `5 × 3`, less the part of the disk with `x ≥ 0` and `|y| ≤ 1.5`,
-/// whose area is `1.5 √1.75 + 4 asin 0.75`. Each thin bar adds its two ends
-/// of length 1 past `z = ±2`; between them it is inside the thick bar, and the
-/// sliver the two share holds no volume a measure can see.
-fn the_volume() -> f64 {
+/// The thick bar and a block `length` long, `4` tall: the disk of radius 2 and
+/// the rectangle `length × 3`, less the part of the disk with `x ≥ 0` and
+/// `|y| ≤ 1.5`, whose area is `1.5 √1.75 + 4 asin 0.75`. Each thin bar adds its
+/// two ends of length 1 past `z = ±2`; between them it is inside the thick bar,
+/// and the sliver the two share holds no volume a measure can see.
+fn the_volume(length: f64) -> f64 {
     let disk = 4.0 * PI;
-    let rectangle = 15.0;
+    let rectangle = 3.0 * length;
     let both = 1.5 * 1.75_f64.sqrt() + 4.0 * 0.75_f64.asin();
     4.0 * (disk + rectangle - both) + 4.0 * PI
 }
@@ -252,10 +308,13 @@ fn a_bar(model: &mut Model, radius: f64, height: f64, foot: [f64; 3], turn: f64)
         .expect("a bar")
 }
 
-fn the_block(model: &mut Model, turn: f64) -> SolidKey {
-    let rectangle = ProfileBuilder::new(vec![[0.0, -1.5], [5.0, -1.5], [5.0, 1.5], [0.0, 1.5]])
-        .build(&Policy::certified(), &mut ProvenanceLog::new())
-        .expect("a rectangle");
+/// The block from `x = 0` to `length`, `y = −1.5` to 1.5 and `z = −2` to 2,
+/// turned.
+fn the_block(model: &mut Model, length: f64, turn: f64) -> SolidKey {
+    let rectangle =
+        ProfileBuilder::new(vec![[0.0, -1.5], [length, -1.5], [length, 1.5], [0.0, 1.5]])
+            .build(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("a rectangle");
     model
         .add_extrusion(&rectangle, 4.0, &turned(turn, [0.0, 0.0, -2.0]))
         .expect("a block")

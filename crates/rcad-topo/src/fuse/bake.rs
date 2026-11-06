@@ -2030,11 +2030,12 @@ fn its_reading_lets_a_crossing_in_through_a_face_it_does_not_cut(
 /// be replaced by the meet without a word — the ill-conditioned corner of §70.3,
 /// three surfaces at a grazing angle and a corner far from where they cross.
 ///
-/// Two places that both overlap it are two answers to one question, and a triple
-/// where no place overlaps it at all is the model's corner and its surfaces
-/// disagreeing by more than the boxes and that room allow. Both give `None`, and
-/// neither is a refusal: it is this triple saying nothing about this corner while
-/// another may still place it.
+/// Two places that both overlap it, and that its own rounding does not tell
+/// apart (below), are two answers to one question, and a triple where no place
+/// overlaps it at all is the model's corner and its surfaces disagreeing by more
+/// than the boxes and that room allow. Both give `None`, and neither is a
+/// refusal: it is this triple saying nothing about this corner while another may
+/// still place it.
 ///
 /// # The stored corner is grown first, and that is a tolerance
 ///
@@ -2060,6 +2061,26 @@ fn its_reading_lets_a_crossing_in_through_a_face_it_does_not_cut(
 /// to bake (§75.6). A room of the rounding alone refused a two-millimetre block
 /// with a corner a nanometre off one plane (§136.8, §368).
 ///
+/// # Two places inside the room are told apart by the rounding alone
+///
+/// The tolerance can hold two places the corner's own rounding does not. A thin
+/// bar's circle crossing a thick bar's rim close to where the two touch does it:
+/// a block 5 long on a bar of radius 2, united with bars of radius 1 turned
+/// `0.2` about `z`, put two places of one triple `3.8e-9` apart inside a room
+/// of `5.198e-9`, and the corner was refused `Undecidable`, though the stored
+/// corner was inside the box of one and `3.8e-9` from the other. A block 50
+/// long was refused so at 32 of 63 turns (Q3255).
+///
+/// The tolerance is there for a corner placed off its plane by up to that much,
+/// and it is what makes the two places one question. A corner its rounding ties
+/// to one place was written down there, so when the room holds two, the corner
+/// grown by [`what_writing_the_corner_down_cost`] alone is asked again, and the
+/// one place it holds is the one. It still has to be the only one: two inside
+/// the rounding are two answers, and a corner the rounding ties to neither is
+/// not placed by the nearer, which would be a guess the tolerance made. The
+/// rounding is part of the room, so a room that holds no place makes this ask
+/// nothing new.
+///
 /// **This never places the point.** It picks among places the surfaces already
 /// agree on; the geometry comes from the meet, which is what keeps a wrong
 /// cached corner from moving a right one. A corner placed within the room is
@@ -2071,18 +2092,23 @@ fn the_place_the_model_points_at(
     validate_allows: f64,
 ) -> Option<PredicatePoint> {
     let stored = where_the_model_puts_it.enclosure();
-    let room = what_writing_the_corner_down_cost(stored) + validate_allows;
-    let mut found = None;
-    for place in places {
-        if !boxes_overlap(place.enclosure(), stored, room) {
-            continue;
-        }
-        if found.is_some() {
-            return None;
-        }
-        found = Some(*place);
-    }
-    found
+    let writing_it_down = what_writing_the_corner_down_cost(stored);
+    the_only_place_within(places, stored, writing_it_down + validate_allows)
+        .or_else(|| the_only_place_within(places, stored, writing_it_down))
+}
+
+/// The one place of `places` whose box overlaps `stored` grown by `room`, or
+/// `None` when none does or more than one does.
+fn the_only_place_within(
+    places: &[PredicatePoint],
+    stored: [Interval; 3],
+    room: f64,
+) -> Option<PredicatePoint> {
+    let mut within = places
+        .iter()
+        .filter(|place| boxes_overlap(place.enclosure(), stored, room));
+    let only = within.next().copied();
+    if within.next().is_some() { None } else { only }
 }
 
 /// How far a corner can read off a plane it is on purely because the plane
@@ -2869,7 +2895,10 @@ mod tests {
     use rcad_geom::{Axis, Isometry, Plane, Point, Scale, Sphere, Surface, Vector};
     use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 
-    use super::{Bounds, bake, derive_a_corner, what_writing_the_corner_down_cost};
+    use super::{
+        Bounds, bake, boxes_overlap, derive_a_corner, the_place_the_model_points_at,
+        what_writing_the_corner_down_cost,
+    };
     use crate::VertexKey;
     use crate::validate::{CornerRoom, MEASURING_SLACK, side_of_surface};
     use crate::{Error, Model, SolidKey};
@@ -3794,6 +3823,99 @@ mod tests {
         assert!(
             matches!(refused, Err(Error::Undecidable { .. })),
             "two places both holding the stored corner is not an answer, it was {refused:?}"
+        );
+    }
+
+    /// Two places inside the room `validate` grants a corner are told apart by
+    /// what writing the corner down cost, when that holds only one of them.
+    ///
+    /// **The numbers are a real shape's** (Q3255): a block 5 long on a thick
+    /// bar of radius 2, united with a bar of radius 1 at `x = −1` and then with
+    /// one at `x = 1`, all turned `0.2` about `z`. In the last union the
+    /// `x = −1` bar's circle on `z = −2` crosses the thick bar's rim at these
+    /// two places, `3.8e-9` apart. The room is a modelling tolerance of `1e-9`
+    /// of the solid's size, `5.198e-9`, and holds both, so the corner was
+    /// refused `Undecidable` where three surfaces meet. The stored corner is
+    /// inside the first place's box and `3.8e-9` from the second, and its own
+    /// rounding, `2.8e-14`, holds the first alone.
+    ///
+    /// A corner stored a third of the way from the first place to the second is
+    /// past that rounding from both, so it is still two answers, and the nearer
+    /// is not taken for being nearer.
+    #[test]
+    fn two_places_inside_the_room_validate_grants_are_told_apart_by_the_corners_rounding() {
+        let on_the_bottom = |x: [f64; 2], y: [f64; 2]| {
+            PredicatePoint::Constructed([
+                Interval::new(x[0], x[1]).expect("a box round x"),
+                Interval::new(y[0], y[1]).expect("a box round y"),
+                Interval::exactly(-2.0),
+            ])
+        };
+        let first = on_the_bottom(
+            [-1.9601331553014836, -1.9601331553014825],
+            [-0.3973386634696573, -0.3973386634696569],
+        );
+        let second = on_the_bottom(
+            [-1.9601331560634845, -1.9601331560634834],
+            [-0.39733865971058796, -0.3973386597105875],
+        );
+        let stored = [-1.9601331553014831, -0.39733866346965707, -2.0];
+        let validate_allows = 5.198410758209039e-9;
+
+        let writing_it_down =
+            what_writing_the_corner_down_cost(PredicatePoint::from(stored).enclosure());
+        let within = |place: PredicatePoint, corner: [f64; 3], room: f64| {
+            boxes_overlap(
+                place.enclosure(),
+                PredicatePoint::from(corner).enclosure(),
+                room,
+            )
+        };
+        assert!(
+            [first, second].iter().all(|&place| within(
+                place,
+                stored,
+                writing_it_down + validate_allows
+            )),
+            "the room validate grants holds both places, which is the refusal this is about"
+        );
+        assert!(
+            within(first, stored, writing_it_down) && !within(second, stored, writing_it_down),
+            "the {writing_it_down:e} writing the corner down cost holds the first place alone"
+        );
+        for places in [[first, second], [second, first]] {
+            assert_eq!(
+                the_place_the_model_points_at(
+                    &places,
+                    PredicatePoint::from(stored),
+                    validate_allows
+                ),
+                Some(first),
+                "the place the corner's own rounding holds is the one, whichever comes first"
+            );
+        }
+
+        let middle =
+            |place: PredicatePoint| place.enclosure().map(|side| (side.lo() + side.hi()) / 2.0);
+        let [from, to] = [first, second].map(middle);
+        let a_third_of_the_way: [f64; 3] =
+            core::array::from_fn(|axis| from[axis] + (to[axis] - from[axis]) / 3.0);
+        assert!(
+            [first, second].iter().all(|&place| {
+                within(place, a_third_of_the_way, writing_it_down + validate_allows)
+                    && !within(place, a_third_of_the_way, writing_it_down)
+            }),
+            "a third of the way along is inside the room from both places and past the rounding \
+             from both"
+        );
+        assert_eq!(
+            the_place_the_model_points_at(
+                &[first, second],
+                PredicatePoint::from(a_third_of_the_way),
+                validate_allows
+            ),
+            None,
+            "a corner the rounding cannot tie to one place is not placed by the nearer"
         );
     }
 
