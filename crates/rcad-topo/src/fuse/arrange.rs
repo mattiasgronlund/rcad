@@ -7548,10 +7548,13 @@ impl<'f> Arrangement<'f> {
     /// two planes' line, and the other node's plane climbs one way all along
     /// it. The plate of
     /// `tests/a_bar_with_a_leaning_cap_cut_beside_its_rim_corner.rs` leaning
-    /// `(0.1, 0, 1)` and turned `0.4` about `x` was refused `Undecidable`
-    /// "order along a crossing" on its pipe face, along the seam, where the
-    /// seam corner and the meet of the seam's plane, the block's floor and the
-    /// pipe are a rounding apart (Q3236).
+    /// `(0.1, 0, 1)` or `(−0.1, 0, 1)` and turned `0.4` about `x` was refused
+    /// `Undecidable` "order along a crossing" on its pipe face, along the
+    /// seam, between the seam corner and the meet of the seam's plane, the
+    /// block's floor and the pipe, which the boxes do not tell apart. Turned
+    /// about `z`, the same two are put in order along
+    /// the seam by this reading too, from
+    /// [`Arrangement::as_a_corner_written_down_off_its_meet_says`] (Q3236).
     fn lies_forward_of_the_other(
         &self,
         crossing: usize,
