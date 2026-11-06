@@ -95,9 +95,9 @@ use rcad_predicates::{
 use smallvec::SmallVec;
 
 use crate::holds::{
-    WhereTheCurveIsCentred, a_picker_that_tells_the_two_arcs_apart,
+    WhereTheCurveIsCentred, a_picker_that_tells_the_two_arcs_apart, dot, exactly,
     the_nappe_an_arc_that_does_not_close_is_on, the_nappe_of, the_picker_naming_the_circle_through,
-    where_a_closed_crossing_is_centred,
+    the_way_into_an_arc, where_a_closed_crossing_is_centred,
 };
 use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{FaceUse, ShellUse, WireStep};
@@ -6727,12 +6727,19 @@ impl Assembly {
     /// [`Assembly::the_surface_that_cut_each_edge_its_faces_do_not_name`] gives.
     fn how_each_edge_runs(&self, policy: &Policy, log: &mut ProvenanceLog) -> Result<Vec<EdgeRun>> {
         let cut_by = self.the_surface_that_cut_each_edge_its_faces_do_not_name(policy, log)?;
+        let mut at_each_corner: Vec<Vec<Surface>> = vec![Vec::new(); self.corners.len()];
+        for edge in &self.edges {
+            for &corner in &edge.ends {
+                at_each_corner[corner].extend(edge.carried_by);
+            }
+        }
         self.edges
             .iter()
             .zip(cut_by)
             .zip(self.the_surfaces_of_the_faces_along_each_edge())
             .map(|((edge, cut_by), either_side)| {
-                edge.how_it_runs(&self.corners, cut_by, &either_side)
+                let at_the_ends = edge.ends.map(|corner| at_each_corner[corner].as_slice());
+                edge.how_it_runs(&self.corners, cut_by, &either_side, at_the_ends)
             })
             .collect()
     }
@@ -7436,7 +7443,9 @@ impl Edge {
     /// arc puts it in `and` in place of
     /// [`Edge::the_surface_that_names_it_twice`]. `either_side` is the other:
     /// the surfaces the faces along it are written on, whose spelling that
-    /// names.
+    /// names. `at_the_ends` is every surface an edge ending at each of its two
+    /// corners runs along, which is where a pipe that picks it is found
+    /// ([`Edge::a_picker_the_way_into_the_arc_reads`]).
     ///
     /// # Errors
     ///
@@ -7447,6 +7456,7 @@ impl Edge {
         corners: &[Corner],
         cut_by: Option<Surface>,
         either_side: &[Surface],
+        at_the_ends: [&[Surface]; 2],
     ) -> Result<EdgeRun> {
         match (self.lies_on_two_planes(), self.ends[0] == self.ends[1]) {
             (true, false) => Ok(EdgeRun::Straight),
@@ -7483,6 +7493,11 @@ impl Edge {
                         centred.as_ref().map(|(flat, centre)| (*flat, centre)),
                     )
                     .ok_or(Error::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed)?;
+                    let picker = if centred.is_some() {
+                        self.a_picker_the_way_into_the_arc_reads(picker, facing, ends, at_the_ends)
+                    } else {
+                        picker
+                    };
                     Ok(EdgeRun::PartOfWhereItCrosses {
                         and,
                         picked_by: SmallVec::from_buf([picker]),
@@ -7490,6 +7505,68 @@ impl Edge {
                 }
             },
         }
+    }
+
+    /// `picker` when [`the_way_into_an_arc`] reads it, at the stored `ends`, as
+    /// naming the arc `facing` points into across the chord; otherwise the
+    /// outside or the inside of a pipe that runs along every edge at both
+    /// corners, whichever that reads so; otherwise `picker` as it is.
+    ///
+    /// **A flat picker can name neither arc.** The union of a thick bar of
+    /// radius 2 and a thin one a hair out of its wall, turned by 1 about `z`,
+    /// cuts its cap at `z = −2` along both pipes between two corners `2e−8`
+    /// apart, each stored `1.3e−16` to `2.9e−16` outside both circles. Both edges
+    /// are the long arcs, and the short arc of the thick circle between the
+    /// corners is `2.4e−17` deep, so every plane holding both stored corners
+    /// holds that short arc too: [`the_half_space_both_ends_are_on`] writes one
+    /// with the whole circle in front, which names neither arc, and the next
+    /// fuse refused it (row Q3253).
+    ///
+    /// **A pipe through both corners can.** The other pipe runs through the true
+    /// corners, so its wall cuts this edge's curve there and nowhere else, as
+    /// two circles seen down their parallel axes meet in two points at most. Each
+    /// arc between the corners is then wholly outside that pipe or wholly inside
+    /// it, and the reader reads the one outside off its outside and the one
+    /// inside off its inside, each without asking which the edge is. Where that
+    /// reading agrees with `facing`, the edge is that arc, and it lies on or in
+    /// front of the picker. [`the_way_into_an_arc`] reads a pipe only when its
+    /// axis runs exactly the way the curve's own pipe does, so no other pipe is
+    /// ever taken here.
+    fn a_picker_the_way_into_the_arc_reads(
+        &self,
+        picker: Picker,
+        facing: Vector,
+        ends: [Point; 2],
+        at_the_ends: [&[Surface]; 2],
+    ) -> Picker {
+        let stored = ends.map(|end| PredicatePoint::from(end.coordinates()));
+        let into_the_arc = exactly(facing.components());
+        let reads = |candidate: Picker| {
+            the_way_into_an_arc(
+                &self.carried_by[0],
+                &self.carried_by[1],
+                stored,
+                &[candidate],
+            )
+            .is_some_and(|way| dot(way, into_the_arc).sign() == Decision::Pos)
+        };
+        if reads(picker) {
+            return picker;
+        }
+        let [at_the_start, at_the_end] = at_the_ends;
+        at_the_start
+            .iter()
+            .filter(|surface| !self.carried_by.contains(surface) && at_the_end.contains(surface))
+            .filter_map(|surface| {
+                if let Surface::Cylinder(pipe) = surface {
+                    Some(*pipe)
+                } else {
+                    None
+                }
+            })
+            .flat_map(|pipe| [Picker::OutsideAPipe(pipe), Picker::InsideAPipe(pipe)])
+            .find(|&candidate| reads(candidate))
+            .unwrap_or(picker)
     }
 
     /// Whether both surfaces it runs between are flat, which makes it a straight
@@ -15486,7 +15563,8 @@ mod tests {
                 "leaving corner {from} along {towards:?} is the short arc: {short}"
             );
             assert!(
-                edge.how_it_runs(&corners, None, &edge.carried_by).is_ok(),
+                edge.how_it_runs(&corners, None, &edge.carried_by, [&[], &[]])
+                    .is_ok(),
                 "leaving corner {from} along {towards:?} has a half-space"
             );
         }

@@ -5825,7 +5825,7 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 /// the chord", and `square_to_the_chord` below names the two sides — the chord
 /// read off the corners as they are stored, which for a fused solid is a rounded
 /// world frame and is the same frame every other step here reads (§17.3, §168).
-/// The picker has to settle which side, and it does so in one of five ways:
+/// The picker has to settle which side, and it does so in one of six ways:
 ///
 /// - **Its plane holds both ends**, which is §167's test and what a face built
 ///   by hand gives. That plane then meets the curve's plane in the chord line
@@ -5854,6 +5854,15 @@ fn where_it_is_stored(solid: SolidView<'_>, corner: crate::VertexKey) -> Point {
 ///   side of the chord the picker's normal leans to, and
 ///   [`into_the_arc_square_to_the_chord_from_the_centre`] carries that
 ///   argument.
+/// - **It is a pipe along the curve's own pipe, and the point of the curve
+///   nearest its axis, or farthest from it, is behind it**, which is what an
+///   arc a second pipe's wall cuts out of a cap gives, when the two corners
+///   are so close that every plane holding both holds the short arc between
+///   them too. The first of two bars, one a hair out of the other's wall,
+///   stores two such arcs at `z = −2`, corners `2e−8` apart and the short arc
+///   between them `2.4e−17` deep. The other arc is the one that point is on,
+///   and [`into_the_arc_a_parallel_pipe_picks`] carries that argument; the
+///   first five read only flat pickers.
 ///
 /// # Why the second way works, on a circle and then on an ellipse
 ///
@@ -5951,10 +5960,18 @@ pub(crate) fn the_way_into_an_arc(
             Decision::Zero | Decision::Undecidable { .. } | _ => None,
         }
     });
-    by_its_normal.or_else(|| {
-        let centred = centred.as_ref()?;
-        halves.find_map(|half| {
-            into_the_arc_on_the_centres_side(half, flat, round, centred, boxes, square_to_the_chord)
+    by_its_normal
+        .or_else(|| {
+            let centred = centred.as_ref()?;
+            halves.find_map(|half| {
+                into_the_arc_on_the_centres_side(
+                    half,
+                    flat,
+                    round,
+                    centred,
+                    boxes,
+                    square_to_the_chord,
+                )
                 .or_else(|| {
                     into_the_arc_away_from_the_centre(
                         half,
@@ -5974,8 +5991,21 @@ pub(crate) fn the_way_into_an_arc(
                         square_to_the_chord,
                     )
                 })
+            })
         })
-    })
+        .or_else(|| {
+            let centred = centred.as_ref()?;
+            picked_by.iter().find_map(|picker| {
+                into_the_arc_a_parallel_pipe_picks(
+                    picker,
+                    flat,
+                    round,
+                    centred,
+                    boxes,
+                    square_to_the_chord,
+                )
+            })
+        })
 }
 
 /// Whether `half` says which of the two arcs between `ends` an edge is, by one
@@ -6113,16 +6143,7 @@ fn into_the_arc_on_the_centres_side(
     let [start, end] = ends;
     let middle: [Interval; 3] =
         core::array::from_fn(|axis| (start[axis] + end[axis]) * Interval::exactly(0.5));
-
-    let start_to_from: [Interval; 3] = core::array::from_fn(|axis| from[axis] - start[axis]);
-    let into = match (dot(start_to_from, square_to_the_chord) * across
-        + dot(to_the_centre, square_to_the_chord))
-    .sign()
-    {
-        Decision::Pos => square_to_the_chord,
-        Decision::Neg => square_to_the_chord.map(core::ops::Neg::neg),
-        Decision::Zero | Decision::Undecidable { .. } | _ => return None,
-    };
+    let into = towards_the_centre(flat, centred, start, square_to_the_chord)?;
 
     let facing = exactly(half.normal().components());
     let offset = Interval::exactly(half.offset());
@@ -6369,6 +6390,67 @@ fn into_the_arc_square_to_the_chord_from_the_centre(
     }
 }
 
+/// The way into an arc of the curve a plane cuts a pipe in, when `picker` is
+/// the outside or the inside of a second pipe whose axis runs exactly the same
+/// way, and a point of the curve behind it says which arc it picks; `None`
+/// otherwise.
+///
+/// This is the sixth way [`the_way_into_an_arc`] reads an arc, and the one for
+/// an arc a second pipe's wall cuts out of a cap when the two corners are so
+/// close that every plane holding both also holds the short arc between them.
+/// [`which_arc_a_parallel_pipe_picks`] has the argument for which arc it is:
+/// the one on the centre's side of the chord, and the way into it is
+/// `square_to_the_chord` turned towards the centre, or the one past the chord,
+/// and the way into it is that turned round.
+fn into_the_arc_a_parallel_pipe_picks(
+    picker: &Picker,
+    flat: &Plane,
+    round: &Surface,
+    centred: &WhereTheCurveIsCentred,
+    ends: [[Interval; 3]; 2],
+    square_to_the_chord: [Interval; 3],
+) -> Option<[Interval; 3]> {
+    let on_the_centres_side = which_arc_a_parallel_pipe_picks(round, picker, ends)?;
+    let towards = towards_the_centre(flat, centred, ends[0], square_to_the_chord)?;
+    Some(if on_the_centres_side {
+        towards
+    } else {
+        towards.map(core::ops::Neg::neg)
+    })
+}
+
+/// `square_to_the_chord` turned to point from the chord at `start` towards the
+/// centre of the closed curve `flat` cuts, or `None` when the boxes leave the
+/// side open.
+///
+/// That is the sign of `k·(c − start)·s`, with `k = n·along` positive and `c`
+/// the centre: `k·(from − start)·s + (e − n·from)·along·s`, with `n` and `e`
+/// the plane's normal and offset, so the centre is never formed.
+fn towards_the_centre(
+    flat: &Plane,
+    centred: &WhereTheCurveIsCentred,
+    start: [Interval; 3],
+    square_to_the_chord: [Interval; 3],
+) -> Option<[Interval; 3]> {
+    let normal = exactly(flat.normal().components());
+    let from = exactly(centred.from.coordinates());
+    let across = dot(normal, centred.along);
+    if across.sign() != Decision::Pos {
+        return None;
+    }
+    let up = Interval::exactly(flat.offset()) - dot(normal, from);
+    let to_the_centre = centred.along.map(|step| step * up);
+    let start_to_from: [Interval; 3] = core::array::from_fn(|axis| from[axis] - start[axis]);
+    match (dot(start_to_from, square_to_the_chord) * across
+        + dot(to_the_centre, square_to_the_chord))
+    .sign()
+    {
+        Decision::Pos => Some(square_to_the_chord),
+        Decision::Neg => Some(square_to_the_chord.map(core::ops::Neg::neg)),
+        Decision::Zero | Decision::Undecidable { .. } | _ => None,
+    }
+}
+
 /// Which end of an edge on a closed curve says which of the curve's two arcs
 /// between `ends` it is, when only one of them can lie in the box `inside`:
 /// `Some(1)` for the end, `Some(0)` for the start, and `None` when the box
@@ -6471,6 +6553,225 @@ pub(crate) fn which_end_tells_the_arc_a_box_holds(
     } else {
         None
     }
+}
+
+/// A direction that the tangent along which an edge leaves its start reads
+/// positive against, when the edge is an arc of the curve a plane cuts a pipe
+/// in and a pipe along the same axis in `picked_by` says which of the two arcs
+/// between `ends` it is ([`which_arc_a_parallel_pipe_picks`]); `None` when no
+/// picker does.
+///
+/// The fuse's arrangement reads which way an edge runs by its tangent at its
+/// start (`which_way_an_edge_runs_round` in `fuse/arrange.rs`), and against
+/// [`the_way_into_an_arc`], which is square to the chord, that tangent reads
+/// only by how far it leans off the chord. On the chord `2e−8` long that the
+/// first of two bars, one a hair out of the other's wall, stores at `z = −2`,
+/// it leans off by about `5e−9` of its length, and the chord's own direction
+/// is known only to about `8e−8` from ends boxed `1.6e−15` wide, so that sign
+/// cannot be read. This reads the tangent along the chord instead, where it
+/// reads with all of its length.
+///
+/// **The argument.** With `w(X) = X × a` as [`which_arc_a_parallel_pipe_picks`]
+/// has it, let `g(X) = (w(X) − w(start))·(w(end) − w(start))`. It is affine,
+/// zero at the start and above zero at the end, and its gradient is
+/// `a × (w(end) − w(start))`. Round the circle `w` makes of the curve, `g` is
+/// highest and lowest at the two points on the line through the circle's
+/// centre along the chord, and those lie beyond the ends along the chord,
+/// unless the chord runs through the centre. So the arc past the chord holds
+/// neither, and `g` climbs all along it: it leaves the start climbing. The arc
+/// on the centre's side leaves the start the other way round the curve, so it
+/// leaves falling. The direction is the gradient for the arc past the chord,
+/// and the gradient turned round for the arc on the centre's side.
+///
+/// **The edge's tangent never reads zero against it.** That would put the
+/// start at the lowest point of `g`, which makes the chord run through the
+/// centre, and [`which_arc_a_parallel_pipe_picks`] reads such a chord as
+/// neither arc. Every sign is read over the whole of both end boxes, so a
+/// direction that comes back holds at the true ends wherever in their boxes
+/// they are.
+pub(crate) fn the_way_an_arc_a_pipe_picks_leaves_its_start(
+    surface: &Surface,
+    across: &Surface,
+    ends: [PredicatePoint; 2],
+    picked_by: &[Picker],
+) -> Option<[Interval; 3]> {
+    let flat = surface.as_plane().or_else(|| across.as_plane())?;
+    let round = if surface.as_plane().is_some() {
+        across
+    } else {
+        surface
+    };
+    where_a_closed_crossing_is_centred(round, flat)?;
+    let Surface::Cylinder(pipe) = round else {
+        return None;
+    };
+    let boxes = ends.map(PredicatePoint::enclosure);
+    let on_the_centres_side = picked_by
+        .iter()
+        .find_map(|picker| which_arc_a_parallel_pipe_picks(round, picker, boxes))?;
+    let axis = exactly(pipe.axis().direction().components());
+    let [start, end] = boxes.map(|at| cross(at, axis));
+    let climbs = cross(axis, core::array::from_fn(|at| end[at] - start[at]));
+    Some(if on_the_centres_side {
+        climbs.map(core::ops::Neg::neg)
+    } else {
+        climbs
+    })
+}
+
+/// Whether the arc between `ends` that `picker` picks out of the closed curve a
+/// plane cuts the pipe `round` in is the one on the centre's side of the chord,
+/// `Some(true)`, or the one past it, `Some(false)`, when `picker` is the
+/// outside or the inside of a pipe whose axis runs exactly the way `round`'s
+/// does; `None` otherwise.
+///
+/// **Seen down the axis, both pipes are circles.** With `a` the direction of
+/// `round`'s axis, `w(X) = X × a` carries the curve's plane one to one onto
+/// the plane square to `a`, since a plane along `a` does not cut the pipe in a
+/// curve that closes, and it keeps lines lines. `|w(X) − o × a|` is `|a|` times
+/// how far `X` is from an axis along `a` through `o`, so `w` carries the curve
+/// onto the circle of radius `R = r|a|` about `c = o × a`, with `o` and `r` the
+/// pipe's axis origin and radius, and the picker's pipe onto the circle of
+/// radius `ρ = r′|a|` about `p = o′ × a`. The chord's line splits the curve's
+/// image into the images of the two arcs.
+///
+/// **The point asked is `w* = c + t·R·(p − c)/|p − c|`**, with `t` one for an
+/// outside and minus one for an inside: the point of the curve's image nearest
+/// the picker's centre, or farthest from it. It is strictly behind the picker
+/// when `|p − c|` is below `R + ρ` and above `R − ρ` for an outside, and above
+/// `ρ − R` for an inside, which [`a_parallel_pipe_leaves_its_point_behind`]
+/// reads exactly. The arc picked lies on or in front of the picker, because
+/// that is what a picker is, so `w*` is on the other arc.
+///
+/// **Which arc `w*` is on is read by where it falls along the chord**, not by
+/// which side of the chord's line it is on. Write a point of the circle as
+/// `c + u·e + v·m`, with `e` along the chord, `m` square to it pointing from `c`
+/// to the chord's middle `M`, `u² + v² = R²`, and the ends at `u = ±h`,
+/// `v = d = |M − c|`. A point with `|u| < h` has `|v| > d`, so with `v > 0` it is
+/// past the chord; one with `|u| > h` has `|v| < d`, and one with `v < 0` is on
+/// the centre's side either way. So `w*` on `M`'s side of `c` and strictly
+/// between the ends along the chord means the arc picked is the one on the
+/// centre's side, and `w*` on the far side of `c`, or past an end, means the
+/// one past the chord. A chord through the centre, `d = 0`, reads as neither.
+///
+/// **Why along the chord.** On the cap the first of two bars, one a hair out
+/// of the other's wall, stores at `z = −2`, the corners are `2e−8` apart and
+/// boxed `1.6e−15` wide by the next fuse, and `w*` is the middle of the short
+/// arc, `2.4e−17` past the chord's line, which no box that wide can place. But
+/// it is about `1e−8` from either end along the chord, so each reading along
+/// the chord has a margin of about `2e−16` against roundings near `1e−22`. How
+/// far `w*` is behind the picker is a hair, `|p − c|² − 1` above nought, and
+/// that is why it is read exactly.
+///
+/// Every reading of `w*` is multiplied through by `|p − c|`, so nothing
+/// divides, and every sign is read over the whole of both end boxes, so one
+/// that comes back certified holds at the true ends wherever in their boxes
+/// they are.
+fn which_arc_a_parallel_pipe_picks(
+    round: &Surface,
+    picker: &Picker,
+    ends: [[Interval; 3]; 2],
+) -> Option<bool> {
+    let Surface::Cylinder(pipe) = round else {
+        return None;
+    };
+    let (other, outside) = if let Picker::OutsideAPipe(other) = picker {
+        (other, true)
+    } else if let Picker::InsideAPipe(other) = picker {
+        (other, false)
+    } else {
+        return None;
+    };
+    if a_parallel_pipe_leaves_its_point_behind(pipe, other, outside) != Some(true) {
+        return None;
+    }
+    let toward = Interval::exactly(if outside { 1.0 } else { -1.0 });
+    let axis = exactly(pipe.axis().direction().components());
+    let centre = cross(exactly(pipe.axis().origin().coordinates()), axis);
+    let other_centre = cross(exactly(other.axis().origin().coordinates()), axis);
+    let apart: [Interval; 3] = core::array::from_fn(|at| other_centre[at] - centre[at]);
+    let how_far_apart = dot(apart, apart).sqrt()?;
+    if how_far_apart.sign() != Decision::Pos {
+        return None;
+    }
+    let radius = Interval::exactly(pipe.radius()) * dot(axis, axis).sqrt()?;
+    let reach = apart.map(|step| step * radius * toward);
+    let [start, end] = ends.map(|at| cross(at, axis));
+    let chord: [Interval; 3] = core::array::from_fn(|at| end[at] - start[at]);
+    let to_the_middle: [Interval; 3] =
+        core::array::from_fn(|at| start[at] + end[at] - Interval::exactly(2.0) * centre[at]);
+    let on_the_middles_side = (toward * dot(apart, to_the_middle)).sign();
+    if on_the_middles_side == Decision::Neg {
+        return Some(false);
+    }
+    if on_the_middles_side != Decision::Pos {
+        return None;
+    }
+    let from_a_corner = |corner: [Interval; 3]| -> [Interval; 3] {
+        core::array::from_fn(|at| (centre[at] - corner[at]) * how_far_apart + reach[at])
+    };
+    let past_the_start = dot(from_a_corner(start), chord).sign();
+    let short_of_the_end = (-dot(from_a_corner(end), chord)).sign();
+    if past_the_start == Decision::Neg || short_of_the_end == Decision::Neg {
+        return Some(false);
+    }
+    (past_the_start == Decision::Pos && short_of_the_end == Decision::Pos).then_some(true)
+}
+
+/// Whether the point of `pipe`'s circle nearest `other`'s axis, for
+/// `outside`, or farthest from it, otherwise, is strictly behind the outside
+/// or the inside of `other`, read in exact arithmetic; `None` where a product
+/// would round, as for [`TheConeAlongWhereTwoPlanesMeet`], and `Some(false)`
+/// when the two axes do not run exactly the same way or a sum overflowed.
+///
+/// With `a` the direction of `pipe`'s axis, `D = o′ × a − o × a` and
+/// `reach(s) = s²|a|²`, that point is behind the outside when
+/// `|D|² < reach(r + r′)` and either `r ≤ r′` or `|D|² > reach(r − r′)`, and
+/// behind the inside when `r > r′` or `|D|² > reach(r − r′)`
+/// ([`which_arc_a_parallel_pipe_picks`] has why).
+fn a_parallel_pipe_leaves_its_point_behind(
+    pipe: &rcad_geom::Cylinder,
+    other: &rcad_geom::Cylinder,
+    outside: bool,
+) -> Option<bool> {
+    let crossed = |one: [f64; 3], two: [f64; 3], axis: usize| -> Option<Vec<f64>> {
+        let (next, after) = ((axis + 1) % 3, (axis + 2) % 3);
+        let (entries, used) =
+            difference_of_two_products(one[next], two[after], one[after], two[next])?;
+        Some(entries[..used].to_vec())
+    };
+    let negated =
+        |expansion: &[f64]| -> Vec<f64> { expansion.iter().map(|entry| -entry).collect() };
+    let axis = pipe.axis().direction().components();
+    let other_axis = other.axis().direction().components();
+    for at in 0..3 {
+        if expansion_sign(&crossed(axis, other_axis, at)?) != Decision::Zero {
+            return Some(false);
+        }
+    }
+    let [origin, other_origin] = [pipe, other].map(|it| it.axis().origin().coordinates());
+    let mut apart = Vec::new();
+    let mut length = Vec::new();
+    for at in 0..3 {
+        let step = added(
+            &crossed(other_origin, axis, at)?,
+            &negated(&crossed(origin, axis, at)?),
+        );
+        apart = added(&apart, &multiplied(&step, &step)?);
+        length = added(&length, &multiplied(&[axis[at]], &[axis[at]])?);
+    }
+    let (radius, other_radius) = (pipe.radius(), other.radius());
+    let beyond = |across: Vec<f64>| -> Option<Decision> {
+        let reach = multiplied(&multiplied(&across, &across)?, &length)?;
+        Some(expansion_sign(&added(&apart, &negated(&reach))))
+    };
+    let past_the_difference = || beyond(added(&[radius], &[-other_radius]));
+    Some(if outside {
+        beyond(added(&[radius], &[other_radius]))? == Decision::Neg
+            && (radius <= other_radius || past_the_difference()? == Decision::Pos)
+    } else {
+        radius > other_radius || past_the_difference()? == Decision::Pos
+    })
 }
 
 /// Where the closed curve `flat` cuts a round surface in is centred: walk
@@ -14517,6 +14818,184 @@ mod tests {
                 dot(way, exactly(leaning)).sign(),
                 Decision::Pos,
                 "facing {facing}: {way:?}"
+            );
+        }
+    }
+
+    /// **A thin pipe a hair out of a thick pipe's wall names the long arc of
+    /// the thick pipe's circle, and the thick pipe names the long arc of the
+    /// thin one's**, where no plane can.
+    ///
+    /// The corners, the cap and the two pipes are the ones the union of a thick
+    /// bar of radius 2 and a thin bar of radius 1 a hair out of its wall,
+    /// turned by 1 about `z`, stores
+    /// (`a_thin_bar_a_hair_out_of_a_thick_bars_wall_turned.rs`, Q3253). The
+    /// corners are `2e−8` apart and each is `1.3e−16` to `2.9e−16` outside both
+    /// circles, and the thick circle's short arc between them is `2.4e−17`
+    /// deep, so every plane that holds both corners holds that short arc too.
+    /// Both long arcs are on their centre's side of the chord, and both centres
+    /// are along `(0.54, 0.84)` from the corners. Read on the stored corners,
+    /// and on boxes `1.6e−15` wide round them, as the next fuse solves them.
+    #[test]
+    fn a_thin_pipe_a_hair_out_of_a_thick_pipes_wall_names_the_long_arc_of_each() {
+        let up_z = |x: f64, y: f64, z: f64| {
+            Axis::new(Point::new(x, y, z), Vector::new(0.0, 0.0, 1.0)).expect("a direction")
+        };
+        let thick = Cylinder::new(up_z(0.0, 0.0, -2.0), 2.0).expect("a positive radius");
+        let thin = Cylinder::new(up_z(-0.5403023058681398, -0.8414709848078965, -3.0), 1.0)
+            .expect("a positive radius");
+        let cap = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, -2.0), Vector::new(0.0, 0.0, -1.0))
+                .expect("a unit normal"),
+        );
+        let corners = [
+            [-1.0806046200201131, -1.6829419642968049, -2.0],
+            [-1.080604603452446, -1.6829419749347816, -2.0],
+        ];
+        let boxed = corners.map(|[x, y, z]| {
+            let round = |at: f64| Interval::new(at - 8e-16, at + 8e-16).expect("an interval");
+            PredicatePoint::Constructed([round(x), round(y), Interval::exactly(z)])
+        });
+        let towards_the_centres = exactly([0.5403023058681398, 0.8414709848078965, 0.0]);
+        for ends in [corners.map(PredicatePoint::from), boxed] {
+            for (round, picker) in [
+                (thick, Picker::OutsideAPipe(thin)),
+                (thin, Picker::InsideAPipe(thick)),
+            ] {
+                let way = the_way_into_an_arc(&cap, &Surface::Cylinder(round), ends, &[picker])
+                    .unwrap_or_else(|| panic!("{picker:?} on {ends:?}: no way into the arc"));
+                assert_eq!(
+                    dot(way, towards_the_centres).sign(),
+                    Decision::Pos,
+                    "{picker:?} on {ends:?}: {way:?}"
+                );
+            }
+        }
+    }
+
+    /// **A pipe that crosses a circle's pipe names the arc outside it by its
+    /// outside and the arc inside it by its inside, and a pipe the circle never
+    /// dips into names nothing.**
+    ///
+    /// The pipes of radius 5 up the `z` axis and up `x = 6` cross the plane
+    /// `z = 0` in circles that meet at `(3, ±4, 0)`. The first circle's arc
+    /// through `(5, 0)` is inside the second pipe and its arc through
+    /// `(−5, 0)` outside, so the way into the one is along `x` and into the
+    /// other against it. Every point of the first circle is outside the pipe of
+    /// radius 1 up `x = 20`, so nothing of it is behind that pipe's outside to
+    /// say which arc is meant.
+    #[test]
+    fn a_pipe_that_crosses_a_circles_pipe_names_each_arc_by_one_side_of_it() {
+        let pipe = |x: f64, radius: f64| {
+            Cylinder::new(
+                Axis::new(Point::new(x, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+                    .expect("a direction"),
+                radius,
+            )
+            .expect("a positive radius")
+        };
+        let floor = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("a unit normal"),
+        );
+        let circle = Surface::Cylinder(pipe(0.0, 5.0));
+        let ends = [[3.0, -4.0, 0.0], [3.0, 4.0, 0.0]].map(PredicatePoint::from);
+        for (picker, along_x) in [
+            (Picker::OutsideAPipe(pipe(6.0, 5.0)), Decision::Neg),
+            (Picker::InsideAPipe(pipe(6.0, 5.0)), Decision::Pos),
+        ] {
+            let way = the_way_into_an_arc(&floor, &circle, ends, &[picker])
+                .unwrap_or_else(|| panic!("{picker:?}: no way into the arc"));
+            assert_eq!(way[0].sign(), along_x, "{picker:?}: {way:?}");
+        }
+        let far = Picker::OutsideAPipe(pipe(20.0, 1.0));
+        assert_eq!(the_way_into_an_arc(&floor, &circle, ends, &[far]), None);
+    }
+
+    /// **The way an arc a pipe picks leaves its start reads the tangent there
+    /// along the chord**, on the long arc and the short one of the circle of
+    /// radius 5 that the pipe up `x = 6` crosses at `(3, ±4, 0)`, and on the
+    /// long arcs the thick and the thin bar's pipes pick at `z = −2` from
+    /// corners `2e−8` apart, boxed `1.6e−15` wide.
+    ///
+    /// From `(3, −4)` the arc outside the second pipe leaves along
+    /// `(−0.8, −0.6)` and the arc inside it along `(0.8, 0.6)`. From the first
+    /// of the two close corners both long arcs leave away from the other
+    /// corner, along `(−0.84, 0.54)`, which is `5e−9` of the chord's length off
+    /// it: square to the chord, that tangent cannot be read from such boxes.
+    #[test]
+    fn the_way_an_arc_a_pipe_picks_leaves_its_start_reads_its_tangent_along_the_chord() {
+        let pipe = |x: f64, y: f64, radius: f64| {
+            Cylinder::new(
+                Axis::new(Point::new(x, y, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
+                radius,
+            )
+            .expect("a positive radius")
+        };
+        let floor = |z: f64| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, 1.0))
+                    .expect("a unit normal"),
+            )
+        };
+        let circle = Surface::Cylinder(pipe(0.0, 0.0, 5.0));
+        let ends = [[3.0, -4.0, 0.0], [3.0, 4.0, 0.0]].map(PredicatePoint::from);
+        for (picker, leaving) in [
+            (Picker::OutsideAPipe(pipe(6.0, 0.0, 5.0)), [-0.8, -0.6, 0.0]),
+            (Picker::InsideAPipe(pipe(6.0, 0.0, 5.0)), [0.8, 0.6, 0.0]),
+        ] {
+            let way =
+                the_way_an_arc_a_pipe_picks_leaves_its_start(&floor(0.0), &circle, ends, &[picker])
+                    .unwrap_or_else(|| panic!("{picker:?}: no way out of the start"));
+            assert_eq!(
+                dot(way, exactly(leaving)).sign(),
+                Decision::Pos,
+                "{picker:?}: {way:?}"
+            );
+        }
+        let far = Picker::OutsideAPipe(pipe(20.0, 0.0, 1.0));
+        assert_eq!(
+            the_way_an_arc_a_pipe_picks_leaves_its_start(&floor(0.0), &circle, ends, &[far]),
+            None
+        );
+
+        let thick = pipe(0.0, 0.0, 2.0);
+        let thin = pipe(-0.5403023058681398, -0.8414709848078965, 1.0);
+        let corners = [
+            [-1.0806046200201131, -1.6829419642968049, -2.0],
+            [-1.080604603452446, -1.6829419749347816, -2.0],
+        ];
+        let boxed = corners.map(|[x, y, z]| {
+            let round = |at: f64| Interval::new(at - 8e-16, at + 8e-16).expect("an interval");
+            PredicatePoint::Constructed([round(x), round(y), Interval::exactly(z)])
+        });
+        let away_from_the_other_corner = exactly([-0.8414709848078965, 0.5403023058681398, 0.0]);
+        for (round, picker) in [
+            (thick, Picker::OutsideAPipe(thin)),
+            (thin, Picker::InsideAPipe(thick)),
+        ] {
+            let leaving = the_way_an_arc_a_pipe_picks_leaves_its_start(
+                &floor(-2.0),
+                &Surface::Cylinder(round),
+                boxed,
+                &[picker],
+            )
+            .unwrap_or_else(|| panic!("{picker:?}: no way out of the start"));
+            assert_eq!(
+                dot(leaving, away_from_the_other_corner).sign(),
+                Decision::Pos,
+                "{picker:?}: {leaving:?}"
+            );
+            let square_to_the_chord =
+                the_way_into_an_arc(&floor(-2.0), &Surface::Cylinder(round), boxed, &[picker])
+                    .unwrap_or_else(|| panic!("{picker:?}: no way into the arc"));
+            assert!(
+                matches!(
+                    dot(square_to_the_chord, away_from_the_other_corner).sign(),
+                    Decision::Undecidable { .. }
+                ),
+                "{picker:?}: the tangent read square to the chord, which this test says it \
+                 cannot be: {square_to_the_chord:?}"
             );
         }
     }

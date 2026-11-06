@@ -427,6 +427,8 @@ pub mod a_stepped_shaft_cut_in_half_and_turned;
 pub mod a_tapered_shaft_with_a_cross_hole;
 #[path = "a_tetrahedron_cut_through_its_apex.rs"]
 pub mod a_tetrahedron_cut_through_its_apex;
+#[path = "a_thin_bar_a_hair_out_of_a_thick_bars_wall_turned.rs"]
+pub mod a_thin_bar_a_hair_out_of_a_thick_bars_wall_turned;
 #[path = "a_thin_wedge_out_of_a_cones_axis.rs"]
 pub mod a_thin_wedge_out_of_a_cones_axis;
 #[path = "a_third_spelling_of_a_surface_a_face_never_sees.rs"]
