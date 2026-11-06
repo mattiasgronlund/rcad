@@ -2,10 +2,12 @@
 //! cube's floor.
 //!
 //! The block is `add_cube(10.0)`, `[0, 10]³`. The tipped cube is a second
-//! `add_cube(10.0)` placed by `Isometry::try_from(([5, 5, 0], [0, 0, s, c]))`
-//! with `s = sin t` and `c = cos t`: a half turn about the axis through the
-//! origin along `(0, s, c)`, which leans `t` from `z` towards `y`, then a move
-//! by `(5, 5, 0)`. That stands it on its edge `y = 5`, `z = 0`,
+//! `add_cube(10.0)` placed by `Isometry::try_from(([5, 5, 0], q))`, with `q`
+//! the turn `[0, 0, s, c]` divided by its length ([`divided_by_its_length`])
+//! as every read divided it until queue row Q3234, and `s = sin t` and
+//! `c = cos t`: a half turn about the axis through the origin along
+//! `(0, s, c)`, which leans `t` from `z` towards `y`, then a move by
+//! `(5, 5, 0)`. That stands it on its edge `y = 5`, `z = 0`,
 //! `−5 ≤ x ≤ 5`, tipped by `2t` about `x`, so the edge lies along the block's
 //! floor `z = 0` from `x = 0` to `x = 5` and crosses the floor's own edge at
 //! `(0, 5, 0)`. Two tilts, `t = 0.038` and `t = 0.081`, as queue row Q1506
@@ -112,8 +114,9 @@ use rcad_predicates::expansion::difference_of_two_products;
 use rcad_predicates::{Decision, Policy, ProvenanceLog, side_of_a_plane_where_three_planes_meet};
 use rcad_topo::{Error, Invalid, Model, Rule, SolidKey};
 
-/// The two tilts, as the quaternion `[w, i, j, k]` that `Isometry::try_from`
-/// reads: `t = 0.038` and `t = 0.081`, each written as Q1506 printed it.
+/// The two tilts, as the quaternion `[w, i, j, k]` that
+/// [`divided_by_its_length`] divides: `t = 0.038` and `t = 0.081`, each
+/// written as Q1506 printed it.
 const TILTS: [[f64; 4]; 2] = [
     [0.0, 0.0, 0.037_990_855_326_937_03, 0.999_278_086_876_484_9],
     [0.0, 0.0, 0.080_911_455_551_998_05, 0.996_721_293_221_157_7],
@@ -842,9 +845,27 @@ fn a_model() -> Model {
 fn the_block_and_the_tipped_cube(model: &mut Model, tilt: [f64; 4]) -> [SolidKey; 2] {
     let block = a_cube(model);
     let tipped = a_cube(model);
-    let placement = Isometry::try_from(([5.0, 5.0, 0.0], tilt)).expect("a placement");
+    let placement =
+        Isometry::try_from(([5.0, 5.0, 0.0], divided_by_its_length(tilt))).expect("a placement");
     model.place_solid(tipped, &placement).expect("a placement");
     [block, tipped]
+}
+
+/// `turn` divided by its length, as `Isometry::try_from` divided every turn
+/// until queue row Q3234, by nalgebra's `UnitQuaternion::from_quaternion`,
+/// which adds the squares as `(i² + k²) + (j² + w²)`.
+///
+/// **Every outcome this file pins was measured on these bits.** The read now
+/// keeps a turn this near length one as it is handed, and dividing moves `s`
+/// and `c` one step up at 16 of the 28 tilts here, the two of [`TILTS`]
+/// among them. The cube's edge lies within a rounding of the floor, so that
+/// step can carry it to the floor's other side: at `t = 0.038` the edge is
+/// proved below the floor on these bits and above it on the kept ones, and
+/// the certified fuses refused for the range there answer. Dividing keeps
+/// Q1688's figures as measured without sweeping the 400 tilts again.
+fn divided_by_its_length([w, i, j, k]: [f64; 4]) -> [f64; 4] {
+    let length = ((i * i + k * k) + (j * j + w * w)).sqrt();
+    [w, i, j, k].map(|part| part / length)
 }
 
 fn a_cube(model: &mut Model) -> SolidKey {
