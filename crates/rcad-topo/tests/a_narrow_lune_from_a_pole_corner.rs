@@ -9,10 +9,10 @@
 //! twice. Every test here aims at that lune.
 //!
 //! Since §200 some wedges are answered, and each of those is measured against
-//! its closed form. Of the 48 cases of each family, wedge by size by rule, 39
-//! answer cut by two knives with `x >= 0` first, 45 with the turned knife first
-//! (since Q1024 reads the side of a half ball's skin off its wire), and all 48
-//! cut by one prism. The rest are refused by name. A case that moves either way
+//! its closed form. All 48 cases of each family, wedge by size by rule, answer
+//! now: cut by two knives with `x >= 0` first since Q3228, with the turned
+//! knife first since Q2499, and cut by one prism since §340.10. Each family
+//! keeps its list of the cases that answer, so a case that is refused again
 //! fails, naming itself.
 //!
 //! The ball's seam is the `+x` half of the meridian in `y = 0`, so a knife
@@ -21,7 +21,6 @@
 use core::f64::consts::PI;
 
 use rcad_geom::{Axis, Deflection, Isometry, Point, Scale, Vector};
-use rcad_mesh::CannotTriangulate;
 use rcad_predicates::{Policy, ProvenanceLog};
 use rcad_topo::{Error, Model, ProfileBuilder, Rule, SolidKey};
 
@@ -68,29 +67,29 @@ const HOW_FAR_UNDER: f64 = 3.0 * DEFLECTION_PER_RADIUS;
 /// and so does the 10 degree one at radii 0.001 and 1000. The union needed one
 /// more step: the knife's face then has a half disk hole, two corners that
 /// wind round nothing, and `assemble.rs`'s `rings_round` panicked on it. The
-/// difference is refused at 90 degrees, for the range since Q1664. It panicked
-/// in `arrange.rs`'s `cut_the_crossings_into_arcs` until that walked round a
-/// closed crossing, §197.
+/// difference was refused at 90 degrees, for the range from Q1664 until Q3228
+/// (below). It panicked in `arrange.rs`'s `cut_the_crossings_into_arcs` until
+/// that walked round a closed crossing, §197.
 ///
 /// Since the fuse steps a curved piece's point towards every cut's material
 /// (§200), the cases in `answered` get past the curved pieces and answer, and
 /// each is measured against its closed form. Since §330, the 170 degree
 /// wedge's difference and union answer at every size, and so do the 10 degree
 /// wedge's at radii 1 and 3. Most of the rest
-/// now reach the flat pieces and assembly and are refused there instead. A case
-/// that moves either way fails, naming itself.
+/// then reached the flat pieces and assembly and were refused there instead. A
+/// case that moves either way fails, naming itself.
 ///
 /// **No case stops at `order along a crossing` since Q901**, which orders two
 /// meets of three planes that share two by the planes when their boxes cannot
-/// say. None answers for it: all twelve 45 degree cases, every size and every
-/// rule, are refused at *a point inside a piece of a face* instead, and that
-/// name takes the old one's place in [`moved_from_its_pin`].
+/// say. None answered for it: all twelve 45 degree cases, every size and every
+/// rule, were refused at *a point inside a piece of a face* instead, and that
+/// name took the old one's place in [`moved_from_its_pin`].
 ///
 /// **Ten of those twelve answer since Q1019**, which places a piece no point
 /// was found in by a corner the other solid's ray puts strictly inside or
 /// outside it (`docs/decisions.md` §365.7). Each is one solid that validates
-/// and measures its closed form. The difference at radii 0.001 and 1000 is
-/// refused for the range.
+/// and measures its closed form. The difference at radii 0.001 and 1000 was
+/// refused for the range until Q3228.
 ///
 /// **Q1614 moved two differences**, the 45 degree wedge's at radius 1000 and
 /// the 10 degree wedge's at radius 0.001, from
@@ -100,34 +99,45 @@ const HOW_FAR_UNDER: f64 = 3.0 * DEFLECTION_PER_RADIUS;
 /// `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` to `DynamicRangeTooWide`, by
 /// asking the range before the answer's edges are named, so no case is refused
 /// that name now and it is no longer one this file accepts.
-/// [`two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range`]
-/// pins all nine by ratio.
+///
+/// **All nine of those answer since Q3228**, and every case here with them.
+/// [`the_nine_wedges_once_refused_for_the_range_answer_under_either_policy`]
+/// says what kept them apart and pins them under a tolerant policy too.
 #[test]
 fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_refused_by_name() {
     let answered = [
         (90.0, 1.0, "Intersection"),
+        (90.0, 1.0, "Difference"),
         (90.0, 1.0, "Union"),
         (90.0, 0.001, "Intersection"),
+        (90.0, 0.001, "Difference"),
         (90.0, 0.001, "Union"),
         (90.0, 1000.0, "Intersection"),
+        (90.0, 1000.0, "Difference"),
         (90.0, 1000.0, "Union"),
         (90.0, 3.0, "Intersection"),
+        (90.0, 3.0, "Difference"),
         (90.0, 3.0, "Union"),
         (45.0, 1.0, "Intersection"),
         (45.0, 1.0, "Difference"),
         (45.0, 1.0, "Union"),
         (45.0, 0.001, "Intersection"),
+        (45.0, 0.001, "Difference"),
         (45.0, 0.001, "Union"),
         (45.0, 1000.0, "Intersection"),
+        (45.0, 1000.0, "Difference"),
         (45.0, 1000.0, "Union"),
         (45.0, 3.0, "Intersection"),
         (45.0, 3.0, "Difference"),
         (45.0, 3.0, "Union"),
+        (10.0, 1.0, "Intersection"),
         (10.0, 1.0, "Difference"),
         (10.0, 1.0, "Union"),
         (10.0, 0.001, "Intersection"),
+        (10.0, 0.001, "Difference"),
         (10.0, 0.001, "Union"),
         (10.0, 1000.0, "Intersection"),
+        (10.0, 1000.0, "Difference"),
         (10.0, 1000.0, "Union"),
         (10.0, 3.0, "Intersection"),
         (10.0, 3.0, "Difference"),
@@ -179,159 +189,104 @@ fn a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_r
     assert!(moved.is_empty(), "{}", moved.join("\n"));
 }
 
-/// Nine of the cases [`a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_refused_by_name`]
-/// lets through as refused by name are refused for the range: the 90 degree
-/// wedge's difference at every radius, the 45 degree wedge's at radii 0.001
-/// and 1000, and the 10 degree wedge's intersection at radius 1 and its
-/// difference at radii 0.001 and 1000.
+/// Nine cases of [`a_wedge_cut_from_a_ball_by_two_knives_through_its_polar_axis_is_answered_or_refused_by_name`]
+/// were refused for the range until Q3228: the 90 degree wedge's difference at
+/// every radius, the 45 degree wedge's at radii 0.001 and 1000, and the 10
+/// degree wedge's intersection at radius 1 and its difference at radii 0.001
+/// and 1000. Each answers now under a certified and a tolerant policy alike,
+/// as one solid that validates and measures its closed form, and its only
+/// corners on the polar axis are the poles themselves. The certified fuse
+/// logs nothing.
 ///
-/// **Q1614 moved two of them**, the 45 degree difference at radius 1000 and
-/// the 10 degree one at radius 0.001. Until then the fuse nested the answer's
-/// shells before it asked the range, and both were refused
-/// `CannotNameWhichPieceOfACrossingThisIs` there (`docs/decisions.md` §87.3).
+/// **The turned knife's stored plane misses the poles by a rounding** (see
+/// [`a_knife_through_the_axis`]), while the half ball's corners at its poles
+/// are stored at `(0, 0, ±r)` exactly. The fuse kept the place where that
+/// plane crosses the circle of `x = 0` apart from the pole, a rounding from it
+/// in `y`, so the answer had an arc of `x = 0` from a pole to a corner beside
+/// it, such as `(0, 0, −1)` to `(0, 4.4e−16, −1)`: a chord a rounding long
+/// beside a coordinate of 1, past the range §87.3 names. A certified policy
+/// refused each `DynamicRangeTooWide`, since Q1614 for two of them and since
+/// Q1664 for the other seven. A tolerant policy only warns of the range, and
+/// there the mesher and the check of the answer refused them further on: the
+/// 90 degree differences at radii 1, 0.001 and 1000 and the 10 degree
+/// intersection for loops that touch beside a pole, the 45 degree difference
+/// at radius 1000 for corners that coincide, and the other four for faces
+/// that do not agree which way they face.
 ///
-/// **Q1664 moved the other seven.** The arc where the ball crosses the first
-/// knife's plane `x = 0` runs from a pole to a corner a rounding off it, such
-/// as `(0, 0, −1)` to `(0, 4.4e−16, −1)`, so its chord lies along the tangent
-/// at the pole and nothing could say which way the arc leaves it. Each was
-/// refused `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` while the edges
-/// were named, before the range was asked. The fuse now asks the range first,
-/// of the answer's corners and edges as they are once its pieces are joined,
-/// and a chord a rounding long beside a coordinate of 1 is the limit §87.3
-/// names. A tolerant policy only warns of the range, and there the arc is named
-/// since Q1867 and the seven are refused further on
-/// ([`two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy`]).
+/// **Since Q3228 the pole is taken as that place.** `arrange.rs`'s
+/// `a_corner_of_two_surfaces_is_where_the_partner_crosses_their_curve` takes a
+/// corner with two surfaces round it as where a third crosses their curve when
+/// that crossing is the one place within what writing the corner down cost.
+/// It no longer asks that the two boxes also share a point, which the place a
+/// rounding off the pole in `y` did not.
 #[test]
-fn two_wedges_cut_by_two_knives_are_refused_their_difference_for_the_range() {
-    for (degrees, radius, rule, ratio) in [
-        (90.0, 1.0, Rule::Difference, 1.351_079_888_211_149e16),
-        (90.0, 0.001, Rule::Difference, 1.290_583_773_813_634_8e16),
-        (90.0, 1000.0, Rule::Difference, 1.419_201_563_247_005_2e16),
-        (90.0, 3.0, Rule::Difference, 4.053_239_664_633_447e16),
-        (45.0, 0.001, Rule::Difference, 6_917_529_027_641_085.0),
-        (45.0, 1000.0, Rule::Difference, 1.319_413_953_331_200_8e16),
-        (10.0, 1.0, Rule::Intersection, 5_435_766_241_772_876.0),
-        (10.0, 0.001, Rule::Difference, 5_566_224_631_575_426.0),
-        (10.0, 1000.0, Rule::Difference, 5_308_365_470_481_324.0),
+fn the_nine_wedges_once_refused_for_the_range_answer_under_either_policy() {
+    for (degrees, radius, rule) in [
+        (90.0, 1.0, Rule::Difference),
+        (90.0, 0.001, Rule::Difference),
+        (90.0, 1000.0, Rule::Difference),
+        (90.0, 3.0, Rule::Difference),
+        (45.0, 0.001, Rule::Difference),
+        (45.0, 1000.0, Rule::Difference),
+        (10.0, 1.0, Rule::Intersection),
+        (10.0, 0.001, Rule::Difference),
+        (10.0, 1000.0, Rule::Difference),
     ] {
-        let mut model = a_model(radius);
-        let ball = model
-            .add_ball(radius, &Isometry::identity())
-            .expect("a ball");
-        let first = a_knife_through_the_axis(&mut model, radius, 0.0);
-        let half = fused(&mut model, &[ball], &[first], Rule::Intersection);
-        let second = a_knife_through_the_axis(&mut model, radius, 180.0 - degrees);
-        let mut log = ProvenanceLog::new();
-        let outcome = model.fuse(&half, &[second], rule, &Policy::certified(), &mut log);
-        let Err(Error::Invalid(rcad_topo::Invalid::DynamicRangeTooWide { ratio: found })) = outcome
-        else {
-            panic!("{degrees} degrees, radius {radius}, {rule:?}: {outcome:?}");
-        };
-        assert_eq!(found, ratio, "{degrees} degrees, radius {radius}, {rule:?}");
-        assert!(
-            log.records().is_empty(),
-            "{degrees} degrees, radius {radius}, {rule:?}: a certified fuse logs nothing: {:#?}",
-            log.records()
-        );
-    }
-}
-
-/// The same nine cases under a tolerant policy, where a range too wide is only
-/// a warning, so each goes on past the range check and is refused by name
-/// further on. Each is past the range §87.3 names: the arc of `x = 0` from a
-/// pole to a corner a rounding off it is a chord `4.4e−16` long beside a
-/// coordinate of 1.
-///
-/// **The seven Q1664 moved were refused
-/// `ACurvedEdgeThatIsPartOfACrossingCannotBeNamed` until Q1867**, as all
-/// seven were under every policy before Q1664: that arc has its chord along
-/// the tangent at the pole. **Q1614's two were refused
-/// `CannotNameWhichPieceOfACrossingThisIs` until Q2081**, as they were before
-/// Q1614. Their arc from a pole to the corner a rounding off it has its
-/// chord along the tangent too, and the crossing at the pole, squared off
-/// against that chord, came out not nought but a rounding along it:
-/// `(0, ±4.7e−38, 0)` at radius 1000 and `(0, ±3.3e−55, 0)` at radius 0.001.
-/// The fuse took that rounding as the way into the arc, and a side of the
-/// chord read along the chord names no one piece of the circle. Since Q2081
-/// `Edge::the_way_across_the_chord_into_the_arc` faces an arc of a closed
-/// curve whose two ends square off the same way by which way it sets off
-/// along its chord, here away from the ball's centre.
-///
-/// **Q1867 names that arc** (`Edge::the_way_into_an_arc_along_its_own_chord`
-/// in `fuse/assemble.rs`) and none of the seven answers for it, nor does
-/// either of Q1614's two for Q2081. Each answer's corners, edges and faces are
-/// right — the 90 degree difference at radius 1 and the 10 degree one at
-/// radius 0.001 were dumped, the arcs from each pole to the corner beside it
-/// picked as the short ones — and each is refused further on:
-///
-/// - **the 45 degree difference at radius 1000 for corners that coincide**, by
-///   the mesher, which sees the pole and the corner a rounding from it as one
-///   point on the face's own map. Until Q2290 all four 90 degree ones were
-///   refused so on the sphere's lune too. Since then `mesh.rs` cuts a loop that
-///   names one place twice into lobes (`what_the_triangulator_can_cut`), so the
-///   lune is meshed, and the 90 degree ones stop further on, at the flat face of
-///   `x = 0`;
-/// - **the 90 degree differences at radii 1, 0.001 and 1000 for loops that
-///   touch**, at that flat face, beside the north pole: at `(0, 4.44e−16, 1)`,
-///   `(0, 4.6e−19, 0.001)` and `(0, 4.23e−13, 1000)`. Until Q2352 radii 1 and
-///   1000 were refused there for corners that coincide, and radius 3 for two
-///   patches drawing one side, on a place the walk named twice. The walk along
-///   the arc of `x = 0` from the south pole `P` to the corner `C` `4.4e−16`
-///   from it put its one point `P′` at `P` itself, so the lune and the flat face
-///   each named `P` twice in its loop, along `P P′` and `P′ C`. At radius 3 each
-///   face cut a lobe off there, and the side `P C` that closes the lobe it kept
-///   lay inside its patch: drawn by both patches, it was used four times
-///   (`TwoPatchesOfTheMeshDrewTheSameSide { drawn: 4, used: 4 }`). Since Q2352
-///   `mesh.rs` drops a point of a walk stored at one of the edge's ends, so `P′`
-///   is gone;
-/// - **the 90 degree difference at radius 3 for faces that do not agree which
-///   way they face**, since Q2352. Not traced past the name;
-/// - **the 45 degree one at radius 0.001 and the 10 degree ones at radii 0.001
-///   and 1000 for faces that do not agree which way they face**. The faces are
-///   right and the name is not. The walk puts a point on the arc of `x = 0`
-///   from the north pole to the corner beside it, and the flat face of
-///   `x = 0` goes through that point, but the coarsest mesh of the sphere's
-///   face draws the pole straight to the corner and skips it, so the sides
-///   there are not each used once both ways;
-/// - **the 10 degree intersection at radius 1 for loops that touch** at
-///   `(0, −6.4e−16, −1)`, where the two knives' line meets the ball a rounding
-///   past the south pole. Before Q1866 `validate.rs`'s
-///   `the_coarsest_mesh_whose_sides_do_not_cross` walked its ladder down
-///   endlessly there, a rung refused at the same corner each time; it now stops
-///   at the second.
-#[test]
-fn two_wedges_cut_by_two_knives_are_refused_by_name_under_a_tolerant_policy() {
-    const COINCIDE: &str = "CornersCoincide";
-    const FACE_APART: &str = "FacesDoNotAgreeWhichWayTheyFace";
-    const TOUCH: &str = "LoopsTouch";
-    for (degrees, radius, rule, refused) in [
-        (90.0, 1.0, Rule::Difference, TOUCH),
-        (90.0, 0.001, Rule::Difference, TOUCH),
-        (90.0, 1000.0, Rule::Difference, TOUCH),
-        (90.0, 3.0, Rule::Difference, FACE_APART),
-        (45.0, 0.001, Rule::Difference, FACE_APART),
-        (45.0, 1000.0, Rule::Difference, COINCIDE),
-        (10.0, 1.0, Rule::Intersection, TOUCH),
-        (10.0, 0.001, Rule::Difference, FACE_APART),
-        (10.0, 1000.0, Rule::Difference, FACE_APART),
-    ] {
-        let mut model = a_model(radius);
-        let ball = model
-            .add_ball(radius, &Isometry::identity())
-            .expect("a ball");
-        let first = a_knife_through_the_axis(&mut model, radius, 0.0);
-        let half = fused(&mut model, &[ball], &[first], Rule::Intersection);
-        let second = a_knife_through_the_axis(&mut model, radius, 180.0 - degrees);
-        let policy = Policy::tolerant(model.scale().nominal_size());
-        let outcome = model.fuse(&half, &[second], rule, &policy, &mut ProvenanceLog::new());
-        let Err(why) = outcome else {
-            panic!("{degrees} degrees, radius {radius}, {rule:?}: answered {outcome:?}");
-        };
-        assert_eq!(
-            what_stops_the_mesher_or_which_refusal(&why),
-            refused,
-            "{degrees} degrees, radius {radius}, {rule:?}: {why:?}"
-        );
+        let closed_form = what_two_knives_leave()
+            .into_iter()
+            .find_map(|(each, closed_form)| (each == rule).then(|| closed_form(degrees, radius)))
+            .expect("every rule has its closed form");
+        let tolerant = Policy::tolerant(a_model(radius).scale().nominal_size());
+        for (policy, named, logs_nothing) in [
+            (Policy::certified(), "certified", true),
+            (tolerant, "tolerant", false),
+        ] {
+            let case = format!("{degrees} degrees, radius {radius}, {rule:?}, {named}");
+            let mut model = a_model(radius);
+            let ball = model
+                .add_ball(radius, &Isometry::identity())
+                .expect("a ball");
+            let first = a_knife_through_the_axis(&mut model, radius, 0.0);
+            let half = fused(&mut model, &[ball], &[first], Rule::Intersection);
+            let second = a_knife_through_the_axis(&mut model, radius, 180.0 - degrees);
+            let mut log = ProvenanceLog::new();
+            let answer = model
+                .fuse(&half, &[second], rule, &policy, &mut log)
+                .unwrap_or_else(|why| panic!("{case}: refused {why:?}"))
+                .solids()
+                .to_vec();
+            if logs_nothing {
+                assert!(
+                    log.records().is_empty(),
+                    "{case}: a certified fuse logs nothing: {:#?}",
+                    log.records()
+                );
+            }
+            let [solid] = answer[..] else {
+                panic!("{case}: {} solids", answer.len());
+            };
+            model
+                .validate(&Policy::certified(), &mut ProvenanceLog::new())
+                .unwrap_or_else(|why| panic!("{case}: {why:?}"));
+            measures(volume_of(&model, &answer, radius), closed_form);
+            let beside_a_pole: Vec<[f64; 3]> = model
+                .solid(solid)
+                .expect("this model made the key")
+                .faces()
+                .flat_map(|face| face.wires())
+                .flat_map(|wire| wire.points())
+                .map(|corner| corner.coordinates())
+                .filter(|&[x, y, z]| {
+                    x.abs() < 1e-9 * radius
+                        && y.abs() < 1e-9 * radius
+                        && !(x == 0.0 && y == 0.0 && z.abs() == radius)
+                })
+                .collect();
+            assert!(
+                beside_a_pole.is_empty(),
+                "{case}: corners a rounding off the polar axis: {beside_a_pole:?}"
+            );
+        }
     }
 }
 
@@ -1063,24 +1018,4 @@ fn which_refusal(why: &Error) -> &str {
         return "FacesDoNotAgreeWhichWayTheyFace";
     }
     panic!("expected a refusal by name, got {why:?}")
-}
-
-/// What stopped the mesher, for a face it could not mesh, and otherwise
-/// [`which_refusal`].
-fn what_stops_the_mesher_or_which_refusal(why: &Error) -> &str {
-    if let Error::CannotMeshAFace {
-        why: CannotTriangulate::CornersCoincide { .. },
-        ..
-    } = why
-    {
-        return "CornersCoincide";
-    }
-    if let Error::CannotMeshAFace {
-        why: CannotTriangulate::LoopsTouch { .. },
-        ..
-    } = why
-    {
-        return "LoopsTouch";
-    }
-    which_refusal(why)
 }
