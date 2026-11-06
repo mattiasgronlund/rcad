@@ -30106,16 +30106,123 @@ Nobody has run the kernel's walk on any of these, so none of them has a class
 
 ### 464.42 A distance off a plane, and a plane's shift, with two or three products below the normals
 
-DRAFT, unfinished: Q2858's first lane stopped at its budget and handed over.
-The lane after it finishes this subsection, or rewrites it, before the row
-lands. Nothing below is a result yet but the two prints it quotes.
-
-Q2858 asks whether 464.9's `signed.g` holds with `L` at least `2⁻¹⁰²²` and
+Q2858 asked whether 464.9's `signed.g` holds with `L` at least `2⁻¹⁰²²` and
 two or three of its products below `2⁻¹⁰²²` or of a zero factor, and whether
 `shiftplane.g` does with `|n|·L` at least `2⁻¹⁰²²`, split by where each
-product lands as 464.18's `planeall.py` split `plane.g`.
+product lands as 464.18's `planeall.py` split `plane.g`. Three lanes took it
+on 2026-11-06, one after another. The first ran a search and one script that
+failed (5). The second wrote `signedall.py`, which writes the cases. The third
+ran them, fixed the two things that stopped 14 of them (6), ran the controls
+and `coqc`, and wrote this.
 
-**What the first lane ran.**
+Both bounds hold, however the three products land. With `L` at least
+`2⁻¹⁰²²`, `signed_distance_to` is within `7.71u·L`, under the code's `8u·L`;
+with `|n|·L` at least `2⁻¹⁰²²`, a plane's or a half-space's shifted offset is
+within `8u·|n|·L`, under the code's `16u·|n|·L` (2). Gappa proves all 220
+cases, and Coq checks them, modulo their hints (4). Only the 32 cases where no
+product is normal need the condition on `L`, or on `|n|·L`: with one normal
+product a case proves with `L` down to `2⁻¹⁰⁷⁴` (3). Without the condition the
+bound is false: the plane through the origin with normal `(0.6, 0.8, 0)` reads
+the point `(2⁻¹⁰⁷⁴, 0, 0)` at `2⁻¹⁰⁷⁴` where it is `0.6·2⁻¹⁰⁷⁴`, which is
+`0.4·L`, and 464.24's 5 has the half-space.
+
+Every run is Gappa 1.8.0 under 464.4's pin at `-Eprecision=200`, through
+464.13's `one.sh`, unchanged, and `coqc` under 464.5's pins with gappalib
+1.8.0. The code is the base `d8b92629`'s. `signed_distance_to`
+(`plane.rs:400-402`) and `HalfSpace::shifted` (`half_space.rs:244-249`) do the
+arithmetic 464.24 read at `d084a409`: `git diff d084a409 d8b92629` changes
+only comments in `half_space.rs` and `moved_corner.rs`, and in `plane.rs` only
+tests and `TryFrom<[f64; 4]>`, which now keeps as it stands a normal that
+`has_length_one_to_within_a_turn` finds within `NORMAL_LENGTH_ROUNDOFF`
+(`64ε`) of unit length, as `signed.g` assumes. `u` is `2⁻⁵³` and `ε` is `2u`.
+
+**1. The cases.** `signedall.py` (below) writes one script for each kind,
+`signed` for `signed_distance_to` and `shift` for `shiftplane.g`'s offset
+after a shift, each state of the three products, and each choice of which of
+the fold's operations round, as `<kind>_<state>[_u<ops>][_big].g`. 220 in all,
+110 of each kind:
+
+- Each product is `n`, its double at least `2⁻¹⁰²²` with 464.5's lemma; `s`,
+  the product at most `2⁻¹⁰²²` with neither factor zero, what its rounding
+  cost carried as an amount `a_k` of at most `2⁻¹⁰⁷⁵` times the roundings
+  after it, as in 464.24; or `z`, a factor zero, left out of the fold, since
+  adding zero to a double gives the double back (464.13's `addzero.g`).
+  Every product is one of the three: if `|X_k|` is above `2⁻¹⁰²²` and no
+  factor is zero, its double is at least `2⁻¹⁰²²`, since rounding keeps order
+  and `2⁻¹⁰²²` is a double. All three `z` is not written: the value is then
+  the offset, or its negative, exactly.
+- Each of the fold's operations, the sums after the first live product and
+  `value`, is either rounded, its argument at least `2⁻¹⁰⁷⁴`, or written
+  unrounded, `_u<ops>`, as `flatcases.py`'s `_c` cases do. Every input is one
+  of the two: an operation that does not round to itself has an argument that
+  is not zero, and a sum of doubles that is not zero is at least `2⁻¹⁰⁷⁴`.
+- A first sum of two `s` products is written unrounded only. It is a sum of
+  two doubles of at most `2⁻¹⁰²²` each, which `sumexact.g` (below) proves
+  rounds to itself.
+- `nss` and `sns` with all three operations rounded are `_big`, the first sum
+  at least `2⁻¹⁰²¹`, since plain shares reach `8u` there. Below `2⁻¹⁰²¹` that
+  sum rounds to itself, by `sumexact.g`'s second goal, and the same case with
+  the sum unrounded covers it.
+
+The error is each term's error and the amounts. 464.9's averaging gives each
+term a share of the bound `D`: `w/4` of `|nᵢ|·L` for a product that meets `w`
+roundings, `w/4` of `L` for the offset (`|n|·L` for the shift), and each
+amount a quarter of a payer's share. The payer is `L` itself, which needs `L`
+at least `2⁻¹⁰²²` (`|n|·L` for the shift); a normal product, whose `|nᵢ|·L` is
+at least `2⁻¹⁰²²` give or take a rounding, by 464.24's hint; or, in a `_big`
+case, `(|n₀| + |n₁|)·L` for the first sum's two products. The script picks the
+payers that make `D` least, and of two that make it the same, the one that
+takes less out of `L`. It bounds the weighted sum of the `|nᵢ|` by
+Cauchy-Schwarz, on a normal whose `n·n` is within `64ε` of one for `signed`
+and over `|n|` for the shift, rounded up to a multiple of `1/1024`.
+
+The `_big` cases rest on one hypothesis on paper, as 464.24's Cauchy-Schwarz
+ones do: `(|n₀| + |n₁|)·L ≥ (2⁵² − 1)·2⁻¹⁰⁷³`, which is `2⁻¹⁰²¹·(1 − 2u)`.
+With one of the two products normal and the other below the normals, `|S01| ≤
+|t₀| + |t₁| ≤ (1 + u + 2u²)·|n_a|·L + |n_b|·L + 2⁻¹⁰⁷⁵`, by the lemma's ratio
+for the normal one and half of `2⁻¹⁰⁷⁴` for the other, and `|pᵢ| ≤ L`. So
+`|S01| ≥ 2⁻¹⁰²¹` gives `(|n₀| + |n₁|)·L ≥ 2⁻¹⁰²¹·(1 − u/2)/(1 + u + 2u²)`,
+which is above `2⁻¹⁰²¹·(1 − 2u)`.
+
+**2. They prove.** `allcases.sh` writes the 220 and runs them through
+`runall.sh`. Each exits 0, in at most 1.52 s. The largest bounds the averaging
+plans are `7.711u` for `signed`, in `signed_nns`, `signed_nss_big` and
+`signed_sns_big`, and `8.000u` for the shift, in `shift_nss` and `shift_sns`.
+Asked for the best it can do on those five, by `allreach.sh`, Gappa reaches
+`±8.56086e-16`, `7.71u`, for the three signed and `±8.88178e-16`, `8u` and a
+term of order `u²`, for the two shift. `sumexact.g` exits 0 and `coqc`
+accepts it. No case's `.out` holds anything but divisor warnings, 8 to 67 a
+case, and its results, so Gappa checked every hint's two sides equal by
+algebra.
+
+**3. The controls.** `controls.py` writes two for each case, and
+`allcontrols.sh` runs the 440. 437 do as they must:
+
+- `c_<case>_below.g` asks for `1/256` under the bound the case's averaging
+  plans. 217 of the 220 exit 1. The three that prove are `signed_ssz_u01`,
+  `signed_szs_u02` and `signed_zss_u12`, two products below the normals and
+  only `value` rounded, where the plan is `4.418u` and Gappa reaches `4u` by
+  another route. `alllower.sh` asks each for `k/2` u, `k` 1 to 8: 1 to 7 exit
+  1 and 8 exits 0. So in none of the 220 do the hypotheses contradict each
+  other.
+- `c_<case>_anyl.g` lets `L` go down to `2⁻¹⁰⁷⁴`, or `|n|·L` to `2⁻¹¹⁰⁰`. The
+  32 cases that pay an amount out of `L` exit 1, and the 188 that do not exit
+  0. The 32 are every state with no normal product, `sss`, `ssz`, `szs`,
+  `zss`, `szz`, `zsz` and `zzs`, rounded or not, for both kinds. With a normal
+  product the amounts are paid out of its share, and nothing else in a case
+  needs a floor under `L`.
+
+**4. Coq checks all 220, modulo their hints.** `allcoq.sh` runs `gappa -Bcoq`
+and `coqc` through `one.sh` on the 220 and on the 188 `_anyl` controls that
+prove, and both exit 0 on all 408. The `.v` files came to 285 to 4739 lines,
+with 6 to 18 hints, and the two steps took 0.52 to 4.99 s a script. As in
+464.24's 4, each hint enters the `.v` as a hypothesis with no condition, so a
+proof stands on its hints and on the divisors Gappa took to be nonzero: the
+rounded sums and `y`, which a hypothesis keeps from zero, and `L`, `N`,
+`|nᵢ|`, `|nᵢ|·L`, the products and `D`, none of which is zero since no factor
+is.
+
+**5. What the first lane ran.**
 
 - `search.py` (below), `python3 search.py 1`, draws 400 000 inputs with `L`
   within `2⁶` of `2⁻¹⁰²²`, runs the code's arithmetic in Python's `f64` and
@@ -30131,20 +30238,9 @@ product lands as 464.18's `planeall.py` split `plane.g`.
   `[−1, 4]`. The `4` is what loses it: the hint bounds `s012 / L` by interval,
   not by `|n₀| + |n₁| + |n₂|`.
 
-**What the first lane worked out on paper, not run.** 464.24's shares, each
-term's error within `4u` of `wᵢ·|nᵢ|·L` and what rounding a product below the
-normals cost paid out of a normal product's share:
-
-- one normal product, one below and one zero (`nsz` and its turns): the normal
-  product meets three roundings, so the amount fits its share; plain shares,
-  `7.93u`.
-- `ssn` (product 2 normal): weights `3/4, 3/4, 5/4`, so `(√43 + 1)u = 7.56u`
-  with the weighted Cauchy-Schwarz hypothesis as in 464.24's `k = 2`.
-- `nss` and `sns`: weights `6/4, 3/4, 2/4`, `(√49·√(1 + 64ε) + 1)u`, which is
-  `8u` and a little over. Shares alone cannot prove these at the code's `8u`;
-  the case needs a split on `|S01|`, below `2⁻¹⁰²¹`, where `s01` is exact and
-  the weights are `5, 2, 2` (`6.74u`), or at least it, where the two amounts
-  are within `u·|S01|`.
+It then found on paper that 464.24's shares put `nss` and `sns` at `8u` and a
+little over, which is why `signedall.py` weights each share by the roundings
+its term meets and splits those two on their first sum.
 
 `search.py`, whole:
 
@@ -30276,46 +30372,37 @@ Ex = X0 + X1 + X2 - off;
 y / L -> s012 / L - off / L;
 ```
 
-**What the second lane wrote, not run through Gappa yet.** `signedall.py`
-(below) writes 220 cases, 110 for `signed` and 110 for the shift, and prints
-the bound each case's shares should reach. `./gen.sh` printed `generate exit
-0`, `cases 220 signed 110 shift 110`, the largest signed bound `7.711u`
-(`signed_nns`, `signed_nss_big`, `signed_sns_big`) and the largest shift bound
-`8.000` (`shift_nss`, `shift_sns`). The split, and why, on paper:
+**6. Why the first runs failed.** As the second lane left `signedall.py`, 206
+of the 220 proved and 14 exited 1 in under 0.03 s with `syntax error,
+unexpected IN`: every product `s` or `z` and every operation unrounded, so no
+product has a share, the weighted sum was empty, and the script wrote `in [0,
+0b-10]` with nothing in front. Such a case now leaves the Cauchy-Schwarz
+hypothesis out, and its `D` is the offset's share alone. With that, all 220
+proved, and 50 `_anyl` controls were to fail, but 9 signed ones proved:
+every operation unrounded and one product normal, where an amount paid out of
+`L` costs the same `D` as one paid out of the normal product, and the normal
+product keeps `L` near `2⁻¹⁰²²` by itself. Of two such plans the script now
+takes the one that pays out of the normal product. That took the `_anyl`
+controls that must fail from 50 to the 32 of 3, and each of them fails.
 
-- Each product is `n` (its double at least `2⁻¹⁰²²`, with lemma.g's ratio),
-  `s` (the product at most `2⁻¹⁰²²`, neither factor zero, its rounding an
-  amount of at most `2⁻¹⁰⁷⁵`) or `z` (a factor zero, left out of the fold, as
-  `flatcases.py` leaves a zero product out). All-`z` is not written: the value
-  is then the offset, exactly.
-- Each rounded operation, the sums and `value`, is either rounded with its sum
-  at least `2⁻¹⁰⁷⁴`, or written unrounded, `_u<ops>`, which covers its
-  cancelling to zero, as `flatcases.py`'s `_c` cases do. Unlike there, two
-  unrounded sums may be next to each other, since an `s` product can round to
-  zero.
-- A first sum of two `s` products is written unrounded only: it is at most
-  `2⁻¹⁰²¹` and a multiple of `2⁻¹⁰⁷⁴`, so a double. t_ppp.g's print `s01 −
-  S01 in [0, 0]` is Gappa finding the same; a `sumexact.g` stating it alone is
-  still to write.
-- Shares are 464.24's, but weighted by the roundings each term meets, `w/4` of
-  `|nᵢ|·L` (and `w/4` of `L` for the offset), and each `s` product's amount
-  costs a quarter of a payer's share. The payer is `L` itself, which needs
-  `L ≥ 2⁻¹⁰²²` (`|n|·L` for the shift), or a normal product, whose `|nᵢ|·L`
-  is at least `2⁻¹⁰²²` give or take a rounding, by 464.24's hint. The script
-  picks the payers that make `D` least, and bounds the weighted sum by
-  Cauchy-Schwarz, rounded up to a multiple of `1/1024`.
-- `nss` and `sns` with all three operations rounded reach `8u` that way, so
-  their rounded first sum is split: below `2⁻¹⁰²¹` it rounds to itself, which
-  the `_u01` case covers, and at least `2⁻¹⁰²¹` is `_big`. There `(|n₀| +
-  |n₁|)·L ≥ (2 − 4u)·2⁻¹⁰²²`, since `|S01| ≤ (1 + u)·(|n₀| + |n₁|)·L +
-  2⁻¹⁰⁷⁵`. That is a hypothesis on paper, as 464.24's Cauchy-Schwarz ones are,
-  and both amounts are paid out of `(|n₀| + |n₁|)·L / 4`: weights `5, 4, 2`,
-  `(√45 + 1)u = 7.71u`.
+**What this leaves.**
 
-What is left: run the 220 through `one.sh`, fix the hints of any that fail,
-write `sumexact.g`, the controls (a goal just under each case's bound; `L`
-down to `2⁻¹⁰⁷⁴` for each case with `L` a payer), and `gappa -Bcoq` and
-`coqc` on each that proves; then replace this DRAFT with the result.
+- Q2695 restates the doc comments of `plane.rs:85-112` and
+  `moved_corner.rs:99-143`, and waits on this row. Its condition is now
+  settled: `L` at least `2⁻¹⁰²²` for `Plane::SIGNED_DISTANCE_ROUNDOFF`, and
+  `|n|·L` at least `2⁻¹⁰²²` for `SURFACE_AFTER_SHIFTING_ROUNDOFF` on a plane
+  or a half-space, whatever the products are. Not a new row.
+- Q2700 moves these scripts into `proofs/gappa/` with the rest of §464's.
+
+**The scripts, whole, as they ran.** To run them again, save `signedall.py`,
+`controls.py`, `reach.py`, `lower.py`, `sumexact.g` and the `.sh` files below
+in one directory with 464.13's `one.sh`, make the `.sh` files executable, and
+run `./allcases.sh`, `./allcontrols.sh` and `./allcoq.sh`, in that order,
+since `allcoq.sh` reads the list `controls.py` prints. Then `./allreach.sh
+signed_nns signed_nss_big signed_sns_big shift_nss shift_sns` and
+`./alllower.sh signed_ssz_u01 signed_szs_u02 signed_zss_u12`. The `.g` files
+are not appended: the scripts write them. The first lane's `search.py` and
+`t_ppp.g` are above, in 5.
 
 `signedall.py`, whole:
 
@@ -30347,7 +30434,8 @@ that meets w roundings, w/4 of L for the offset, and each amount a quarter of
 a payer's share, the payer being L itself (L at least 2^-1022), a normal
 product (its |n_i| L at least 2^-1022, give or take a rounding), or, in a _big
 case, (|n_a| + |n_b|) L for the first sum's two products, which that sum keeps
-at least 2^-1021 (1 - 2u). The payers are chosen to make D smallest.
+at least 2^-1021 (1 - 2u). The payers are chosen to make D smallest, and of
+two choices with the same D, the one that takes less out of L.
 
 Run as: python3 signedall.py; it writes beside itself and prints one line a
 case: its name, its shares and the bound the averaging reaches in u."""
@@ -30426,7 +30514,9 @@ def plan(kind, st, live, rounded, big):
         k = cap(sum(o * o for o in omega.values()), kind == "signed")
         c3 = F(v + m["L"], 4)
         bound = 4 * (F(k, 1024) + c3)
-        if best is None or bound < best[0]:
+        # Of two plans with the same D, the one that takes less out of L, so
+        # that fewer cases need L at least 2^-1022.
+        if best is None or (bound, m["L"]) < (best[0], best[2]["L"]):
             best = (bound, pay, m, omega, k, c3)
     return w, v, best
 
@@ -30547,7 +30637,10 @@ def make(kind, st, unrounded, big, goal=None, anyl=False):
     hyp.append("  /\\ " + " /\\ ".join(f"{q}{i} / L in [-1, 1]" for i in live)
                + (" /\\ off / L in [-1, 1]" if kind == "signed" else " /\\ off / (N * L) in [-1, 1]"))
     total = sum(o * o for o in omega.values())
-    if kind == "signed":
+    if not weighted:
+        hyp.append("  # Every product is below the normals and every operation exact: the")
+        hyp.append("  # amounts are all D holds.")
+    elif kind == "signed":
         hyp.append(f"  # Cauchy-Schwarz on a normal whose n.n is within 64 epsilon of one:")
         hyp.append(f"  # the weights' squares add to {total}, and sqrt({total} (1 + 64 epsilon)) <= {k} / 1024.")
         hyp.append(f"  /\\ {weighted} in [0, {k}b-10]")
@@ -30574,7 +30667,9 @@ def make(kind, st, unrounded, big, goal=None, anyl=False):
         lines.append("value / y -> 1 + (value - y) / y;")
     lines.append("")
     lines.append(f"{s['goal_lhs']} -> ((value - Ex) / D) * (D / {size});")
-    if kind == "signed":
+    if not weighted:
+        lines.append(f"D / {size} -> {c3};")
+    elif kind == "signed":
         lines.append(f"D / L -> {weighted} + {c3};")
     else:
         lines.append(f"D / (N * L) -> ({weighted}) / N + {c3};")
@@ -30674,4 +30769,237 @@ grep '^shift' list.txt | awk '{b=$(NF); sub("u","",b); print b, $1}' | sort -n |
 # the second argument to one.sh being $COQ, and print one line a script.
 cd "$(dirname "$0")"
 printf '%s\n' "$@" | xargs -P 8 -I{} ./one.sh {} $COQ
+```
+
+`allcases.sh`, whole:
+
+```sh
+#!/bin/bash
+# Write the cases, run every one through Gappa, and print the ones that fail;
+# then run sumexact.g with its Coq check, and count what the cases' prints
+# hold besides the divisor warnings and the results.
+cd "$(dirname "$0")"
+./gen.sh
+./runall.sh signed_*.g shift_*.g > runs.txt
+echo "runs $(wc -l < runs.txt) exit0 $(grep -c ' exit 0 ' runs.txt)"
+grep -v ' exit 0 ' runs.txt | sort
+echo "slowest:"
+awk '{print $4, $1}' runs.txt | sort -g | tail -1
+COQ=coq ./runall.sh sumexact.g
+grep -v '^Warning: the expression\|^ *$' sumexact.out
+echo "other messages in the cases: $(cat signed_*.out shift_*.out | grep -v '^Warning: the expression\|^ *$\|^Results:\|^  .* in \[' | wc -l)"
+echo "divisor warnings a case, least and most:"
+grep -c '^Warning: the expression' signed_*.out shift_*.out | awk -F: '{print $2}' | sort -n | sed -n '1p;$p'
+```
+
+It printed, after `gen.sh`'s lines:
+
+```text
+runs 220 exit0 220
+slowest:
+1.52s shift_sns_u01
+sumexact exit 0 0.03s
+sumexact coq -Bcoq exit 0 coqc exit 0 0.75s lines 299 hints 0
+other messages in the cases: 0
+divisor warnings a case, least and most:
+8
+67
+```
+
+`sumexact.g`, whole:
+
+```gappa
+# A sum of two doubles whose magnitude is at most 2^-1021 rounds to itself: it
+# is a multiple of 2^-1074 below 2^53 of them. Two products below the normals
+# (each at most 2^-1022 rounded) give such a sum, and so does a first sum that
+# a _big case leaves out, one below 2^-1021.
+@rnd = float<ieee_64, ne>;
+
+a = rnd(a_); b = rnd(b_);
+c = rnd(c_); d = rnd(d_);
+
+{
+     |a| <= 1b-1022 /\ |b| <= 1b-1022
+  /\ |c + d| <= 1b-1021
+->
+     rnd(a + b) - (a + b) in [0, 0]
+  /\ rnd(c + d) - (c + d) in [0, 0]
+}
+```
+
+`controls.py`, whole:
+
+```python
+"""Write two controls for each case signedall.py writes, as 464.24's
+casecontrols.py did for its twelve:
+
+- c_<case>_below.g asks for 1/256 under the bound the case's averaging plans,
+  rounded down to a multiple of u/1024. It must fail: if it proved, the
+  hypotheses would contradict each other, or the bound proved would not be the
+  averaging's.
+- c_<case>_anyl.g lets L go down to 2^-1074 (signed), or |n| L to 2^-1100 (the
+  shift). It must fail where an amount is paid out of L, and prove elsewhere.
+
+Run as: python3 controls.py; it writes beside itself and prints one line a
+control: its name and what it must do, fail or prove."""
+from fractions import Fraction as F
+import math
+
+import signedall as S
+
+for kind, st, unrounded, big in S.cases():
+    name = S.name_of(kind, st, unrounded, big)
+    live = [i for i in (0, 1, 2) if st[i] != "z"]
+    rounded = [o for o in S.ops(live) if o not in unrounded]
+    _, _, (bound, pay, m, _, _, _) = S.plan(kind, st, live, rounded, big)
+    under = math.floor(bound * (1 - F(1, 256)) * 1024)
+    lhs = S.KIND[kind]["goal_lhs"]
+    goal = f"{lhs} in [-{under}b-63, {under}b-63]"
+    src, _, _, _ = S.make(kind, st, unrounded, big, goal=goal)
+    open(f"c_{name}_below.g", "w").write(src)
+    print(f"c_{name}_below fail")
+    src, _, _, _ = S.make(kind, st, unrounded, big, anyl=True)
+    open(f"c_{name}_anyl.g", "w").write(src)
+    print(f"c_{name}_anyl {'fail' if m['L'] else 'prove'}")
+```
+
+`allcontrols.sh`, whole:
+
+```sh
+#!/bin/bash
+# Write the controls, run them, and print each one that did not do what
+# controls.py says it must, then a count of each.
+cd "$(dirname "$0")"
+rm -f c_*.g c_*.out
+python3 controls.py > controls.txt
+echo "controls exit $? count $(wc -l < controls.txt)"
+./runall.sh c_*.g > controlruns.txt
+while read -r n want; do
+  code=$(grep "^$n exit " controlruns.txt | awk '{print $3}')
+  got=$([ "$code" = 0 ] && echo prove || echo fail)
+  echo "$n want $want got $got"
+done < controls.txt > controlcheck.txt
+echo "as they must: $(awk '$3 == $5' controlcheck.txt | wc -l) of $(wc -l < controlcheck.txt)"
+awk '$3 != $5' controlcheck.txt
+echo "below: $(grep -c '_below want fail got fail' controlcheck.txt) fail; anyl must fail: $(grep -c '_anyl want fail' controlcheck.txt), must prove: $(grep -c '_anyl want prove' controlcheck.txt)"
+echo "exit codes other than 0 and 1:"
+awk '$3 != 0 && $3 != 1' controlruns.txt
+```
+
+It printed:
+
+```text
+controls exit 0 count 440
+as they must: 437 of 440
+c_signed_ssz_u01_below want fail got prove
+c_signed_szs_u02_below want fail got prove
+c_signed_zss_u12_below want fail got prove
+below: 217 fail; anyl must fail: 32, must prove: 188
+exit codes other than 0 and 1:
+```
+
+`allcoq.sh`, whole:
+
+```sh
+#!/bin/bash
+# Run gappa -Bcoq and coqc through one.sh on every case and on every _anyl
+# control controls.py says must prove, and count what passed.
+cd "$(dirname "$0")"
+COQ=coq ./runall.sh signed_*.g shift_*.g $(awk '$2 == "prove" {print $1 ".g"}' controls.txt) > coqruns.txt
+echo "scripts $(grep -c ' exit .* [0-9.]*s$' coqruns.txt | head -1) coq lines $(grep -c ' coq -Bcoq ' coqruns.txt)"
+echo "both exit 0: $(grep -c ' coq -Bcoq exit 0 coqc exit 0 ' coqruns.txt)"
+grep ' coq -Bcoq ' coqruns.txt | grep -v ' coq -Bcoq exit 0 coqc exit 0 '
+grep -v ' coq -Bcoq ' coqruns.txt | grep -v ' exit 0 '
+echo "lines, least and most:"
+grep ' coq -Bcoq ' coqruns.txt | awk '{print $(NF-2)}' | sort -n | sed -n '1p;$p'
+echo "hints, least and most:"
+grep ' coq -Bcoq ' coqruns.txt | awk '{print $NF}' | sort -n | sed -n '1p;$p'
+echo "seconds, least and most:"
+grep ' coq -Bcoq ' coqruns.txt | awk '{print $(NF-4)}' | sort -g | sed -n '1p;$p'
+```
+
+It printed:
+
+```text
+scripts 408 coq lines 408
+both exit 0: 408
+lines, least and most:
+285
+4739
+hints, least and most:
+6
+18
+seconds, least and most:
+0.52s
+4.99s
+```
+
+`reach.py`, whole:
+
+```python
+"""Write r_<case>.g for each case named on the command line, the case with its
+goal asking Gappa for the best enclosure it finds of the error over L, or over
+|n| L for the shift, in place of the code's bound.
+
+Run as: python3 reach.py <case> ..., then run the r_*.g through one.sh."""
+import sys
+
+import signedall as S
+
+want = set(sys.argv[1:])
+for kind, st, unrounded, big in S.cases():
+    name = S.name_of(kind, st, unrounded, big)
+    if name in want:
+        goal = f"{S.KIND[kind]['goal_lhs']} in ?"
+        src, _, _, _ = S.make(kind, st, unrounded, big, goal=goal)
+        open(f"r_{name}.g", "w").write(src)
+```
+
+`allreach.sh`, whole:
+
+```sh
+#!/bin/bash
+# Write and run reach.py's scripts for the cases named on the command line,
+# and print what Gappa reaches for the error, in u.
+cd "$(dirname "$0")"
+rm -f r_*.g r_*.out
+python3 reach.py "$@"
+./runall.sh r_*.g
+for f in r_*.out; do
+  b=$(grep -A1 '(value - Ex) / ' "$f" | grep -v '/ D' | grep -o '\[.*\]' | tail -1)
+  echo "${f%.out} $b"
+done
+```
+
+`lower.py`, whole:
+
+```python
+"""Write l_<case>_<k>.g for each case named on the command line and each k in
+1 to 8: the case with its goal at k/2 u, to find the least half-u Gappa
+proves where the case's below control proves too.
+
+Run as: python3 lower.py <case> ..., then run the l_*.g through one.sh."""
+import sys
+
+import signedall as S
+
+want = set(sys.argv[1:])
+for kind, st, unrounded, big in S.cases():
+    name = S.name_of(kind, st, unrounded, big)
+    if name in want:
+        for k in range(1, 9):
+            goal = f"{S.KIND[kind]['goal_lhs']} in [-{k}b-54, {k}b-54]"
+            src, _, _, _ = S.make(kind, st, unrounded, big, goal=goal)
+            open(f"l_{name}_{k}.g", "w").write(src)
+```
+
+`alllower.sh`, whole:
+
+```sh
+#!/bin/bash
+# Write and run lower.py's scripts for the cases named on the command line.
+cd "$(dirname "$0")"
+rm -f l_*.g l_*.out
+python3 lower.py "$@"
+./runall.sh l_*.g | sort
 ```
