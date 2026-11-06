@@ -34,9 +34,14 @@ use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 /// The turns at which Q3241 found the second union refused.
 const TURNS: [f64; 4] = [1.0, 2.0, 5.0, 6.0];
 
+/// [`TURNS`] and turn 0.2, where `|c|² − 1` is `1.8e−18` and the corners
+/// are `3.8e−9` apart, at which Q3262 found the second union of the bars
+/// alone refused (row Q3264).
+const TURNS_OF_THE_BARS_ALONE: [f64; 5] = [0.2, 1.0, 2.0, 5.0, 6.0];
+
 #[test]
 fn a_thick_bar_unites_with_two_thin_bars_each_a_hair_out_of_its_wall() {
-    for turn in TURNS {
+    for turn in TURNS_OF_THE_BARS_ALONE {
         let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
         let thick = a_bar(&mut model, 2.0, 4.0, [0.0, 0.0, -2.0], turn);
         let [left, right] = the_thin_bars(&mut model, turn);
