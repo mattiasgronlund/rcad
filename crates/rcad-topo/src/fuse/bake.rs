@@ -2030,11 +2030,12 @@ fn its_reading_lets_a_crossing_in_through_a_face_it_does_not_cut(
 /// be replaced by the meet without a word — the ill-conditioned corner of §70.3,
 /// three surfaces at a grazing angle and a corner far from where they cross.
 ///
-/// Two places that both overlap it are two answers to one question, and a triple
-/// where no place overlaps it at all is the model's corner and its surfaces
-/// disagreeing by more than the boxes and that room allow. Both give `None`, and
-/// neither is a refusal: it is this triple saying nothing about this corner while
-/// another may still place it.
+/// Two places that both overlap it, and that its own rounding does not tell
+/// apart (below), are two answers to one question, and a triple where no place
+/// overlaps it at all is the model's corner and its surfaces disagreeing by more
+/// than the boxes and that room allow. Both give `None`, and neither is a
+/// refusal: it is this triple saying nothing about this corner while another may
+/// still place it.
 ///
 /// # The stored corner is grown first, and that is a tolerance
 ///
@@ -2060,6 +2061,26 @@ fn its_reading_lets_a_crossing_in_through_a_face_it_does_not_cut(
 /// to bake (§75.6). A room of the rounding alone refused a two-millimetre block
 /// with a corner a nanometre off one plane (§136.8, §368).
 ///
+/// # Two places inside the room are told apart by the rounding alone
+///
+/// The tolerance can hold two places the corner's own rounding does not. A thin
+/// bar's circle crossing a thick bar's rim close to where the two touch does it:
+/// a block 5 long on a bar of radius 2, united with bars of radius 1 turned
+/// `0.2` about `z`, put two places of one triple `3.8e-9` apart inside a room
+/// of `5.198e-9`, and the corner was refused `Undecidable`, though the stored
+/// corner was inside the box of one and `3.8e-9` from the other. A block 50
+/// long was refused so at 32 of 63 turns (Q3255).
+///
+/// The tolerance is there for a corner placed off its plane by up to that much,
+/// and it is what makes the two places one question. A corner its rounding ties
+/// to one place was written down there, so when the room holds two, the corner
+/// grown by [`what_writing_the_corner_down_cost`] alone is asked again, and the
+/// one place it holds is the one. It still has to be the only one: two inside
+/// the rounding are two answers, and a corner the rounding ties to neither is
+/// not placed by the nearer, which would be a guess the tolerance made. The
+/// rounding is part of the room, so a room that holds no place makes this ask
+/// nothing new.
+///
 /// **This never places the point.** It picks among places the surfaces already
 /// agree on; the geometry comes from the meet, which is what keeps a wrong
 /// cached corner from moving a right one. A corner placed within the room is
@@ -2071,18 +2092,23 @@ fn the_place_the_model_points_at(
     validate_allows: f64,
 ) -> Option<PredicatePoint> {
     let stored = where_the_model_puts_it.enclosure();
-    let room = what_writing_the_corner_down_cost(stored) + validate_allows;
-    let mut found = None;
-    for place in places {
-        if !boxes_overlap(place.enclosure(), stored, room) {
-            continue;
-        }
-        if found.is_some() {
-            return None;
-        }
-        found = Some(*place);
-    }
-    found
+    let writing_it_down = what_writing_the_corner_down_cost(stored);
+    the_only_place_within(places, stored, writing_it_down + validate_allows)
+        .or_else(|| the_only_place_within(places, stored, writing_it_down))
+}
+
+/// The one place of `places` whose box overlaps `stored` grown by `room`, or
+/// `None` when none does or more than one does.
+fn the_only_place_within(
+    places: &[PredicatePoint],
+    stored: [Interval; 3],
+    room: f64,
+) -> Option<PredicatePoint> {
+    let mut within = places
+        .iter()
+        .filter(|place| boxes_overlap(place.enclosure(), stored, room));
+    let only = within.next().copied();
+    if within.next().is_some() { None } else { only }
 }
 
 /// How far a corner can read off a plane it is on purely because the plane
