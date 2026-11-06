@@ -541,6 +541,13 @@ impl SolidView<'_> {
             };
             let crossed = a_flat_face_whose_bent_sides_crossed(self, &why);
             if let Some(face) = crossed {
+                if !building.pinched.contains(&face.key())
+                    && building.a_hole_comes_within_a_rounding_of_its_outline(face)
+                {
+                    building = building.again_with_its_holes_pinched_onto_its_outline(face);
+                    last_crossing = Some((why, said));
+                    continue;
+                }
                 let rungs = walked_again.entry(face.key()).or_default();
                 if *rungs < 2 * RUNGS_A_CROSSED_FLAT_FACE_IS_WALKED_FINER {
                     *rungs += 1;
@@ -915,6 +922,18 @@ struct BuildingAMesh {
     pinched: HashSet<FaceKey>,
 }
 
+/// Where [`BuildingAMesh::pinch_its_holes_onto_its_outline`] puts a point of
+/// a hole: on `side` of the outline, onto its point `onto` as
+/// [`BuildingAMesh::the_side_as_it_was_last_walked`] lists it where that is
+/// within a rounding, and otherwise into its chord `chord`, the one from
+/// that list's point `chord` to the next. `moved` is how far that moves it.
+struct APinch<'m> {
+    side: EdgeView<'m>,
+    chord: usize,
+    onto: Option<usize>,
+    moved: f64,
+}
+
 impl BuildingAMesh {
     fn new(
         deflection: Deflection,
@@ -947,9 +966,182 @@ impl BuildingAMesh {
             self.walk_the_edges_this_face_can_place(solid, face, policy, log)?;
         }
         for face in solid.faces() {
+            if self.pinched.contains(&face.key()) {
+                self.pinch_its_holes_onto_its_outline(face);
+            }
+        }
+        for face in solid.faces() {
             self.cut_up(face, solid, log)?;
         }
         Ok(())
+    }
+
+    /// Put each point the holes of `face` were walked into that lies within a
+    /// rounding of its outline on the outline: onto the point of the outline's
+    /// walk within a rounding of it where there is one, and into the outline's
+    /// walk where there is none. Each move is charged.
+    ///
+    /// **A hole that touches its outline from inside puts a point on it**, and
+    /// no walk of the outline clears that point. A thick bar of radius 2 holding
+    /// two thin bars of radius 1 that touch along its axis has a cap whose hole
+    /// is the outline of both thin disks, and each thin circle touches the rim
+    /// `5e−17` inside it. Each thin arc is walked evenly from the two places the
+    /// thin circles cross near the axis, so its middle point is where it
+    /// touches the rim, and rounded it stood `9e−17` outside the rim's circle.
+    /// Every chord of the rim lies inside that circle, so the hole crossed the
+    /// outline there at every rung, and at a deflection of `0.01` and `0.03`
+    /// the union and the difference were refused `BoundaryCrossesItself`
+    /// (Q3248, `two_thin_bars_touching_inside_a_thick_one_turned.rs`). Halving
+    /// both walks keeps the middle point, and the rungs that walk only the
+    /// outline walk the hole as it was.
+    ///
+    /// **Two loops that share a point of the table are a pinch**, which the
+    /// triangulator takes where both name it at one place in the chart
+    /// (`triangulate` in `rcad-mesh`), and they do, since both read the one
+    /// entry. The faces along the hole's edge and the outline's read the same
+    /// lists, so they see the same points.
+    ///
+    /// **Only on a crossed flat face** ([`SolidView::mesh`]), once one of its
+    /// holes was seen to come within a rounding of its outline, since this asks
+    /// it of every point of every hole.
+    ///
+    /// What a move costs is charged on top of the worst any walk strayed, which
+    /// is all `worst` holds before a face is cut up: a side through a point
+    /// moved strays no further than it did, and the move.
+    fn pinch_its_holes_onto_its_outline(&mut self, face: FaceView<'_>) {
+        let outline = Self::the_bent_sides_of(face.wires().take(1));
+        let mut moved: f64 = 0.0;
+        for hole in Self::the_bent_sides_of(face.wires().skip(1)) {
+            if outline.iter().any(|side| side.key() == hole.key()) {
+                continue;
+            }
+            let count = self.along_edge.get(&hole.key()).map_or(0, Vec::len);
+            for at in 0..count {
+                let point = self.points[self.along_edge[&hole.key()][at] as usize];
+                let Some(pinch) = self.where_a_hole_point_is_pinched(&outline, point) else {
+                    continue;
+                };
+                match pinch.onto {
+                    Some(corner) => {
+                        let entry = self.the_entry_of_a_point_of_the_side(pinch.side, corner);
+                        self.along_edge
+                            .get_mut(&hole.key())
+                            .expect("its length was just read")[at] = entry;
+                    }
+                    None => {
+                        let entry = self.along_edge[&hole.key()][at];
+                        self.along_edge
+                            .get_mut(&pinch.side.key())
+                            .expect("a pinch is found only along a side that was walked")
+                            .insert(pinch.chord, entry);
+                    }
+                }
+                moved = moved.max(pinch.moved);
+            }
+        }
+        self.worst += moved;
+    }
+
+    /// Where `point`, a point a hole was walked into, goes on the bent sides
+    /// of the outline `outline` lists, when it lies within a rounding of the
+    /// curved surface one of them runs along and near that side's walk. Of
+    /// several, the one that moves it least.
+    ///
+    /// Near the walk is as [`Self::how_far_its_holes_stand_in`] reads it, so a
+    /// point on that surface where the side does not run is left where it is.
+    fn where_a_hole_point_is_pinched<'m>(
+        &self,
+        outline: &[EdgeView<'m>],
+        point: Point,
+    ) -> Option<APinch<'m>> {
+        let rounding = one_rounding_among([point; 3]);
+        outline
+            .iter()
+            .filter_map(|&side| {
+                let curved = self.the_curved_surface_along(side)?;
+                let (u, v) = curved.coordinates_of(point);
+                let off_the_side = point.distance_to(curved.point_at(u, v));
+                if off_the_side > rounding {
+                    return None;
+                }
+                let walked = self.the_side_as_it_was_last_walked(side);
+                let near = 2.0
+                    * WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO
+                    * self.room_it_was_last_walked_at(side);
+                let (chord, off_the_walk) = walked
+                    .windows(2)
+                    .map(|chord| how_far_from_the_side(point, [chord[0], chord[1]]))
+                    .enumerate()
+                    .min_by(|one, other| one.1.total_cmp(&other.1))?;
+                if off_the_walk > near {
+                    return None;
+                }
+                let onto = [chord, chord + 1]
+                    .into_iter()
+                    .filter(|&end| point.distance_to(walked[end]) <= rounding)
+                    .min_by(|&one, &other| {
+                        point
+                            .distance_to(walked[one])
+                            .total_cmp(&point.distance_to(walked[other]))
+                    });
+                Some(APinch {
+                    side,
+                    chord,
+                    onto,
+                    moved: onto.map_or(off_the_side, |end| point.distance_to(walked[end])),
+                })
+            })
+            .min_by(|one, other| one.moved.total_cmp(&other.moved))
+    }
+
+    /// The entry in the point table of point `at` of `side` as
+    /// [`Self::the_side_as_it_was_last_walked`] lists it: its first end, the
+    /// points it was walked into, and its last end.
+    fn the_entry_of_a_point_of_the_side(&mut self, side: EdgeView<'_>, at: usize) -> u32 {
+        let (from, to) = ends_in_the_stored_order(side);
+        let walked = &self.along_edge[&side.key()];
+        match at.checked_sub(1) {
+            None => self.remember_the_corner(from),
+            Some(inside) if inside < walked.len() => walked[inside],
+            Some(_) => self.remember_the_corner(to),
+        }
+    }
+
+    /// Whether a point one of `face`'s holes was walked into lies within a
+    /// rounding of its outline, as
+    /// [`Self::pinch_its_holes_onto_its_outline`] reads it.
+    fn a_hole_comes_within_a_rounding_of_its_outline(&self, face: FaceView<'_>) -> bool {
+        let outline = Self::the_bent_sides_of(face.wires().take(1));
+        Self::the_bent_sides_of(face.wires().skip(1))
+            .into_iter()
+            .filter(|hole| outline.iter().all(|side| side.key() != hole.key()))
+            .filter_map(|hole| self.along_edge.get(&hole.key()))
+            .flatten()
+            .any(|&at| {
+                self.where_a_hole_point_is_pinched(&outline, self.points[at as usize])
+                    .is_some()
+            })
+    }
+
+    /// A building started over, with the holes of `face` pinched onto its
+    /// outline after every walk — see
+    /// [`Self::pinch_its_holes_onto_its_outline`].
+    fn again_with_its_holes_pinched_onto_its_outline(mut self, face: FaceView<'_>) -> Self {
+        let mut again = Self::new(self.deflection, core::mem::take(&mut self.along_each_edge));
+        again.walked_finer = core::mem::take(&mut self.walked_finer);
+        again.pinched = core::mem::take(&mut self.pinched);
+        again.pinched.insert(face.key());
+        again
+    }
+
+    /// The edges of `wires` that bend, each once.
+    fn the_bent_sides_of<'f>(wires: impl Iterator<Item = WireView<'f>>) -> Vec<EdgeView<'f>> {
+        let mut seen = HashSet::new();
+        wires
+            .flat_map(WireView::coedges)
+            .map(|coedge| coedge.edge())
+            .filter(|edge| *edge.stored_run() != EdgeRun::Straight && seen.insert(edge.key()))
+            .collect()
     }
 
     /// A building started over, with each side of `face` that bends walked at
@@ -1043,20 +1235,7 @@ impl BuildingAMesh {
     /// poking out through the outline does, which no walk of the outline
     /// clears.
     fn how_far_its_holes_stand_in(&self, face: FaceView<'_>, edge: EdgeView<'_>) -> Option<f64> {
-        let along: SmallVec<[Surface; 2]> = self
-            .along_each_edge
-            .get(&edge.key())
-            .expect("an edge reached through a face has that face along it")
-            .iter()
-            .map(SurfaceAlongAnEdge::where_it_really_is)
-            .collect();
-        let pair = match along.as_slice() {
-            [only] => [only, only],
-            [first, second] => [first, second],
-            _ => return None,
-        };
-        let pair = which_two_surfaces_a_run_is_between(&edge.run(), pair);
-        let curved = pair.iter().find(|surface| surface.as_plane().is_none())?;
+        let curved = &self.the_curved_surface_along(edge)?;
         let last_walked = self.the_side_as_it_was_last_walked(edge);
         let near = 2.0 * WHAT_A_BOUNDARY_SIDE_IS_REFINED_TO * self.room_it_was_last_walked_at(edge);
         let holes = || face.wires().skip(1);
@@ -1084,6 +1263,28 @@ impl BuildingAMesh {
             nearest = nearest.min(point.distance_to(curved.point_at(u, v)));
         }
         side.map(|_| nearest)
+    }
+
+    /// The curved one of the two surfaces `edge` runs between, as
+    /// [`which_two_surfaces_a_run_is_between`] reads them off the faces along
+    /// it where they really are. `None` when both are flat, or when the edge
+    /// has more than two faces along it.
+    fn the_curved_surface_along(&self, edge: EdgeView<'_>) -> Option<Surface> {
+        let along: SmallVec<[Surface; 2]> = self
+            .along_each_edge
+            .get(&edge.key())
+            .expect("an edge reached through a face has that face along it")
+            .iter()
+            .map(SurfaceAlongAnEdge::where_it_really_is)
+            .collect();
+        let pair = match along.as_slice() {
+            [only] => [only, only],
+            [first, second] => [first, second],
+            _ => return None,
+        };
+        which_two_surfaces_a_run_is_between(&edge.run(), pair)
+            .into_iter()
+            .find(|surface| surface.as_plane().is_none())
     }
 
     /// `edge`'s ends and the points the last pass walked it into, where the
