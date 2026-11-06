@@ -15,8 +15,8 @@
 //! with arcs where the way each side runs is read. So was every fuse that asked
 //! one about a point. The circle is now left out of the polygon, the disk read
 //! against the pipe across it the way a round wire's disk is, and the face held
-//! where the polygon alone says it is, turned round where the disk holds the
-//! point.
+//! where the polygon alone says it is, turned round once for each disk that
+//! holds the point.
 
 use core::f64::consts::PI;
 
@@ -146,6 +146,46 @@ fn a_slot_cut_across_the_end_of_a_thick_bar_with_a_thin_bar_touching_its_wall() 
     let the_thin_bar = 0.5 * the_strip_of_a_disk(1.0);
     let meant = the_bars_volume() - the_bar_and_the_block - the_thin_bar;
     valid_and_of_volume(&model, whole, meant, "the slot");
+}
+
+/// A plate `4 × 5 × 1` with two pins of radius 1 standing through it at
+/// `(1, 1.25)` and `(1, 3.75)`, both touching its side `x = 0`: its top and
+/// bottom have two such circles in one wire, and hold the plate outside both
+/// pins. The second union asks the first one's top and bottom where the second
+/// pin goes, and the plate with the pins' four ends past it is `20 + 4π`.
+#[test]
+fn a_plate_with_two_pins_touching_one_side_holds_what_is_outside_both() {
+    let mut model = a_model();
+    let plate = a_box(&mut model, [[0.0, 4.0], [0.0, 5.0], [0.0, 1.0]]);
+    let [one, other] = [1.25, 3.75].map(|y| {
+        model
+            .add_round_bar(1.0, 3.0, &shift(1.0, y, -1.0))
+            .expect("a bar of radius one")
+    });
+    let pinned = the_one_solid(&mut model, plate, one, Rule::Union);
+    let whole = the_one_solid(&mut model, pinned, other, Rule::Union);
+    let view = model.solid(whole).expect("this model made the key");
+    for z in [0.0, 1.0] {
+        let face = the_flat_face_at(view, z);
+        for ([x, y], held) in [
+            ([3.0, 2.5], OnAFace::Held),
+            ([0.5, 2.5], OnAFace::Held),
+            ([0.25, 0.1], OnAFace::Held),
+            ([1.0, 1.25], OnAFace::NotHeld),
+            ([1.0, 3.75], OnAFace::NotHeld),
+            ([0.5, 3.75], OnAFace::NotHeld),
+            ([-1.0, 2.5], OnAFace::NotHeld),
+            ([0.0, 1.25], OnAFace::OnItsBoundary),
+            ([0.0, 3.75], OnAFace::OnItsBoundary),
+            ([2.0, 3.75], OnAFace::OnItsBoundary),
+            ([0.0, 2.5], OnAFace::OnItsBoundary),
+        ] {
+            let asked = format!("the plate's face at z = {z}, ({x}, {y})");
+            let point = PredicatePoint::from([x, y, z]);
+            assert_eq!(the_face_holds(view, face, point, &asked), held, "{asked}");
+        }
+    }
+    valid_and_of_volume(&model, whole, 20.0 + 4.0 * PI, "two pins");
 }
 
 /// A plate `4 × 4 × 1` on `z = 0` united with a pin of radius 1 at `(1, 2)`
