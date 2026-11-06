@@ -121,13 +121,17 @@ impl<'m> SolidView<'m> {
     ///
     /// **The wires it follows on a flat face with no arc of a crossing among its
     /// sides**: a polygon whose sides are straight or pieces of a cone's ruling,
-    /// walked; and a whole closed curve, a circle walked as two arcs from pole to
-    /// pole, or several whole circles that all close at the wire's one corner —
-    /// the one wire two round holes that touch at a point leave — each read
-    /// circle by circle against the round surface across that circle's own
-    /// edge. A wire that is none of these is refused by name. A flat face with
-    /// an arc among its sides is wound by its chords and arcs instead, and its
-    /// whole circles, one or several to a wire, are read the same way there.
+    /// walked, which may also run right round a whole circle at one of its
+    /// corners — a round hole touching the face's outline at one point, which a
+    /// pin through a plate touching the plate's side leaves; and a whole closed
+    /// curve, a circle walked as two arcs from pole to pole, or several whole
+    /// circles that all close at the wire's one corner — the one wire two round
+    /// holes that touch at a point leave. Each whole circle is read on its own
+    /// against the round surface across that circle's own edge. A wire that is
+    /// none of these is refused by name. A flat face with an arc among its sides
+    /// is wound by its chords and arcs instead, and its whole circles, one or
+    /// several to a wire or at one corner of a wire, are read the same way
+    /// there.
     ///
     /// # Errors
     ///
@@ -404,6 +408,16 @@ fn a_point_off_the_plane(face: FaceView<'_>, plane: &Plane) -> Option<Point> {
 /// pole ([`is_one_circle_cut_in_two`]), and a wire of several whole circles
 /// that all close at its one corner, which two round holes that touch leave
 /// ([`is_several_whole_circles`]). See [`how_often_a_round_wire_winds_round`].
+///
+/// **A side that runs right round a whole closed curve at one corner among a
+/// wire's other sides is left out of the walk** ([`runs_right_round_at_one_corner`]):
+/// a pin through a plate that touches the plate's side leaves one in the
+/// plate's top, a round hole touching its outline at one point. The sides left
+/// are still a polygon, closed at that corner, and the side's disk is read on
+/// its own instead, the way a round wire's is ([`how_many_disks_hold`]). Each
+/// such side adds one to the face's count inside its disk and nothing outside,
+/// so the face holds a point where the walk's count and the number of those
+/// disks holding it add up to an odd number ([`held_where_it_and_its_disks_wind`]).
 fn what_a_flat_face_holds(
     solid: SolidView<'_>,
     face: FaceView<'_>,
@@ -420,12 +434,26 @@ fn what_a_flat_face_holds(
                 || is_one_circle_cut_in_two(solid, face, wire)?,
         );
     }
-    let outlines: Vec<Vec<Point>> = face
-        .wires()
-        .zip(&round)
-        .filter(|(_, is_round)| !**is_round)
-        .map(|(wire, _)| wire.points().collect())
+    let polygons = || {
+        face.wires()
+            .zip(&round)
+            .filter(|(_, is_round)| !**is_round)
+            .map(|(wire, _)| wire)
+    };
+    let outlines: Vec<Vec<Point>> = polygons()
+        .map(|wire| {
+            wire.coedges()
+                .filter(|&coedge| !runs_right_round_at_one_corner(coedge))
+                .map(|coedge| coedge.start().point())
+                .collect()
+        })
         .collect();
+    let disks = polygons()
+        .flat_map(WireView::coedges)
+        .filter(|&coedge| runs_right_round_at_one_corner(coedge));
+    let Some(disks) = how_many_disks_hold(solid, face, disks, point, policy, log)? else {
+        return Ok(OnAFace::OnItsBoundary);
+    };
     let mut aims: Vec<Option<Point>> = outlines
         .iter()
         .flatten()
@@ -477,7 +505,7 @@ fn what_a_flat_face_holds(
             }
             Ok(Walked::WindsRound(winding)) => {
                 trial.drain_into(log);
-                return Ok(held_where_it_winds(winding));
+                return Ok(held_where_it_and_its_disks_wind(winding, disks));
             }
             Ok(Walked::OnASide) => {
                 trial.drain_into(log);
@@ -560,10 +588,38 @@ fn how_often_a_round_wire_winds_round(
     log: &mut ProvenanceLog,
 ) -> Result<Option<i64>> {
     let inwards = if position == 0 { 1 } else { -1 };
-    let mut disks_holding_it = 0usize;
-    for circle in the_circles_a_round_wire_is_made_of(solid, face, wire)? {
+    let circles = the_circles_a_round_wire_is_made_of(solid, face, wire)?;
+    let Some(disks_holding_it) = how_many_disks_hold(solid, face, circles, point, policy, log)?
+    else {
+        return Ok(None);
+    };
+    Ok(Some(if disks_holding_it % 2 == 1 {
+        inwards
+    } else {
+        0
+    }))
+}
+
+/// How many of the disks of `circles`, sides of `face` that each run right
+/// round a whole closed curve, hold `point`, or `None` when `point` is on one
+/// of those curves. Each disk is read on its own by
+/// [`what_a_round_wire_encloses`], against the surface across its side.
+///
+/// # Errors
+///
+/// What [`what_a_round_wire_encloses`] gives.
+fn how_many_disks_hold<'m>(
+    solid: SolidView<'_>,
+    face: FaceView<'_>,
+    circles: impl IntoIterator<Item = CoedgeView<'m>>,
+    point: PredicatePoint,
+    policy: &Policy,
+    log: &mut ProvenanceLog,
+) -> Result<Option<usize>> {
+    let mut holding_it = 0usize;
+    for circle in circles {
         match what_a_round_wire_encloses(solid, face, circle, point, policy, log)? {
-            Decision::Neg => disks_holding_it += 1,
+            Decision::Neg => holding_it += 1,
             Decision::Pos => {}
             Decision::Zero => return Ok(None),
             // A side nobody could settle came back as a refusal a moment ago,
@@ -572,11 +628,7 @@ fn how_often_a_round_wire_winds_round(
             other => panic!("a side came back with a decision nothing here knows: {other:?}"),
         }
     }
-    Ok(Some(if disks_holding_it % 2 == 1 {
-        inwards
-    } else {
-        0
-    }))
+    Ok(Some(holding_it))
 }
 
 /// Whether `wire` is several whole closed curves, each one edge: two round
@@ -592,6 +644,16 @@ fn is_several_whole_circles(wire: WireView<'_>) -> bool {
         && wire
             .coedges()
             .all(|coedge| matches!(coedge.edge().is_closed(), Ok(true)))
+}
+
+/// Whether `coedge` runs right round a whole closed curve, from one corner and
+/// back to it. Among a flat face's other sides it is a round hole or a round
+/// bump touching the rest of its wire at that corner: a pin through a plate
+/// that touches the plate's side leaves one in the plate's top
+/// (`tests/a_flat_face_with_a_round_hole_touching_its_outline.rs`, row Q3250).
+/// A kind of run this crate has never seen is not one.
+fn runs_right_round_at_one_corner(coedge: CoedgeView<'_>) -> bool {
+    coedge.start().key() == coedge.end().key() && matches!(coedge.edge().is_closed(), Ok(true))
 }
 
 /// The coedges whose circles make up a round wire, each to be read on its
@@ -629,7 +691,9 @@ fn the_circles_a_round_wire_is_made_of<'m>(
 /// Which side of the surface one circle of a round wire is cut from `point` is
 /// on: [`Decision::Neg`] inside the circle, [`Decision::Pos`] outside it,
 /// [`Decision::Zero`] exactly on it. `circle` is the coedge along it, one of
-/// [`the_circles_a_round_wire_is_made_of`].
+/// [`the_circles_a_round_wire_is_made_of`], or a side that runs right round a
+/// whole closed curve at one corner among its wire's other sides, which
+/// [`how_many_disks_hold`] hands it as well ([`runs_right_round_at_one_corner`]).
 ///
 /// **The inside of such a circle is the inside of the ball or pipe that cut
 /// it**, and that is a fact rather than a convention: a closed curve cut on a
@@ -979,7 +1043,9 @@ pub(crate) fn the_meridian_half_space_keeps(
 /// Every side must be straight between its two corners: stored as
 /// [`EdgeRun::Straight`], or a piece of a cone's ruling
 /// ([`is_a_piece_of_a_ruling`]), which is the same segment stored as part of a
-/// crossing.
+/// crossing. A side that runs right round a whole closed curve at one corner
+/// ([`runs_right_round_at_one_corner`]) is left out, and the polygon is the
+/// sides left: [`what_a_flat_face_holds`] reads that side's disk on its own.
 #[expect(
     clippy::too_many_arguments,
     reason = "the solid is what a ruling side's face across is found in, and every other one \
@@ -995,11 +1061,15 @@ fn walk_one_outline(
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<Walked> {
-    let corners: Vec<Point> = wire.points().collect();
+    let polygon: Vec<CoedgeView<'_>> = wire
+        .coedges()
+        .filter(|&coedge| !runs_right_round_at_one_corner(coedge))
+        .collect();
+    let corners: Vec<Point> = polygon.iter().map(|side| side.start().point()).collect();
     if corners.is_empty() {
         return Ok(Walked::WindsRound(0));
     }
-    for coedge in wire.coedges() {
+    for coedge in polygon {
         let edge = coedge.edge();
         if edge.stored_run() != &EdgeRun::Straight && !is_a_piece_of_a_ruling(solid, face, edge)? {
             return Err(Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() });
@@ -2275,10 +2345,12 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
     let Readings {
         sides: readings,
         whole_curves,
+        disks,
     } = every_reading_of_the_sides_of(solid, face)?;
-    let with_a_round_wire = face
-        .wires()
-        .any(|wire| is_a_round_wire_of_a_flat_face(face, wire));
+    let with_a_round_wire = !disks.is_empty()
+        || face
+            .wires()
+            .any(|wire| is_a_round_wire_of_a_flat_face(face, wire));
     let on_a_ball = matches!(surface, Surface::Sphere(_));
     if !with_a_round_wire && (whole_curves.is_empty() || on_a_ball) {
         let mut refused = None;
@@ -2307,7 +2379,7 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
         }
     }
     match surface {
-        Surface::Plane(flat) => {
+        Surface::Plane(_) => {
             let [sides] = readings.as_slice() else {
                 panic!(
                     "a flat face's sides are read one way, since only a ruling of a pipe is read more ways than one"
@@ -2317,7 +2389,9 @@ fn what_a_face_cut_by_part_of_a_crossing_holds(
                 whole_curves.is_empty(),
                 "only a cone or a ball face's sides are read as whole curves"
             );
-            what_a_flat_face_of_chords_and_arcs_holds(solid, face, &flat, sides, point, policy, log)
+            what_a_flat_face_of_chords_and_arcs_holds(
+                solid, face, sides, &disks, point, policy, log,
+            )
         }
         Surface::Cone(cone) => {
             let [sides] = readings.as_slice() else {
@@ -3889,6 +3963,15 @@ fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
 /// [`what_a_flat_face_holds`] counts one. `sides` leaves such wires out. The
 /// count round the face is the sum of each wire's, so the two add.
 ///
+/// **So is a side right round a whole closed curve at one corner among its
+/// wire's other sides** ([`runs_right_round_at_one_corner`]): the thick bar's
+/// end that a thin bar touching its wall from inside goes through has one, the
+/// thin bar's circle, among the arcs of the thick bar's rim. `sides` leaves it
+/// out too, and `disks` holds it. Its disk is read as a round wire's is
+/// ([`how_many_disks_hold`]), and the face then holds a point where the count
+/// of the rest and the number of those disks holding it add up to an odd
+/// number, for the reason [`held_where_it_and_its_disks_wind`] gives.
+///
 /// **This reads the face's boundary, and never asks whether the part in front of
 /// every cut is one piece.** That is why it answers the cap of a slab with a
 /// round scoop out of its top, which keeps the outside of the pipe and is one of
@@ -3950,15 +4033,18 @@ fn the_cap_and_the_two_cuts_a_cone_face_is_in_front_of_either_of(
 fn what_a_flat_face_of_chords_and_arcs_holds(
     solid: SolidView<'_>,
     face: FaceView<'_>,
-    flat: &Plane,
     sides: &[Side],
+    disks: &[CoedgeView<'_>],
     point: PredicatePoint,
     policy: &Policy,
     log: &mut ProvenanceLog,
 ) -> Result<OnAFace> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
-    let Surface::Plane(placed) = face.surface() else {
-        unreachable!("a face stored on a plane sits on one once moved")
+    let (Surface::Plane(flat), Surface::Plane(placed)) = (face.stored_surface(), face.surface())
+    else {
+        unreachable!(
+            "the caller hands this only a face stored on a plane, and a movement keeps a plane one"
+        )
     };
     let target = a_point_off_the_plane(face, &placed)
         .ok_or(Error::NothingSaysWhichSideOfItsTrimmingAFaceLiesOn { face: face.key() })?;
@@ -3973,6 +4059,10 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
             None => return Ok(OnAFace::OnItsBoundary),
         }
     }
+    let Some(disks) = how_many_disks_hold(solid, face, disks.iter().copied(), point, policy, log)?
+    else {
+        return Ok(OnAFace::OnItsBoundary);
+    };
     let mut chords = Vec::new();
     let mut along = Vec::with_capacity(sides.len());
     for (index, side) in sides.iter().enumerate() {
@@ -3993,7 +4083,7 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
             continue;
         };
         let on_the_left =
-            is_the_arc_left_of_its_chord(flat, side, *into_the_arc).ok_or_else(cannot)?;
+            is_the_arc_left_of_its_chord(&flat, side, *into_the_arc).ok_or_else(cannot)?;
         let arcs_side = if on_the_left {
             Decision::Pos
         } else {
@@ -4017,7 +4107,7 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
             read
         };
         let inside = if matches!(read, Decision::Neg | Decision::Zero)
-            && is_on_the_other_nappe_from_the_arc(flat, side, point)?
+            && is_on_the_other_nappe_from_the_arc(&flat, side, point)?
         {
             Decision::Pos
         } else {
@@ -4107,7 +4197,7 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
         match wind_aiming_at(aim, &towards, &mut trial) {
             Ok(winding) => {
                 trial.drain_into(log);
-                return Ok(held_where_it_winds(winding));
+                return Ok(held_where_it_and_its_disks_wind(winding, disks));
             }
             Err(refused) => {
                 first_refusal.get_or_insert((refused, trial));
@@ -4130,7 +4220,7 @@ fn what_a_flat_face_of_chords_and_arcs_holds(
     if one.arcs_side == other.arcs_side {
         winding += other.piece;
     }
-    Ok(held_where_it_winds(winding))
+    Ok(held_where_it_and_its_disks_wind(winding, disks))
 }
 
 /// An arc of a flat face, of a cone face seen down its axis, or of a ball face
@@ -4147,6 +4237,34 @@ struct AChordThrough {
 /// A face holds a point it winds round, and no other.
 fn held_where_it_winds(winding: i64) -> OnAFace {
     if winding == 0 {
+        OnAFace::NotHeld
+    } else {
+        OnAFace::Held
+    }
+}
+
+/// What a flat face holds where the rest of its wires wind `winding` times
+/// round a point and `disks` of its sides that run right round a whole closed
+/// curve at one corner ([`runs_right_round_at_one_corner`]) hold it in their
+/// disks: held exactly when `winding` and `disks` add up to an odd number.
+///
+/// The face's whole wires wind once round a point it holds and not at all round
+/// any other. Each such side is a closed loop of its wire, so it adds one to that
+/// count inside its disk, one way round or the other, and nothing outside it.
+/// The whole count and `winding + disks` are then both odd or both even, and
+/// the whole count is odd exactly where the face holds the point. Which way
+/// round each loop goes is never asked, so whether its disk is a hole in the
+/// rest of the face or a bump on it does not matter, nor how the rest of the
+/// face winds round the point there: a point in a bump's disk that is also in
+/// a hole lying inside that disk has the rest wind `-1` round it.
+///
+/// With no such side this is [`held_where_it_winds`], so every face without one
+/// reads as it did.
+fn held_where_it_and_its_disks_wind(winding: i64, disks: usize) -> OnAFace {
+    if disks == 0 {
+        return held_where_it_winds(winding);
+    }
+    if (winding.rem_euclid(2) == 1) == (disks % 2 == 1) {
         OnAFace::NotHeld
     } else {
         OnAFace::Held
@@ -5333,20 +5451,34 @@ enum Lies {
 /// **A flat face's round wires are left out too** ([`is_a_round_wire_of_a_flat_face`]):
 /// a whole closed curve has no two ends to read a chord between, and
 /// [`what_a_flat_face_of_chords_and_arcs_holds`] counts it as a whole instead.
-/// So, for the same reason, is a cone face's side right round the curve a
-/// plane cuts it in ([`a_whole_curve_round_a_cone_or_a_ball`]), which
+/// So, for the same reason, is a flat face's side right round a whole closed
+/// curve at one corner among its wire's other sides
+/// ([`runs_right_round_at_one_corner`]), which goes in [`Readings::disks`]
+/// before the face across it is looked for: [`what_a_round_wire_encloses`]
+/// reads its disk, and refuses one with no face across, a flat one, or a ring
+/// naming no one circle through it. So is a cone face's side right round the
+/// curve a plane cuts it in ([`a_whole_curve_round_a_cone_or_a_ball`]), which
 /// [`what_a_cone_face_seen_down_its_axis_holds`] reads as a whole, and a ball
 /// face's side right round the circle a plane cuts it in, which
 /// [`what_the_part_in_front_of_its_cuts_holds`] reads as a cut with no corners.
-fn every_reading_of_the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Result<Readings> {
+fn every_reading_of_the_sides_of<'m>(
+    solid: SolidView<'m>,
+    face: FaceView<'m>,
+) -> Result<Readings<'m>> {
     let cannot = || Error::AFaceTrimmedByACurveThisCannotFollow { face: face.key() };
     let mut readings: Vec<Vec<Side>> = vec![Vec::new()];
     let mut whole_curves = Vec::new();
+    let mut disks = Vec::new();
+    let on_a_plane = face.stored_surface().as_plane().is_some();
     let coedges = face
         .wires()
         .filter(|&wire| !is_a_round_wire_of_a_flat_face(face, wire))
         .flat_map(WireView::coedges);
     for coedge in coedges {
+        if on_a_plane && runs_right_round_at_one_corner(coedge) {
+            disks.push(coedge);
+            continue;
+        }
         let edge = coedge.edge();
         let Some(across) = the_face_across(solid, face, edge)? else {
             continue;
@@ -5424,16 +5556,22 @@ fn every_reading_of_the_sides_of(solid: SolidView<'_>, face: FaceView<'_>) -> Re
     Ok(Readings {
         sides: readings,
         whole_curves,
+        disks,
     })
 }
 
 /// What [`every_reading_of_the_sides_of`] reads off a face.
-struct Readings {
+struct Readings<'m> {
     /// Every way to read the sides that run between two corners.
     sides: Vec<Vec<Side>>,
     /// The sides that run right round a closed curve, on a cone or a ball face
     /// only.
     whole_curves: Vec<WholeCurve>,
+    /// The sides of a flat face that run right round a whole closed curve at
+    /// one corner among their wire's other sides
+    /// ([`runs_right_round_at_one_corner`]), each a disk read by
+    /// [`how_many_disks_hold`].
+    disks: Vec<CoedgeView<'m>>,
 }
 
 /// A side of a cone or a ball face that runs right round the closed curve a
@@ -5496,8 +5634,10 @@ fn is_a_round_wire_of_a_flat_face(face: FaceView<'_>, wire: WireView<'_>) -> boo
 /// tells from its sibling and that is not an arc of a cone's face along a curve
 /// that does not close ([`the_way_into_an_arc_that_does_not_close`]), a whole
 /// closed crossing among parts of others that is not a cone or a ball face's
-/// [`WholeCurve`], which never reaches here, or a kind of run this has not been
-/// taught, and whatever [`the_face_across`] gives for the edge.
+/// [`WholeCurve`] or a flat face's side right round at one corner, neither of
+/// which reaches here ([`every_reading_of_the_sides_of`] leaves both out), or a
+/// kind of run this has not been taught, and whatever [`the_face_across`] gives
+/// for the edge.
 fn the_way_a_side_runs(
     solid: SolidView<'_>,
     face: FaceView<'_>,
