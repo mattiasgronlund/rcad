@@ -163,6 +163,40 @@ fn every_turn_a_floor_crossing_the_rim_at_the_seam_corner_was_refused_at_fuses()
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Every turn at which a rule was refused for the two leans whose cap's rim
+/// the floor `z = 1` touches at the seam corner `(13, 10, 1)`, lowest for
+/// `(0.1, 0, 1)` and highest for `(−0.1, 0, 1)` (Q3236): `step · 0.05` about
+/// `z`, refused `CannotTellTheCellsOfAFaceApart`, and `0.4` about `x`, refused
+/// on the order along a crossing. The block's floor stops at `x = 12`, a unit
+/// short of the seam corner, so wherever the turned numbers put the touch, no
+/// face of the answer reaches it.
+#[test]
+fn every_turn_a_floor_touching_the_rim_at_the_seam_corner_was_refused_at_fuses() {
+    let refused: [([f64; 3], &[u8]); 2] = [
+        ([0.1, 0.0, 1.0], &[29, 30, 31, 34, 37, 47, 49, 51, 59]),
+        (
+            [-0.1, 0.0, 1.0],
+            &[4, 14, 17, 18, 23, 24, 29, 34, 40, 41, 42, 47, 52, 59],
+        ),
+    ];
+    let wrong: Vec<String> = refused
+        .into_iter()
+        .flat_map(|(lean, steps)| {
+            steps
+                .iter()
+                .map(|&step| (Axis::z(), "z", f64::from(step) * 0.05))
+                .chain([(Axis::x(), "x", 0.4)])
+                .filter_map(move |(axis, about, angle)| {
+                    let turn = Isometry::rotation(&axis, angle).expect("a finite angle");
+                    fuses_with_the_block_on_the_seam_corner(lean, &turn)
+                        .err()
+                        .map(|why| format!("turned {angle} about {about}: {why}"))
+                })
+        })
+        .collect();
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// The lean whose cap's plane holds the line where the wall `y = 10` meets the
 /// floor `z = 1` of the block `[6, 12]² × [1, 3]`, so the cap's straight edge
 /// from `(7, 10, 1)` to `(10, 10, 1)` lies in that floor (Q3229).
