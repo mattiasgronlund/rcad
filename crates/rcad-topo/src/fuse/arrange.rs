@@ -2134,7 +2134,7 @@ impl<'f> Arrangement<'f> {
     /// other, and is where `partner` crosses the curve those two share: the
     /// one place where the three meet that comes within what writing the
     /// corner down cost ([`what_writing_the_corner_down_cost`]), lying wholly
-    /// inside that room and sharing a point with the corner's own box.
+    /// inside that room.
     ///
     /// [`what_writing_the_corner_down_cost`]: super::bake::what_writing_the_corner_down_cost
     ///
@@ -2179,10 +2179,22 @@ impl<'f> Arrangement<'f> {
     /// by the same room, so no second node stands a rounding from it.
     ///
     /// **Only one place may come that near.** Where two do, as where `partner`
-    /// grazes the curve, nothing says which the corner is, and it is asked as
-    /// before. The box of the place must share a point with the corner's, so
-    /// a crossing a rounding past a corner the arithmetic can tell apart from
-    /// it still is told apart.
+    /// grazes the curve within the room, nothing here says which the corner
+    /// is, and it is asked as before.
+    ///
+    /// **The place need not share a point with the corner's box.** Inside the
+    /// room it is the corner moved along the curve no further than writing it
+    /// down may have, which is the argument above. Told apart from the corner
+    /// instead, it left the corner and every meet through that place a
+    /// rounding apart on the crossings through both. A bar of radius 3 up `z`
+    /// from `(10, 10, 0)`, capped by the plane through `(13, 10, 1)` with the
+    /// normal `(0.3, −0.2, 1)` and turned `0.8` about `z`, has its seam corner
+    /// stored at `(1.8836263125179205, 16.29269627516545,
+    /// 0.9999999999999999)`, while the block's floor `z = 1`, which crosses
+    /// the rim there, is boxed with the cap and the pipe at `z = 1` exactly.
+    /// Told apart, the bar united with a square plate and then fused with the
+    /// block `[6, 12]² × [1, 3]` on that floor was refused at that turn, and
+    /// at 31 more turns of that lean and of `(0.1, 0.07, 1)` (Q3228).
     ///
     /// **Every face round the corner asks the same three in the same order**,
     /// the two round it and `partner` sorted by name, so they all take the
@@ -2224,11 +2236,7 @@ impl<'f> Arrangement<'f> {
         let (Some(place), None) = (reaching.next(), reaching.next()) else {
             return false;
         };
-        let (meet, room) = (place.enclosure(), room.enclosure());
-        boxes_overlap(corner.point, place)
-            && (0..3).all(|axis| {
-                room[axis].lo() <= meet[axis].lo() && meet[axis].hi() <= room[axis].hi()
-            })
+        holds_every_point_of(room, place)
     }
 
     /// Whether a corner of the face is on one crossing: on its partner surface,
