@@ -1078,6 +1078,16 @@ fn its_corners_and_plane_part_at(face: FaceView<'_>, flat: &Plane, point: Predic
 /// an own plane that cannot settle a box `0.077` off the face's stored plane,
 /// and that read as a parting and refused a union of cubes turned about a
 /// slanted axis (Q3224).
+///
+/// **Not yet shown: that a box this leaves out never needs the face by its
+/// edge.** Where the ray's line meets this face it reads the box right, but
+/// beside the edge the line can meet the neighbour instead (Q997), and only a
+/// face that parts sends such a box to a plane. Read by hand across the edge,
+/// a box just past a fan triangle's side, by the corner furthest off the
+/// plane, can be outside the triangles' solid and inside the stored planes'
+/// one while it lies outside this slab, by up to twice the furthest corner,
+/// where that triangle is tipped from the plane by more than the two faces
+/// bend. No probe has built that box.
 fn is_further_off_its_plane_than_its_corners(
     face: FaceView<'_>,
     flat: &Plane,
