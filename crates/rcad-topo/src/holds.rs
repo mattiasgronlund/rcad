@@ -14521,6 +14521,96 @@ mod tests {
         }
     }
 
+    /// **A thin pipe a hair out of a thick pipe's wall names the long arc of
+    /// the thick pipe's circle, and the thick pipe names the long arc of the
+    /// thin one's**, where no plane can.
+    ///
+    /// The corners, the cap and the two pipes are the ones the union of a thick
+    /// bar of radius 2 and a thin bar of radius 1 a hair out of its wall,
+    /// turned by 1 about `z`, stores
+    /// (`a_thin_bar_a_hair_out_of_a_thick_bars_wall_turned.rs`, Q3253). The
+    /// corners are `2e−8` apart and each is `1.3e−16` to `2.9e−16` outside both
+    /// circles, and the thick circle's short arc between them is `2.4e−17`
+    /// deep, so every plane that holds both corners holds that short arc too.
+    /// Both long arcs are on their centre's side of the chord, and both centres
+    /// are along `(0.54, 0.84)` from the corners. Read on the stored corners,
+    /// and on boxes `1.6e−15` wide round them, as the next fuse solves them.
+    #[test]
+    fn a_thin_pipe_a_hair_out_of_a_thick_pipes_wall_names_the_long_arc_of_each() {
+        let up_z = |x: f64, y: f64, z: f64| {
+            Axis::new(Point::new(x, y, z), Vector::new(0.0, 0.0, 1.0)).expect("a direction")
+        };
+        let thick = Cylinder::new(up_z(0.0, 0.0, -2.0), 2.0).expect("a positive radius");
+        let thin = Cylinder::new(up_z(-0.5403023058681398, -0.8414709848078965, -3.0), 1.0)
+            .expect("a positive radius");
+        let cap = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, -2.0), Vector::new(0.0, 0.0, -1.0))
+                .expect("a unit normal"),
+        );
+        let corners = [
+            [-1.0806046200201131, -1.6829419642968049, -2.0],
+            [-1.080604603452446, -1.6829419749347816, -2.0],
+        ];
+        let boxed = corners.map(|[x, y, z]| {
+            let round = |at: f64| Interval::new(at - 8e-16, at + 8e-16).expect("an interval");
+            PredicatePoint::Constructed([round(x), round(y), Interval::exactly(z)])
+        });
+        let towards_the_centres = exactly([0.5403023058681398, 0.8414709848078965, 0.0]);
+        for ends in [corners.map(PredicatePoint::from), boxed] {
+            for (round, picker) in [
+                (thick, Picker::OutsideAPipe(thin)),
+                (thin, Picker::InsideAPipe(thick)),
+            ] {
+                let way = the_way_into_an_arc(&cap, &Surface::Cylinder(round), ends, &[picker])
+                    .unwrap_or_else(|| panic!("{picker:?} on {ends:?}: no way into the arc"));
+                assert_eq!(
+                    dot(way, towards_the_centres).sign(),
+                    Decision::Pos,
+                    "{picker:?} on {ends:?}: {way:?}"
+                );
+            }
+        }
+    }
+
+    /// **A pipe that crosses a circle's pipe names the arc outside it by its
+    /// outside and the arc inside it by its inside, and a pipe the circle never
+    /// dips into names nothing.**
+    ///
+    /// The pipes of radius 5 up the `z` axis and up `x = 6` cross the plane
+    /// `z = 0` in circles that meet at `(3, ±4, 0)`. The first circle's arc
+    /// through `(5, 0)` is inside the second pipe and its arc through
+    /// `(−5, 0)` outside, so the way into the one is along `x` and into the
+    /// other against it. Every point of the first circle is outside the pipe of
+    /// radius 1 up `x = 20`, so nothing of it is behind that pipe's outside to
+    /// say which arc is meant.
+    #[test]
+    fn a_pipe_that_crosses_a_circles_pipe_names_each_arc_by_one_side_of_it() {
+        let pipe = |x: f64, radius: f64| {
+            Cylinder::new(
+                Axis::new(Point::new(x, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+                    .expect("a direction"),
+                radius,
+            )
+            .expect("a positive radius")
+        };
+        let floor = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, 1.0))
+                .expect("a unit normal"),
+        );
+        let circle = Surface::Cylinder(pipe(0.0, 5.0));
+        let ends = [[3.0, -4.0, 0.0], [3.0, 4.0, 0.0]].map(PredicatePoint::from);
+        for (picker, along_x) in [
+            (Picker::OutsideAPipe(pipe(6.0, 5.0)), Decision::Neg),
+            (Picker::InsideAPipe(pipe(6.0, 5.0)), Decision::Pos),
+        ] {
+            let way = the_way_into_an_arc(&floor, &circle, ends, &[picker])
+                .unwrap_or_else(|| panic!("{picker:?}: no way into the arc"));
+            assert_eq!(way[0].sign(), along_x, "{picker:?}: {way:?}");
+        }
+        let far = Picker::OutsideAPipe(pipe(20.0, 1.0));
+        assert_eq!(the_way_into_an_arc(&floor, &circle, ends, &[far]), None);
+    }
+
     /// **The fifth way reads nothing of an ellipse whose line through the
     /// centre, square to the chord, meets the curve twice on the centre's side
     /// of the chord.**
