@@ -14912,6 +14912,94 @@ mod tests {
         assert_eq!(the_way_into_an_arc(&floor, &circle, ends, &[far]), None);
     }
 
+    /// **The way an arc a pipe picks leaves its start reads the tangent there
+    /// along the chord**, on the long arc and the short one of the circle of
+    /// radius 5 that the pipe up `x = 6` crosses at `(3, ±4, 0)`, and on the
+    /// long arcs the thick and the thin bar's pipes pick at `z = −2` from
+    /// corners `2e−8` apart, boxed `1.6e−15` wide.
+    ///
+    /// From `(3, −4)` the arc outside the second pipe leaves along
+    /// `(−0.8, −0.6)` and the arc inside it along `(0.8, 0.6)`. From the first
+    /// of the two close corners both long arcs leave away from the other
+    /// corner, along `(−0.84, 0.54)`, which is `5e−9` of the chord's length off
+    /// it: square to the chord, that tangent cannot be read from such boxes.
+    #[test]
+    fn the_way_an_arc_a_pipe_picks_leaves_its_start_reads_its_tangent_along_the_chord() {
+        let pipe = |x: f64, y: f64, radius: f64| {
+            Cylinder::new(
+                Axis::new(Point::new(x, y, 0.0), Vector::new(0.0, 0.0, 1.0)).expect("a direction"),
+                radius,
+            )
+            .expect("a positive radius")
+        };
+        let floor = |z: f64| {
+            Surface::Plane(
+                Plane::from_point_and_normal(Point::new(0.0, 0.0, z), Vector::new(0.0, 0.0, 1.0))
+                    .expect("a unit normal"),
+            )
+        };
+        let circle = Surface::Cylinder(pipe(0.0, 0.0, 5.0));
+        let ends = [[3.0, -4.0, 0.0], [3.0, 4.0, 0.0]].map(PredicatePoint::from);
+        for (picker, leaving) in [
+            (Picker::OutsideAPipe(pipe(6.0, 0.0, 5.0)), [-0.8, -0.6, 0.0]),
+            (Picker::InsideAPipe(pipe(6.0, 0.0, 5.0)), [0.8, 0.6, 0.0]),
+        ] {
+            let way =
+                the_way_an_arc_a_pipe_picks_leaves_its_start(&floor(0.0), &circle, ends, &[picker])
+                    .unwrap_or_else(|| panic!("{picker:?}: no way out of the start"));
+            assert_eq!(
+                dot(way, exactly(leaving)).sign(),
+                Decision::Pos,
+                "{picker:?}: {way:?}"
+            );
+        }
+        let far = Picker::OutsideAPipe(pipe(20.0, 0.0, 1.0));
+        assert_eq!(
+            the_way_an_arc_a_pipe_picks_leaves_its_start(&floor(0.0), &circle, ends, &[far]),
+            None
+        );
+
+        let thick = pipe(0.0, 0.0, 2.0);
+        let thin = pipe(-0.5403023058681398, -0.8414709848078965, 1.0);
+        let corners = [
+            [-1.0806046200201131, -1.6829419642968049, -2.0],
+            [-1.080604603452446, -1.6829419749347816, -2.0],
+        ];
+        let boxed = corners.map(|[x, y, z]| {
+            let round = |at: f64| Interval::new(at - 8e-16, at + 8e-16).expect("an interval");
+            PredicatePoint::Constructed([round(x), round(y), Interval::exactly(z)])
+        });
+        let away_from_the_other_corner = exactly([-0.8414709848078965, 0.5403023058681398, 0.0]);
+        for (round, picker) in [
+            (thick, Picker::OutsideAPipe(thin)),
+            (thin, Picker::InsideAPipe(thick)),
+        ] {
+            let leaving = the_way_an_arc_a_pipe_picks_leaves_its_start(
+                &floor(-2.0),
+                &Surface::Cylinder(round),
+                boxed,
+                &[picker],
+            )
+            .unwrap_or_else(|| panic!("{picker:?}: no way out of the start"));
+            assert_eq!(
+                dot(leaving, away_from_the_other_corner).sign(),
+                Decision::Pos,
+                "{picker:?}: {leaving:?}"
+            );
+            let square_to_the_chord =
+                the_way_into_an_arc(&floor(-2.0), &Surface::Cylinder(round), boxed, &[picker])
+                    .unwrap_or_else(|| panic!("{picker:?}: no way into the arc"));
+            assert!(
+                matches!(
+                    dot(square_to_the_chord, away_from_the_other_corner).sign(),
+                    Decision::Undecidable { .. }
+                ),
+                "{picker:?}: the tangent read square to the chord, which this test says it \
+                 cannot be: {square_to_the_chord:?}"
+            );
+        }
+    }
+
     /// **The fifth way reads nothing of an ellipse whose line through the
     /// centre, square to the chord, meets the curve twice on the centre's side
     /// of the chord.**

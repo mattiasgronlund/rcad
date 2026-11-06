@@ -94,8 +94,8 @@ use smallvec::SmallVec;
 
 use crate::classify::stretched_to_the_plane;
 use crate::holds::{
-    how_the_axis_lies_on, lie_along_one_line, the_way_into_an_arc,
-    which_end_tells_the_arc_a_box_holds,
+    how_the_axis_lies_on, lie_along_one_line, the_way_an_arc_a_pipe_picks_leaves_its_start,
+    the_way_into_an_arc, which_end_tells_the_arc_a_box_holds,
 };
 use crate::mesh::the_surface_pinches_at;
 use crate::validate::{name_of_surface, side_of_surface};
@@ -10514,6 +10514,16 @@ impl<'f> Arrangement<'f> {
     /// no picker. Every fuse of `LED_D5.0mm_Horizontal_O1.27mm_Z3.0mm.step`'s
     /// solid was refused on that edge (row Q2926).
     ///
+    /// **An edge a pipe along its own pipe picks is read along the chord
+    /// first** ([`the_way_an_arc_a_pipe_picks_leaves_its_start`] has the
+    /// argument), because against a way square to the chord the tangent reads
+    /// only by how far it leans off the chord. The union of a thick bar and a
+    /// thin one a hair out of its wall, turned by 1 about `z`, stores two arcs
+    /// at `z = −2` whose corners are `2e−8` apart, and the next fuse solves
+    /// them into boxes `1.6e−15` wide: the tangent leans off that chord by
+    /// `5e−9` of its length and the chord's direction is known to `8e−8`, so
+    /// that sign was refused (row Q3253).
+    ///
     /// # Errors
     ///
     /// [`Error::Undecidable`] naming [`WHICH_WAY_AN_EDGE_RUNS_ROUND`] when the
@@ -10522,7 +10532,7 @@ impl<'f> Arrangement<'f> {
     /// [`Error::AFaceTrimmedByACurveThisCannotFollow`] when the edge is not an
     /// arc of a closed crossing between a plane and a round surface — a ball's
     /// circle, a cone's or a pipe's circle or ellipse, or a ring's circle —
-    /// with a picker that tells its two arcs apart by one of the five ways
+    /// with a picker that tells its two arcs apart by one of the six ways
     /// [`the_way_into_an_arc`] sets out, the reading of a picker this and
     /// [`holds`](crate::holds) share — on a ring's circle by the first of them —
     /// nor an arc of a ball's, a cone's or a pipe's curve whose other arc the
@@ -10534,9 +10544,13 @@ impl<'f> Arrangement<'f> {
     /// If the direction read gives no sign against the way into the arc. Read
     /// at the start against a picker's way, that is a tangent along the chord,
     /// which on a closed conic means the two ends are one point, and an edge
-    /// with one corner at both ends never gets here. Read against the chord at
-    /// the end the box names, it puts that end where the curve goes farthest
-    /// along the chord, which the box has ruled out.
+    /// with one corner at both ends never gets here. Read at the start along
+    /// the chord, as a pipe along the edge's own pipe has it, it puts the start
+    /// where the curve goes least far along the chord seen down the axis, which
+    /// makes the chord run through the centre, and a chord through the centre
+    /// is read as neither arc there. Read against the chord at the end the box
+    /// names, it puts that end where the curve goes farthest along the chord,
+    /// which the box has ruled out.
     fn which_way_an_edge_runs_round(
         &self,
         crossing: usize,
@@ -10552,23 +10566,29 @@ impl<'f> Arrangement<'f> {
         let cannot_follow = || Error::AFaceTrimmedByACurveThisCannotFollow {
             face: self.face.keys[0],
         };
-        let (at, against) = match the_way_into_an_arc(&self.surface, &partner, ends, picked_by) {
-            Some(into_the_arc) => (from, into_the_arc),
-            None => {
-                let inside = self
-                    .face
-                    .bounds
-                    .as_a_point_anywhere_inside()
-                    .ok_or_else(cannot_follow)?
-                    .enclosure();
-                let read_at =
-                    which_end_tells_the_arc_a_box_holds(&self.surface, &partner, ends, inside)
-                        .ok_or_else(cannot_follow)?;
-                let [start, end] = ends.map(PredicatePoint::enclosure);
-                (
-                    [from, to][read_at],
-                    core::array::from_fn(|axis| end[axis] - start[axis]),
-                )
+        let along_the_chord =
+            the_way_an_arc_a_pipe_picks_leaves_its_start(&self.surface, &partner, ends, picked_by);
+        let (at, against) = if let Some(leaving) = along_the_chord {
+            (from, leaving)
+        } else {
+            match the_way_into_an_arc(&self.surface, &partner, ends, picked_by) {
+                Some(into_the_arc) => (from, into_the_arc),
+                None => {
+                    let inside = self
+                        .face
+                        .bounds
+                        .as_a_point_anywhere_inside()
+                        .ok_or_else(cannot_follow)?
+                        .enclosure();
+                    let read_at =
+                        which_end_tells_the_arc_a_box_holds(&self.surface, &partner, ends, inside)
+                            .ok_or_else(cannot_follow)?;
+                    let [start, end] = ends.map(PredicatePoint::enclosure);
+                    (
+                        [from, to][read_at],
+                        core::array::from_fn(|axis| end[axis] - start[axis]),
+                    )
+                }
             }
         };
         let forward = self.way_out_of(
@@ -10593,9 +10613,10 @@ impl<'f> Arrangement<'f> {
             decided,
             Decision::Zero,
             "an edge's tangent gives no sign against the way into its arc: along the \
-             chord at a start a picker read, which makes its two ends one, or square to \
-             the chord at an end the box read, which makes that end the farthest the \
-             curve goes along its chord, as the box ruled out"
+             chord at a start a picker read, which makes its two ends one, square to the \
+             chord seen down the axis at a start a pipe read, which puts the chord through \
+             the centre, or square to the chord at an end the box read, which makes that \
+             end the farthest the curve goes along its chord, as the box ruled out"
         );
         assert!(
             decided == Decision::Pos || decided == Decision::Neg,
