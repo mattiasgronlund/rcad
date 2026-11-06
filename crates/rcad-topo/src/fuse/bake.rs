@@ -2869,7 +2869,10 @@ mod tests {
     use rcad_geom::{Axis, Isometry, Plane, Point, Scale, Sphere, Surface, Vector};
     use rcad_predicates::{Interval, Point as PredicatePoint, Policy, ProvenanceLog};
 
-    use super::{Bounds, bake, derive_a_corner, what_writing_the_corner_down_cost};
+    use super::{
+        Bounds, bake, boxes_overlap, derive_a_corner, the_place_the_model_points_at,
+        what_writing_the_corner_down_cost,
+    };
     use crate::VertexKey;
     use crate::validate::{CornerRoom, MEASURING_SLACK, side_of_surface};
     use crate::{Error, Model, SolidKey};
@@ -3794,6 +3797,99 @@ mod tests {
         assert!(
             matches!(refused, Err(Error::Undecidable { .. })),
             "two places both holding the stored corner is not an answer, it was {refused:?}"
+        );
+    }
+
+    /// Two places inside the room `validate` grants a corner are told apart by
+    /// what writing the corner down cost, when that holds only one of them.
+    ///
+    /// **The numbers are a real shape's** (Q3255): a block 5 long on a thick
+    /// bar of radius 2, united with a bar of radius 1 at `x = −1` and then with
+    /// one at `x = 1`, all turned `0.2` about `z`. In the last union the
+    /// `x = −1` bar's circle on `z = −2` crosses the thick bar's rim at these
+    /// two places, `3.8e-9` apart. The room is a modelling tolerance of `1e-9`
+    /// of the solid's size, `5.198e-9`, and holds both, so the corner was
+    /// refused `Undecidable` where three surfaces meet. The stored corner is
+    /// inside the first place's box and `3.8e-9` from the second, and its own
+    /// rounding, `2.8e-14`, holds the first alone.
+    ///
+    /// A corner stored a third of the way from the first place to the second is
+    /// past that rounding from both, so it is still two answers, and the nearer
+    /// is not taken for being nearer.
+    #[test]
+    fn two_places_inside_the_room_validate_grants_are_told_apart_by_the_corners_rounding() {
+        let on_the_bottom = |x: [f64; 2], y: [f64; 2]| {
+            PredicatePoint::Constructed([
+                Interval::new(x[0], x[1]).expect("a box round x"),
+                Interval::new(y[0], y[1]).expect("a box round y"),
+                Interval::exactly(-2.0),
+            ])
+        };
+        let first = on_the_bottom(
+            [-1.9601331553014836, -1.9601331553014825],
+            [-0.3973386634696573, -0.3973386634696569],
+        );
+        let second = on_the_bottom(
+            [-1.9601331560634845, -1.9601331560634834],
+            [-0.39733865971058796, -0.3973386597105875],
+        );
+        let stored = [-1.9601331553014831, -0.39733866346965707, -2.0];
+        let validate_allows = 5.198410758209039e-9;
+
+        let writing_it_down =
+            what_writing_the_corner_down_cost(PredicatePoint::from(stored).enclosure());
+        let within = |place: PredicatePoint, corner: [f64; 3], room: f64| {
+            boxes_overlap(
+                place.enclosure(),
+                PredicatePoint::from(corner).enclosure(),
+                room,
+            )
+        };
+        assert!(
+            [first, second].iter().all(|&place| within(
+                place,
+                stored,
+                writing_it_down + validate_allows
+            )),
+            "the room validate grants holds both places, which is the refusal this is about"
+        );
+        assert!(
+            within(first, stored, writing_it_down) && !within(second, stored, writing_it_down),
+            "the {writing_it_down:e} writing the corner down cost holds the first place alone"
+        );
+        for places in [[first, second], [second, first]] {
+            assert_eq!(
+                the_place_the_model_points_at(
+                    &places,
+                    PredicatePoint::from(stored),
+                    validate_allows
+                ),
+                Some(first),
+                "the place the corner's own rounding holds is the one, whichever comes first"
+            );
+        }
+
+        let middle =
+            |place: PredicatePoint| place.enclosure().map(|side| (side.lo() + side.hi()) / 2.0);
+        let [from, to] = [first, second].map(middle);
+        let a_third_of_the_way: [f64; 3] =
+            core::array::from_fn(|axis| from[axis] + (to[axis] - from[axis]) / 3.0);
+        assert!(
+            [first, second].iter().all(|&place| {
+                within(place, a_third_of_the_way, writing_it_down + validate_allows)
+                    && !within(place, a_third_of_the_way, writing_it_down)
+            }),
+            "a third of the way along is inside the room from both places and past the rounding \
+             from both"
+        );
+        assert_eq!(
+            the_place_the_model_points_at(
+                &[first, second],
+                PredicatePoint::from(a_third_of_the_way),
+                validate_allows
+            ),
+            None,
+            "a corner the rounding cannot tie to one place is not placed by the nearer"
         );
     }
 
