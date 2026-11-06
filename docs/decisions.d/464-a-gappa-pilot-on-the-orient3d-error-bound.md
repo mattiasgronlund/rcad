@@ -16632,6 +16632,8 @@ from Q2693:
   directions on a parabola. 2 takes the doc's `4u` for `and` and `across` as a
   hypothesis, and the cross product they are built from has length
   `1/√(1 + t²)` of `|w|·|n|` there, so their error may grow with the slope.
+  464.41 probes it: both grow like `√(1 + t²)`, and `and` passes `4u` at
+  slope 3.
 
 And what is not a row: Q2700, which moves these scripts into `proofs/gappa/`
 with the rest of 464's and already waits on Q2693; the hyperbola branch, which
@@ -29682,11 +29684,16 @@ square; what moves it to first order is the tilt, times `n̂·ŵ`. That is why
 **3. What this reaches.** The pairs are in random orientation, and nearly none
 of them sum `E` to exactly zero, which is what takes the parabola branch at
 `walk.rs:5588`. `two_directions_in` does not ask `E`, so for any such pair
-that does sum it to zero these are its errors. Whether a cone about an axis
-along no coordinate axis and a plane along its ruling sums `E` to zero is not
-run (6). On a cone about the `z` axis, `w × n` is `(−n_y, n_x, 0)` and rounds
-nothing, so `across` is within `u` and nothing grows: the tests that walk a
-parabola all build their cones about `z`, and cannot see this.
+that does sum it to zero these are its errors. The error needs a component of
+`w × n` whose two products are both nonzero, so `w` and `n` must both be
+nonzero on two of the same axes. On a cone about the `z` axis `w × n` is
+`(−n_y, n_x, 0)`, and on a plane whose normal is along `z` it is
+`(w_y, −w_x, 0)`: neither rounds anything, so neither can show this error.
+Corpus `70fbff12`'s parabola, which `walk.rs`'s tests walk
+(`walk.rs:7558-7586`), is the second kind: its cone is about `(0, 1, 1)`, along
+no coordinate axis, but its plane's normal is `(0, 0, 1)`, and its slope is 1.
+Whether a pair whose `w × n` rounds a difference sums `E` to exactly zero is
+not run (6).
 
 **4. What it does to 464.23.** 464.23's total, `116.05u·L`, counts `12u` for
 the two directions, and the search beats that from slope 4 (`12.61u`). With
@@ -30089,10 +30096,10 @@ column's largest.
   slope 3 and its `12u` term from slope 4.
 - Prove a bound on `two_directions_in`'s two directions as a function of the
   slope, and with it say how far up the slope 464.23's chain proves `64 ε`.
-- Find whether a cone about an axis along no coordinate axis and a plane along
-  its ruling can sum `E` to exactly zero and take the parabola branch
-  (`walk.rs:5588`), and if one can, walk it at slopes 5 to 32 and measure its
-  points against the exact parabola.
+- Find whether a plane along a cone's ruling, with `w` and `n` both nonzero on
+  two of the same axes so that `w × n` rounds a difference, can sum `E` to
+  exactly zero and take the parabola branch (`walk.rs:5588`), and if one can,
+  walk it at slopes 5 to 32 and measure its points against the exact parabola.
 
 Nobody has run the kernel's walk on any of these, so none of them has a class
 (§360.5).
