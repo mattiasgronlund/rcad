@@ -29630,3 +29630,469 @@ lines of stage_e0_1.out that stage_e0_1_coq.out does not have, and how often:
 lines of stage_e0_1_coq.out that stage_e0_1.out does not have: 0
 c_e0_1_coq_7: best on (out - Ex) / M 7.0078u
 ```
+
+### 464.41 The two directions on a parabola
+
+Q2851 probed `two_directions_in` (`walk.rs:5895-5918` at `9d6d272c`) on
+2026-11-06 against the true directions, at a parabola's angle between the
+plane's normal and the cone's axis, for slopes from `2⁻⁵⁰⁰` to 32. It did not
+prove anything. **The doc's `4u` for each of `and` and `across`
+(`walk.rs:158-159`, `181-184`), which 464.23 takes as a hypothesis, is not a
+bound.** A search finds `and` `5.03u` and `across` `4.26u` off at slope 5, and
+both grow like about `0.75·√(1 + t²)·u` at large slopes, to `23.87u` and
+`23.68u` at 32. Below slope 3 both stay under `4u`. The hypothesis 464.23
+puts on `Bw`, `7.5u`, holds with room to spare: the search finds `Bw` within
+`2.68u` at every slope (2). Line numbers here are `walk.rs`'s at `9d6d272c`.
+`u` is `2⁻⁵³`.
+
+**1. What is measured.** `w` is a direction scaled by
+`scaled_to_length_one_from_anywhere`, as an axis's is, and `n` the normal
+`Plane::from_point_and_normal` stores for `w·t/√(1 + t²) + p/√(1 + t²)`, with
+`p` square to `w`, so the angle between them is a parabola's. The true
+directions are those of the `f64` `w` and `n`: `across* = (w × n)/‖w × n‖`
+and `and* = ((w × n) × n)/‖(w × n) × n‖`, worked out in double-double. Each
+column is a largest over a million random pairs per slope and then 300,000
+pairs near the worst for `2·and + across`, in `u`:
+
+- `across` and `and`, `‖across − across*‖` and `‖and − and*‖`;
+- `2and+across`, `2‖and − and*‖ + ‖across − across*‖`, which is the two
+  directions' term of 464.23's 2 in `u·L`, there counted as `8u + 4u`;
+- `tilt across` and `tilt and`, `|across·n̂|` and `|and·n̂|`, how far each
+  leans out of the plane;
+- `and.w share`, `|(and − and*)·ŵ|`, the direction's part of `Bw`'s error;
+- `Bw`, `|fl(and·w) − and*·w|/‖w‖`, what 464.23's `(Bw − Bws)/wW` hypothesis
+  bounds by `7.5u`.
+
+`exact.py` (5) works the worst pair of `2and+across` and of `Bw` at each slope
+out again in exact rationals, and every figure it prints is the probe's to two
+decimals.
+
+**2. Why it grows, and why `Bw` does not.** Each component of `w × n` is a
+difference of two rounded products, so it misses by about `u` times the
+products, which are about `‖w‖‖n‖`, and not `u` times the difference. On a
+parabola `‖w × n‖` is `‖w‖‖n‖/√(1 + t²)`, so the miss, over that length,
+turns `across` within the plane by up to about `√2·u·√(1 + t²)`, a first-order
+count by hand that this does not prove. `and = across × n` turns with it. The
+subtraction of the normal part takes out the lean out of the plane and not the
+turn within it: both tilts stay under `2.17u` at every slope. The turn is
+square to `w`, since `across*·w = 0`, so it moves `and·w` only through its
+square; what moves it to first order is the tilt, times `n̂·ŵ`. That is why
+`and.w share` is at most `1.90u` and `Bw` at most `2.68u` while `and` grows.
+
+**3. What this reaches.** The pairs are in random orientation, and nearly none
+of them sum `E` to exactly zero, which is what takes the parabola branch at
+`walk.rs:5588`. `two_directions_in` does not ask `E`, so for any such pair
+that does sum it to zero these are its errors. Whether a cone about an axis
+along no coordinate axis and a plane along its ruling sums `E` to zero is not
+run (6). On a cone about the `z` axis, `w × n` is `(−n_y, n_x, 0)` and rounds
+nothing, so `across` is within `u` and nothing grows: the tests that walk a
+parabola all build their cones about `z`, and cannot see this.
+
+**4. What it does to 464.23.** 464.23's total, `116.05u·L`, counts `12u` for
+the two directions, and the search beats that from slope 4 (`12.61u`). With
+the search's figure in place of the `12u`, the total at slope 5 is `116.05 −
+12 + 14.17 = 118.22u`, still under the constant's `128u`. The constant leaves
+the directions `128 − (16.928 + 3.125 + 84) = 23.947u`; the search stays under
+that up to slope 8, at `19.33u`, and passes it at 16, at `36.61u`. None of
+that is a proof, and the search has not settled: an earlier run of the same
+probe, with twelve of the fourteen slopes and so a different stream of pairs,
+found `and` `5.60u` and `2and+across` `15.69u` at slope 5. So 464.23's premise,
+`4u` for each direction, is false from slope 3, where `and` is found at
+`4.20u`, and its `12u` term from slope 4. Below slope 3 the premise is not
+beaten but not proved either, so a proof of `64 ε` at any slope needs a bound
+on the two directions as a function of the slope (6). A term-by-term count of
+2's kind, the turn plus the subtraction's and the scaling's roundings, comes
+to about `36u` for `2and+across` at slope 5, over `23.947u`, so that count
+would not reach slope 5 either; it is not run.
+
+**5. The probe, whole, as it ran.** A test in `walk.rs`'s `mod tests`, in a
+scratch worktree at `9d6d272c` and not committed, run as
+`Q2851_TRIES=1000000 Q2851_LOCAL=100000 mise exec -- just t -p rcad-geom --lib
+q2851_probe --no-capture`, which took 27.2 s. It goes straight after `use
+crate::Vector;`:
+
+```rust
+    type Dd = (f64, f64);
+
+    fn quick(a: f64, b: f64) -> Dd {
+        let s = a + b;
+        (s, b - (s - a))
+    }
+
+    fn two_sum(a: f64, b: f64) -> Dd {
+        let s = a + b;
+        let bb = s - a;
+        (s, (a - (s - bb)) + (b - bb))
+    }
+
+    fn add(x: Dd, y: Dd) -> Dd {
+        let (s, e) = two_sum(x.0, y.0);
+        let (t, f) = two_sum(x.1, y.1);
+        let (s, e) = quick(s, e + t);
+        quick(s, e + f)
+    }
+
+    fn neg(x: Dd) -> Dd {
+        (-x.0, -x.1)
+    }
+
+    fn mul(x: Dd, y: Dd) -> Dd {
+        let p = x.0 * y.0;
+        let e = x.0.mul_add(y.0, -p) + (x.0 * y.1 + x.1 * y.0);
+        quick(p, e)
+    }
+
+    fn div(x: Dd, y: Dd) -> Dd {
+        let q1 = x.0 / y.0;
+        let r = add(x, neg(mul(y, (q1, 0.0))));
+        let q2 = r.0 / y.0;
+        let r = add(r, neg(mul(y, (q2, 0.0))));
+        let q3 = r.0 / y.0;
+        add(quick(q1, q2), (q3, 0.0))
+    }
+
+    fn root(x: Dd) -> Dd {
+        let s = x.0.sqrt();
+        let r = add(x, neg(mul((s, 0.0), (s, 0.0))));
+        quick(s, r.0 / (2.0 * s))
+    }
+
+    fn dd(x: f64) -> Dd {
+        (x, 0.0)
+    }
+
+    fn dots(a: [Dd; 3], b: [Dd; 3]) -> Dd {
+        add(add(mul(a[0], b[0]), mul(a[1], b[1])), mul(a[2], b[2]))
+    }
+
+    fn unit(a: [Dd; 3]) -> [Dd; 3] {
+        let l = root(dots(a, a));
+        a.map(|c| div(c, l))
+    }
+
+    fn of(v: Vector) -> [Dd; 3] {
+        v.components().map(dd)
+    }
+
+    fn gap(v: Vector, exact: [Dd; 3]) -> f64 {
+        let [x, y, z] = v.components();
+        let d = [
+            add(dd(x), neg(exact[0])).0,
+            add(dd(y), neg(exact[1])).0,
+            add(dd(z), neg(exact[2])).0,
+        ];
+        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+    }
+
+    fn next(state: &mut u64) -> f64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        ((*state >> 11) as f64) / 4_503_599_627_370_496.0 - 1.0
+    }
+
+    fn direction(state: &mut u64) -> Vector {
+        loop {
+            let v = Vector::new(next(state), next(state), next(state));
+            let l = v.length();
+            if l > 0.1 && l <= 1.0 {
+                return v.scaled_to_length_one_from_anywhere("probe").unwrap();
+            }
+        }
+    }
+
+    fn square_to(w: Vector, v: Vector) -> Option<Vector> {
+        (v - w * v.dot(w))
+            .scaled_to_length_one_from_anywhere("probe")
+            .ok()
+    }
+
+    /// `[across, and, 2·and + across, across·n̂, and·n̂, (and − and*)·ŵ, Bw]`,
+    /// each in `u`, against the true directions of `w` and `flat`'s stored
+    /// normal, worked out in double-double.
+    fn measure(w: Vector, flat: &Plane) -> [f64; 7] {
+        let u = f64::EPSILON / 2.0;
+        let n = flat.normal();
+        let (across, and) = two_directions_in(flat, w);
+        let (wd, nd) = (of(w), of(n));
+        let cross = [
+            add(mul(wd[1], nd[2]), neg(mul(wd[2], nd[1]))),
+            add(mul(wd[2], nd[0]), neg(mul(wd[0], nd[2]))),
+            add(mul(wd[0], nd[1]), neg(mul(wd[1], nd[0]))),
+        ];
+        let across_true = unit(cross);
+        let wn = dots(wd, nd);
+        let nn = dots(nd, nd);
+        let and_true = unit([0, 1, 2].map(|i| add(mul(nd[i], wn), neg(mul(wd[i], nn)))));
+        let n_unit = unit(nd);
+        let e_c = gap(across, across_true) / u;
+        let e_a = gap(and, and_true) / u;
+        let tilt_c = dots(of(across), n_unit).0.abs() / u;
+        let tilt_a = dots(of(and), n_unit).0.abs() / u;
+        let w_len = root(dots(wd, wd));
+        let and_w_true = dots(and_true, wd);
+        let share = div(add(dots(of(and), wd), neg(and_w_true)), w_len).0.abs() / u;
+        let bw = div(add(dd(and.dot(w)), neg(and_w_true)), w_len).0.abs() / u;
+        [e_c, e_a, 2.0 * e_a + e_c, tilt_c, tilt_a, share, bw]
+    }
+
+    /// Q2851's probe, not committed.
+    #[test]
+    fn q2851_probe_two_directions_on_a_parabola() {
+        let tries: usize = std::env::var("Q2851_TRIES").map_or(200_000, |v| v.parse().unwrap());
+        let local: usize = std::env::var("Q2851_LOCAL").map_or(50_000, |v| v.parse().unwrap());
+        let mut state: u64 = 0x2851_9E37_79B9_7F4A;
+        let names = ["across", "and", "2and+across", "tilt across", "tilt and", "and.w share", "Bw"];
+        for slope in [
+            2f64.powi(-500),
+            1.0 / 1024.0,
+            1.0 / 16.0,
+            0.25,
+            7.0 / 16.0,
+            1.0,
+            2.0,
+            3.0,
+            4.0,
+            5.0,
+            6.7,
+            8.0,
+            16.0,
+            32.0,
+        ] {
+            let lean = (1.0f64 + slope * slope).sqrt();
+            let (along, off) = (slope / lean, 1.0 / lean);
+            let mut worst = [0.0f64; 7];
+            let mut worst_at = [(Vector::zero(), Vector::zero()); 7];
+            let try_one = |w: Vector, p: Vector, worst: &mut [f64; 7], worst_at: &mut [(Vector, Vector); 7]| {
+                let Ok(flat) = Plane::from_point_and_normal(Point::origin(), w * along + p * off) else {
+                    return None;
+                };
+                let got = measure(w, &flat);
+                for i in 0..7 {
+                    if got[i] > worst[i] {
+                        worst[i] = got[i];
+                        worst_at[i] = (w, p);
+                    }
+                }
+                Some(got)
+            };
+            let (mut measured, mut across_past_4, mut and_past_4) = (0, 0, 0);
+            for _ in 0..tries {
+                let w = direction(&mut state);
+                let Some(p) = square_to(w, direction(&mut state)) else {
+                    continue;
+                };
+                let Some(got) = try_one(w, p, &mut worst, &mut worst_at) else {
+                    continue;
+                };
+                measured += 1;
+                across_past_4 += usize::from(got[0] > 4.0);
+                and_past_4 += usize::from(got[1] > 4.0);
+            }
+            println!(
+                "slope {slope}: of {measured} random pairs, across past 4u on {across_past_4}, and past 4u on {and_past_4}"
+            );
+            for step in [1e-2, 1e-5, 1e-9] {
+                for _ in 0..local {
+                    let (w0, p0) = worst_at[2];
+                    let w = (w0 + direction(&mut state) * step)
+                        .scaled_to_length_one_from_anywhere("probe")
+                        .unwrap();
+                    let Some(p) = square_to(w, p0 + direction(&mut state) * step) else {
+                        continue;
+                    };
+                    try_one(w, p, &mut worst, &mut worst_at);
+                }
+            }
+            let scale = lean;
+            let row: Vec<String> = (0..7)
+                .map(|i| format!("{} {:.2}", names[i], worst[i]))
+                .collect();
+            println!("slope {slope}: {}", row.join(", "));
+            println!(
+                "  over sqrt(1+t^2): across {:.3}, and {:.3}, 2and+across {:.3}",
+                worst[0] / scale,
+                worst[1] / scale,
+                worst[2] / scale
+            );
+            for i in [2, 6] {
+                let (w, p) = worst_at[i];
+                let flat = Plane::from_point_and_normal(Point::origin(), w * along + p * off).unwrap();
+                let (across, and) = two_directions_in(&flat, w);
+                println!(
+                    "  worst {} at slope {slope}: w {:?} n {:?} across {:?} and {:?} bw {:?}",
+                    names[i],
+                    w.components(),
+                    flat.normal().components(),
+                    across.components(),
+                    and.components(),
+                    and.dot(w)
+                );
+            }
+        }
+    }
+```
+
+Its lines that start `slope` or `  over`, with the first slope's 160-digit
+decimal written `2^-500`:
+
+```text
+slope 2^-500: of 1000000 random pairs, across past 4u on 0, and past 4u on 0
+slope 2^-500: across 2.03, and 3.06, 2and+across 7.47, tilt across 1.86, tilt and 1.83, and.w share 0.86, Bw 2.60
+  over sqrt(1+t^2): across 2.029, and 3.056, 2and+across 7.472
+slope 0.0009765625: of 1000000 random pairs, across past 4u on 0, and past 4u on 0
+slope 0.0009765625: across 2.11, and 3.03, 2and+across 7.73, tilt across 1.81, tilt and 1.85, and.w share 0.86, Bw 2.38
+  over sqrt(1+t^2): across 2.107, and 3.035, 2and+across 7.729
+slope 0.0625: of 1000000 random pairs, across past 4u on 0, and past 4u on 0
+slope 0.0625: across 2.01, and 3.10, 2and+across 7.85, tilt across 1.74, tilt and 1.76, and.w share 0.87, Bw 2.33
+  over sqrt(1+t^2): across 2.006, and 3.097, 2and+across 7.837
+slope 0.25: of 1000000 random pairs, across past 4u on 0, and past 4u on 0
+slope 0.25: across 2.05, and 3.07, 2and+across 7.94, tilt across 1.87, tilt and 1.81, and.w share 0.98, Bw 2.43
+  over sqrt(1+t^2): across 1.986, and 2.983, 2and+across 7.707
+slope 0.4375: of 1000000 random pairs, across past 4u on 0, and past 4u on 0
+slope 0.4375: across 2.14, and 3.30, 2and+across 8.71, tilt across 2.04, tilt and 1.82, and.w share 1.20, Bw 2.42
+  over sqrt(1+t^2): across 1.958, and 3.022, 2and+across 7.983
+slope 1: of 1000000 random pairs, across past 4u on 0, and past 4u on 0
+slope 1: across 2.41, and 3.16, 2and+across 8.28, tilt across 2.12, tilt and 1.91, and.w share 1.42, Bw 2.68
+  over sqrt(1+t^2): across 1.702, and 2.234, 2and+across 5.857
+slope 2: of 1000000 random pairs, across past 4u on 0, and past 4u on 0
+slope 2: across 2.74, and 3.72, 2and+across 9.70, tilt across 1.91, tilt and 1.84, and.w share 1.69, Bw 2.50
+  over sqrt(1+t^2): across 1.223, and 1.663, 2and+across 4.338
+slope 3: of 1000000 random pairs, across past 4u on 0, and past 4u on 0
+slope 3: across 3.45, and 4.20, 2and+across 11.16, tilt across 2.13, tilt and 1.84, and.w share 1.75, Bw 2.57
+  over sqrt(1+t^2): across 1.090, and 1.328, 2and+across 3.528
+slope 4: of 1000000 random pairs, across past 4u on 0, and past 4u on 1
+slope 4: across 3.97, and 4.52, 2and+across 12.61, tilt across 1.90, tilt and 1.81, and.w share 1.77, Bw 2.66
+  over sqrt(1+t^2): across 0.962, and 1.096, 2and+across 3.058
+slope 5: of 1000000 random pairs, across past 4u on 3, and past 4u on 66
+slope 5: across 4.26, and 5.03, 2and+across 14.17, tilt across 1.93, tilt and 1.79, and.w share 1.77, Bw 2.37
+  over sqrt(1+t^2): across 0.835, and 0.986, 2and+across 2.779
+slope 6.7: of 1000000 random pairs, across past 4u on 1329, and past 4u on 1841
+slope 6.7: across 5.47, and 6.03, 2and+across 17.41, tilt across 2.16, tilt and 1.92, and.w share 1.90, Bw 2.41
+  over sqrt(1+t^2): across 0.807, and 0.890, 2and+across 2.570
+slope 8: of 1000000 random pairs, across past 4u on 5123, and past 4u on 6251
+slope 8: across 6.30, and 6.56, 2and+across 19.33, tilt across 1.84, tilt and 1.86, and.w share 1.86, Bw 2.42
+  over sqrt(1+t^2): across 0.781, and 0.814, 2and+across 2.398
+slope 16: of 1000000 random pairs, across past 4u on 135416, and past 4u on 137200
+slope 16: across 12.14, and 12.31, 2and+across 36.61, tilt across 1.82, tilt and 1.83, and.w share 1.81, Bw 2.37
+  over sqrt(1+t^2): across 0.757, and 0.768, 2and+across 2.284
+slope 32: of 1000000 random pairs, across past 4u on 395882, and past 4u on 396440
+slope 32: across 23.68, and 23.87, 2and+across 71.29, tilt across 1.75, tilt and 1.83, and.w share 1.83, Bw 2.56
+  over sqrt(1+t^2): across 0.740, and 0.746, 2and+across 2.227
+```
+
+The slope-3 line says `and 4.20` where 1 says below slope 3 both stay under
+`4u`: at slope 3 itself `and` passes it. `exact.py`, which reads the probe's
+whole print on its standard input:
+
+```python
+"""Work out again, in exact rationals and 100-digit square roots, the errors
+the probe printed for each worst case it names: |across - across*|,
+|and - and*|, 2|and - and*| + |across - across*|, and (Bw - and*.w) / |w|,
+each in u = 2^-53. across* is (w x n) / |w x n| and and* is
+((w x n) x n) / |(w x n) x n|, of the f64 w and n the probe printed.
+Run as: python3 exact.py < probe.log"""
+import re
+import sys
+from decimal import Decimal, getcontext
+from fractions import Fraction
+
+getcontext().prec = 100
+U = Fraction(1, 2**53)
+LINE = re.compile(
+    r"worst (\S+(?: \S+)?) at slope (\S+): w \[(.*?)\] n \[(.*?)\] across \[(.*?)\] and \[(.*?)\] bw (\S+)"
+)
+
+
+def vec(text):
+    return [Fraction(float(x)) for x in text.split(",")]
+
+
+def dot(a, b):
+    return sum(x * y for x, y in zip(a, b))
+
+
+def dec(f):
+    return Decimal(f.numerator) / Decimal(f.denominator)
+
+
+def distance_to_unit(v, d):
+    """|v - d/|d||, from |v|^2 - 2 v.d/|d| + 1."""
+    return (dec(dot(v, v)) - 2 * dec(dot(v, d)) / dec(dot(d, d)).sqrt() + 1).sqrt()
+
+
+def in_u(x):
+    return float(x / dec(U))
+
+
+for line in sys.stdin:
+    found = LINE.search(line)
+    if not found:
+        continue
+    what, slope, w, n, across, and_, bw = found.groups()
+    w, n, across, and_ = vec(w), vec(n), vec(across), vec(and_)
+    c = [w[1] * n[2] - w[2] * n[1], w[2] * n[0] - w[0] * n[2], w[0] * n[1] - w[1] * n[0]]
+    wn, nn = dot(w, n), dot(n, n)
+    d = [n[i] * wn - w[i] * nn for i in range(3)]
+    e_c = in_u(distance_to_unit(across, c))
+    e_a = in_u(distance_to_unit(and_, d))
+    and_w_true = dec(dot(d, w)) / dec(dot(d, d)).sqrt()
+    bw_err = in_u(abs(dec(Fraction(float(bw))) - and_w_true) / dec(dot(w, w)).sqrt())
+    print(
+        f"worst {what} at slope {slope}: across {e_c:.2f}u, and {e_a:.2f}u,"
+        f" 2and+across {2 * e_a + e_c:.2f}u, Bw {bw_err:.2f}u"
+    )
+```
+
+It printed, with the same `2^-500`:
+
+```text
+worst 2and+across at slope 2^-500: across 1.50u, and 2.98u, 2and+across 7.47u, Bw 0.41u
+worst Bw at slope 2^-500: across 0.59u, and 0.73u, 2and+across 2.05u, Bw 2.60u
+worst 2and+across at slope 0.0009765625: across 1.66u, and 3.03u, 2and+across 7.73u, Bw 1.06u
+worst Bw at slope 0.0009765625: across 1.06u, and 1.28u, 2and+across 3.61u, Bw 2.38u
+worst 2and+across at slope 0.0625: across 1.65u, and 3.10u, 2and+across 7.85u, Bw 0.41u
+worst Bw at slope 0.0625: across 0.28u, and 0.72u, 2and+across 1.71u, Bw 2.33u
+worst 2and+across at slope 0.25: across 1.79u, and 3.07u, 2and+across 7.94u, Bw 0.34u
+worst Bw at slope 0.25: across 0.12u, and 0.88u, 2and+across 1.88u, Bw 2.43u
+worst 2and+across at slope 0.4375: across 2.12u, and 3.30u, 2and+across 8.71u, Bw 1.35u
+worst Bw at slope 0.4375: across 0.30u, and 1.01u, 2and+across 2.32u, Bw 2.42u
+worst 2and+across at slope 1: across 1.97u, and 3.16u, 2and+across 8.28u, Bw 0.49u
+worst Bw at slope 1: across 0.35u, and 1.25u, 2and+across 2.86u, Bw 2.68u
+worst 2and+across at slope 2: across 2.26u, and 3.72u, 2and+across 9.70u, Bw 0.25u
+worst Bw at slope 2: across 0.69u, and 1.88u, 2and+across 4.45u, Bw 2.50u
+worst 2and+across at slope 3: across 3.40u, and 3.88u, 2and+across 11.16u, Bw 0.11u
+worst Bw at slope 3: across 1.07u, and 1.96u, 2and+across 4.98u, Bw 2.57u
+worst 2and+across at slope 4: across 3.97u, and 4.32u, 2and+across 12.61u, Bw 0.37u
+worst Bw at slope 4: across 0.95u, and 1.97u, 2and+across 4.89u, Bw 2.66u
+worst 2and+across at slope 5: across 4.12u, and 5.03u, 2and+across 14.17u, Bw 0.35u
+worst Bw at slope 5: across 2.29u, and 2.77u, 2and+across 7.83u, Bw 2.37u
+worst 2and+across at slope 6.7: across 5.47u, and 5.97u, 2and+across 17.41u, Bw 0.59u
+worst Bw at slope 6.7: across 0.79u, and 1.77u, 2and+across 4.32u, Bw 2.41u
+worst 2and+across at slope 8: across 6.21u, and 6.56u, 2and+across 19.33u, Bw 0.16u
+worst Bw at slope 8: across 0.35u, and 1.57u, 2and+across 3.49u, Bw 2.42u
+worst 2and+across at slope 16: across 11.99u, and 12.31u, 2and+across 36.61u, Bw 0.00u
+worst Bw at slope 16: across 1.13u, and 1.92u, 2and+across 4.97u, Bw 2.37u
+worst 2and+across at slope 32: across 23.62u, and 23.83u, 2and+across 71.29u, Bw 0.07u
+worst Bw at slope 32: across 1.27u, and 1.96u, 2and+across 5.20u, Bw 2.56u
+```
+
+Its `2and+across` on each `2and+across` line and its `Bw` on each `Bw` line
+are the probe's; its `across` and `and` there are that pair's, not the
+column's largest.
+
+**6. What this leaves.** Rows, each from Q2851:
+
+- Restate `POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF`'s doc (`walk.rs:158-159`,
+  `181-184`) against 1 to 4: the `4u` for each direction is not a bound, both
+  grow like `√(1 + t²)`, and 464.23's premise of `4u` for each is beaten from
+  slope 3 and its `12u` term from slope 4.
+- Prove a bound on `two_directions_in`'s two directions as a function of the
+  slope, and with it say how far up the slope 464.23's chain proves `64 ε`.
+- Find whether a cone about an axis along no coordinate axis and a plane along
+  its ruling can sum `E` to exactly zero and take the parabola branch
+  (`walk.rs:5588`), and if one can, walk it at slopes 5 to 32 and measure its
+  points against the exact parabola.
+
+Nobody has run the kernel's walk on any of these, so none of them has a class
+(§360.5).
