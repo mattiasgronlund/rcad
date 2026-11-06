@@ -909,6 +909,10 @@ struct BuildingAMesh {
     /// The deflection each edge of a crossed flat face is walked to in place of
     /// `deflection`, which it is always under — see [`SolidView::mesh`].
     walked_finer: HashMap<EdgeKey, f64>,
+    /// The crossed flat faces whose holes are pinched onto their outline
+    /// wherever a hole's walk comes within a rounding of it — see
+    /// [`BuildingAMesh::pinch_its_holes_onto_its_outline`].
+    pinched: HashSet<FaceKey>,
 }
 
 impl BuildingAMesh {
@@ -928,6 +932,7 @@ impl BuildingAMesh {
             along_each_edge,
             made: Vec::new(),
             walked_finer: HashMap::new(),
+            pinched: HashSet::new(),
         }
     }
 
@@ -1137,6 +1142,7 @@ impl BuildingAMesh {
         walked_finer.extend(halved);
         let mut again = Self::new(self.deflection, core::mem::take(&mut self.along_each_edge));
         again.walked_finer = walked_finer;
+        again.pinched = core::mem::take(&mut self.pinched);
         again
     }
 
