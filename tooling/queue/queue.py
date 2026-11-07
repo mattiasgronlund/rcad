@@ -103,6 +103,7 @@ just queue apply header <text>             replace the file's own header -- the 
                                             no-op (§307.7, §352.7)
 just queue drop <id> <§N>                  state dropped:§N, moved under ## Closed
 just queue park <id> <§N>                  state parked:§N, left in its tier
+just queue unpark <id>                     a parked row goes back to todo, left in its tier; refuses any row not parked
 just queue after <id> <id|date>[,<id|date>...]   state after:<ids,date>; each id must exist in some copy, branch
                                             or claim, at most one date (YYYY-MM-DD); ready once every named id is
                                             done: and that UTC date has come (§308); a row with no class moves down
@@ -992,6 +993,17 @@ def park_step(queue, claims, here, args, batch):
     return queue, message, ("release", row_id, now(), here.top, "park")
 
 
+def unpark_step(queue, claims, here, args, batch):
+    need(args, 1, "unpark <id>")
+    row_id = args[0]
+    refuse_conflicted(here, queue)
+    row = require_row(queue, here, row_id)
+    if not row.state.startswith("parked:"):
+        raise Refused(f"{row_id} is {row.state}, and unpark puts back only a row whose state is parked:")
+    queue.replace(row, row.with_state("todo"))
+    return queue, f"{row_id}: {row.state} -> todo", None
+
+
 def after_step(queue, claims, here, args, batch):
     if len(args) < 2:
         raise Refused("usage: after <id> <id|date>[,<id|date>...] | after <id> -")
@@ -1569,7 +1581,7 @@ def ids_of(args, usage):
 
 STEP_FUNCS = {
     "take": take_step, "add": add_step, "done": done_step, "drop": drop_step, "park": park_step,
-    "after": after_step, "cores": cores_step, "night": night_step, "rank": rank_step, "tier": tier_step,
+    "unpark": unpark_step, "after": after_step, "cores": cores_step, "night": night_step, "rank": rank_step, "tier": tier_step,
     "tag": tag_step,
     "pick": pick_step, "pin": pin_step, "unpin": unpin_step, "give": give_step, "sweep": sweep_step,
     "reword": reword_step, "header": header_step,

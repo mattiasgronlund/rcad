@@ -399,7 +399,8 @@ report names.
   with the section its reason belongs under; or `just queue drop` it. A row
   filed again after a drop says `was/<old row>`. A drop that leaves rows
   waiting on it is refused, naming an `after` step for each: `after <id> -`
-  frees one, and the steps go in the same apply (§451). `git worktree unlock` each
+  frees one, and the steps go in the same apply (§451). `just queue unpark <id>`
+  puts a parked row back to `todo`, and refuses a row that is not parked. `git worktree unlock` each
   tree the result named once the apply is pushed.
 
 **A triage row's fault rows each name their fuzz target** (§433.3). The

@@ -17544,8 +17544,8 @@ _queue-rows file:
 # `tooling/queue/families.py`.
 #
 # **The verbs change the file, one row at a time** (§263): `take`, `add`,
-# `done`, `drop`, `park`, `after`, `cores`, `night`, `rank`, `tier`, `tag`,
-# `pick`, `pin` and `unpin`, with `show`, `running` and `families` to read, and
+# `done`, `drop`, `park`, `unpark`, `after`, `cores`, `night`, `rank`, `tier`,
+# `tag`, `pick`, `pin` and `unpin`, with `show`, `running` and `families` to read, and
 # `narrow`, which changes a hold and no row. `cores` and `night` set an entry
 # of the write set that names no path (§308, §308.8). `tier` moves an open row to another tier and, like
 # `add`, writes that tier's heading when the file has none (§307). `tag` sets,
@@ -17598,7 +17598,7 @@ _queue-rows file:
 # row's, since the fill reads a ready row's write set the same way as a
 # running one's.
 #
-# **Every verb that writes — `take`, `add`, `done`, `drop`, `park`, `after`,
+# **Every verb that writes — `take`, `add`, `done`, `drop`, `park`, `unpark`, `after`,
 # `cores`, `night`, `rank`, `tier`, `tag`, `pick`, `pin`, `unpin`, `apply`,
 # `narrow`, `writes`, `give`, `sweep`, `reword` — also runs `queue-page` after it**, so the page
 # stays current as a side effect instead of needing its own trigger (Q254). Its
@@ -17611,7 +17611,7 @@ queue mode="" *args:
     set -uo pipefail
     mode="${1:-}"
     case "$mode" in
-        take|add|done|drop|park|after|cores|night|rank|tier|tag|pick|pin|unpin|apply|narrow|writes|give|sweep|reword)
+        take|add|done|drop|park|unpark|after|cores|night|rank|tier|tag|pick|pin|unpin|apply|narrow|writes|give|sweep|reword)
             now_iso='{{ queue_now }}'
             [ -n "$now_iso" ] || now_iso=$(date -u +%Y-%m-%dT%H:%M:%SZ)
             QUEUE_FILE='{{ queue_file }}' QUEUE_JUST='{{ just_executable() }}' QUEUE_JUSTFILE='{{ justfile() }}' \
@@ -17642,6 +17642,7 @@ queue mode="" *args:
                 'just queue reword <id> <what, ending in §N>  replace what an open row'"'"'s description says, past the pin, kept to the same shape add checks for a new row' \
                 'just queue drop <id> <§N>                    close a row as dropped:§N, moved under Closed' \
                 'just queue park <id> <§N>                    mark a row parked:§N, left in its tier' \
+                'just queue unpark <id>                       a parked row goes back to todo, left in its tier; refuses a row that is not parked' \
                 'just queue after <id> <id>[,<id>...]         mark a row waiting on others: state after:<ids>' \
                 'just queue after <id> <date>                 mark a row waiting on a UTC date (YYYY-MM-DD) as well as, or instead of, other rows' \
                 'just queue after <id> -                      a row that waits goes back to todo, for a row whose wait was dropped (§451)' \
@@ -21639,6 +21640,13 @@ check-queue-api-selftest:
     got=$(q "$pin_wt" pin "$parked" 2>&1) && fail "pin put a parked row first"
     grep -qF "$parked is parked:§230, and the fill never takes a parked row" <<<"$got" \
         || fail "pin did not say $parked is parked"
+    got=$(q "$pin_wt" unpark "$first" 2>&1) && fail "unpark took a row that is not parked"
+    grep -qF "$first is todo, and unpark puts back only a row whose state is parked:" <<<"$got" \
+        || fail "unpark did not say $first is not parked: $got"
+    got=$(q "$pin_wt" unpark "$parked" 2>&1) || fail "unpark refused the parked row $parked: $got"
+    grep -qF "$parked: parked:§230 -> todo" <<<"$got" || fail "unpark did not say it sent $parked back to todo: $got"
+    [ "$(pinword "$parked")" = "3 from/-" ] || fail "unpark did not leave $parked in tier 3 as todo: $(pinword "$parked")"
+    got=$(q "$pin_wt" park "$parked" §230 2>&1) || fail "park refused $parked again"
     fifth=$(q "$pin_wt" add 5 opus - "crash/C from/- a crash only a probe builds §230") || fail "add for the tier 5 row failed"
     got=$(q "$pin_wt" pin "$fifth" 2>&1) && fail "pin moved a C row out of tier 5"
     grep -qF "$fifth carries the class crash/C, which puts it in tier 5" <<<"$got" || fail "pin did not say a C row belongs in tier 5"
