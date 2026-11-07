@@ -2495,7 +2495,8 @@ fn by_the_piece_across_a_side_clear_of_every_face(
                 Some(flat) => Some(InPlane::of(flat)?),
                 None => None,
             };
-            let candidates = candidate_points(across, &corners_of(across));
+            let corners = corners_of(across);
+            let candidates = candidate_points(across, &corners);
             let search = place_the_piece(
                 model,
                 solids,
@@ -2506,9 +2507,16 @@ fn by_the_piece_across_a_side_clear_of_every_face(
                 policy,
                 &mut trial,
             );
-            let Ok(Search::Placed(placement @ (Placement::Inside | Placement::Outside))) = search
-            else {
-                return None;
+            let placement = match search {
+                Ok(Search::Placed(placement @ (Placement::Inside | Placement::Outside))) => {
+                    placement
+                }
+                Ok(Search::Placed(Placement::On { .. })) | Err(_) => return None,
+                Ok(
+                    Search::NoPointInside
+                    | Search::OnlyRungsInside { .. }
+                    | Search::NoPointInsidePlaced,
+                ) => by_a_corner(model, solids, against, &corners, policy, &mut trial)?,
             };
             trial.drain_into(log);
             Some(placement)
