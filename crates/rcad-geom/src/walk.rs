@@ -697,9 +697,10 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 /// `a_block_edge_grazing_a_ball.rs` fences off at `h = 0`, whose ends are
 /// `z = ±2⁻⁵¹` and whose middle is at `z = 0`, came out at `z = 6e−48`, under
 /// the `2⁻¹⁴²` a triangulation takes, and that face was refused
-/// `CoordinateOutOfRange`. That arc bows `1e−31`, so its middle point is
-/// raised `8.9e−16` along `N`, as the last paragraph under `# When` says, and
-/// `N`'s `z` is nought: the point stays at `z = 0`.
+/// `CoordinateOutOfRange`. That arc bows `1e−31`, under its own rounding, and
+/// raised clear of it its point would stand `8.9e−16` off a chord `8.9e−16`
+/// long, so it is now placed from its centre, as the last paragraph under
+/// `# When` says.
 ///
 /// # When
 ///
@@ -745,9 +746,18 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 /// done only when `|N|` is at most twice `|n·N|`, so a raise moves a point by
 /// under `16u·(S + bow)` and its bulge is no more than that or the bow: its
 /// rounding across the chord stays far under the `2u·S + 4.5u·bow` the raise
-/// leaves over it. An arc that bows that little with `N` further from square to
-/// its chord is placed from its centre as before. The steep cone less a slab
-/// turned `1.5` in `a_plane_cut_along_a_cones_other_nappe.rs` keeps a lens
+/// leaves over it. **And only when the raise, `8u·(S + bow)·|N| / |n·N|`, is
+/// no longer than half the chord**, as an arc placed as it bows bows no more
+/// than that. The sliver where a bar dips into a block in `validate.rs`'s
+/// tests has ends one ulp apart near `(3, 2, 4)`, and its two arcs bow
+/// `2.5e−32` and `1.1e−16`. Raised, their points stood `3.6e−15` and
+/// `2.7e−15` off a chord `4.4e−16` long, and the sliver's coarsest mesh turned
+/// a fortieth of a turn about `x` enclosed `7e−46` and not nothing
+/// (`a_sliver_meshed_on_one_line_encloses_exactly_nothing_however_it_is_turned`).
+/// An arc that bows that little with `N` further from square to its chord, or
+/// with a chord under twice its raise, is placed from its centre as before.
+/// The steep cone less a slab turned `1.5` in
+/// `a_plane_cut_along_a_cones_other_nappe.rs` keeps a lens
 /// whose cap's arc, of radius `6`, bows `3.6e−16` between ends near
 /// `(5.98, −0.42, 3)`, where `x` rounds by `4.4e−16`. Placed from its chord as
 /// it bows, its one point came out on the chord's rounded middle; placed from
@@ -851,22 +861,26 @@ impl AnArcTooFlatToPlaceFromItsCentre {
             * across.length();
         let its_own_rounding = 4.0 * f64::EPSILON * (what_a_point_rounds_against + bow);
         let clears_its_own_rounding = off_the_chord_nearest_an_end > its_own_rounding;
+        let least_out = if clears_its_own_rounding {
+            0.0
+        } else {
+            its_own_rounding / across.length()
+        };
         let raised_mostly_across_the_chord = out_to_the_middle.length() <= 2.0 * across.length();
+        let raised_less_than_half_its_chord =
+            least_out * out_to_the_middle.length() <= half_the_chord.length();
         let bows_less_than_half_its_chord = bow <= half_the_chord.length();
         (bow <= deviation
             && bows_less_than_half_its_chord
             && on_the_conic
-            && (clears_its_own_rounding || raised_mostly_across_the_chord))
+            && (clears_its_own_rounding
+                || (raised_mostly_across_the_chord && raised_less_than_half_its_chord)))
             .then_some(Self {
                 halfway,
                 half_the_chord,
                 half,
                 out_to_the_middle,
-                least_out: if clears_its_own_rounding {
-                    0.0
-                } else {
-                    its_own_rounding / across.length()
-                },
+                least_out,
             })
     }
 
