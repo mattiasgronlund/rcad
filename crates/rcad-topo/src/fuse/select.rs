@@ -232,7 +232,7 @@ use rcad_geom::{
 };
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
-    orient3d_of_points, side_of_a_plane_where_three_planes_meet,
+    meet_of_three_planes, orient3d_of_points, side_of_a_plane_where_three_planes_meet,
     which_meet_comes_first_along_a_line,
 };
 
@@ -2002,22 +2002,33 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
 /// **Why an edge can place a piece.** `P` is the piece, on `G`'s plane, `S` the
 /// solid, and `H` the flat face across `e`. `s` is a side of `P` carried by
 /// `G`'s plane and `H`'s, so it runs along the line `e` runs along, and both
-/// its ends lie on `e` and are not one point. Take `m`, the middle of `s`: it
-/// is strictly inside `e`, so near `m` the skin of `S` is `G` and `H` and
-/// nothing else, `G` a half-plane on one side of `H`'s plane. Near `m` the
-/// inside of `P` is the half-plane of `G`'s plane on its material side of
-/// `H`'s plane. `P` was cut by every surface of `S`, so its inside lies all
-/// inside `S`, all outside it, or all on its skin (§17.4), and it is enough to
-/// know where it is near `m`.
+/// its ends lie on `e` and are not one point. Take `m`, a point of `s` between
+/// its ends: it is strictly inside `e`, so near `m` `G` is a half-plane on one
+/// side of `H`'s plane. Near `m` the inside of `P` is the half-plane of `G`'s
+/// plane on its material side of `H`'s plane. `P` was cut by every surface of
+/// `S`, so its inside lies all inside `S`, all outside it, or all on its skin
+/// (§17.4), and it is enough to know where it is near `m`.
 ///
-/// - On `G`'s side of `H`'s plane, the inside of `P` near `m` lies on `G`, so
-///   `P` lies on `S`'s skin, on `G`, and faces `G`'s way or the other.
-/// - On the other side, it lies in `G`'s plane beyond `e`, and so in front of
-///   `H`'s outward plane where the solid's corner at `e` is convex and behind
-///   it where it is reflex: across a convex edge the solid is on `G`'s side of
+/// - On `G`'s side of `H`'s plane, the inside of `P` near `m` is `G` near `m`,
+///   so `P` lies on `S`'s skin, on `G`, and faces `G`'s way or the other.
+/// - On the other side, it lies in `G`'s plane beyond `e`. Where the skin of
+///   `S` near `m` is `G` and `H` and nothing else, that is in front of `H`'s
+///   outward plane where the solid's corner at `e` is convex and behind it
+///   where it is reflex: across a convex edge the solid is on `G`'s side of
 ///   `H`'s plane, and across a reflex one `H` faces towards `G`. Behind is
 ///   inside and in front is outside, with no need to ask which kind of edge it
 ///   is.
+///
+/// Being strictly inside `e` does not make the skin near `m` `G` and `H` and
+/// nothing else, since another part of `S` can touch `e` from beyond it. Two
+/// blocks built as one solid, `[0, 3]²` from `z = −1` to `2` and `[3, 6]²`
+/// from `z = 0` to `1`, have four faces round `x = y = 3`, and a piece on the
+/// second block's face `x = 3` with a side along the first block's edge there
+/// was read outside (Q2921). So the second case is read only where
+/// [`no_other_face_reaches`] has every face of `S` but `G` and `H` off `s`, but
+/// for single points of it, and `m` is taken off those. The first needs no
+/// such check: near `m`, `G` is all of `P`'s inside, and no face of a sound
+/// solid reaches inside another.
 ///
 /// **`G`'s side of `H`'s plane is read off the way `G`'s wire walks `e`**, with
 /// the face on its left about `G`'s own normal ([`BakedFace::wires`]). Left of
@@ -2026,9 +2037,13 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
 /// [`FaceMeet::material_side`]. Every question here is
 /// [`which_meet_comes_first_along_a_line`] along that line, each point asked
 /// as the meet of three planes, or two planes compared bit for bit, so every
-/// answer is exact and nothing goes into the log. An end of `s` or of `e` that
-/// is not the meet of `G`'s plane, `H`'s and one plane more, a question that
-/// comes back undecided, or a plane that does not match leaves the side out.
+/// answer is exact and nothing goes into the log. The one that is not, asked
+/// in the second case only, is whether another face of `S` keeps off `s`,
+/// which is as sure as that face's [`Bounds`](super::bake::Bounds) is where
+/// its plane holds the whole line. An end of `s` or of `e` that is not the
+/// meet of `G`'s plane, `H`'s and one plane more, a question that comes back
+/// undecided, a plane that does not match, or, in the second case, another
+/// face of `S` that may reach `s` leaves the side out.
 ///
 /// Inside one solid of the group is inside. Lying on one or more with none
 /// having it inside is read as [`LyingOn`] reads it, and outside every one is
@@ -2157,7 +2172,11 @@ fn beside_one_edge(
             same_way,
         });
     }
-    let behind = the_inner_side_of(the_face_across(solid, edge, h)?, across)?;
+    let face_across = the_face_across(solid, edge, h)?;
+    if !no_other_face_reaches(solid, [face, face_across], [g, h], &[from, to]) {
+        return None;
+    }
+    let behind = the_inner_side_of(face_across, across)?;
     Some(if side.material_side == behind {
         Placement::Inside
     } else {
@@ -2175,25 +2194,36 @@ fn beside_one_edge(
 /// that is neither `G`'s nor that of `H`, the flat face across `e`, and `S` is
 /// the solid. `s` is a side of `P` carried by `P`'s plane and `G`'s, and `c`,
 /// one end of it, is where `P`'s plane crosses the line of `e`, strictly
-/// between `e`'s two ends. So near `c` the skin of `S` is `G` and `H` and
-/// nothing else, `G` a half-plane on one side of `H`'s plane. `P` was cut by
-/// every surface of `S`, so its inside lies all inside `S`, all outside it, or
-/// all on its skin (§17.4), and it is enough to know where it is near one
-/// point. Take `m` on `s`, near `c`: it is on `G`'s plane, and off `H`'s,
-/// since the far end of `s` is off it.
+/// between `e`'s two ends, so near `c` `G` is a half-plane on one side of
+/// `H`'s plane. `P` was cut by every surface of `S`, so its inside lies all
+/// inside `S`, all outside it, or all on its skin (§17.4), and it is enough to
+/// know where it is near one point. Take `m` on `s`, near `c`: it is on `G`'s
+/// plane, and off `H`'s, since the far end of `s` is off it.
 ///
-/// - Where `s` runs to `G`'s side of `H`'s plane, `m` is on `G` and on no other
-///   face, so near `m` the skin is a disk of `G`'s plane with `S` behind it.
-///   The inside of `P` near `m` is a half-disk off that plane, on its material
-///   side of it, and so inside `S` when that is `G`'s inner side and outside
-///   it when it is not.
-/// - Where it runs to the other side, `m` is on `G`'s plane beyond `e`, off
-///   the skin, and the inside of `P` near `m` is where `m` is. That is in
-///   front of `H`'s outward plane where the solid's corner at `e` is convex
-///   and behind it where it is reflex: across a convex edge the solid is on
-///   `G`'s side of `H`'s plane, and across a reflex one `H` faces towards `G`.
-///   So `m` is inside when it is behind `H`'s outward plane, with no need to
-///   ask which kind of edge it is.
+/// - Where `s` runs to `G`'s side of `H`'s plane, `m` is inside `G`, and no
+///   face of a sound solid reaches inside another, so near `m` the skin is a
+///   disk of `G`'s plane with `S` behind it. The inside of `P` near `m` is a
+///   half-disk off that plane, on its material side of it, and so inside `S`
+///   when that is `G`'s inner side and outside it when it is not.
+/// - Where it runs to the other side, `m` is on `G`'s plane beyond `e`, and
+///   the inside of `P` near `m` is where `m` is. Where the skin of `S` near
+///   `c` is `G` and `H` and nothing else, `m` is off it, in front of `H`'s
+///   outward plane where the solid's corner at `e` is convex and behind it
+///   where it is reflex: across a convex edge the solid is on `G`'s side of
+///   `H`'s plane, and across a reflex one `H` faces towards `G`. So `m` is
+///   inside when it is behind `H`'s outward plane, with no need to ask which
+///   kind of edge it is.
+///
+/// Being strictly inside `e` does not make the skin near `c` `G` and `H` and
+/// nothing else, since another part of `S` can touch `e` from beyond it. Two
+/// blocks built as one solid, `[0, 3]²` from `z = −1` to `2` and `[3, 6]²`
+/// from `z = 0` to `1`, have four faces round `x = y = 3`, and a square on
+/// `z = 0.5` inside the second block, with a side from the first block's edge
+/// there along the plane of its face `x = 3`, past the edge, was read outside
+/// (Q2921). So the second case is read only where [`no_other_face_reaches`]
+/// has every face of `S` but `G` and `H` off `c`. The first needs no such
+/// check, and the second block's own edge up that line reads the square
+/// inside by it.
 ///
 /// `P` is never on the skin of `S`, since near `m` it is off it.
 ///
@@ -2202,9 +2232,12 @@ fn beside_one_edge(
 /// [`which_meet_comes_first_along_a_line`] along the line of `e`, or
 /// [`side_of_a_plane_where_three_planes_meet`] for the far end of `s`, each
 /// point asked as the meet of three planes, or two planes compared bit for
-/// bit, so every answer is exact and nothing goes into the log. An end of `s`
+/// bit, so every answer is exact and nothing goes into the log. The one that
+/// is not, asked in the second case only, is whether another face of `S`
+/// keeps off `c`, as [`by_an_edge_of_a_face_it_lies_on`] says. An end of `s`
 /// or of `e` that is not such a meet, a question that comes back undecided or
-/// as a tie, or a plane that does not match leaves the side out.
+/// as a tie, a plane that does not match, or, in the second case, another face
+/// of `S` that may reach `c` leaves the side out.
 ///
 /// Inside one solid of the group is inside, and outside every one is outside,
 /// as [`by_a_plane`] reads it. A solid no side of the piece starts inside an
@@ -2325,10 +2358,149 @@ fn from_one_edge(
         Decision::Zero | Decision::Undecidable { .. } | _ => return None,
     }
     if runs_to == towards_g {
-        Some(side.material_side == the_inner_side_of(face, cut_by)?)
-    } else {
-        Some(runs_to == the_inner_side_of(the_face_across(solid, edge, h)?, h)?)
+        return Some(side.material_side == the_inner_side_of(face, cut_by)?);
     }
+    let face_across = the_face_across(solid, edge, h)?;
+    if !no_other_face_reaches(solid, [face, face_across], [g, h], &[at]) {
+        return None;
+    }
+    Some(runs_to == the_inner_side_of(face_across, h)?)
+}
+
+/// Whether every face of `solid` but `edge_faces`, the two faces along an edge
+/// on the line where `g` and `h` meet, keeps off the stretch of that line
+/// between where the planes `ends` cross it, but for single points of it. With
+/// one plane in `ends` the stretch is the one point, and no face may touch it.
+/// The branch of each edge rule that reads past the edge reads the solid near
+/// that stretch as the wedge between the edge's two faces, which holds only
+/// where no other face reaches it. Where another part of the solid touches
+/// this one along the line, four faces stand round it, and it does not hold
+/// (Q2921).
+///
+/// A flat face whose plane misses one of the points where `ends` cross the
+/// line meets the line at one point at most, and misses the one point when
+/// there is one. A flat face whose plane holds the whole line keeps off the
+/// stretch where [`its_corners_keep_off`] finds one of `ends` with every
+/// corner of the face strictly on one side and the stretch on the other or on
+/// it. Any other face — curved, or one whose questions came back undecided —
+/// must have its [`Bounds`](super::bake::Bounds) clear of the box round the
+/// stretch, which is as sure as that box is. So a block standing past the
+/// edge along the line stops both rules reading past the edge, and the
+/// slivers they were built for, in
+/// `tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs`, are placed still.
+///
+/// The corners are asked for the slivers of a triangle prism's leaning wall
+/// that runs a rounding past where the two blocks above touch
+/// (`tests/a_sliver_beside_six_walls_round_one_line.rs`). Two of them lie
+/// along the second block's top edge on `x = 3`, one on its top and one on its
+/// face `x = 3`, and the wall crosses that edge a rounding past `y = 3`. The
+/// first block's face `x = 3` holds that whole line and ends a rounding short
+/// of the crossing, so its box reaches the box round it, and with the box
+/// alone every fuse that test runs at 7 of its 10 slopes was refused
+/// `Undecidable`. Its corners are all on the near side of the wall's plane.
+fn no_other_face_reaches(
+    solid: &BakedSolid,
+    edge_faces: [&BakedFace; 2],
+    [g, h]: [Plane; 2],
+    ends: &[[f64; 4]],
+) -> bool {
+    let line = [g.coefficients(), h.coefficients()];
+    let Ok(boxes) = ends
+        .iter()
+        .map(|&third| meet_of_three_planes(line[0], line[1], third).map(PredicatePoint::enclosure))
+        .collect::<core::result::Result<Vec<[Interval; 3]>, _>>()
+    else {
+        return false;
+    };
+    let hull: [Option<Interval>; 3] = core::array::from_fn(|axis| {
+        let low = boxes
+            .iter()
+            .map(|one| one[axis].lo())
+            .fold(f64::INFINITY, f64::min);
+        let high = boxes
+            .iter()
+            .map(|one| one[axis].hi())
+            .fold(f64::NEG_INFINITY, f64::max);
+        Interval::new(low, high).ok()
+    });
+    let [Some(x), Some(y), Some(z)] = hull else {
+        return false;
+    };
+    let stretch = PredicatePoint::Constructed([x, y, z]);
+    solid
+        .faces
+        .iter()
+        .filter(|other| !edge_faces.iter().any(|one| core::ptr::eq(*one, *other)))
+        .all(|other| {
+            let leaves_an_end_off = other.surface.as_plane().is_some_and(|plane| {
+                ends.iter().any(|&third| {
+                    matches!(
+                        side_of_a_plane_where_three_planes_meet(
+                            [line[0], line[1], third],
+                            plane.coefficients()
+                        ),
+                        Ok(Decision::Pos | Decision::Neg)
+                    )
+                })
+            });
+            leaves_an_end_off
+                || its_corners_keep_off(other, line, ends)
+                || other.bounds.provably_misses(stretch)
+        })
+}
+
+/// Whether the flat face `face`, every side of it straight, has every corner
+/// strictly on one side of one of the planes `ends`, and the stretch of `line`
+/// between where the planes `ends` cross it on that plane or past it.
+///
+/// A flat face with straight sides lies in the hull of its corners: each side
+/// is the segment between two of them, and the face is a bounded piece of its
+/// plane, so every point of it is between two points of its sides. So every
+/// point of it is strictly on the corners' side of that plane, every point of
+/// the stretch is on the plane or on the other side, and the two share none.
+///
+/// A corner is the meet of the three planes bake solved it from, as
+/// [`by_a_plane`] reads a corner of a solid. A curved face, a curved side, a
+/// corner read out of the model or solved from a curved surface, and a
+/// question that comes back undecided all leave it unproved.
+fn its_corners_keep_off(face: &BakedFace, line: [[f64; 4]; 2], ends: &[[f64; 4]]) -> bool {
+    if face.surface.as_plane().is_none() {
+        return false;
+    }
+    let corners = face
+        .wires
+        .iter()
+        .flatten()
+        .map(|edge| {
+            let straight =
+                edge.across.as_plane().is_some() && edge.along_a_curved_surface.is_none();
+            if !straight {
+                return None;
+            }
+            three_planes(edge.start.solved_from.as_ref()?)
+                .map(|three| three.map(|plane| plane.coefficients()))
+        })
+        .collect::<Option<Vec<[[f64; 4]; 3]>>>();
+    let Some(corners) = corners else {
+        return false;
+    };
+    ends.iter().any(|&plane| {
+        let side_of = |three| side_of_a_plane_where_three_planes_meet(three, plane).ok();
+        let Some(&first) = corners.first() else {
+            return false;
+        };
+        let away = match side_of(first) {
+            Some(Decision::Pos) => Decision::Pos,
+            Some(Decision::Neg) => Decision::Neg,
+            Some(Decision::Zero | Decision::Undecidable { .. } | _) | None => return false,
+        };
+        corners.iter().all(|&corner| side_of(corner) == Some(away))
+            && ends.iter().all(|&end| {
+                let at = side_of([line[0], line[1], end]);
+                matches!(at, Some(Decision::Pos | Decision::Neg | Decision::Zero))
+                    && at != Some(away)
+            })
+    })
 }
 
 /// The one plane of `three` that is neither `g` nor `h`, either way round, as
@@ -6298,10 +6470,11 @@ mod tests {
     use smallvec::SmallVec;
 
     use super::{
-        ACornerReadAsOnePoint, ANodeReadRoundACorner, InPlane, Piece, Rule,
-        a_face_of_the_input_holds, by_the_one_face_its_box_meets, candidate_points, choose,
-        corners_of, every_picker_keeps, far_from_both_ends_of_the_range, midway_between,
-        the_meridian_circle_each_side_runs_round, the_middles_of_a_round_wire,
+        ACornerReadAsOnePoint, ANodeReadRoundACorner, InPlane, Piece, Placement, Rule,
+        a_face_of_the_input_holds, beside_one_edge, by_a_side_from_an_edge_it_starts_on,
+        by_an_edge_of_a_face_it_lies_on, by_the_one_face_its_box_meets, candidate_points, choose,
+        corners_of, every_picker_keeps, far_from_both_ends_of_the_range, from_one_edge,
+        midway_between, the_meridian_circle_each_side_runs_round, the_middles_of_a_round_wire,
         the_pickers_of_the_meridian_circle_through, the_piece_holds,
         what_else_each_round_wire_asks,
     };
@@ -8417,6 +8590,310 @@ mod tests {
                 }
             }
             assert!(wrong.is_empty(), "{off:e} off: {wrong:#?}");
+        }
+    }
+
+    /// A square on `z = 0.5` from `(3, 3)` to `(4, 4)` is inside the second of
+    /// [`two_blocks_touching_along_a_line`], and the first block's edge up
+    /// `x = y = 3` must not read it outside. Its side on `x = 3` starts inside
+    /// that edge and runs past it, into the second block and along its face
+    /// `x = 3`, not out into the air: four faces stand round the line there, so
+    /// the skin near the edge is not the edge's two faces and nothing else. The
+    /// second block's own edge up the line, which the side runs from onto that
+    /// block's face `x = 3`, reads it inside.
+    #[test]
+    fn a_square_past_an_edge_another_block_stands_beyond_is_not_read_outside() {
+        let (_model, solid) = two_blocks_touching_along_a_line();
+        let flat = Plane::from_coefficients([0.0, 0.0, 1.0, -0.5]).expect("a normal");
+        let square = a_square_of_planes(
+            Surface::Plane(flat),
+            [
+                [3.0, 3.0, 0.5],
+                [4.0, 3.0, 0.5],
+                [4.0, 4.0, 0.5],
+                [3.0, 4.0, 0.5],
+            ],
+            [
+                [0.0, -1.0, 0.0, 3.0],
+                [1.0, 0.0, 0.0, -4.0],
+                [0.0, 1.0, 0.0, -4.0],
+                [-1.0, 0.0, 0.0, 3.0],
+            ],
+        );
+        let (face, edge) =
+            the_first_blocks_edge_up_the_line(&solid, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let along_x_3 = &square.wires[0][3];
+        assert_eq!(
+            from_one_edge(&solid, &solid, flat, face, edge, along_x_3),
+            None,
+            "the face x = 3 and its edge across y = 3 say nothing of a square past the edge"
+        );
+        assert_eq!(
+            by_a_side_from_an_edge_it_starts_on(&[&solid, &solid], &[0], 1, &square),
+            Some(Placement::Inside),
+            "the second block's edge up x = y = 3 places the square inside"
+        );
+    }
+
+    /// A square on `x = 3` from `y = 3` to `4` and `z = 0.25` to `0.75` lies on
+    /// the second block's face `x = 3` of [`two_blocks_touching_along_a_line`],
+    /// and the first block's edge up `x = y = 3`, along which its side on
+    /// `y = 3` runs, must not read it outside: past that edge the plane `x = 3`
+    /// is the second block's face, not air. The second block's own edge up the
+    /// line reads it on that face, facing the other way.
+    #[test]
+    fn a_square_on_a_face_past_an_edge_another_block_stands_beyond_is_not_read_outside() {
+        let (_model, solid) = two_blocks_touching_along_a_line();
+        let flat = Plane::from_coefficients([1.0, 0.0, 0.0, -3.0]).expect("a normal");
+        let square = a_square_of_planes(
+            Surface::Plane(flat),
+            [
+                [3.0, 3.0, 0.25],
+                [3.0, 4.0, 0.25],
+                [3.0, 4.0, 0.75],
+                [3.0, 3.0, 0.75],
+            ],
+            [
+                [0.0, 0.0, -1.0, 0.25],
+                [0.0, 1.0, 0.0, -4.0],
+                [0.0, 0.0, 1.0, -0.75],
+                [0.0, -1.0, 0.0, 3.0],
+            ],
+        );
+        let (face, edge) =
+            the_first_blocks_edge_up_the_line(&solid, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let along_y_3 = &square.wires[0][3];
+        assert_eq!(
+            beside_one_edge(&solid, 0, &solid, &square, flat, face, edge, along_y_3),
+            None,
+            "the face x = 3 and its edge across y = 3 say nothing of a square past the edge"
+        );
+        assert_eq!(
+            by_an_edge_of_a_face_it_lies_on(&[&solid, &solid], &[0], 1, &square),
+            Some(Placement::On {
+                solid: 0,
+                same_way: false
+            }),
+            "the second block's edge up x = y = 3 places the square on its face x = 3"
+        );
+    }
+
+    /// A square on `z = 0.5` from `(2, 2)` to `(3, 3)` is inside the first of
+    /// [`two_blocks_touching_along_a_line`], and its side on `x = 3` runs from
+    /// the first block's edge up `x = y = 3` onto that block's own face
+    /// `x = 3`. The second block stands round the line on the far side, and
+    /// near that face it is the face and nothing else, so the edge still reads
+    /// the square inside.
+    #[test]
+    fn a_square_from_an_edge_onto_its_own_face_beside_another_block_is_read_inside() {
+        let (_model, solid) = two_blocks_touching_along_a_line();
+        let flat = Plane::from_coefficients([0.0, 0.0, 1.0, -0.5]).expect("a normal");
+        let square = a_square_of_planes(
+            Surface::Plane(flat),
+            [
+                [2.0, 2.0, 0.5],
+                [3.0, 2.0, 0.5],
+                [3.0, 3.0, 0.5],
+                [2.0, 3.0, 0.5],
+            ],
+            [
+                [0.0, -1.0, 0.0, 2.0],
+                [1.0, 0.0, 0.0, -3.0],
+                [0.0, 1.0, 0.0, -3.0],
+                [-1.0, 0.0, 0.0, 2.0],
+            ],
+        );
+        let (face, edge) =
+            the_first_blocks_edge_up_the_line(&solid, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let along_x_3 = &square.wires[0][1];
+        assert_eq!(
+            from_one_edge(&solid, &solid, flat, face, edge, along_x_3),
+            Some(true),
+            "the side runs onto the face x = 3 with the square behind it"
+        );
+    }
+
+    /// A square on `x = 3` from `y = 2` to `3` and `z = 0.25` to `0.75` lies on
+    /// the first block's face `x = 3` of [`two_blocks_touching_along_a_line`],
+    /// facing out the way it does, and its side on `y = 3` runs along that
+    /// block's edge up `x = y = 3`. The second block stands round the line on
+    /// the far side, and the edge still reads the square on the face.
+    #[test]
+    fn a_square_on_an_edges_own_face_beside_another_block_is_read_on_it() {
+        let (_model, solid) = two_blocks_touching_along_a_line();
+        let flat = Plane::from_coefficients([1.0, 0.0, 0.0, -3.0]).expect("a normal");
+        let square = a_square_of_planes(
+            Surface::Plane(flat),
+            [
+                [3.0, 2.0, 0.25],
+                [3.0, 2.0, 0.75],
+                [3.0, 3.0, 0.75],
+                [3.0, 3.0, 0.25],
+            ],
+            [
+                [0.0, -1.0, 0.0, 2.0],
+                [0.0, 0.0, 1.0, -0.75],
+                [0.0, 1.0, 0.0, -3.0],
+                [0.0, 0.0, -1.0, 0.25],
+            ],
+        );
+        let (face, edge) =
+            the_first_blocks_edge_up_the_line(&solid, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let along_y_3 = &square.wires[0][2];
+        assert_eq!(
+            beside_one_edge(&solid, 0, &solid, &square, flat, face, edge, along_y_3),
+            Some(Placement::On {
+                solid: 0,
+                same_way: true
+            }),
+            "the square lies on the face x = 3, facing out with it"
+        );
+    }
+
+    /// Two blocks built as one solid through [`crate::SolidBuilder`], touching
+    /// along part of a line: `[0, 3]²` from `z = −1` to `2`, and `[3, 6]²` from
+    /// `z = 0` to `1`. Between `z = 0` and `1` four faces stand round
+    /// `x = y = 3`, two of each block, and the first block's edge runs on past
+    /// both ends of the second's. Every plane is exact.
+    fn two_blocks_touching_along_a_line() -> (Model, BakedSolid) {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let mut builder = crate::SolidBuilder::new();
+        let mut faces = Vec::new();
+        for ([x0, x1], [y0, y1], [z0, z1]) in [
+            ([0.0, 3.0], [0.0, 3.0], [-1.0, 2.0]),
+            ([3.0, 6.0], [3.0, 6.0], [0.0, 1.0]),
+        ] {
+            let corners: Vec<[f64; 3]> = [z0, z1]
+                .into_iter()
+                .flat_map(|z| {
+                    [y0, y1]
+                        .into_iter()
+                        .flat_map(move |y| [[x0, y, z], [x1, y, z]])
+                })
+                .collect();
+            let vertices: Vec<_> = corners
+                .iter()
+                .map(|&corner| {
+                    builder
+                        .add_vertex(Point::from(corner))
+                        .expect("a finite corner")
+                })
+                .collect();
+            let mut edges: Vec<([usize; 2], crate::DraftEdge)> = Vec::new();
+            for face in [
+                [0, 2, 3, 1],
+                [4, 5, 7, 6],
+                [0, 4, 6, 2],
+                [1, 3, 7, 5],
+                [0, 1, 5, 4],
+                [2, 6, 7, 3],
+            ] {
+                let steps: Vec<crate::DraftStep> = (0..4)
+                    .map(|position| {
+                        let (from, to) = (face[position], face[(position + 1) % 4]);
+                        let (edge, orientation) =
+                            match edges.iter().find(|(ends, _)| *ends == [to, from]) {
+                                Some(&(_, edge)) => (edge, Orientation::Reversed),
+                                None => {
+                                    let edge = builder
+                                        .add_edge(vertices[from], vertices[to], EdgeRun::Straight)
+                                        .expect("a side");
+                                    edges.push(([from, to], edge));
+                                    (edge, Orientation::Forward)
+                                }
+                            };
+                        crate::DraftStep::Along(
+                            builder.add_coedge(edge, orientation).expect("a use"),
+                        )
+                    })
+                    .collect();
+                let wire = builder.add_wire(&steps).expect("a closed boundary");
+                let at = |index: usize| Point::from(corners[face[index]]);
+                let plane =
+                    Plane::through_three_points(at(0), at(1), at(2)).expect("three corners");
+                faces.push(
+                    builder
+                        .add_face(Surface::Plane(plane), &[wire])
+                        .expect("a face"),
+                );
+            }
+        }
+        let shell: Vec<_> = faces
+            .into_iter()
+            .map(|face| (face, Orientation::Forward))
+            .collect();
+        builder.add_shell(&shell).expect("twelve faces");
+        let blocks = builder
+            .build(&mut model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("two blocks touching along a line");
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("two blocks touching along a line are a sound solid");
+        let [solid] = <[BakedSolid; 1]>::try_from(
+            bake(
+                &model,
+                &[blocks],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("the blocks bake"),
+        )
+        .expect("one solid");
+        (model, solid)
+    }
+
+    /// The first block's face facing `out` and its edge up `x = y = 3`, across
+    /// which is the face facing `across`.
+    fn the_first_blocks_edge_up_the_line(
+        solid: &BakedSolid,
+        out: [f64; 3],
+        across: [f64; 3],
+    ) -> (&BakedFace, &BakedEdge) {
+        let faces_out = |normal: [f64; 3]| {
+            move |plane: Option<&Plane>| {
+                plane.is_some_and(|plane| plane.normal().components() == normal)
+            }
+        };
+        let face = solid
+            .faces
+            .iter()
+            .find(|face| faces_out(out)(face.surface.as_plane()))
+            .expect("the first block's face");
+        let edge = face
+            .wires
+            .iter()
+            .flatten()
+            .find(|edge| faces_out(across)(edge.across.as_plane()))
+            .expect("its edge up x = y = 3");
+        (face, edge)
+    }
+
+    /// A flat piece with four `corners`, each side `which` on the plane
+    /// `walls[which]` from corner `which` to the next, with its material
+    /// behind every wall.
+    fn a_square_of_planes(flat: Surface, corners: [[f64; 3]; 4], walls: [[f64; 4]; 4]) -> Piece {
+        let walls =
+            walls.map(|wall| Surface::Plane(Plane::from_coefficients(wall).expect("a normal")));
+        let corner = |which: usize| MeetPoint::OfThreeSurfaces {
+            surfaces: [flat, walls[(which + 3) % 4], walls[which]],
+            which: 0,
+            point: PredicatePoint::from(corners[which]),
+        };
+        let square = (0..4)
+            .map(|which| FaceMeet {
+                carried_by: [flat, walls[which]],
+                ends: [corner(which), corner((which + 1) % 4)],
+                material_side: Decision::Neg,
+                along: SmallVec::new(),
+                approximation: None,
+            })
+            .collect();
+        Piece {
+            ancestors: Vec::new(),
+            surface: flat,
+            orientation: Orientation::Forward,
+            wires: vec![square],
+            is_the_whole_surface: false,
         }
     }
 }

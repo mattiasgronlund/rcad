@@ -407,6 +407,8 @@ pub mod a_skin_that_closes_only_with_another_never_reads_back;
 pub mod a_sliver_along_an_edge_of_a_face_it_lies_on;
 #[path = "a_sliver_arc_on_a_joined_flat_face.rs"]
 pub mod a_sliver_arc_on_a_joined_flat_face;
+#[path = "a_sliver_beside_six_walls_round_one_line.rs"]
+pub mod a_sliver_beside_six_walls_round_one_line;
 #[path = "a_sliver_on_the_plane_of_a_face_it_misses.rs"]
 pub mod a_sliver_on_the_plane_of_a_face_it_misses;
 #[path = "a_slot_end_built_from_two_stacked_blocks.rs"]
