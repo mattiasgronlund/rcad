@@ -1,0 +1,167 @@
+# restates: crates/rcad-geom/src/isometry.rs apply_to_point at ba0a654e
+# restates: crates/rcad-geom/src/isometry.rs turned_by at ba0a654e
+# restates: crates/rcad-geom/src/isometry.rs POINT_ROUNDOFF at ba0a654e
+# restates: crates/rcad-geom/src/isometry.rs held_near_length_one at 17306d5ee
+# restates: Cargo.lock nalgebra at ba0a654e
+# Isometry::apply_to_point and Isometry::POINT_ROUNDOFF,
+# crates/rcad-geom/src/isometry.rs at ba0a654e, through nalgebra 0.35's
+# UnitQuaternion * Vector3 (src/geometry/quaternion_ops.rs:377-388): the
+# moved point's z is within 12.5 * f64::EPSILON * L of what the same arithmetic
+# gives without rounding, L at least every |p_i| and |s_i|. y and z are this
+# with the indices turned 0 -> 1 -> 2 -> 0, as turn.py writes them.
+@rnd = float<ieee_64, ne>;
+
+# The quaternion (w, v), the point and the shift's x, each an f64.
+w = rnd(w_); v2 = rnd(v2_); v0 = rnd(v0_); v1 = rnd(v1_);
+p2 = rnd(p2_); p0 = rnd(p0_); p1 = rnd(p1_);
+s2 = rnd(s2_);
+
+# c = v x p, as nalgebra's cross writes each component: a*b - c*d.
+P21 = v0 * p1; q21 = rnd(P21); P22 = v1 * p0; q22 = rnd(P22);
+C2 = q21 - q22; c2 = rnd(C2);
+P01 = v1 * p2; q01 = rnd(P01); P02 = v2 * p1; q02 = rnd(P02);
+C0 = q01 - q02; c0 = rnd(C0);
+P11 = v2 * p0; q11 = rnd(P11); P12 = v0 * p2; q12 = rnd(P12);
+C1 = q11 - q12; c1 = rnd(C1);
+
+# t = c * 2, written without its rounding: doubling.g proves rnd(c * 2) is
+# c * 2 for every f64 c that does not overflow when doubled.
+t2 = c2 * 2; t0 = c0 * 2; t1 = c1 * 2;
+
+# k = v x t, its x.
+K1 = v0 * t1; k21 = rnd(K1); K2 = v1 * t0; k22 = rnd(K2);
+KK = k21 - k22; k2 = rnd(KK);
+
+# t * w + k + p, folded left to right, then + the shift.
+M = t2 * w; m0 = rnd(M);
+A = m0 + k2; a0 = rnd(A);
+R = a0 + p2; r0 = rnd(R);
+O = r0 + s2; out = rnd(O);
+
+# The same arithmetic without rounding.
+Ex = 2 * w * (v0 * p1 - v1 * p0)
+   + v0 * (2 * (v2 * p0 - v0 * p2)) - v1 * (2 * (v1 * p2 - v2 * p1))
+   + p2 + s2;
+
+# What each rounding multiplied its argument by.
+rq21 = q21 / P21; rq22 = q22 / P22; rq01 = q01 / P01; rq02 = q02 / P02;
+rq11 = q11 / P11; rq12 = q12 / P12;
+rc2 = c2 / C2; rc0 = c0 / C0; rc1 = c1 / C1;
+rk21 = k21 / K1; rk22 = k22 / K2; rk2 = k2 / KK;
+rm = m0 / M; ra = a0 / A; rr = r0 / R; ro = out / O;
+
+# The eight terms of Ex, each as out carries it, less the term itself: six
+# roundings for the two through w, seven for the four through k, two for p2
+# and one for s2.
+W1 = ro * rr * ra * rm * rc2 * rq21 - 1;
+W2 = ro * rr * ra * rm * rc2 * rq22 - 1;
+W3 = ro * rr * ra * rk2 * rk21 * rc1 * rq11 - 1;
+W4 = ro * rr * ra * rk2 * rk21 * rc1 * rq12 - 1;
+W5 = ro * rr * ra * rk2 * rk22 * rc0 * rq01 - 1;
+W6 = ro * rr * ra * rk2 * rk22 * rc0 * rq02 - 1;
+W7 = ro * rr - 1;
+W8 = ro - 1;
+e1 = 2 * w * v0 * p1 * W1; e2 = -(2 * w * v1 * p0 * W2);
+e3 = 2 * v0 * v2 * p0 * W3; e4 = -(2 * v0 * v0 * p2 * W4);
+e5 = -(2 * v1 * v1 * p2 * W5); e6 = 2 * v1 * v2 * p1 * W6;
+e7 = p2 * W7 + s2 * W8;
+
+# Each term's share of the bound: its size with L for the point's coordinate,
+# times the roundings it meets. p2 and s2 share one, 2L + L, since Gappa
+# 1.8.0 aborts in ast.cpp printing a warning about a D that holds both.
+d1 = 12 * |w| * |v0| * L; d2 = 12 * |w| * |v1| * L;
+d3 = 14 * |v0| * |v2| * L; d4 = 14 * |v0| * |v0| * L;
+d5 = 14 * |v1| * |v1| * L; d6 = 14 * |v1| * |v2| * L;
+d7 = 3 * L;
+D = d1 + d2 + d3 + d4 + d5 + d6 + d7;
+
+# q.q, each square written as |x| * |x|, and the four squares D / L is
+# written with below.
+N4 = |w| * |w| + |v2| * |v2| + |v0| * |v0| + |v1| * |v1|;
+X = |w| - 30/109 * (|v0| + |v1|);
+Y = |v2| - 35/109 * (|v0| + |v1|);
+Z = |v0| - |v1|;
+
+{
+  # Every input is a finite f64.
+     |w| <= 1b1024 /\ |v2| <= 1b1024 /\ |v0| <= 1b1024 /\ |v1| <= 1b1024
+  /\ |p2| <= 1b1024 /\ |p0| <= 1b1024 /\ |p1| <= 1b1024 /\ |s2| <= 1b1024
+  # No factor of a product is zero.
+  /\ |w| >= 1b-1074 /\ |v2| >= 1b-1074 /\ |v0| >= 1b-1074 /\ |v1| >= 1b-1074
+  /\ |p2| >= 1b-1074 /\ |p0| >= 1b-1074 /\ |p1| >= 1b-1074
+  # No sum cancels to zero.
+  /\ |C2| >= 1b-1074 /\ |C0| >= 1b-1074 /\ |C1| >= 1b-1074 /\ |KK| >= 1b-1074
+  /\ |A| >= 1b-1074 /\ |R| >= 1b-1074 /\ |O| >= 1b-1074
+  # The nine products are normal, which apply_to_point does not check.
+  /\ |q21| >= 1b-1022 /\ |q22| >= 1b-1022 /\ |q01| >= 1b-1022
+  /\ |q02| >= 1b-1022 /\ |q11| >= 1b-1022 /\ |q12| >= 1b-1022
+  /\ |k21| >= 1b-1022 /\ |k22| >= 1b-1022 /\ |m0| >= 1b-1022
+  # What lemma.g proves each of those nine gives.
+  /\ q21 -/ P21 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q22 -/ P22 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q01 -/ P01 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q02 -/ P02 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q11 -/ P11 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ q12 -/ P12 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ k21 -/ K1 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ k22 -/ K2 in [-4503599627370497b-105, 4503599627370497b-105]
+  /\ m0 -/ M in [-4503599627370497b-105, 4503599627370497b-105]
+  # L is at least every coordinate of the point and the shift.
+  /\ L in [1b-1074, 1b1024]
+  /\ p2 / L in [-1, 1] /\ p0 / L in [-1, 1] /\ p1 / L in [-1, 1]
+  /\ s2 / L in [-1, 1]
+  # A stored turn has |q.q - 1| <= 6 epsilon (held_near_length_one), and
+  # 6 epsilon is 12b-53.
+  /\ N4 in [9007199254740980b-53, 9007199254741004b-53]
+  # x / |x| is in [-1, 1] for any x that is not zero.
+  /\ w / |w| in [-1, 1] /\ v2 / |v2| in [-1, 1]
+  /\ v0 / |v0| in [-1, 1] /\ v1 / |v1| in [-1, 1]
+->
+  W1 in ? /\ W3 in ? /\ W7 in ? /\ W8 in ? /\ D / L in ?
+  /\ (out - Ex) / D in ?
+  /\ (out - Ex) / L in [-100b-55, 100b-55]
+}
+
+# How far each rounding is from the identity.
+q21 / P21 -> 1 + (q21 - P21) / P21;
+q22 / P22 -> 1 + (q22 - P22) / P22;
+q01 / P01 -> 1 + (q01 - P01) / P01;
+q02 / P02 -> 1 + (q02 - P02) / P02;
+q11 / P11 -> 1 + (q11 - P11) / P11;
+q12 / P12 -> 1 + (q12 - P12) / P12;
+c2 / C2 -> 1 + (c2 - C2) / C2;
+c0 / C0 -> 1 + (c0 - C0) / C0;
+c1 / C1 -> 1 + (c1 - C1) / C1;
+k21 / K1 -> 1 + (k21 - K1) / K1;
+k22 / K2 -> 1 + (k22 - K2) / K2;
+k2 / KK -> 1 + (k2 - KK) / KK;
+m0 / M -> 1 + (m0 - M) / M;
+a0 / A -> 1 + (a0 - A) / A;
+r0 / R -> 1 + (r0 - R) / R;
+out / O -> 1 + (out - O) / O;
+
+# The error is the sum of the seven shares' errors, each a fraction of its
+# own share of D; add_rr then averages them.
+(out - Ex) / L -> ((out - Ex) / D) * (D / L);
+(out - Ex) / D -> ((D + (out - Ex)) - D) / D;
+D + (out - Ex) -> (d1 + e1) + (d2 + e2) + (d3 + e3) + (d4 + e4)
+                + (d5 + e5) + (d6 + e6) + (d7 + e7);
+(d1 + e1) - d1 -> e1;
+(d2 + e2) - d2 -> e2;
+(d3 + e3) - d3 -> e3;
+(d4 + e4) - d4 -> e4;
+(d5 + e5) - d5 -> e5;
+(d6 + e6) - d6 -> e6;
+(d7 + e7) - d7 -> e7;
+e1 / d1 -> (w / |w|) * (v0 / |v0|) * (p1 / L) * (W1 / 6);
+e2 / d2 -> -((w / |w|) * (v1 / |v1|) * (p0 / L) * (W2 / 6));
+e3 / d3 -> (v0 / |v0|) * (v2 / |v2|) * (p0 / L) * (W3 / 7);
+e4 / d4 -> -((v0 / |v0|) * (v0 / |v0|) * (p2 / L) * (W4 / 7));
+e5 / d5 -> -((v1 / |v1|) * (v1 / |v1|) * (p2 / L) * (W5 / 7));
+e6 / d6 -> (v1 / |v1|) * (v2 / |v2|) * (p1 / L) * (W6 / 7);
+e7 / d7 -> ((p2 / L) * W7 + (s2 / L) * W8) / 3;
+
+# D / L is 3 and a quadratic in |w|, |v2|, |v0|, |v1|, and that quadratic is
+# 109/5 q.q less four squares: Gappa bounds each square below by zero.
+D / L -> 109/5 * N4 - (109/5 * (X * X) + 109/5 * (Y * Y) + 425/109 * (Z * Z)
+                       + 1/545 * (|v0| * |v0| + |v1| * |v1|)) + 3;
