@@ -5087,6 +5087,11 @@ check-lanes-workflow:
         'test code lines removed: 7' \
         'toggled.rs: +#[cfg(test)]' \
         'lines that run: 1')
+    proofs_want=$(printf '%s\n' \
+        'proofs/gappa/old.g: -@x = float<ieee_64,ne>(1);' \
+        'proofs/gappa/old.g: -{ x in [0,1] -> x <= 1 }' \
+        'test code lines removed: 2' \
+        'lines that run: 0')
     notes_bound="    notes: { type: 'string', description: 'at most five lines, for the merger:"
     notes_rule='`notes` is at most five lines, for the merger: what it must act on and what no'
     runs_note_field="    lines_that_run_note: { type: 'string', description: 'your own note about the print above, if any"
@@ -5278,10 +5283,22 @@ check-lanes-workflow:
     printf '%s\n' 'pub fn kept() -> u32 {' '    1' '}' '' > "$cfgtest/removed.rs"
     printf '%s\n' '#[cfg(test)]' 'pub fn helper() -> u32 {' '    5' '}' > "$cfgtest/toggled.rs"
     commit "$cfgtest" branch
+    proofstest="$dir/proofstest"
+    mkdir -p "$proofstest/proofs/gappa"
+    git -C "$proofstest" init -q
+    printf '%s\n' '# A proof, and a comment in it.' '@x = float<ieee_64,ne>(1);' '{ x in [0,1] -> x <= 1 }' \
+        > "$proofstest/proofs/gappa/old.g"
+    commit "$proofstest" base
+    git -C "$proofstest" rm -q proofs/gappa/old.g
+    mkdir -p "$proofstest/proofs/gappa"
+    printf '%s\n' '# Another proof, and a comment in it.' '@y = float<ieee_64,ne>(2);' '{ y in [0,2] -> y <= 2 }' \
+        > "$proofstest/proofs/gappa/new.g"
+    commit "$proofstest" branch
     diff_cache_1_set=''
     diff_cache_2_set=''
     diff_cache_3_set=''
     diff_cache_4_set=''
+    diff_cache_5_set=''
     scan() {
         local n t at prev line types prog got same found tt l content i
         local -a types_arr lines merger_lines
@@ -5550,6 +5567,20 @@ check-lanes-workflow:
             printf '%s\n' "$cfg_want"
             echo "the #[cfg(test)] attribute line must be skipped when the item it heads is removed or added with it, and counted when it changes alone (§375)"
             return 23
+        fi
+        if [ "$same" = 1 ] && [ -n "$diff_cache_5_set" ]; then
+            got="$diff_cache_5"
+        else
+            got=$(git -C "$proofstest" diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 HEAD~1 HEAD | awk "$prog" 2>&1 || true)
+            if [ "$same" = 1 ]; then diff_cache_5="$got"; diff_cache_5_set=1; fi
+        fi
+        if [ "$got" != "$proofs_want" ]; then
+            echo "the lines-that-run recipe in $4 printed, on a commit that removes one proofs/gappa/ .g file and adds another:"
+            printf '%s\n' "$got"
+            echo "and should have printed exactly:"
+            printf '%s\n' "$proofs_want"
+            echo "a proof no crate builds is test code: its added lines and comments do not run, and one taken out is listed in the test-code-removed section (§375)"
+            return 51
         fi
         if ! grep -qF -- "$notes_bound" "$1" || ! grep -qF -- "$notes_rule" "$2/verifier.md"; then
             echo "$1's verdict schema or $2/verifier.md no longer holds a verifier's notes to five lines; unbounded, they were about a third of its report (§382)"
