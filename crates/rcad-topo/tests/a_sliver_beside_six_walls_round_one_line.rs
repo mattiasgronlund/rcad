@@ -3,7 +3,7 @@
 
 use rcad_geom::{Deflection, EdgeRun, Isometry, Orientation, Plane, Point, Scale, Surface, Vector};
 use rcad_predicates::{Policy, ProvenanceLog};
-use rcad_topo::{DraftStep, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
+use rcad_topo::{DraftStep, Error, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
 
 /// Two blocks built as one solid, `[0, 3]²` from `z = −1` to `2` and `[3, 6]²`
 /// from `z = 0` to `1`, touch along `x = y = 3`, so four faces stand round
@@ -87,13 +87,15 @@ fn a_triangle_whose_long_side_passes_where_two_blocks_touch_fuses_to_its_volume(
                         volume_of(&copy, &solids)
                     });
                 let first = if one == blocks { "blocks" } else { "triangle" };
-                match said {
-                    Ok((measured, error)) if (measured - volume).abs() <= error + 1e-12 => (),
-                    other => wrong.push(format!(
-                        "slope {dy}/{dx}, right angle at the {corner}, {rule:?} from the \
-                         {first}: {other:?}, not {volume}"
-                    )),
-                }
+                let gave = match said {
+                    Ok((measured, error)) if (measured - volume).abs() <= error + 1e-12 => continue,
+                    Ok((measured, _)) => format!("{measured}"),
+                    Err(refusal) => name_of(&refusal),
+                };
+                wrong.push(format!(
+                    "slope {dy}/{dx}, right angle at the {corner}, {rule:?} from the {first}: \
+                     {gave}, not {volume}"
+                ));
             }
         }
     }
@@ -186,6 +188,15 @@ fn a_prism(model: &mut Model, outline: &[[f64; 2]], [x, y, z]: [f64; 3]) -> Soli
             &Isometry::translation(Vector::new(x, y, z)).expect("a finite shift"),
         )
         .expect("a positive length")
+}
+
+/// The variant's name, which is what its `Debug` starts with.
+fn name_of(refusal: &Error) -> String {
+    let debug = format!("{refusal:?}");
+    let end = debug
+        .find(|c: char| !c.is_ascii_alphanumeric())
+        .unwrap_or(debug.len());
+    debug[..end].to_owned()
 }
 
 /// The volume of `solids` together, and how far off it may be.
