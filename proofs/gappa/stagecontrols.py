@@ -38,6 +38,8 @@ for name, at in (("stage_0.g", "[0, 0]"), ("stage_1.g", "[1, 1]")):
     write(name, sub(text, SPLIT, ""))
 # The share-at-1 edge, stage_e0_1.g, is proved by Gappa and refused by coqc
 # (464.22 7), so it is not written: prove-bounds stamps only what coqc accepts.
+# stage_e0_1_coq.g, below, is the edge with the hint that makes coqc refuse
+# it dropped (464.40).
 for name, at in (("stage_e0_0.g", "[0, 0]"),):
     text = sub(small, SHARE, "  /\\ share in " + at + "\n")
     write(name, sub(text, SPLIT, ""))
@@ -71,6 +73,17 @@ write("stage_noa.g", sub(stage, "  /\\ A in [0, 1]\n", ""))
 write("stage_noknots.g", sub(stage, "  /\\ above - below in [1b-1074, 1b1024]\n", ""))
 # The small-E case at 8.5u, which it reaches.
 write("stage_e0_85.g", sub(small, E0_GOAL, "/\\ (out - Ex) / M in [-17b-54, 17b-54]"))
+# The share-at-1 edge without the hint z0 / M -> rest * (d0 / M), and its
+# control at 7u under the 7u and 2^-60 the edge reaches.
+HINT = "z0 / M -> rest * (d0 / M);\n"
+WHY = ("# Not z0 / M -> rest * (d0 / M), which stage_e0.g has. rest is 0 here, and\n"
+       "# with that hint Gappa 1.8.0 proves P0 = z0 by saying rest has 0 bits,\n"
+       "# FLT(rest, 0), which -Bcoq writes as it is and coqc refuses, since\n"
+       "# gappalib's FLT takes a positive count of bits (464.40).\n")
+edge = sub(sub(small, SHARE, "  /\\ share in [1, 1]\n"), SPLIT, "")
+coq = sub(edge, HINT, WHY)
+write("stage_e0_1_coq.g", coq)
+write("c_stage_e0_1_coq_7.g", sub(coq, E0_GOAL, "/\\ (out - Ex) / M in [-7b-53, 7b-53]"))
 # stage.g with E allowed to be zero, which is why stage_e0.g exists.
 write("c_stage_e_from_0.g", sub(stage, "/\\ E / M in [1b-60, 1b-40]", "/\\ E / M in [0, 1b-40]"))
 # stage.g averaging over the weights themselves, which is why it takes twice

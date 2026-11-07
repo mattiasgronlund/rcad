@@ -3030,6 +3030,75 @@ nothing, and `summary.py`, `controls.py`, `same.py`, `ids.py` and the run
 scripts, which read run logs, not the tree. `check-proofs` prints
 `check-proofs: 1471 proofs and 1557 controls match their stamps`.
 
+Q3284 moved in 464.25 to 464.28, 464.32 and 464.34, on 2026-11-07, each
+generator extracted from its section with literal-number `sed`, run beside
+`block1.g`, `point.g` or `cyl.g` as the section says, and each proof run by
+`prove-bounds` in chunks. 464.29 and 464.33 hold no script that proves.
+464.25: `make_differences_zero.py` writes the 237 `dz_<set>.g` and the 222
+`dzq_<set>.g`, which prove, and the nine single-difference `dz_<d>.g` and six
+`dzq_<d>.g` that 464.26 starts from. A set whose longest path has five
+roundings proves at 6u, so its `c_dz_<set>_6u.g` is no control and the
+generator writes it only for the 55 sets above five (and the nine singles);
+the 5u control is written for all. 464.26: `make_minor_zero_too.py` writes the
+15 `dm_`, 12 `dmi_` and six `dmq_` proofs. A `dmi_` control is
+`c_dmi_<pair>_nonormal.g`, so that it names its proof; the 6u control is
+written for all `dm_` pairs but `adx_first`, `ady_first`, `bdx_second` and
+`bdy_second`, which prove at 6u. 464.27: `flatall.py` writes the 722 `fa_`
+cases and `fa_none.g` with their controls; its restates line is
+`SideOfAFlatSurfaceThroughAPoint::on_floats`, since `plane.rs` defines
+`on_floats` twice. `prodzero.g` and `pmin.g` are the section's lemmas, with
+restates lines for `product_is_normal` and the constant, and `c_prodzero.g`
+is `c_prodzero_half.g`. 464.28: `cylzero.py`'s 82 cases at `cc9adf3f`.
+464.32: `torzero.py`'s 169 cases at `37bc60af`. 464.34: `pointzero.py` writes
+the 436 `pz_` cases, with point.g's restates lines (`apply_to_point`,
+`turned_by` and `POINT_ROUNDOFF` at `ba0a654e`, `held_near_length_one` at
+`17306d5ee`, `Cargo.lock` `nalgebra`) in place of the section's at `c0859e3f`;
+all 436 are proved and moved. In the 21 where `out` and `Ex` are both zero
+the section's control asks for a ratio in `[2^-60, 1]` and Gappa exits 1 with
+"no contradiction was found", where `prove-bounds` waits for "some properties
+were not satisfied" and so refuses to stamp; those 21 have a proof and no
+control, since a goal of `out - Ex` in `[-1b-54, 1b-54]` holds when both are
+0. 464.35: `pointsub.py` writes the 88 `pm_` cases and their controls, with
+point.g's restates lines, `pmcontrols.py` is the section's `controls.py`
+(renamed so that it does not meet 464.22's) and writes `c_pm_n_l.g` and
+`c_pm_n_34.g`, and `mixedn.g`, `mixeds.g` and `sum.g` are its lemmas, each with
+point.g's restates lines added because a proof must start with them;
+`pmlemmacontrols.py` writes their `_half` controls by the section's rule.
+464.36: `vectorsub.py` writes the 88 `vm_` cases with vector.g's restates lines
+(`held_near_length_one` in place of `named_by`), and for the 21 where nothing
+is live a proof and no control, as 464.34's 21; `squarezero.py` writes the 77
+`sq_` cases, keeping `square.g`'s restates lines. 464.37: `squarekept.py`
+writes `kept_10.g`, the only case that proves, and its controls, which are
+the three that fail, named `c_kept_10_k128.g`, `c_kept_10_k119.g` and
+`c_kept_10_k11.g`, and `c_kept_10_127.g`; its restates lines name
+`held_near_length_one` at `17306d5ee`. 464.39: `widen.py`, which runs
+`vectorturn.py` and `vectorsub.py` and then widens their files, writes
+`wide.g`, `wide1.g`, `wide2.g` (control `c_wide_195.g`) and `r_wide_6.g`
+(control `c_r_wide_6_five.g`, the `1 + 2^-5` run that fails), and 77 `vw_`
+cases with 67 controls from the `vm_` files, in `proofs/gappa/` and not in
+`zero/`; the 11 with every component zero have nothing to widen and are not
+written. Its restates lines keep the sibling scripts' shas and add the three
+for the axis at `2b2c90e3`. 464.40: `stagecontrols.py` writes
+`stage_e0_1_coq.g` and its control `c_stage_e0_1_coq_7.g`, the section's
+`coqedge.py` edit. 464.42: `signedall.py` writes the 220 `signed_` and
+`shift_` cases with the restates lines of `signed.g` and `shiftplane.g`, and
+`signedallcontrols.py` the 249 controls that fail: 217 `_below` (the three
+that prove, `signed_ssz_u01`, `signed_szs_u02` and `signed_zss_u12`, are no
+control) and the 32 `_anyl` that must fail (the 188 that prove are not
+written); `signedsumexact.g` is the section's `sumexact.g`, renamed since
+`sumexact.g` is 464.2x's. 464.43: `make_minors_zero_with_differences.py`
+writes the 45 `dm_`, 30 `dmq_` and 414 `dmi_` proofs, with 45 `c_dm_*_5u`, 17
+`c_dm_*_6u` (the 28 sets that prove at 6u get none) and 414
+`c_dmi_<set>_nonormal` controls, beside the existing `dz_` files. 464.44:
+`make_first_two_cancelling.py` writes the 13 `ds_` and 12 `dsq_` proofs, 13
+`c_ds_*_5u` and 7 `c_ds_*_6u` controls (the six pairs prove at 6u), and
+`make_hypothesis_dropped.py` the 156 `dk_` proofs, which the section ran
+without Coq and `prove-bounds` stamps with it. Not moved: 464.30 and 464.31's
+cone scripts, which have a row; 464.38 and 464.41, which hold Rust probes and
+run logs; the `r_` and `l_` reach and lower runs of 464.42, the run, tally and
+same-file scripts of each section. `check-proofs` prints `check-proofs: 4620
+proofs and 4351 controls match their stamps`.
+
 Do the cone scripts of 464.30 and 464.31 still restate `HowFarFromTheSkin::
 on_floats`? Not as they were read. 464.30 read `cone.rs` at `c3c03fd8`, and
 neither section's text names `up_reach`: Q2779's `83539cc32`, of 2026-11-06,
