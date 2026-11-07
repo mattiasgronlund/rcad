@@ -503,7 +503,9 @@ fn a_model() -> Model {
 /// refuses the solid as `ACurvedFaceGoesRightRoundWithNoSeam`
 /// (`docs/decisions.md` §199.4) — the first of the function's two documented
 /// `None` cases, which until now no test reached. The lid's own plane can
-/// face either way without changing that.
+/// face either way without changing that. The refusal names the skin by its
+/// place in the description, face `1`, since the key it was raised with is
+/// into the model `build` swept and dropped (Q2890).
 #[test]
 fn a_cone_walked_the_wrong_way_round_its_rim_is_refused_by_name() {
     for lid_normal_z in [1.0, -1.0] {
@@ -550,8 +552,9 @@ fn a_cone_walked_the_wrong_way_round_its_rim_is_refused_by_name() {
         let built = builder.build(&mut model, &Policy::certified(), &mut ProvenanceLog::new());
         assert!(
             matches!(
-                built,
-                Err(Error::ACurvedFaceGoesRightRoundWithNoSeam { .. })
+                &built,
+                Err(Error::ADraftEntityWasRefusedByTheSweep { entity: "face", index: 1, refused, .. })
+                    if matches!(**refused, Error::ACurvedFaceGoesRightRoundWithNoSeam { .. })
             ),
             "lid normal z {lid_normal_z}: {built:?}"
         );

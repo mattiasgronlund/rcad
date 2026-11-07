@@ -692,14 +692,20 @@ fn holds_what_pappus_gives_the_top_half_of_a_ring(
 /// `ACrossingBetweenAPlaneAndATorusThatIsAQuartic` before anything is meshed.
 /// The block's only walls neither through the ring's axis nor square to it are
 /// `x = -200` and `y = 200`, and both miss the torus.
+///
+/// **The refusal names the skin by the position it was described at**, face
+/// `0`, and not by the key the sweep raised it with. That key was into the
+/// model `build` swept and dropped, so the caller's model looked it up as
+/// `KeyFromAnotherModel` (Q2890).
 #[test]
 fn a_crown_of_a_ring_with_a_slot_across_its_top_in_one_face_is_refused() {
     let mut model = Model::new(Scale::millimetres(250.0).expect("a positive size"));
     let refused = a_crown_of_a_ring_with_a_slot_across_its_top(&mut model, false);
     assert!(
         matches!(
-            refused,
-            Err(Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
+            &refused,
+            Err(Error::ADraftEntityWasRefusedByTheSweep { entity: "face", index: 0, refused: why, .. })
+                if matches!(**why, Error::CurvedFaceWithAHoleGoesTooFarRound { .. })
         ),
         "the crown with a slot in one face came back {refused:?}"
     );

@@ -180,6 +180,10 @@ fn the_mitre_is_named_by_its_plane(reference: &str, sizes: &str) {
 /// a band's wire does not come back to where it set off in the band's own two
 /// coordinates. That is the refusal the reader gave the twelve-digit mitre
 /// before `docs/decisions.md` §335.
+///
+/// The sweep raises it about a face of the model the builder swept and
+/// dropped, so the builder hands it on wrapped with that face's place in the
+/// description (Q2890).
 fn the_mitre_is_named_by_its_pipes(reference: &str, sizes: &str, level_pipe: [&str; 2]) {
     let text = an_elbow(reference, sizes, level_pipe);
     let file = StepFile::read(text.as_bytes()).expect("a file this test wrote reads");
@@ -195,7 +199,14 @@ fn the_mitre_is_named_by_its_pipes(reference: &str, sizes: &str, level_pipe: [&s
         matches!(
             &refused,
             Refusal::TheSolidTheFileDescribesIsNotOne { why, .. }
-                if matches!(**why, rcad_topo::Error::AWireWillNotLieFlatOnItsFace { .. })
+                if matches!(
+                    &**why,
+                    rcad_topo::Error::ADraftEntityWasRefusedByTheSweep {
+                        entity: "face",
+                        refused,
+                        ..
+                    } if matches!(**refused, rcad_topo::Error::AWireWillNotLieFlatOnItsFace { .. })
+                )
         ),
         "a mitre named by its two pipes leaves a band's wire unable to close, not {refused:?}"
     );

@@ -102,7 +102,9 @@ fn a_bend_growing_out_of_a_blocks_side_builds_walked_the_one_way_round() {
 /// round the tube twice in all bounds no piece of the torus, whichever way the
 /// face is used, and the mesher refused it by name. Walked `Reversed` here,
 /// the wall's wire goes round the tube the same way at both ends too, and is
-/// refused by that same name.
+/// refused by that same name. The builder hands that refusal back beside the
+/// wall's place in the description, face `7` after the block's six sides and
+/// the end cap, since its key is into the model it swept and dropped (Q2890).
 ///
 /// With one closed edge round the cap, the wrong walk is refused
 /// `AClosedEdgeIsWalkedAgainstItsSurface` instead; the halves are not closed
@@ -146,7 +148,11 @@ fn a_bend_whose_cap_circle_is_two_halves_builds_walked_the_one_way_round() {
         TheCapCircle::TwoHalves,
     );
     assert!(
-        matches!(turned_over, Err(Error::AWireWillNotLieFlatOnItsFace { .. })),
+        matches!(
+            &turned_over,
+            Err(Error::ADraftEntityWasRefusedByTheSweep { entity: "face", index: 7, refused, .. })
+                if matches!(**refused, Error::AWireWillNotLieFlatOnItsFace { .. })
+        ),
         "the block's side walking the halves the same way as the wall: {turned_over:?}"
     );
 }
