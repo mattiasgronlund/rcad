@@ -228,8 +228,9 @@ pub const POINT_ALONG_A_CROSSING_ROUNDOFF: f64 = 256.0 * f64::EPSILON;
 /// raised clear of it, and charged this too. Its points are not on the chain
 /// above: each is kept only within `D/16` of the point `HyperbolaBranch`'s
 /// own `at` puts at the same step, with `D` this constant times `L`, so it is
-/// within `D` of the crossing wherever that point is within `0.937·D` of it. That is derived at `AStretchOfAHyperbolaTooFlatToPlaceFromItsCentre`,
-/// and it is as proved as the hyperbola's own chain, which is the hole the
+/// within `D` of the crossing wherever that point is within `0.937·D` of it.
+/// That is derived at `AStretchOfAHyperbolaTooFlatToPlaceFromItsCentre`, and
+/// it is as proved as the hyperbola's own chain, which is the hole the
 /// paragraph above names. A parabola is never placed so: a probe over 742
 /// parabola runs whose lens is under an ulp deep found none that needs it
 /// (Q3297).
@@ -3658,12 +3659,17 @@ impl AnEndlessBend for HyperbolaBranch {
 /// Q3297, so that this moves only the points rounding could leave on the
 /// chord. When `|N|` is at most twice `|n·N|`, with the arc's `n`, and the
 /// raise is no longer than half the chord: the arc's two gates, for the
-/// arc's reasons, and without them seven frustum and wall tests failed with
-/// hyperbola stretches raised (Q3287). Then every point is raised to stand at
-/// least `8u·(S + bow)` off the chord, along `N`, which lands it on the
-/// branch's own side of the chord by the count
-/// `AnArcTooFlatToPlaceFromItsCentre` makes, since the arithmetic is the same
-/// step for step.
+/// arc's reasons. Then every point is raised to stand at least
+/// `8u·(S + bow)` off the chord, along `N`, which lands it on the branch's own
+/// side of the chord by the count `AnArcTooFlatToPlaceFromItsCentre` makes,
+/// since the arithmetic is the same step for step.
+///
+/// **No test here fails without those two gates.** Without them, and without
+/// the check against `at` below, seven frustum and wall tests failed with
+/// hyperbola stretches raised (Q3287's probe). With that check and without
+/// them, the 3987 tests of `rcad-geom` and `rcad-topo` all pass (Q3297). They
+/// are kept because what they refuse falls back on `at`'s points, which is the
+/// walk as it was before Q3297.
 ///
 /// **And when every point so placed is within `D/16` of the point `at` put at
 /// the same step**, which is what the bound below stands on. It stands in for
@@ -3674,8 +3680,9 @@ impl AnEndlessBend for HyperbolaBranch {
 /// than about `D/8`, as the arc's check of its ends does, and a second check
 /// of the ends is left out.
 /// `a_hyperbola_whose_end_is_off_the_curve_is_not_walked_from_its_chord`
-/// lifts one end of the lens above `D/2` off the cone, where placed from its
-/// chord its point would stand `1.7e−14` off the cone.
+/// lifts one end of the lens 99 ulps above the rim's `z = 3`, `0.46·D` off the
+/// cone, where placed from its chord its point would stand `1.7e−14` off the
+/// cone.
 ///
 /// **The arc's gate on ends that differ only where `N` is nought is left
 /// out.** There it keeps a point that rounding cannot carry across the chord
