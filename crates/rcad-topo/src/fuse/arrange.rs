@@ -14888,7 +14888,11 @@ impl<'f> Arrangement<'f> {
     /// through the apex of the cone whose straight lines each cross the loop,
     /// and
     /// [`Arrangement::whether_past_the_pickers_of_a_loop_and_two_branches`]
-    /// answers there (Q3172). A flat face square to a ring's axis is the one pair picked by
+    /// answers there (Q3172). So are two mirror images of one slope with each
+    /// apex inside the other, which the flat surface halfway between the apexes
+    /// cuts in an ellipse picked by two flat surfaces through one line, and
+    /// [`Arrangement::whether_past_the_pickers_of_an_ellipse_two_mirror_images_cross_in`]
+    /// answers there (Q2998). A flat face square to a ring's axis is the one pair picked by
     /// something other than a half-space: the plane cuts the ring in two
     /// circles round the axis, the pipe of the ring's own radius tells them
     /// apart, and
@@ -14979,6 +14983,18 @@ impl<'f> Arrangement<'f> {
         {
             return Self::whether_past_the_flat_surface_between_two_loops_of_two_cones(
                 picker, &this, &other, at,
+            );
+        }
+        if let (Surface::Cone(this), Surface::Cone(other)) = (self.surface, partner)
+            && let picked_by @ [Picker::InFrontOf(first), Picker::InFrontOf(second)] =
+                self.crossings[crossing].picked_by()
+        {
+            return Self::whether_past_the_pickers_of_an_ellipse_two_mirror_images_cross_in(
+                [first, second],
+                picked_by,
+                &this,
+                &other,
+                at,
             );
         }
         let axis = match (self.surface, partner) {
@@ -15452,6 +15468,93 @@ impl<'f> Arrangement<'f> {
             || side_of_surface(&Surface::Cone(*other), at) == towards_the_flat_surface
         {
             PastThePicker::Yes(towards_the_flat_surface)
+        } else {
+            PastThePicker::CannotTell
+        }
+    }
+
+    /// On a cone crossed by its mirror image of one slope, each apex inside the
+    /// other, where the flat surface halfway between the apexes cuts both in an
+    /// ellipse: whether a point is past the two flat half-spaces that pick that
+    /// ellipse out, and if it is, which side of the ellipse it is on.
+    ///
+    /// The half-spaces are one of the four corners `rcad_geom`'s
+    /// [`Cone::the_flat_cut_of_a_mirror_image_held_apart_from_it`] reads: the
+    /// two cross in the whole curves of two flat cuts of either cone, the one
+    /// halfway, `P`, and another, `F`, whose cut is always a hyperbola, and on
+    /// either cone the other's form is a multiple of `P·F`. Call the nappe the
+    /// other's apex is inside the near one. Where `P` cuts an ellipse `E`, it is
+    /// all on the near nappe, so the cone less `E` is two pieces: the piece
+    /// round the apex, which runs on through the apex into the whole far nappe,
+    /// and the rest of the near nappe. `P` meets neither, so each is on one side
+    /// of it, and the apex is on its own side. `F` cuts the near nappe in an
+    /// endless branch that never meets `E` and the far nappe in the other
+    /// branch, so it misses the part of the near nappe between the apex and
+    /// `E`, and `E`, and the apex is on neither flat surface, so `F` keeps one
+    /// sign over that part and the apex. So beside `E` on the piece round the
+    /// apex the other's sign is its sign at the apex, `Neg`, since each apex is
+    /// inside the other, and beside `E` on the rest it is `Pos`. Every point of
+    /// the cone is on the side of `E` that it is of `P`, read as `Neg` on the
+    /// apex's side, on both nappes.
+    ///
+    /// In front of both half-spaces the other cuts the cone in `E` alone, so
+    /// its sign is the side there, and [`PastThePicker::No`] says so. Past
+    /// either, the side is read off `P` as the flat surface square to the gap
+    /// between the apexes through its middle, `2(p − a)·(b − a) − |b − a|²` for
+    /// this apex `a` and the other's `b`, not off the stored flat surface,
+    /// which is rounded once. A point whose box straddles it cannot tell, and
+    /// nor can one where how the two cross cannot be settled. Where the pair is
+    /// not two such mirror images, or the half-spaces pick a branch of `F` or
+    /// of a cut halfway that is not an ellipse, nothing here is known of the
+    /// pair, and the other's sign is read, as it always was. That the cut
+    /// halfway is an ellipse is read off the stored flat surface, as
+    /// `how_a_crossing_runs` reads it before ordering points along `E` as along
+    /// a closed curve.
+    ///
+    /// Read without this, two pointed cones of slope a half, eight high, each
+    /// turned 75 degrees about `x` the two ways round, four apart along `y`,
+    /// read the side of `E` on the strip between `F`'s branch and the rim off
+    /// that branch, inside the other cone's far nappe, and joined the strip to
+    /// the piece round the apex. That piece came out as no face of its own, and
+    /// every fuse of the two was refused `ResultIsNotManifold` (Q2998).
+    fn whether_past_the_pickers_of_an_ellipse_two_mirror_images_cross_in(
+        [first, second]: [&HalfSpace; 2],
+        picked_by: &[Picker],
+        this: &Cone,
+        other: &Cone,
+        at: PredicatePoint,
+    ) -> PastThePicker {
+        // Compared rather than matched, so that `Decision`'s wildcard arm is
+        // not written once more (§40).
+        let in_front = |picker: &HalfSpace| {
+            let side = picker.side_of_point(at);
+            side == Decision::Pos || side == Decision::Zero
+        };
+        if in_front(first) && in_front(second) {
+            return PastThePicker::No;
+        }
+        let Ok(cut) = this.the_flat_cut_of_a_mirror_image_held_apart_from_it(other, picked_by)
+        else {
+            return PastThePicker::CannotTell;
+        };
+        let Some((flat, cone)) = cut else {
+            return PastThePicker::No;
+        };
+        let lean = how_a_plane_leans_against_a_cone(&flat, &cone);
+        if lean == Decision::Zero || lean == Decision::Neg {
+            return PastThePicker::No;
+        }
+        if lean != Decision::Pos {
+            return PastThePicker::CannotTell;
+        }
+        let [here, there] = [this.apex(), other.apex()].map(|apex| apex.coordinates());
+        let gap =
+            [0, 1, 2].map(|axis| Interval::exactly(there[axis]) - Interval::exactly(here[axis]));
+        let box_of_it = at.enclosure();
+        let step = [0, 1, 2].map(|axis| box_of_it[axis] - Interval::exactly(here[axis]));
+        let side = (Interval::exactly(2.0) * dot_of(step, gap) - dot_of(gap, gap)).sign();
+        if side == Decision::Pos || side == Decision::Neg {
+            PastThePicker::Yes(side)
         } else {
             PastThePicker::CannotTell
         }
