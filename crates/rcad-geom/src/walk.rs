@@ -10014,4 +10014,83 @@ mod tests {
             );
         }
     }
+
+    /// An arc that bows off its chord by more than half the chord's length is
+    /// not placed from that chord, though it bows by less than the walk's
+    /// rounding (Q3263).
+    ///
+    /// The numbers are those the fuse hands the walk for the bar along a
+    /// block's top in `a_bar_lying_along_a_plane_or_a_bar.rs`, turned twice
+    /// with its seam underneath: the top is `z = 0`, the bar runs from its
+    /// near end at `x = 3` to its far end at `x = 1`, and its axis drops `2⁻⁵²`
+    /// a unit along. The top cuts its pipe in an ellipse `2⁵²` long whose tip
+    /// is at `x = 3 + 1.1e−16`, and its near cap meets the top at
+    /// `x = 3 + 2.2e−16`, so a point past `3.0` in doubles is off the bar. The
+    /// arc between the two places the far cap's circle crosses the top,
+    /// `5.96e−8` apart at `x = 1`, turns round that tip `2` away, which is
+    /// under the deviation of `256` so long a conic is walked to. Placed from
+    /// its chord, its one point came out at `x = 3 + 1.5e−8`, past the bar's
+    /// near end, and the union of that bar and block was refused
+    /// `CannotMeshAFace`.
+    #[test]
+    fn an_arc_that_bows_more_than_half_its_chord_is_not_placed_from_its_chord() {
+        let pipe = Surface::Cylinder(
+            Cylinder::new(
+                crate::Axis::new(
+                    Point::new(3.0, 2.980_232_283_178_452e-8, 1.0),
+                    Vector::new(
+                        -1.0,
+                        -1.224_646_799_147_353_2e-16,
+                        -2.220_446_049_250_313e-16,
+                    ),
+                )
+                .expect("an axis"),
+                1.0,
+            )
+            .expect("a pipe"),
+        );
+        let top = Surface::Plane(
+            Plane::from_point_and_normal(Point::new(0.0, 0.0, 0.0), Vector::new(0.0, 0.0, -1.0))
+                .expect("a unit normal"),
+        );
+        let towards_the_near_end = HalfSpace::new(
+            Vector::new(1.058_791_175_366_236_5e-22, 0.0, 0.0),
+            1.058_791_175_366_169_2e-22,
+        )
+        .expect("a direction with length");
+        let run = NamedRun::new(
+            EdgeRun::PartOfWhereItCrosses {
+                and: top,
+                picked_by: smallvec![Picker::from(towards_the_near_end)],
+            },
+            [
+                [1.000_000_000_000_000_4, 5.960_464_433_130_141_5e-8, 0.0],
+                [1.000_000_000_000_000_4, 0.0, 0.0],
+            ]
+            .map(PredicatePoint::from),
+        )
+        .expect("a picked run")
+        .moved_in_from(Vector::new(0.0, 2.0, 4.0))
+        .expect("a finite shift");
+
+        let walked = walk(
+            &run,
+            [&pipe, &top],
+            Deflection::of(1526.25).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|refused| panic!("the arc round the tip is {refused:?}"));
+
+        assert!(
+            !walked.points().is_empty(),
+            "the arc round the tip has a point between its ends"
+        );
+        for point in walked.points() {
+            assert!(
+                point.x() <= 3.0,
+                "{point:?} on the arc round the tip is past the bar's near end"
+            );
+        }
+    }
 }
