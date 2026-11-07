@@ -36,7 +36,7 @@ fn probe_q2921_scan() {
                     found += 1;
                     eprintln!("PROBE side {side} outline {outline:?}");
                     let run = std::panic::catch_unwind(|| {
-                        run_with(two_built_blocks, dx, dy, k, false, outline);
+                        run_with(a_block_and_a_wedge, dx, dy, k, false, outline);
                     });
                     if run.is_err() {
                         eprintln!("PROBE panicked");
@@ -79,6 +79,41 @@ fn probe_q2921_t_junction() {
             run_with(two_built_blocks, dx, dy, k, rising, outline);
         }
     }
+}
+
+fn a_block_and_a_wedge(model: &mut Model) -> SolidKey {
+    let mut corners = Vec::new();
+    for z in [-1.0, 2.0] {
+        for y in [0.0, 3.0] {
+            for x in [0.0, 3.0] {
+                corners.push([x, y, z]);
+            }
+        }
+    }
+    for z in [0.0, 1.0] {
+        for [x, y] in [[3.0, 3.0], [6.0, 2.0], [2.0, 6.0]] {
+            corners.push([x, y, z]);
+        }
+    }
+    let faces: [&[usize]; 11] = [
+        &[0, 2, 3, 1],
+        &[4, 5, 7, 6],
+        &[0, 4, 6, 2],
+        &[1, 3, 7, 5],
+        &[0, 1, 5, 4],
+        &[2, 6, 7, 3],
+        &[8, 10, 9],
+        &[11, 12, 13],
+        &[8, 9, 12, 11],
+        &[9, 10, 13, 12],
+        &[10, 8, 11, 13],
+    ];
+    let solid = a_polyhedron(model, &corners, &faces);
+    eprintln!(
+        "PROBE block and wedge validate {:?}",
+        model.validate(&Policy::certified(), &mut ProvenanceLog::new())
+    );
+    solid
 }
 
 fn two_built_blocks(model: &mut Model) -> SolidKey {

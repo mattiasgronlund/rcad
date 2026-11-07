@@ -232,7 +232,7 @@ use rcad_geom::{
 };
 use rcad_predicates::{
     Decision, Interval, Measures, Point as PredicatePoint, Policy, ProvenanceLog, SideOfSurface,
-    orient3d_of_points, side_of_a_plane_where_three_planes_meet,
+    meet_of_three_planes, orient3d_of_points, side_of_a_plane_where_three_planes_meet,
     which_meet_comes_first_along_a_line,
 };
 
@@ -2088,14 +2088,7 @@ fn beside_an_edge_of(
         .find_map(|face| {
             face.wires.iter().flatten().find_map(|edge| {
                 piece.wires.iter().flatten().find_map(|side| {
-                    let read = beside_one_edge(solid, index, own, piece, flat, face, edge, side);
-                    if read.is_some() {
-                        eprintln!(
-                            "PROBE beside_one_edge face {:?} {:?} edge {:?} across {:?} -> {read:?}",
-                            face.keys, face.surface, edge.keys, edge.across
-                        );
-                    }
-                    read
+                    beside_one_edge(solid, index, own, piece, flat, face, edge, side)
                 })
             })
         })
@@ -2149,6 +2142,10 @@ fn beside_one_edge(
     if !has_length || !is_on_the_edge(from) || !is_on_the_edge(to) {
         return None;
     }
+    let face_across = the_face_across(solid, edge, h)?;
+    if !no_other_face_reaches(solid, [face, face_across], [g, h], &[from, to]) {
+        return None;
+    }
     if side.material_side == towards_g {
         let mine = outward_plane_of(piece)?;
         let theirs = outward_plane_of_face(face)?;
@@ -2164,7 +2161,7 @@ fn beside_one_edge(
             same_way,
         });
     }
-    let behind = the_inner_side_of(the_face_across(solid, edge, h)?, across)?;
+    let behind = the_inner_side_of(face_across, across)?;
     Some(if side.material_side == behind {
         Placement::Inside
     } else {
@@ -2261,17 +2258,7 @@ fn from_an_edge_of(
                 .wires
                 .iter()
                 .flatten()
-                .find_map(|side| {
-                    let read = from_one_edge(solid, own, flat, face, edge, side);
-                    if read.is_some() {
-                        eprintln!(
-                            "PROBE from_one_edge face {:?} {:?} edge {:?} across {:?} side material {:?} carried {:?} ends {:?} -> {read:?}",
-                            face.keys, face.surface, edge.keys, edge.across, side.material_side, side.carried_by,
-                            side.ends.each_ref().map(|end| end.point().enclosure().map(|i| [i.lo(), i.hi()]))
-                        );
-                    }
-                    read
-                })
+                .find_map(|side| from_one_edge(solid, own, flat, face, edge, side))
         })
     })
 }
@@ -2303,10 +2290,6 @@ fn from_one_edge(
     {
         return None;
     }
-    eprintln!(
-        "PROBE from_one_edge asks face {:?} {:?} edge {:?} across {:?}: start around {:?} end around {:?} side ends {:?}",
-        face.keys, g, edge.keys, h, edge.start.around, edge.end.around, side.ends
-    );
     let holds =
         |three: &[Plane; 3], plane| three.iter().any(|one| is_one_plane_either_way(*one, plane));
     let [first, second] = &side.ends;
@@ -2345,11 +2328,78 @@ fn from_one_edge(
         Decision::Pos | Decision::Neg => (),
         Decision::Zero | Decision::Undecidable { .. } | _ => return None,
     }
+    let face_across = the_face_across(solid, edge, h)?;
+    if !no_other_face_reaches(solid, [face, face_across], [g, h], &[at]) {
+        return None;
+    }
     if runs_to == towards_g {
         Some(side.material_side == the_inner_side_of(face, cut_by)?)
     } else {
-        Some(runs_to == the_inner_side_of(the_face_across(solid, edge, h)?, h)?)
+        Some(runs_to == the_inner_side_of(face_across, h)?)
     }
+}
+
+/// Whether no face of `solid` but `edge_faces`, the two faces along an edge
+/// on the line where `g` and `h` meet, reaches the stretch of that line
+/// between the planes `ends`, or the one point where a single plane in `ends`
+/// crosses it. Both edge rules stand on the skin near that stretch being
+/// those two faces and nothing else, and on a line four faces stand round,
+/// where another part of the solid touches this one, it is not (Q2921).
+///
+/// A flat face whose plane leaves one of `ends`' points off it meets the line
+/// at one point at most, and has the stretch near every other point of it
+/// clear, or the one point clear. Any other face — curved, on a plane through
+/// the whole line, or asked about without an answer — must have its
+/// [`Bounds`](super::bake::Bounds) provably clear of the stretch. So two of a
+/// comb's tooth tops on one plane do not stop each other, and a block standing
+/// past the edge along the line does.
+fn no_other_face_reaches(
+    solid: &BakedSolid,
+    edge_faces: [&BakedFace; 2],
+    [g, h]: [Plane; 2],
+    ends: &[[f64; 4]],
+) -> bool {
+    let line = [g.coefficients(), h.coefficients()];
+    let Ok(boxes) = ends
+        .iter()
+        .map(|&third| meet_of_three_planes(line[0], line[1], third).map(PredicatePoint::enclosure))
+        .collect::<core::result::Result<Vec<[Interval; 3]>, _>>()
+    else {
+        return false;
+    };
+    let hull: [Option<Interval>; 3] = core::array::from_fn(|axis| {
+        let low = boxes
+            .iter()
+            .map(|one| one[axis].lo())
+            .fold(f64::INFINITY, f64::min);
+        let high = boxes
+            .iter()
+            .map(|one| one[axis].hi())
+            .fold(f64::NEG_INFINITY, f64::max);
+        Interval::new(low, high).ok()
+    });
+    let [Some(x), Some(y), Some(z)] = hull else {
+        return false;
+    };
+    let stretch = PredicatePoint::Constructed([x, y, z]);
+    solid
+        .faces
+        .iter()
+        .filter(|other| !edge_faces.iter().any(|one| core::ptr::eq(*one, *other)))
+        .all(|other| {
+            let leaves_an_end_off = other.surface.as_plane().is_some_and(|plane| {
+                ends.iter().any(|&third| {
+                    matches!(
+                        side_of_a_plane_where_three_planes_meet(
+                            [line[0], line[1], third],
+                            plane.coefficients()
+                        ),
+                        Ok(Decision::Pos | Decision::Neg)
+                    )
+                })
+            });
+            leaves_an_end_off || other.bounds.provably_misses(stretch)
+        })
 }
 
 /// The one plane of `three` that is neither `g` nor `h`, either way round, as
