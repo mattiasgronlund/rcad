@@ -751,10 +751,9 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 /// whose cap's arc, of radius `6`, bows `3.6e−16` between ends near
 /// `(5.98, −0.42, 3)`, where `x` rounds by `4.4e−16`. Placed from its chord as
 /// it bows, its one point came out on the chord's rounded middle; placed from
-/// its centre, on its centre's side at each of nine traced of the 26 turns
-/// between `1.3` and `1.7` it was refused at. Either way that cone less the slab
-/// was refused
-/// `FacesDoNotAgreeWhichWayTheyFace` (Q3286,
+/// its centre, turned `1.321`, one of the 26 turns between `1.3` and `1.7` it
+/// was refused at, on its centre's side. Either way that cone less the slab was
+/// refused `FacesDoNotAgreeWhichWayTheyFace` (Q3286,
 /// `an_arc_that_bows_less_than_its_ends_round_is_placed_from_its_chord_raised_clear_of_it`).
 ///
 /// # How far off, derived

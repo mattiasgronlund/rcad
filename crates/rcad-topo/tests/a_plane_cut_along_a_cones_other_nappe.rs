@@ -1205,12 +1205,11 @@ fn the_steep_cone_less_a_slab_turned_one_and_a_half_keeps_a_lens_past_the_end_it
 ///
 /// At each of these turns the cap rim comes inside one end of the slab, as
 /// turned `1.5` it does, and the arc of the rim past that end bows less than
-/// a point near `(6, 0, 3)` rounds. At the nine turns traced, that arc was
-/// placed from the rim's centre, and its one point rounded onto the centre's
-/// side of the chord between its ends, so the cap's piece of the lens ran the
-/// wrong way round. The turns are
-/// those of Q3278's sweep, `1.3 + 0.001·i` and `1.5` give or take a few
-/// `f64::EPSILON`, written as the doubles that sum gives.
+/// a point near `(6, 0, 3)` rounds. Turned `1.321`, that arc was placed from
+/// the rim's centre, and its one point rounded onto the centre's side of the
+/// chord between its ends, so the cap's piece of the lens ran the wrong way
+/// round. The turns are those of Q3278's sweep, `1.3 + 0.001·i` and `1.5` give
+/// or take a few `f64::EPSILON`, written as the doubles that sum gives.
 #[test]
 fn the_steep_cone_less_a_slab_answers_at_each_turn_whose_rim_arc_bows_less_than_its_ends_round() {
     let cone = THE_STEEP_CONE;
