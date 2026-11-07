@@ -101,6 +101,50 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
     assert_eq!(every_fuse_of(funnel_and_spout).refusals(), [[None; 2]; 3]);
 }
 
+/// **Two pointed cones of slope a half, each turned 75 degrees about `x`
+/// through its own apex, the two ways round, and four apart along `y`**, row
+/// Q2998. Each axis is the other's mirror image across `y = 0` bit for bit,
+/// since the two turns differ by the sign of `sin` alone, so the two are
+/// exactly mirror images across `y = 2`. Their axes are 150 degrees apart, so
+/// each apex is inside the other, and `y = 2` cuts each in an ellipse, all of
+/// it inside both faces. The second flat cut, `z ≈ −1.064`, is a hyperbola
+/// whose branch on either cone's near half is on the other's far half, so it is
+/// on no face, and the two faces cross in the ellipse alone.
+///
+/// `intersect` names the ellipse as the cut halfway, in front of one of the
+/// two flat surfaces that pick the curves apart, and it reaches the closed
+/// curve gate in `how_a_crossing_runs`. Every fuse is refused, under every
+/// rule both ways round, `ResultIsNotManifold` with one face along an edge.
+#[test]
+fn two_mirror_cones_cut_in_an_ellipse_halfway_answer_every_fuse() {
+    assert_eq!(
+        every_fuse_of(two_mirror_cones_cut_in_an_ellipse_halfway).refusals(),
+        [[None; 2]; 3]
+    );
+}
+
+fn two_mirror_cones_cut_in_an_ellipse_halfway(model: &mut Model) -> (SolidKey, SolidKey) {
+    let one = a_pointed_cone(model, 0.5, 8.0);
+    let other = a_pointed_cone(model, 0.5, 8.0);
+    let turn = 75.0_f64.to_radians();
+    model
+        .place_solid(one, &Isometry::rotation(&Axis::x(), -turn).expect("a turn"))
+        .expect("this model made the key");
+    model
+        .place_solid(
+            other,
+            &Isometry::rotation(&Axis::x(), turn).expect("a turn"),
+        )
+        .expect("this model made the key");
+    model
+        .place_solid(
+            other,
+            &Isometry::translation(Vector::new(0.0, 4.0, 0.0)).expect("a move"),
+        )
+        .expect("this model made the key");
+    (one, other)
+}
+
 /// **Two pointed cones, one leaning off the other.** Both have slope a half and
 /// height eight, and the second leans 0.3 radians about the `x` axis through
 /// the point four up the first's axis, less than either's half-angle of about
