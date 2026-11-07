@@ -1272,9 +1272,11 @@ so the sizes are the third lane's:
 - `planes0.g` to `planes2n.g`: 3349 to 3498 lines, 18 hints each.
 
 Each hint enters the Coq file as a hypothesis with no condition attached, as
-in 464.4, so each proof stands on its hints, and on the divisors Gappa took to
-be nonzero. `field` took all 39 of block 1's hints (464.10). It has not been
-run on the hints of these scripts, nor on those of 464.7 and 464.9.
+in 464.4, so each proof as Gappa writes it stands on its hints, and on the
+divisors Gappa took to be nonzero. `field` took all 39 of block 1's hints
+(464.10 1). Q2699's `prove-bounds` then ran it on every hint of every script
+here that proves, and it took each one, so none of these proofs stands on a
+hint any more, only on numbers being nonzero. 464.10 5 gives the counts.
 
 **6. The scripts.** `o2.g`, whole:
 
@@ -2565,8 +2567,8 @@ one step on paper from block 1's hypotheses:
 
 None of the 35 is proved in Coq yet. They would be proved from `s1`, the Coq
 form of block 1's hypotheses: a nested `/\` of `BND <expr> <interval>` terms.
-That is a row. `field` was run on block 1 alone. The scripts of 464.7 to 464.9
-have not had it run on their hints.
+That is a row, Q2701. `field` was run here on block 1 alone. 5 runs it, through
+`prove-bounds`, on every script of 464.5 to 464.9.
 
 **2. What would notice `on_floats` drifting.** Today nothing does (464.4's 5).
 A check that fires when the Rust under a script changes is worth having only if
@@ -2609,11 +2611,11 @@ b. **Each proved script joins the tree** as `proofs/gappa/<name>.g`.
 
 - Its controls go beside it as `proofs/gappa/c_<name>_<what>.g`. A control is
   a script that must fail, as each of 464.4's variants must. 464.8 and 464.9
-  already name theirs `c_*.g`.
+  already name theirs `c_*.g`, but 464.8 gives that name to five scripts that
+  prove, and gives none to one that fails. 5 says how those were named.
 - A script that a Python generator writes is committed as the files it writes,
-  with the generator beside them, so that each stamp names a file. The
-  generators are `o2cases.py`, `planecases.py`, `controls.py` and
-  `shiftcontrols.py`.
+  with the generator beside them, so that each stamp names a file. 5 lists the
+  generators and what each writes.
 - Each script starts with one line per item of Rust it restates. The item is
   named as `just src` takes it, with the commit it was read at:
 
@@ -2630,6 +2632,14 @@ b. **Each proved script joins the tree** as `proofs/gappa/<name>.g`.
   restates nalgebra 0.35's `dot` (464.9), so it carries
   `# restates: Cargo.lock nalgebra at c3b2160e`. That line's hash is the
   package's entry in `Cargo.lock`.
+- An item the file defines more than once is named `Owner::name`. That is the
+  one `name` inside the file's top-level `impl` blocks for `Owner`, its own
+  and each trait's. `plane.rs` defines `on_floats` twice, so `plane.g` names
+  `SideOfAFlatSurface::on_floats`. `just src` takes no owner, and lists the
+  places for such a name rather than printing the item. So for an
+  `Owner::name`, `check-proofs-selftest` reads the item at each place `just
+  src` lists, in a copy where the name's other definitions are renamed. One of
+  those reads must be the extent `check-proofs` hashes.
 
 c. **`just prove-bounds [script]`** runs each script, or the one named, under
 464.4's pins:
@@ -2647,6 +2657,7 @@ against new code, and that hides the drift the stamp is there to show.
 It then writes `proofs/gappa/<name>.stamp`, holding:
 
 - the script's hash;
+- each control's hash, so that a control changed is a change too;
 - each restated item's code hash;
 - the pin;
 - the count of hints and of nonzero facts the proof stands on.
@@ -2674,11 +2685,18 @@ prove-bounds <script>`, in four cases:
 - a script has no stamp;
 - an item is no longer found.
 
-`check-proofs-selftest` works in a scratch copy. It changes a restated item's
-code, a comment in it, and a script, one at a time, and checks that the code
-and the script fail and the comment passes. By 2's figures, `check-proofs`
-would have fired once in `orient3d.rs`' fourteen commits, at §12.2's fix, and
-not at all since the pilot.
+As built it also fails on a script with no `restates` line, a stamp with no
+script beside it, and a control whose name names no proof.
+
+`check-proofs-selftest` works in a scratch copy. It changes one thing at a
+time, inside the first restated item of the first script or in the files
+beside it. A comment and a blank line put in the item pass. The item's code,
+its name, the script, one of its controls, the pin and a stamp removed each
+fail, naming the script and `just prove-bounds <script>`. Then, for every item
+a script restates, it checks that the extent `check-proofs` hashes is the one
+`just src` prints. By 2's figures, `check-proofs` would have fired once in
+`orient3d.rs`' fourteen commits, at §12.2's fix, and not at all since the
+pilot.
 
 What it misses:
 
@@ -2883,14 +2901,129 @@ print(len(proved), "hints proved by field;",
 - by `ring`, from a hypothesis about an equal number. This takes
   `Phat + (P − Phat)` and `B × P + (eb − B × P)`.
 
+**5. What was built.** Q2699 built 3 b to d, in two lanes on 2026-11-06 and
+2026-11-07, off `256f2352` and then `a96cd9d8`. It moved in the scripts of
+464.5 to 464.9, which this section held when the row was taken. Those of
+464.11 on are Q2700's (3 f).
+
+- `proofs/bounds.py` holds both recipes. `check` is `check-proofs`, `prove
+  [name]` is `prove-bounds`, and `extent PATH ITEM` prints the lines
+  `check-proofs` reads as the item, for the selftest.
+- `proofs/gappalib18.nix` is 464.5's nix block for gappalib 1.8.0. The pin a
+  stamp holds is the nixpkgs commit, that file's hash, and `-Eprecision=200`.
+- `proofs/gappa/` holds 31 proofs, 42 controls, a stamp for each proof, and 11
+  generators. `just check-proofs` prints `check-proofs: 31 proofs and 42
+  controls match their stamps`.
+- `check-proofs` and `check-proofs-selftest` are gate steps, in `gate_steps`
+  and `gate_reusable_steps`. Both read the tree and nothing else, so a gate
+  served from the same tree serves them soundly.
+
+Where each script came from:
+
+- 464.5: `block1.g` and `lemma.g`. `block1controls.py` writes their six
+  controls, the runs of 464.4 3 and 4 and of 464.5.
+- 464.7: `zero2.g`, which 464.7 4 gives whole. `make_one_zero.py` writes
+  `secondzero.g` and `thirdzero.g`, making to `block1.g` the changes 464.7 4
+  lists. 464.7's `make_two_zero.py`, as it stands, writes `zero12d.g`,
+  `zero13d.g` and `zero23d.g`. `zerocontrols.py` writes their seven controls,
+  each at a smaller `B`.
+- 464.8: 19 proofs. `o2.g`, `o2s.g` and `plane.g` are its fences.
+  `o2cases.py` writes `o2sn.g`, `o2f.g`, `o2fn.g` and `o2tiny.g`, as 464.8 has
+  it. `planecases.py` writes `planes0.g` to `planes2n.g` and their `3u`
+  controls, with `plane.g`'s restates lines in front, which 464.8 does not
+  quote. `make_value.py` writes `planev.g` and `c_o2_value.g`.
+  `o2planecontrols.py`, 464.8's `controls.py`, writes the rest.
+- 464.9: `nearest.g`, `signed.g`, `shiftplane.g` and `shiftball.g`.
+  `signedcontrols.py`, 464.9's `controls.py`, and `shiftcontrols.py` write
+  their controls. `nearestcontrols.py` writes `nearest.g`'s two, which 464.9 1
+  describes and no generator of it wrote.
+
+**The renames.** `prove-bounds` holds every `c_*.g` to failing, and takes
+every other `.g` for a proof, so a name says which a script is.
+
+- 464.8 6's `controls.py` writes 2's four runs at `3u + 14u²` as
+  `c_o2s_14.g` to `c_o2fn_14.g`, and they prove. Here they are proofs,
+  `o2s_14.g`, `o2sn_14.g`, `o2f_14.g` and `o2fn_14.g`, each with its stamp.
+- 464.8 4's `c_plane_noeb.g` proves. Here it is `plane_noeb.g`, and its
+  control is `c_plane_noeb_why.g`, 464.8 4's run of it with the goal changed.
+- 464.8 1's `o2v.g` fails at the code's `B`. Here it is a control of `o2.g`,
+  `c_o2_value.g`, and its run at `4u + 16u²`, 464.8 6's `c_o2v_4u.g`, is
+  `c_o2_value4u.g`.
+- 464.8's generator and 464.9's are both `controls.py`. Here they are
+  `o2planecontrols.py` and `signedcontrols.py`.
+
+The same clash waits in what Q2700 moves: 464.12's `c_sphere_noeb.g` and
+464.13's `c_flat_noeb.g` prove too, as `c_plane_noeb.g` did.
+
+`o2.g`'s and `plane.g`'s own runs below the code's `B`, which 464.8 1 and 3
+ran by hand, are added as `c_o2_14.g`, `c_o2_3u.g` and `c_plane_14.g`.
+
+**Two scripts written from a description.** 464.8 describes `planev.g` and
+`o2v.g` and quotes neither. `make_value.py` makes the changes 464.8 1 and 3
+name, as 464.5 makes them to block 1. `prove-bounds` checks that `planev.g`
+proves and that `c_planev_3u.g`, `c_planev_4u.g`, `c_o2_value.g` and
+`c_o2_value4u.g` fail, as 464.8 says each does.
+
+**Restates lines beyond what a script's comment names.** A line is there
+wherever the arithmetic the script restates runs through an item:
+
+- the plane scripts name `point.rs`' `exact_coordinates`, which
+  `SideOfAFlatSurface::on_floats` calls, as block 1 names it;
+- `signed.g` and `shiftplane.g` name `Vector::dot` and nalgebra's
+  `Cargo.lock` entry (464.9 2);
+- `shiftplane.g` and `shiftball.g` name `turned_by` and the two items of
+  `TurnOfACube` it calls, `named_by` and `turned`. Those are where a movement
+  with no turn hands a vector back bit for bit, as both scripts take it to
+  (464.9). They also name the `holding` that `Plane::transformed` and
+  `Sphere::transformed` build their answer by, and `Axis::holding`.
+
+**What `field` takes.** The transform in `bounds.py` is 4's, with its table
+read off Coq rather than written by hand. It declares `nz_X : X <> 0` after
+each number Gappa's proof defines with a name starting `_`, bounds and float
+formats left out. A first `coqc` asks `field` for each hint
+and prints which it took. A second checks the result, and its `Print
+Assumptions` of the last lemma lists what the proof stands on. A fact no step
+uses is not listed, so declaring one for every number adds nothing to the
+count. On `block1.g` it took 39 of 39 and left 35 nonzero facts, the 35 of 1.
+
+The second lane ran `prove-bounds` on all 31 again, on its branch off
+`a96cd9d8`. Each proved, each of the 42 controls failed, and every stamp it
+wrote was the first lane's, byte for byte. The figures it printed are these:
+
+| script | `field` took | hints left | nonzero facts |
+|---|---|---|---|
+| `block1.g` | 39 of 39 | 0 | 35 |
+| `lemma.g` | 0 of 0 | 0 | 0 |
+| `zero2.g`, `secondzero.g` | 31 of 36 | 5 | 29 |
+| `thirdzero.g` | 34 of 43 | 7 | 32 |
+| `zero12d.g`, `zero13d.g`, `zero23d.g` | 25 of 41 | 12 | 24 |
+| `o2.g` | 15 of 15 | 0 | 16 |
+| `o2s.g`, `o2sn.g`, `o2f.g`, `o2fn.g` and their `_14` | 16 of 16 | 0 | 15 |
+| `o2tiny.g` | 15 of 15 | 0 | 0 |
+| `plane.g`, `plane_noeb.g` | 17 of 17 | 0 | 19 |
+| `planev.g` | 19 of 19 | 0 | 20 |
+| `planes0.g` to `planes2n.g` | 18 of 18 | 0 | 18 |
+| `nearest.g` | 0 of 3 | 0 | 0 |
+| `signed.g`, `shiftplane.g` | 12 of 18 | 6 | 10 |
+| `shiftball.g` | 0 of 6 | 6 | 0 |
+
+So 464.8's proofs stand on no hint. 464.7's, `signed.g`'s, `shiftplane.g`'s
+and `shiftball.g`'s still stand on 5 to 12 hints that Coq has not checked.
+`nearest.g`'s proof uses none of the 3 `field` did not take. Why `field`
+refuses those hints was not traced. 3 a expected some to be left.
+
+What this build does not check: that a generated file is what its generator
+writes now. Each file is proved, or fails, as it stands, and its stamp is its
+own, so an edit to one is caught. But a generator edited and not run again
+drifts from its files unseen.
+
 **What this leaves.**
 
-- The build of 3 b to d: `proofs/gappa/`, `prove-bounds`, the stamps,
-  `check-proofs` in the gate, and `check-proofs-selftest`. That is a row.
+- The build of 3 b to d: done, 5.
 - Moving in the scripts the fourteen rows of 3 f append after the build row
-  is taken: a row, after the build row and the fourteen.
+  is taken: Q2700.
 - The 35 nonzero facts of 1, proved in Coq from `s1`, so that block 1's proof
-  stands on its hypotheses alone: a row, after the build row.
+  stands on its hypotheses alone: Q2701.
 
 ### 464.11 One of the nine differences at zero
 
