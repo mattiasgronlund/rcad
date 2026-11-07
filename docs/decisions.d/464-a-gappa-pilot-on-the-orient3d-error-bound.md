@@ -2936,8 +2936,31 @@ the controls of 7, `tinysq.g`, `tinyzero.g`, `tinyzero_nohint.g` and
 `skinwhy.py` as `flatwhy.py` does. `prove-bounds` proved the 436 and every
 control failed, and `check-proofs` prints `check-proofs: 795 proofs and 816
 controls match their stamps`. What 464.14 holds besides, the tally and
-checking scripts of 9, is not moved: they read run logs, not the tree. The
-scripts of 464.15 on are not moved yet.
+checking scripts of 9, is not moved: they read run logs, not the tree.
+
+Q2700's third lane moved in 464.15's and part of 464.16's, on 2026-11-07.
+`cyl.g`, `cylcases.py`, `cylsplit.py` and `dbl.g` are 464.15's, with each
+restates line at `e59fab75`, after a reading of `cylinder.rs`'s `on_floats`
+against the script: its checks are the script's, and the commits since
+`2a7ca9e7` changed comments and the bound's doc, not the arithmetic.
+`cylsplit.py` writes the 63 cases other than `nnn`, which is `cyl.g`, and
+asserts that. `cyl.g` has the controls `c_cyl_half.g`, `c_cyl_nonormal.g` and
+`c_cyl_value.g`, which is the section's `cylv.g`: the claim on `value` exits 1
+at the code's `B` (464.15 4), so it is a control and not a proof. Not moved
+from 464.15: `c_cyl_noeb.g`, which exits 124 at 600 s and so cannot be a
+control; `c_cylv_half.g`, which says nothing `c_cyl_value.g` does not;
+`cylv2.g`, `vgen.py` and the probes `m2.g` and `m3.g`; the bisection scripts
+`b_*`; and the run and tally scripts. `prove-bounds` proved the 65 of 464.15
+and every control failed. `cone.g`, `sumexact.g` and `conecases.py` are 464.16's, at
+`e59fab75`, with `cone.g`'s three controls. Read against `on_floats` as Q2779
+changed it, `cone.g` still restates it: its hypotheses already hold `R2` and
+`A` normal. `conesplit.py` is moved with its loop cut to the axial states `n`,
+`e` and `c`: in `a`, `s` and `t`, `R2` or `A` is below the normals, which
+`on_floats` now refuses, so those 192 scripts no longer restate the code and
+are not written. Its 191 other cases and their controls are written by the
+script and not yet run through `prove-bounds`. `check-proofs` prints
+`check-proofs: 862 proofs and 885 controls match their stamps`. The cases of
+`conesplit.py`, and 464.17 on, are not proved here yet.
 
 - `proofs/bounds.py` holds both recipes. `check` is `check-proofs`, `prove
   [name]` is `prove-bounds`, and `extent PATH ITEM` prints the lines
@@ -2986,7 +3009,9 @@ every other `.g` for a proof, so a name says which a script is.
   `o2planecontrols.py` and `signedcontrols.py`.
 
 The same clash waits in what Q2700 moves: 464.12's `c_sphere_noeb.g` and
-464.13's `c_flat_noeb.g` prove too, as `c_plane_noeb.g` did.
+464.13's `c_flat_noeb.g` prove too, as `c_plane_noeb.g` did. 464.15's
+`c_cyl_noeb.g` is the other kind: it exits 124 at 600 s, so it is neither a
+proof nor a control, and it is dropped.
 
 `o2.g`'s and `plane.g`'s own runs below the code's `B`, which 464.8 1 and 3
 ran by hand, are added as `c_o2_14.g`, `c_o2_3u.g` and `c_plane_14.g`.
