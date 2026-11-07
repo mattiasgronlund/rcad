@@ -61,13 +61,20 @@
 //! points along it as along that flat surface's cut of a cone, so every fuse
 //! of the pair answers.
 //!
-//! The last came with row Q2914: the quarter turn again, with cones of slope
+//! A sixth came with row Q2914: the quarter turn again, with cones of slope
 //! two, so each apex is inside the other and the two cross in the whole curves
 //! of two flat cuts that do not touch. Since Q2914 every fuse answers where
 //! one is eight high and the other ten. Both eight high, both caps' rims meet
 //! on the flat surface halfway, where four surfaces meet in one point, and
 //! since row Q2997 the fuse proves the meets named there one point, so every
 //! fuse of that pair answers too.
+//!
+//! The last came with row Q2998: two cones of slope a half, eight high, turned
+//! 150 degrees apart, so each apex is inside the other again, and the flat
+//! surface halfway cuts each in an ellipse rather than a hyperbola. Since
+//! Q2998 the fuse reads which side of that ellipse a point of either face is
+//! on off the flat surface halfway, past the two that pick the ellipse out,
+//! and every fuse answers and measures what the two share.
 //!
 //! Each answer that comes back is to be certified, sound, and measure as the
 //! two solids alone bound it and as the others that came back say it must: the
@@ -113,13 +120,39 @@ fn a_funnel_fused_with_a_spout_leaning_across_it_answers_every_fuse() {
 ///
 /// `intersect` names the ellipse as the cut halfway, in front of one of the
 /// two flat surfaces that pick the curves apart, and it reaches the closed
-/// curve gate in `how_a_crossing_runs`. Every fuse is refused, under every
-/// rule both ways round, `ResultIsNotManifold` with one face along an edge.
+/// curve gate in `how_a_crossing_runs`. Each cap is cut from rim to rim by the
+/// other cone's far half, and each face by the ellipse and by that branch.
+/// Until row Q2998 every fuse was refused, under every rule both ways round,
+/// `ResultIsNotManifold` with one face along an edge: the face's strip between
+/// the branch and the rim read its side of the ellipse off the branch, inside
+/// the other cone, and was joined to the piece round the apex, so that piece
+/// came out as no face of its own. Since Q2998
+/// `whether_past_the_pickers_of_an_ellipse_two_mirror_images_cross_in` in
+/// `fuse/arrange.rs` reads that side off `y = 2`, and every fuse answers.
+///
+/// The two share each one's piece on its own apex's side of `y = 2`, which is
+/// a cone over the ellipse two high, so they share `4/3` of the ellipse's
+/// area. For a cone of half-angle `α`, `tan α` the slope, cut by a flat
+/// surface `d` from the apex whose normal is `β` off the axis, the ellipse's
+/// half-axes are `d sin α cos α / (cos² β − sin² α)` and
+/// `d sin α / √(cos² β − sin² α)`. Here `d = 2` and `β` is 15 degrees, so the
+/// area is about `3.58193`, which counting the points of a 3000 by 3000 grid
+/// over `y = 2` inside the first cone gives to `5e-5`, so they share about
+/// `4.77591`. The intersection measures `4.7651`, give or take the `0.114` it
+/// publishes.
 #[test]
 fn two_mirror_cones_cut_in_an_ellipse_halfway_answer_every_fuse() {
-    assert_eq!(
-        every_fuse_of(two_mirror_cones_cut_in_an_ellipse_halfway).refusals(),
-        [[None; 2]; 3]
+    let (slope, off_the_axis) = (0.5_f64, 15.0_f64.to_radians());
+    let (from_the_apex, sine_squared) = (2.0, slope * slope / (1.0 + slope * slope));
+    let leaning = off_the_axis.cos().powi(2) - sine_squared;
+    let half_axes = [
+        from_the_apex * sine_squared.sqrt() / (1.0 + slope * slope).sqrt() / leaning,
+        from_the_apex * sine_squared.sqrt() / leaning.sqrt(),
+    ];
+    let ellipse = core::f64::consts::PI * half_axes[0] * half_axes[1];
+    every_fuse_answers_and_the_intersection_is_what_the_two_share(
+        two_mirror_cones_cut_in_an_ellipse_halfway,
+        (4.0 / 3.0 * ellipse, 0.0),
     );
 }
 
@@ -558,10 +591,10 @@ fn two_pointed_cones_ten_high_a_quarter_turn_apart_answer_every_fuse() {
     );
 }
 
-/// Fails unless every fuse of the two cones `shape` builds a quarter turn
-/// apart answers, and the intersection measures `shared`, what
-/// [`what_two_cones_a_quarter_turn_apart_share`] adds up and how far that sum
-/// can be from the volume.
+/// Fails unless every fuse of the two cones `shape` builds answers, and the
+/// intersection measures `shared`: what the two share, as
+/// [`what_two_cones_a_quarter_turn_apart_share`] adds it up for two a quarter
+/// turn apart, and how far that can be from the volume.
 fn every_fuse_answers_and_the_intersection_is_what_the_two_share(
     shape: fn(&mut Model) -> (SolidKey, SolidKey),
     shared: (f64, f64),
