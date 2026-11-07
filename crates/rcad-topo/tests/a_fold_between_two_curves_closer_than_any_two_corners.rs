@@ -700,6 +700,9 @@ fn a_ring_of_a_ball_less_a_bar_on_its_axis_builds_wherever_its_two_corners_stand
 /// the way it asks a crossing, and with one corner place there is no distance
 /// to read a crossing's floor off, so it hands the refusal back at once. That
 /// arm is reached through the public API, so it cannot become an assertion.
+/// The builder hands the refusal back beside the lobes' place in the
+/// description, face `1`, since its key is into the model it swept and
+/// dropped (Q2890).
 #[test]
 fn what_a_thin_bar_resting_inside_a_thick_one_shares_is_handed_back_at_once_round_one_corner() {
     let thick = Surface::Cylinder(Cylinder::new(Axis::z(), 2.0).expect("a pipe"));
@@ -763,8 +766,13 @@ fn what_a_thin_bar_resting_inside_a_thick_one_shares_is_handed_back_at_once_roun
         );
         assert!(
             matches!(
-                said,
-                Err(rcad_topo::Error::AMeshCoveredTheWrongSideOfALoop { .. })
+                &said,
+                Err(rcad_topo::Error::ADraftEntityWasRefusedByTheSweep {
+                    entity: "face",
+                    index: 1,
+                    refused,
+                    ..
+                }) if matches!(**refused, rcad_topo::Error::AMeshCoveredTheWrongSideOfALoop { .. })
             ),
             "the band walking its loops {band_way:?}: {said:?}"
         );

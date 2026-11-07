@@ -98,13 +98,19 @@ fn a_ball_whose_seam_runs_from_the_far_pole_to_a_hair_from_the_near_one_measures
 /// Listed from the hair corner, the walk sets off where there is no longitude
 /// and crosses the pole before it has one, which the walk refuses rather than
 /// guesses. A ball, and a refusal of one; pinned so that the day it measures,
-/// this says so.
+/// this says so. The refusal names the ball's one face by its place in the
+/// description, `0`, since the key it was raised with is into the model the
+/// builder swept and dropped (Q2890).
 #[test]
 fn a_ball_whose_wire_is_listed_from_the_hair_corner_is_refused_as_a_wire_that_will_not_lie_flat() {
     for pole in [Pole::North, Pole::South] {
         let refusal = a_ball(99.0, pole, Equator::Bare, SetOff::FromTheHair).err();
         assert!(
-            matches!(refusal, Some(Error::AWireWillNotLieFlatOnItsFace { .. })),
+            matches!(
+                &refusal,
+                Some(Error::ADraftEntityWasRefusedByTheSweep { entity: "face", index: 0, refused, .. })
+                    if matches!(**refused, Error::AWireWillNotLieFlatOnItsFace { .. })
+            ),
             "{pole:?}: {refusal:?}"
         );
     }

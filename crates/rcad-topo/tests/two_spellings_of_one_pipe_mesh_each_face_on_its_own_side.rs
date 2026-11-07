@@ -484,7 +484,17 @@ fn a_bar_in_two_bands_with_its_rim_as_two_arcs_meshes_each_band_on_its_own_side(
                                 &built_on,
                             ) {
                                 Ok(bar) => Some(bar),
-                                Err(Error::AWireWillNotLieFlatOnItsFace { .. }) => None,
+                                Err(Error::ADraftEntityWasRefusedByTheSweep {
+                                    entity: "face",
+                                    refused,
+                                    ..
+                                }) if matches!(
+                                    *refused,
+                                    Error::AWireWillNotLieFlatOnItsFace { .. }
+                                ) =>
+                                {
+                                    None
+                                }
                                 Err(why) => panic!("{what}: refused {why:?}"),
                             }
                         })
