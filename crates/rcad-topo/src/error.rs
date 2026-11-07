@@ -1529,9 +1529,10 @@ impl Error {
     /// The solid builder's refusals are limits of the draft as it was handed
     /// over: a wire of two steps, or a skin open along an edge, describes no
     /// solid. [`Error::ADraftEntityWasRefusedByTheSweep`] is not one of those,
-    /// and says what the sweep's refusal it carries says. An importer whose own reading of a file made the draft has its
-    /// own refusal to class, because a file has reached several of them for a
-    /// shape that exists (§43.6, §218.4, §250.7).
+    /// and says what the sweep's refusal it carries says. An importer whose
+    /// own reading of a file made the draft has its own refusal to class,
+    /// because a file has reached several of them for a shape that exists
+    /// (§43.6, §218.4, §250.7).
     ///
     /// One match and no wildcard, so a new variant does not compile until it is
     /// given a class.
