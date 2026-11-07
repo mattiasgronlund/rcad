@@ -1290,6 +1290,99 @@ fn the_steep_cone_less_a_slab_answers_at_each_turn_whose_rim_arc_bows_less_than_
     }
 }
 
+/// The steep cone less a slab, and their union with the cone first, answer at
+/// each of the 72 turns between `1.3` and `1.7` where both were refused
+/// `ACurvedFaceGoesRightRoundWithNoSeam`, from `−8`, `0` and `2`, and each
+/// answer validates and measures (Q3297).
+///
+/// At each of these turns the cap rim comes inside both ends of the slab, and
+/// the lens past one of them is under half an ulp of `3` deep. The end's plane
+/// cuts the cone's wall there in an arc of a hyperbola between two points
+/// about `1e−7` apart on the rim, and walked from the hyperbola's centre at
+/// `z = 0`, its one point came out at `z = 3` exactly, on the chord between
+/// its ends. The lens's piece of the cone's wall then enclosed nothing, and
+/// the mesher read it as the cone with a disc cut out of it. The turns are
+/// those of Q3278's sweep, `1.3 + 0.001·i` and `1.5 + k·f64::EPSILON`, named
+/// by `i` and `k`.
+#[test]
+fn the_steep_cone_less_a_slab_and_their_union_answer_at_each_turn_whose_rim_comes_inside_both_ends()
+{
+    let cone = THE_STEEP_CONE;
+    let policy = Policy::certified();
+    let steps: [i32; 62] = [
+        1, 3, 6, 10, 16, 24, 29, 36, 39, 43, 45, 46, 59, 60, 67, 72, 73, 78, 79, 81, 83, 95, 96,
+        103, 106, 111, 112, 115, 145, 146, 154, 155, 160, 173, 175, 177, 179, 183, 190, 213, 241,
+        245, 246, 249, 250, 261, 269, 295, 296, 297, 307, 312, 317, 321, 346, 347, 348, 360, 370,
+        380, 385, 393,
+    ];
+    let ulps: [i32; 10] = [7, 13, 14, 15, -28, -29, 33, 34, 35, 40];
+    let turns = steps
+        .map(|i| 1.3 + 0.001 * f64::from(i))
+        .into_iter()
+        .chain(ulps.map(|k| 1.5 + f64::from(k) * f64::EPSILON));
+    for turn in turns {
+        for low in [-8.0, 0.0, 2.0] {
+            let case = Case {
+                cone,
+                block: a_slab(low, turn),
+                solids: a_slabs_solids(cone, low, turn),
+            };
+            assert_eq!(
+                the_cap_rim_against_each_end(cone, case.block).map(|end| end.rim_inside),
+                [Decision::Pos; 2],
+                "low {low}, turn {turn:?}"
+            );
+            for which in [0, 2] {
+                let (rule, cone_first) = RULES[which];
+                assert!(cone_first, "the cone first");
+                let mut model =
+                    Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+                let (cone_key, slab_key) = build(&mut model, &case);
+                let answer = model
+                    .fuse(
+                        &[cone_key],
+                        &[slab_key],
+                        rule,
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|error| {
+                        panic!("low {low}, turn {turn:?}, {rule:?}: refused: {error:?}")
+                    });
+                model
+                    .validate(&policy, &mut ProvenanceLog::new())
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "low {low}, turn {turn:?}, {rule:?}: the answer does not validate: \
+                             {error:?}"
+                        )
+                    });
+                assert_eq!(
+                    answer.solids().len(),
+                    case.solids[which],
+                    "low {low}, turn {turn:?}, {rule:?}"
+                );
+                for &piece in answer.solids() {
+                    model
+                        .solid(piece)
+                        .expect("this model made the key")
+                        .measure(
+                            Deflection::of(0.002).expect("a positive length"),
+                            &policy,
+                            &mut ProvenanceLog::new(),
+                        )
+                        .unwrap_or_else(|error| {
+                            panic!(
+                                "low {low}, turn {turn:?}, {rule:?}: a piece does not measure: \
+                                 {error:?}"
+                            )
+                        });
+                }
+            }
+        }
+    }
+}
+
 /// The same leaning block round a cone of slope `1` instead of `2` — §350.1
 /// and §350.3's cone, run for the first time. Leans `0.25` and `0.375` meet
 /// the cone at every crossing, and so does a lean of `1` but at two. Leaned
