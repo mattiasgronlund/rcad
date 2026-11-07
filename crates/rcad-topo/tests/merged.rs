@@ -313,6 +313,8 @@ pub mod a_piece_of_a_ball_holding_both_poles;
 pub mod a_piece_of_a_face_bounded_by_two_straight_sides;
 #[path = "a_pin_beside_a_ring_it_never_touches.rs"]
 pub mod a_pin_beside_a_ring_it_never_touches;
+#[path = "a_pin_flush_with_a_round_boss_on_a_long_plate_turned.rs"]
+pub mod a_pin_flush_with_a_round_boss_on_a_long_plate_turned;
 #[path = "a_pin_header_body_less_a_box.rs"]
 pub mod a_pin_header_body_less_a_box;
 #[path = "a_placed_bar_is_meshed_from_the_corners_it_stores.rs"]
