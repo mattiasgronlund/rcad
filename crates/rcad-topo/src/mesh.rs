@@ -358,6 +358,15 @@ impl SolidView<'_> {
     /// *Where* those points go is [`rcad_geom::walk`]'s answer and not this
     /// crate's (§27.5).
     ///
+    /// **Two edges walked into one point name it once.** Where a flat face's
+    /// hole and its outline each put a point at the very same place, bit for
+    /// bit, the hole is given the outline's entry for it, which moves nothing
+    /// and changes nothing of that face's triangles but the name of one corner.
+    /// Two entries there cracked the mesh: the face's triangles named the
+    /// outline's and the face across the hole named the hole's, and the mesh
+    /// was refused as two patches drawing the same side
+    /// (`name_each_point_a_hole_and_its_outline_were_walked_to_once`, Q3266).
+    ///
     /// # A flat face whose bent sides cross is walked again, finer
     ///
     /// The chords of a flat face's bent sides can cross where the sides do not.
@@ -980,6 +989,9 @@ impl BuildingAMesh {
             }
         }
         for face in solid.faces() {
+            self.name_each_point_a_hole_and_its_outline_were_walked_to_once(face);
+        }
+        for face in solid.faces() {
             self.cut_up(face, solid, log)?;
         }
         Ok(())
@@ -1175,6 +1187,83 @@ impl BuildingAMesh {
         again.pinched = core::mem::take(&mut self.pinched);
         again.pinched.insert(face.key());
         again
+    }
+
+    /// Where a hole of the flat `face` was walked into a point its outline was
+    /// walked into too, the same bits where the solid sits and where it was
+    /// made, give the hole the outline's entry for it.
+    ///
+    /// **Two entries at one place in the chart are one corner of a flat patch**,
+    /// and the triangulator tells the triangles the first of the two, which is
+    /// the outline's (`triangulate` in `rcad-mesh`). So the face's triangles
+    /// named the outline's entry there and the face across the hole's side named
+    /// the hole's, the two sides of the hole either side of that point were each
+    /// drawn inside the patch and used once, and the mesh was refused
+    /// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 1, used: 1 }`. With a block
+    /// on a thick bar of radius 2 holding two thin bars of radius 1 that touch
+    /// its wall from inside, each cap's rim is one arc between the two corners
+    /// the block's sides meet it at, and the circle of the thin bar at `x = −1`
+    /// is one arc between the places it crosses the other thin circle. Walked
+    /// evenly, both put their middle point at `−2c`, bit for bit, at four turns
+    /// and at a deflection of `0.01`, `0.02` and `0.03` (Q3266,
+    /// `two_thin_bars_touching_inside_a_thick_one_turned.rs`).
+    ///
+    /// **It moves no point, so nothing is charged and the face is cut as it
+    /// was.** On a plane the triangulator reads where each corner lies in the
+    /// chart and nothing else, since which corners lie inside one edge is read
+    /// on a curved patch only, so only the name its triangles give that one
+    /// corner changes, to the entry both faces now read. The face across the
+    /// hole's side reads the same bits under the new entry as under the old.
+    ///
+    /// **On every flat face with a hole, and not only one that was refused**,
+    /// since such a pair always folded the mesh as above, and a face with none
+    /// is left as it was.
+    ///
+    /// **Points a side was walked into, and not corners of the model.** A corner
+    /// put into a hole's walk would be read by the face across that side as a
+    /// place its boundary passes from one edge to another (`hand_over`), which
+    /// it is not, and no shape has been seen to walk a point onto a corner bit
+    /// for bit.
+    fn name_each_point_a_hole_and_its_outline_were_walked_to_once(&mut self, face: FaceView<'_>) {
+        if face.wires().nth(1).is_none()
+            || the_surface_this_face_is_meshed_on(face)
+                .as_plane()
+                .is_none()
+        {
+            return;
+        }
+        let outline = Self::the_bent_sides_of(face.wires().take(1));
+        let mut on_the_outline: HashMap<[u64; 6], u32> = HashMap::new();
+        for side in &outline {
+            for &entry in &self.along_edge[&side.key()] {
+                on_the_outline
+                    .entry(self.the_bits_of(entry))
+                    .or_insert(entry);
+            }
+        }
+        for hole in Self::the_bent_sides_of(face.wires().skip(1)) {
+            if outline.iter().any(|side| side.key() == hole.key()) {
+                continue;
+            }
+            let named: Vec<u32> = self.along_edge[&hole.key()]
+                .iter()
+                .map(|&entry| {
+                    on_the_outline
+                        .get(&self.the_bits_of(entry))
+                        .copied()
+                        .unwrap_or(entry)
+                })
+                .collect();
+            self.along_edge.insert(hole.key(), named);
+        }
+    }
+
+    /// The bits of where entry `at` of the point table is and of where it was
+    /// made.
+    fn the_bits_of(&self, at: u32) -> [u64; 6] {
+        let [x, y, z] = self.points[at as usize].coordinates();
+        let [a, b, c] = self.made[at as usize].coordinates();
+        [x, y, z, a, b, c].map(f64::to_bits)
     }
 
     /// The edges of `wires` that bend, each once.
