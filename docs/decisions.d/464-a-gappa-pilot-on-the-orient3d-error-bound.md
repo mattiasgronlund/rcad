@@ -3080,12 +3080,24 @@ cases with 67 controls from the `vm_` files, in `proofs/gappa/` and not in
 written. Its restates lines keep the sibling scripts' shas and add the three
 for the axis at `2b2c90e3`. 464.40: `stagecontrols.py` writes
 `stage_e0_1_coq.g` and its control `c_stage_e0_1_coq_7.g`, the section's
-`coqedge.py` edit. Not moved: 464.30 and 464.31's cone scripts, which have a
-row; 464.38 to 464.44 but for those two (464.42's `signedall.py` and 464.43's
-and 464.44's `dz`, `dm`, `ds` and `dk` generators were not reached; 464.38 and
-464.41 hold Rust probes and run logs); the run, tally and same-file scripts of
-each section. `check-proofs` prints `check-proofs: 3729 proofs and 3606
-controls match their stamps`.
+`coqedge.py` edit. 464.42: `signedall.py` writes the 220 `signed_` and
+`shift_` cases with the restates lines of `signed.g` and `shiftplane.g`, and
+`signedallcontrols.py` the 249 controls that fail: 217 `_below` (the three
+that prove, `signed_ssz_u01`, `signed_szs_u02` and `signed_zss_u12`, are no
+control) and the 32 `_anyl` that must fail (the 188 that prove are not
+written); `signedsumexact.g` is the section's `sumexact.g`, renamed since
+`sumexact.g` is 464.2x's. 464.43: `make_minors_zero_with_differences.py`
+writes the 45 `dm_`, 30 `dmq_` and 414 `dmi_` proofs, with 45 `c_dm_*_5u`, 17
+`c_dm_*_6u` (the 28 sets that prove at 6u get none) and 414
+`c_dmi_<set>_nonormal` controls, beside the existing `dz_` files. 464.44:
+`make_first_two_cancelling.py` writes the 13 `ds_` and 12 `dsq_` proofs, 13
+`c_ds_*_5u` and 7 `c_ds_*_6u` controls (the six pairs prove at 6u), and
+`make_hypothesis_dropped.py` the 156 `dk_` proofs, which the section ran
+without Coq and `prove-bounds` stamps with it. Not moved: 464.30 and 464.31's
+cone scripts, which have a row; 464.38 and 464.41, which hold Rust probes and
+run logs; the `r_` and `l_` reach and lower runs of 464.42, the run, tally and
+same-file scripts of each section. `check-proofs` prints `check-proofs: 4620
+proofs and 4351 controls match their stamps`.
 
 Do the cone scripts of 464.30 and 464.31 still restate `HowFarFromTheSkin::
 on_floats`? Not as they were read. 464.30 read `cone.rs` at `c3c03fd8`, and
