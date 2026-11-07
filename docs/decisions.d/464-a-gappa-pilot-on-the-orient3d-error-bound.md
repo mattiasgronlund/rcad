@@ -2905,15 +2905,24 @@ print(len(proved), "hints proved by field;",
 2026-11-07, off `256f2352` and then `a96cd9d8`. It moved in the scripts of
 464.5 to 464.9, which this section held when the row was taken. Those of
 464.11 on are Q2700's (3 f). Q2700's first lane moved in 464.11's, on
-2026-11-07: `make_one_difference_zero.py` as 464.11 gives it, which writes
+2026-11-07 (464.12's follows below): `make_one_difference_zero.py` as 464.11 gives it, which writes
 `zd_adx.g` to `zd_cdz.g` with block 1's restates lines in front;
 `zerodiffcontrols.py`, which writes each one's controls at `6u` and `5u`, as
 `c_zd_<name>_6u.g` and `c_zd_<name>_5u.g`; and `diffzero.g` and `refl.g`,
 464.11's two steps, with a restates line for `on_floats`, whose subtractions
 they are about. `prove-bounds` proved the 11 and every one of the 18 controls
 failed. `check-proofs` now prints `check-proofs: 42 proofs and 60 controls
-match their stamps`. The scripts of 464.12 on are not moved yet: 464.14 alone
-holds 431 proofs and 433 controls.
+match their stamps`. Its second lane moved in 464.12's: `spherecases.py` as
+464.12 gives it, which writes `sphere.g`, `spherev.g`, the 29 zero cases, the
+30 controls at `u / 2` and the three other controls, and `spherewhy.py`, its
+`why.py`. 464.12's `c_sphere_noeb.g` proves, so it is the proof `sphere_noeb.g`
+here, with `c_sphere_noeb_rel.g` and `c_sphere_noeb_why.g` as its controls;
+`c_sphere_noeb_why.g` gains the goal `eb -/ B * P in ?`, as `c_plane_noeb_why.g`
+has, since with only its own goals it proves. `prove-bounds` proved the 32 and
+every one of the 35 controls failed, so `check-proofs` prints `check-proofs: 74
+proofs and 95 controls match their stamps`. The scripts of 464.13 on are not
+moved yet: 464.13 holds 283 proofs and 282 controls and 464.14 alone 431
+proofs and 433 controls.
 
 - `proofs/bounds.py` holds both recipes. `check` is `check-proofs`, `prove
   [name]` is `prove-bounds`, and `extent PATH ITEM` prints the lines
