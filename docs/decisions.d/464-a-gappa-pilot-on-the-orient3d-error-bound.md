@@ -3030,6 +3030,37 @@ nothing, and `summary.py`, `controls.py`, `same.py`, `ids.py` and the run
 scripts, which read run logs, not the tree. `check-proofs` prints
 `check-proofs: 1471 proofs and 1557 controls match their stamps`.
 
+Q3284 moved in 464.25 to 464.28, 464.32 and 464.34, on 2026-11-07, each
+generator extracted from its section with literal-number `sed`, run beside
+`block1.g`, `point.g` or `cyl.g` as the section says, and each proof run by
+`prove-bounds` in chunks. 464.29 and 464.33 hold no script that proves.
+464.25: `make_differences_zero.py` writes the 237 `dz_<set>.g` and the 222
+`dzq_<set>.g`, which prove, and the nine single-difference `dz_<d>.g` and six
+`dzq_<d>.g` that 464.26 starts from. A set whose longest path has five
+roundings proves at 6u, so its `c_dz_<set>_6u.g` is no control and the
+generator writes it only for the 55 sets above five (and the nine singles);
+the 5u control is written for all. 464.26: `make_minor_zero_too.py` writes the
+15 `dm_`, 12 `dmi_` and six `dmq_` proofs. A `dmi_` control is
+`c_dmi_<pair>_nonormal.g`, so that it names its proof; the 6u control is
+written for all `dm_` pairs but `adx_first`, `ady_first`, `bdx_second` and
+`bdy_second`, which prove at 6u. 464.27: `flatall.py` writes the 722 `fa_`
+cases and `fa_none.g` with their controls; its restates line is
+`SideOfAFlatSurfaceThroughAPoint::on_floats`, since `plane.rs` defines
+`on_floats` twice. `prodzero.g` and `pmin.g` are the section's lemmas, with
+restates lines for `product_is_normal` and the constant, and `c_prodzero.g`
+is `c_prodzero_half.g`. 464.28: `cylzero.py`'s 82 cases at `cc9adf3f`.
+464.32: `torzero.py`'s 169 cases at `37bc60af`. 464.34: `pointzero.py` writes
+the 436 `pz_` cases, with point.g's restates lines (`apply_to_point`,
+`turned_by` and `POINT_ROUNDOFF` at `ba0a654e`, `held_near_length_one` at
+`17306d5ee`, `Cargo.lock` `nalgebra`) in place of the section's at `c0859e3f`;
+415 are proved and moved. The 21 where `out` and `Ex` are both zero are not
+moved: each control asks for a ratio in `[2^-60, 1]` and Gappa exits 1 with
+"no contradiction was found", where `prove-bounds` waits for "some properties
+were not satisfied" and so refuses to stamp. Not moved: 464.30 and 464.31's
+cone scripts, which have a row; 464.35 to 464.44; the run, tally and
+same-file scripts of each section. `check-proofs` prints `check-proofs: 3369
+proofs and 3295 controls match their stamps`.
+
 Do the cone scripts of 464.30 and 464.31 still restate `HowFarFromTheSkin::
 on_floats`? Not as they were read. 464.30 read `cone.rs` at `c3c03fd8`, and
 neither section's text names `up_reach`: Q2779's `83539cc32`, of 2026-11-06,
