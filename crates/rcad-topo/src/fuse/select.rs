@@ -6320,9 +6320,10 @@ mod tests {
 
     use super::{
         ACornerReadAsOnePoint, ANodeReadRoundACorner, InPlane, Piece, Rule,
-        a_face_of_the_input_holds, by_the_one_face_its_box_meets, candidate_points, choose,
-        corners_of, every_picker_keeps, far_from_both_ends_of_the_range, midway_between,
-        the_meridian_circle_each_side_runs_round, the_middles_of_a_round_wire,
+        a_face_of_the_input_holds, beside_one_edge, by_a_side_from_an_edge_it_starts_on,
+        by_an_edge_of_a_face_it_lies_on, by_the_one_face_its_box_meets, candidate_points, choose,
+        corners_of, every_picker_keeps, far_from_both_ends_of_the_range, from_one_edge,
+        midway_between, the_meridian_circle_each_side_runs_round, the_middles_of_a_round_wire,
         the_pickers_of_the_meridian_circle_through, the_piece_holds,
         what_else_each_round_wire_asks,
     };
@@ -8438,6 +8439,232 @@ mod tests {
                 }
             }
             assert!(wrong.is_empty(), "{off:e} off: {wrong:#?}");
+        }
+    }
+
+    /// A square on `z = 0.5` from `(3, 3)` to `(4, 4)` is inside the second of
+    /// [`two_blocks_touching_along_a_line`], and the first block's edge up
+    /// `x = y = 3` must not read it outside. Its side on `x = 3` starts inside
+    /// that edge and runs past it, into the second block and along its face
+    /// `x = 3`, not out into the air: four faces stand round the line there, so
+    /// the skin near the edge is not the edge's two faces and nothing else.
+    #[test]
+    fn a_square_past_an_edge_another_block_stands_beyond_is_not_read_outside() {
+        let (_model, solid) = two_blocks_touching_along_a_line();
+        let flat = Plane::from_coefficients([0.0, 0.0, 1.0, -0.5]).expect("a normal");
+        let square = a_square_of_planes(
+            Surface::Plane(flat),
+            [
+                [3.0, 3.0, 0.5],
+                [4.0, 3.0, 0.5],
+                [4.0, 4.0, 0.5],
+                [3.0, 4.0, 0.5],
+            ],
+            [
+                [0.0, -1.0, 0.0, 3.0],
+                [1.0, 0.0, 0.0, -4.0],
+                [0.0, 1.0, 0.0, -4.0],
+                [-1.0, 0.0, 0.0, 3.0],
+            ],
+        );
+        let (face, edge) =
+            the_first_blocks_edge_up_the_line(&solid, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let along_x_3 = &square.wires[0][3];
+        assert_eq!(
+            from_one_edge(&solid, &solid, flat, face, edge, along_x_3),
+            None,
+            "the face x = 3 and its edge across y = 3 say nothing of a square past the edge"
+        );
+        assert_eq!(
+            by_a_side_from_an_edge_it_starts_on(&[&solid, &solid], &[0], 1, &square),
+            None,
+            "no edge up x = y = 3 places the square"
+        );
+    }
+
+    /// A square on `x = 3` from `y = 3` to `4` and `z = 0.25` to `0.75` lies on
+    /// the second block's face `x = 3` of [`two_blocks_touching_along_a_line`],
+    /// and the first block's edge up `x = y = 3`, along which its side on
+    /// `y = 3` runs, must not read it outside: past that edge the plane `x = 3`
+    /// is the second block's face, not air.
+    #[test]
+    fn a_square_on_a_face_past_an_edge_another_block_stands_beyond_is_not_read_outside() {
+        let (_model, solid) = two_blocks_touching_along_a_line();
+        let flat = Plane::from_coefficients([1.0, 0.0, 0.0, -3.0]).expect("a normal");
+        let square = a_square_of_planes(
+            Surface::Plane(flat),
+            [
+                [3.0, 3.0, 0.25],
+                [3.0, 4.0, 0.25],
+                [3.0, 4.0, 0.75],
+                [3.0, 3.0, 0.75],
+            ],
+            [
+                [0.0, 0.0, -1.0, 0.25],
+                [0.0, 1.0, 0.0, -4.0],
+                [0.0, 0.0, 1.0, -0.75],
+                [0.0, -1.0, 0.0, 3.0],
+            ],
+        );
+        let (face, edge) =
+            the_first_blocks_edge_up_the_line(&solid, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let along_y_3 = &square.wires[0][3];
+        assert_eq!(
+            beside_one_edge(&solid, 0, &solid, &square, flat, face, edge, along_y_3),
+            None,
+            "the face x = 3 and its edge across y = 3 say nothing of a square past the edge"
+        );
+        assert_eq!(
+            by_an_edge_of_a_face_it_lies_on(&[&solid, &solid], &[0], 1, &square),
+            None,
+            "no edge up x = y = 3 places the square"
+        );
+    }
+
+    /// Two blocks built as one solid through [`crate::SolidBuilder`], touching
+    /// along part of a line: `[0, 3]²` from `z = −1` to `2`, and `[3, 6]²` from
+    /// `z = 0` to `1`. Between `z = 0` and `1` four faces stand round
+    /// `x = y = 3`, two of each block, and the first block's edge runs on past
+    /// both ends of the second's. Every plane is exact.
+    fn two_blocks_touching_along_a_line() -> (Model, BakedSolid) {
+        let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+        let mut builder = crate::SolidBuilder::new();
+        let mut faces = Vec::new();
+        for ([x0, x1], [y0, y1], [z0, z1]) in [
+            ([0.0, 3.0], [0.0, 3.0], [-1.0, 2.0]),
+            ([3.0, 6.0], [3.0, 6.0], [0.0, 1.0]),
+        ] {
+            let corners: Vec<[f64; 3]> = [z0, z1]
+                .into_iter()
+                .flat_map(|z| {
+                    [y0, y1]
+                        .into_iter()
+                        .flat_map(move |y| [[x0, y, z], [x1, y, z]])
+                })
+                .collect();
+            let vertices: Vec<_> = corners
+                .iter()
+                .map(|&corner| {
+                    builder
+                        .add_vertex(Point::from(corner))
+                        .expect("a finite corner")
+                })
+                .collect();
+            let mut edges: Vec<([usize; 2], crate::DraftEdge)> = Vec::new();
+            for face in [
+                [0, 2, 3, 1],
+                [4, 5, 7, 6],
+                [0, 4, 6, 2],
+                [1, 3, 7, 5],
+                [0, 1, 5, 4],
+                [2, 6, 7, 3],
+            ] {
+                let steps: Vec<crate::DraftStep> = (0..4)
+                    .map(|position| {
+                        let (from, to) = (face[position], face[(position + 1) % 4]);
+                        let (edge, orientation) =
+                            match edges.iter().find(|(ends, _)| *ends == [to, from]) {
+                                Some(&(_, edge)) => (edge, Orientation::Reversed),
+                                None => {
+                                    let edge = builder
+                                        .add_edge(vertices[from], vertices[to], EdgeRun::Straight)
+                                        .expect("a side");
+                                    edges.push(([from, to], edge));
+                                    (edge, Orientation::Forward)
+                                }
+                            };
+                        crate::DraftStep::Along(
+                            builder.add_coedge(edge, orientation).expect("a use"),
+                        )
+                    })
+                    .collect();
+                let wire = builder.add_wire(&steps).expect("a closed boundary");
+                let at = |index: usize| Point::from(corners[face[index]]);
+                let plane =
+                    Plane::through_three_points(at(0), at(1), at(2)).expect("three corners");
+                faces.push(
+                    builder
+                        .add_face(Surface::Plane(plane), &[wire])
+                        .expect("a face"),
+                );
+            }
+        }
+        let shell: Vec<_> = faces
+            .into_iter()
+            .map(|face| (face, Orientation::Forward))
+            .collect();
+        builder.add_shell(&shell).expect("twelve faces");
+        let blocks = builder
+            .build(&mut model, &Policy::certified(), &mut ProvenanceLog::new())
+            .expect("two blocks touching along a line");
+        model
+            .validate(&Policy::certified(), &mut ProvenanceLog::new())
+            .expect("two blocks touching along a line are a sound solid");
+        let [solid] = <[BakedSolid; 1]>::try_from(
+            bake(
+                &model,
+                &[blocks],
+                &Policy::certified(),
+                &mut ProvenanceLog::new(),
+            )
+            .expect("the blocks bake"),
+        )
+        .expect("one solid");
+        (model, solid)
+    }
+
+    /// The first block's face facing `out` and its edge up `x = y = 3`, across
+    /// which is the face facing `across`.
+    fn the_first_blocks_edge_up_the_line(
+        solid: &BakedSolid,
+        out: [f64; 3],
+        across: [f64; 3],
+    ) -> (&BakedFace, &BakedEdge) {
+        let faces_out = |normal: [f64; 3]| {
+            move |plane: Option<&Plane>| {
+                plane.is_some_and(|plane| plane.normal().components() == normal)
+            }
+        };
+        let face = solid
+            .faces
+            .iter()
+            .find(|face| faces_out(out)(face.surface.as_plane()))
+            .expect("the first block's face");
+        let edge = face
+            .wires
+            .iter()
+            .flatten()
+            .find(|edge| faces_out(across)(edge.across.as_plane()))
+            .expect("its edge up x = y = 3");
+        (face, edge)
+    }
+
+    /// A flat piece with four `corners`, each side `which` on the plane
+    /// `walls[which]` from corner `which` to the next, with its material
+    /// behind every wall.
+    fn a_square_of_planes(flat: Surface, corners: [[f64; 3]; 4], walls: [[f64; 4]; 4]) -> Piece {
+        let walls =
+            walls.map(|wall| Surface::Plane(Plane::from_coefficients(wall).expect("a normal")));
+        let corner = |which: usize| MeetPoint::OfThreeSurfaces {
+            surfaces: [flat, walls[(which + 3) % 4], walls[which]],
+            which: 0,
+            point: PredicatePoint::from(corners[which]),
+        };
+        let square = (0..4)
+            .map(|which| FaceMeet {
+                carried_by: [flat, walls[which]],
+                ends: [corner(which), corner((which + 1) % 4)],
+                material_side: Decision::Neg,
+                along: SmallVec::new(),
+                approximation: None,
+            })
+            .collect();
+        Piece {
+            ancestors: Vec::new(),
+            surface: flat,
+            orientation: Orientation::Forward,
+            wires: vec![square],
+            is_the_whole_surface: false,
         }
     }
 }
