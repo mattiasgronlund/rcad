@@ -10201,4 +10201,76 @@ mod tests {
             );
         }
     }
+
+    /// A stretch of a hyperbola that bows off its chord by less than its ends'
+    /// own coordinates round is walked clear of that chord, on its own side of
+    /// it and within the walk's deviation of both surfaces (Q3297).
+    ///
+    /// The numbers are those the fuse hands the walk for the steep cone in
+    /// `a_plane_cut_along_a_cones_other_nappe.rs` less a slab sitting at `-8`
+    /// and turned `1.301`: the slab's end, the plane `6` out from the axis,
+    /// cuts the cone's wall in a hyperbola whose vertex is a third of an ulp
+    /// below the cone's top `z = 3`, and the run between the two places that
+    /// end crosses the top's rim, `2.3e−8` apart, bows that little. Its one
+    /// point came out at `z = 3.0`, on the chord, so the lens of wall under
+    /// that chord enclosed nothing, and the cone less the slab was refused
+    /// `ACurvedFaceGoesRightRoundWithNoSeam`.
+    #[test]
+    fn a_hyperbola_that_bows_less_than_its_ends_round_is_walked_clear_of_its_chord() {
+        let cone =
+            Surface::Cone(crate::Cone::new(crate::Axis::z(), 2.0).expect("a slope with length"));
+        let normal = Vector::new(0.963_825_202_422_181_8, -0.266_535_136_850_360_23, 0.0);
+        let end_of_the_slab = Plane::from_point_and_normal_as_written(
+            Point::new(5.782_951_203_217_395, -1.599_210_862_021_168_5, 3.0),
+            normal,
+        )
+        .expect("a unit normal");
+        assert_eq!(
+            (end_of_the_slab.normal(), end_of_the_slab.offset()),
+            (normal, 6.0),
+            "the slab's end is the plane the fuse cut"
+        );
+        let flat = Surface::Plane(end_of_the_slab);
+        let up = HalfSpace::new(Vector::new(0.0, 0.0, 1.0), 0.0).expect("a direction");
+        let run = NamedRun::new(
+            EdgeRun::PartOfWhereItCrosses {
+                and: flat,
+                picked_by: smallvec![Picker::from(up)],
+            },
+            [
+                [5.782_951_203_217_395, -1.599_210_862_021_168_5, 3.0],
+                [5.782_951_225_848_787, -1.599_210_780_183_153_4, 3.0],
+            ]
+            .map(PredicatePoint::from),
+        )
+        .expect("a picked run");
+
+        let walked = walk(
+            &run,
+            [&cone, &flat],
+            Deflection::of(3.370_674_627_866_842e307).expect("a length"),
+            &Policy::certified(),
+            &mut ProvenanceLog::new(),
+        )
+        .unwrap_or_else(|refused| panic!("the run along the slab's end is {refused:?}"));
+
+        let deviation = walked.deviation().magnitude();
+        assert!(
+            !walked.points().is_empty(),
+            "the run has a point between its ends"
+        );
+        for point in walked.points() {
+            assert!(
+                point.z() < 3.0,
+                "{point:?} is not on the hyperbola's side of the chord at z = 3"
+            );
+            let off_the_plane = end_of_the_slab.signed_distance_to(*point).abs();
+            let off_the_cone = (point.x().hypot(point.y()) - 2.0 * point.z()).abs() / 5f64.sqrt();
+            assert!(
+                off_the_plane <= deviation && off_the_cone <= deviation,
+                "{point:?} is {off_the_plane} off the slab's end and {off_the_cone} off \
+                 the cone, past {deviation}"
+            );
+        }
+    }
 }
