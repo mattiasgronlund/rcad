@@ -32,8 +32,9 @@ The probe built §469.4's plate both ways its four walls pair. It also built the
 fuse's own answer that touches itself (§39.4): the L plate less the prism lying
 in its corner, with the coordinates of
 `crates/rcad-topo/tests/a_prism_lying_on_one_edge.rs` lines 696 to 736, as a
-`Difference` with the plate first. It wrote each model with `rcad_step::write`,
-read the text back with `StepFile::read` and `Import::read`, and validated what
+`Difference` with the plate first. It wrote each model with `rcad::write`, the
+facade's name for `rcad_step::write`, read the text back with `StepFile::read`
+and `Import::read`, and validated what
 came back. A script then read the file's topology along the line: the
 `VERTEX_POINT`s on it, the `EDGE_CURVE`s between two of them, and the faces
 whose loops walk each one.
