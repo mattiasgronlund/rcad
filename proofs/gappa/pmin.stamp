@@ -1,0 +1,5 @@
+hints 1
+nonzero 0
+pin github:NixOS/nixpkgs/02c087f3fe673c9e317f206a627cb6b910336dbe+gappalib18.nix:6aa93f67c4c38e525491e9033773a3c2d817eef8b8be5f6cb31a309a859aff47+-Eprecision=200
+restates crates/rcad-geom/src/plane.rs SIDE_OF_A_FLAT_SURFACE_THROUGH_A_POINT_ERROR_BOUND 109d970ec12500119dbdf7ac6acb2499bc074176128f37957933ae13201eee54
+script 1460b0ad5ce5b207d21e7574b9457e10f62bf72c7a4941d05761ee6880985173
