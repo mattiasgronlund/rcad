@@ -1216,8 +1216,11 @@ impl BuildingAMesh {
     /// hole's side reads the same bits under the new entry as under the old.
     ///
     /// **On every flat face with a hole, and not only one that was refused**,
-    /// since such a pair always folded the mesh as above, and a face with none
-    /// is left as it was.
+    /// since no pass that met such a pair was seen to make a mesh, and a face
+    /// with none is left as it was. Counted over `rcad-topo`'s and
+    /// `rcad-step`'s tests before this was written, a pair was met in four
+    /// tests, all in `rcad-topo`, and each pass that met one ended in a refusal
+    /// to cut the face up or in the fold above (Q3266).
     ///
     /// **Points a side was walked into, and not corners of the model.** A corner
     /// put into a hole's walk would be read by the face across that side as a

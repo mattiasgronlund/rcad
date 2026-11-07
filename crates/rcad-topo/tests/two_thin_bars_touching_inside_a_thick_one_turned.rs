@@ -104,6 +104,9 @@ const TURNS_THE_BLOCK_WAS_NOT_MEASURED_AT: [f64; 4] = [1.3, 2.4000000000000004, 
 /// the rim's entry there and the thin bar's wall the other, and the measure was
 /// refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 1, used: 1 }`, or, at
 /// `1.3`, the `BoundaryCrossesItself` of the cap pinched before it (Q3266).
+/// The mesh now gives the thin circle the rim's entry for that point
+/// (`name_each_point_a_hole_and_its_outline_were_walked_to_once` in
+/// `mesh.rs`).
 #[test]
 fn a_block_on_a_thick_bar_with_two_thin_bars_measures_where_a_thin_circle_and_the_rim_are_walked_to_one_point()
  {
