@@ -314,7 +314,11 @@ impl SolidBuilder {
     /// A sweep refusal about the crossing an edge runs on arrives as
     /// [`Error::ADraftEdgeHasACrossingThatCannotBeFollowed`], naming the
     /// position that edge was described at rather than a key into a model the
-    /// caller never sees.
+    /// caller never sees. One about meshing a face arrives as
+    /// [`Error::ADraftFaceCouldNotBeMeshed`] the same way, and any other that
+    /// names a face or an edge inside
+    /// [`Error::ADraftEntityWasRefusedByTheSweep`], with that position beside
+    /// it.
     ///
     /// # Panics
     ///
@@ -340,7 +344,8 @@ impl SolidBuilder {
         mine.drain_into(log);
         swept
             .map_err(|why| which_described_edge_the_sweep_meant(&scratch, &written.edges, why))
-            .map_err(|why| which_described_face_the_sweep_meant(&scratch, &written.faces, why))?;
+            .map_err(|why| which_described_face_the_sweep_meant(&scratch, &written.faces, why))
+            .map_err(|why| what_else_the_sweep_named(&scratch, &written, why))?;
 
         let solid = self.write_into(model, shell).solid;
         model.check_touched_solid(solid);
@@ -723,6 +728,51 @@ fn which_described_face_the_sweep_meant(
     }
 }
 
+/// Any other refusal of the sweep that names a face or an edge, handed back
+/// inside [`Error::ADraftEntityWasRefusedByTheSweep`] beside the position the
+/// caller described that face or edge at.
+///
+/// The model the key in it names is about to be dropped, and the caller's
+/// model is left untouched by a refusal, so there is no key of the caller's to
+/// put in its place: the position is the only address left (Q2890).
+///
+/// What the two functions before this one turn into a draft refusal of its
+/// own names no key by then, and comes through untouched, as does a refusal
+/// that never named one: [`Error::Invalid`], or [`Error::Undecidable`], which
+/// names points. No refusal of the sweep names a solid —
+/// [`Error::TwoSolidsShareSpace`] comes from a pass the sweep does not run.
+///
+/// # Panics
+///
+/// If the sweep names a face or an edge this build did not write, for the
+/// reason [`which_described_face_the_sweep_meant`] gives.
+fn what_else_the_sweep_named(scratch: &Model, written: &Written, mut refusal: Error) -> Error {
+    if let Some(&mut face) = refusal.the_face_it_names() {
+        return Error::ADraftEntityWasRefusedByTheSweep {
+            entity: "face",
+            index: described_at(&written.faces, face.slot_in(scratch.id())),
+            refused: Box::new(refusal),
+        };
+    }
+    if let Some(edge) = refusal.the_edge_it_names() {
+        return Error::ADraftEntityWasRefusedByTheSweep {
+            entity: "edge",
+            index: described_at(&written.edges, edge.slot_in(scratch.id())),
+            refused: Box::new(refusal),
+        };
+    }
+    refusal
+}
+
+/// Where among the slots one build wrote the sweep's slot is, which is the
+/// position it was described at.
+fn described_at<Slot: PartialEq>(written: &[Slot], slot: Slot) -> usize {
+    written
+        .iter()
+        .position(|written| *written == slot)
+        .expect("the sweep ran on the solid this build just wrote and on nothing else")
+}
+
 /// Whether an edge's two ends are the whole of what says where it runs.
 ///
 /// Only [`EdgeRun::Straight`] says that. A run that names a curve puts the edge
@@ -891,8 +941,8 @@ mod tests {
     use rcad_geom::{Axis, Cylinder, EdgeRun, Orientation, Plane, Point, Scale, Surface, Vector};
     use rcad_predicates::{Policy, ProvenanceLog};
 
-    use super::{DraftStep, SolidBuilder};
-    use crate::{Error, Model};
+    use super::{DraftStep, SolidBuilder, what_else_the_sweep_named};
+    use crate::{EdgeKey, Error, Model};
 
     /// Two pipes of the same radius about the same axis, each capped top and
     /// bottom by the plane the other pipe's cap shares — a tube whose "hole"
@@ -1033,6 +1083,43 @@ mod tests {
             // walls in `a_tube_whose_hole_is_exactly_as_wide_as_its_wall`.
             matches!(refused, Error::ADraftFaceCouldNotBeMeshed { face: 2, .. }),
             "got {refused:?}, and not a position into this build's own description"
+        );
+    }
+
+    /// A refusal of the sweep that names an edge comes back beside the
+    /// position that edge was described at, as one that names a face does.
+    ///
+    /// Nobody has built a draft that reaches an edge-naming refusal of the
+    /// sweep through `build`, so this test does not go through `build`. It
+    /// writes the tube into a model the way `build` writes its throwaway one,
+    /// makes the refusal the mesh raises for a bent edge between flat faces
+    /// about the outer wall's seam, and hands it to the function `build`
+    /// hands every refusal of its sweep to. The face-naming case goes through
+    /// `build` whole, in `building_a_solid_out_of_faces.rs`'s
+    /// `a_crown_of_a_ring_with_a_slot_across_its_top_in_one_face_is_refused`.
+    #[test]
+    fn an_edge_the_sweep_refuses_is_named_by_its_own_position() {
+        let builder = a_tube_whose_hole_is_exactly_as_wide_as_its_wall();
+        let shell = builder
+            .shell
+            .as_deref()
+            .expect("the tube's shell is described");
+        let mut scratch = Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+        let written = builder.write_into(&mut scratch, shell);
+        // Position 4: the outer wall's seam, described after the four circles.
+        let seam = EdgeKey::new(written.edges[4], scratch.id());
+        let handed_back = what_else_the_sweep_named(
+            &scratch,
+            &written,
+            Error::AnEdgeBendsButEveryFaceAlongItIsFlat { edge: seam },
+        );
+        assert!(
+            matches!(
+                &handed_back,
+                Error::ADraftEntityWasRefusedByTheSweep { entity: "edge", index: 4, refused }
+                    if matches!(**refused, Error::AnEdgeBendsButEveryFaceAlongItIsFlat { edge } if edge == seam)
+            ),
+            "got {handed_back:?}, and not the seam's position in the tube's description"
         );
     }
 
