@@ -1199,6 +1199,97 @@ fn the_steep_cone_less_a_slab_turned_one_and_a_half_keeps_a_lens_past_the_end_it
     }
 }
 
+/// The steep cone less a slab answers at each of the 26 turns between `1.3` and
+/// `1.7` where it was refused `FacesDoNotAgreeWhichWayTheyFace`, from `−8`, `0`
+/// and `2`, and each answer validates and measures (Q3286).
+///
+/// At each of these turns the cap rim comes inside one end of the slab, as
+/// turned `1.5` it does, and the arc of the rim past that end bows less than
+/// a point near `(6, 0, 3)` rounds. Turned `1.321`, that arc was placed from
+/// the rim's centre, and its one point rounded onto the centre's side of the
+/// chord between its ends, so the cap's piece of the lens ran the wrong way
+/// round. The turns are those of Q3278's sweep, `1.3 + 0.001·i` and `1.5` give
+/// or take a few `f64::EPSILON`, written as the doubles that sum gives.
+#[test]
+fn the_steep_cone_less_a_slab_answers_at_each_turn_whose_rim_arc_bows_less_than_its_ends_round() {
+    let cone = THE_STEEP_CONE;
+    let policy = Policy::certified();
+    let turns = [
+        1.321,
+        1.349,
+        1.354,
+        1.404_000_000_000_000_1,
+        1.437,
+        1.452,
+        1.463,
+        1.467,
+        1.471,
+        1.499,
+        1.507_000_000_000_000_1,
+        1.516,
+        1.522,
+        1.554,
+        1.602,
+        1.623,
+        1.653,
+        1.655,
+        1.667,
+        1.689,
+        1.691,
+        1.5 + 3.0 * f64::EPSILON,
+        1.5 + 19.0 * f64::EPSILON,
+        1.5 + 22.0 * f64::EPSILON,
+        1.5 - 10.0 * f64::EPSILON,
+        1.5 - 33.0 * f64::EPSILON,
+    ];
+    for low in [-8.0, 0.0, 2.0] {
+        for turn in turns {
+            let case = Case {
+                cone,
+                block: a_slab(low, turn),
+                solids: a_slabs_solids(cone, low, turn),
+            };
+            let mut model =
+                Model::new(Scale::millimetres(100.0).expect("100 mm is a working size"));
+            let (cone_key, slab_key) = build(&mut model, &case);
+            let answer = model
+                .fuse(
+                    &[cone_key],
+                    &[slab_key],
+                    Rule::Difference,
+                    &policy,
+                    &mut ProvenanceLog::new(),
+                )
+                .unwrap_or_else(|error| {
+                    panic!("low {low}, turn {turn:?}: the cone less the slab refused: {error:?}")
+                });
+            model
+                .validate(&policy, &mut ProvenanceLog::new())
+                .unwrap_or_else(|error| {
+                    panic!("low {low}, turn {turn:?}: the answer does not validate: {error:?}")
+                });
+            assert_eq!(
+                answer.solids().len(),
+                case.solids[2],
+                "low {low}, turn {turn:?}"
+            );
+            for &piece in answer.solids() {
+                model
+                    .solid(piece)
+                    .expect("this model made the key")
+                    .measure(
+                        Deflection::of(0.002).expect("a positive length"),
+                        &policy,
+                        &mut ProvenanceLog::new(),
+                    )
+                    .unwrap_or_else(|error| {
+                        panic!("low {low}, turn {turn:?}: a piece does not measure: {error:?}")
+                    });
+            }
+        }
+    }
+}
+
 /// The same leaning block round a cone of slope `1` instead of `2` — §350.1
 /// and §350.3's cone, run for the first time. Leans `0.25` and `0.375` meet
 /// the cone at every crossing, and so does a lean of `1` but at two. Leaned
