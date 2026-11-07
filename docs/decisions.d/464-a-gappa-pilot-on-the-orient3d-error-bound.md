@@ -2920,9 +2920,15 @@ here, with `c_sphere_noeb_rel.g` and `c_sphere_noeb_why.g` as its controls;
 `c_sphere_noeb_why.g` gains the goal `eb -/ B * P in ?`, as `c_plane_noeb_why.g`
 has, since with only its own goals it proves. `prove-bounds` proved the 32 and
 every one of the 35 controls failed, so `check-proofs` prints `check-proofs: 74
-proofs and 95 controls match their stamps`. The scripts of 464.13 on are not
-moved yet: 464.13 holds 283 proofs and 282 controls and 464.14 alone 431
-proofs and 433 controls.
+proofs and 95 controls match their stamps`. Its second lane then moved in
+464.13's: `flatcases.py` and `flatwhy.py` as 464.13 gives them, and
+`addzero.g`. `flat_noeb.g` is the proof that was 464.13's `c_flat_noeb.g`, with
+`c_flat_noeb_rel.g` and `c_flat_noeb_why.g`, which gains `eb -/ B * P in ?`
+like the sphere's. Each `flat*.g` names `SideOfAFlatSurfaceThroughAPoint::on_floats`
+at `8c943dfd`, since `plane.rs` holds two `on_floats` (3 b). `prove-bounds`
+proved the 285 and every control failed, and `check-proofs` prints
+`check-proofs: 359 proofs and 382 controls match their stamps`. The scripts of
+464.14 on are not moved yet: 464.14 alone holds 431 proofs and 433 controls.
 
 - `proofs/bounds.py` holds both recipes. `check` is `check-proofs`, `prove
   [name]` is `prove-bounds`, and `extent PATH ITEM` prints the lines
