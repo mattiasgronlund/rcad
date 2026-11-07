@@ -223,6 +223,17 @@ pub const POINT_ALONG_A_CROSSING_ROUNDOFF: f64 = 256.0 * f64::EPSILON;
 /// shape that is *not* the measured worst case. That is a **known hole in the
 /// derivation, not a claim that the hyperbola is cheaper**.
 ///
+/// **A stretch of a hyperbola branch that bows off the chord between the two
+/// ends its run names by less than they round is placed from that chord**,
+/// raised clear of it, and charged this too. Its points are not on the chain
+/// above: each is kept only within `D/16` of the point `HyperbolaBranch`'s
+/// own `at` puts at the same step, with `D` this constant times `L`, so it is
+/// within `D` of the crossing wherever that point is within `0.937·D` of it. That is derived at `AStretchOfAHyperbolaTooFlatToPlaceFromItsCentre`,
+/// and it is as proved as the hyperbola's own chain, which is the hole the
+/// paragraph above names. A parabola is never placed so: a probe over 742
+/// parabola runs whose lens is under an ulp deep found none that needs it
+/// (Q3297).
+///
 /// # What the test can and cannot fail on, with the number
 ///
 /// `every_point_along_an_endless_bend_is_on_both_surfaces_inside_the_published_bound`
@@ -3504,6 +3515,27 @@ impl AnEndlessBend for Parabola {
     fn the_size_it_was_worked_out_from(&self) -> f64 {
         self.size
     }
+
+    /// **Never, because no parabola has been found that needs it.** A probe
+    /// walked 742 parabola runs (Q3297): a cone of slope one with its apex
+    /// moved along `x` to sixteen places, a plane along a ruling with normal
+    /// `(1, 0, −1)` cutting a lens 0 to 1 ulp deep under its rim at eighteen
+    /// heights, each run naming both places it crosses the rim. None put a
+    /// point on or over its chord; the nearest came out an ulp under it. That
+    /// is a measurement and not a proof, and a parabola placed from its chord
+    /// would move points no test fails on. A hyperbola branch's vertex, worked
+    /// out as `centre + out`, came out on that chord at 72 turns of the slab in
+    /// `a_plane_cut_along_a_cones_other_nappe.rs`, and that is
+    /// [`AStretchOfAHyperbolaTooFlatToPlaceFromItsCentre`]'s.
+    fn placed_from_its_chord(
+        &self,
+        _ends: [Point; 2],
+        _stretch: (f64, f64),
+        _walked: &[Point],
+        _deviation: f64,
+    ) -> Option<Vec<Point>> {
+        None
+    }
 }
 
 /// One branch of a hyperbola: `centre + out·cosh σ + across·sinh σ`, with `out`
@@ -3552,6 +3584,207 @@ impl AnEndlessBend for HyperbolaBranch {
 
     fn the_size_it_was_worked_out_from(&self) -> f64 {
         self.size
+    }
+
+    /// As [`AStretchOfAHyperbolaTooFlatToPlaceFromItsCentre`] says, and only
+    /// where every point so placed is within a sixteenth of `deviation` of the
+    /// one in `walked` at the same step.
+    fn placed_from_its_chord(
+        &self,
+        ends: [Point; 2],
+        stretch: (f64, f64),
+        walked: &[Point],
+        deviation: f64,
+    ) -> Option<Vec<Point>> {
+        let steps = walked.len() + 1;
+        let placed =
+            AStretchOfAHyperbolaTooFlatToPlaceFromItsCentre::of(self, ends, stretch, steps)?
+                .points(steps);
+        placed
+            .iter()
+            .zip(walked)
+            .all(|(&placed, &walked)| (placed - walked).length() <= deviation / 16.0)
+            .then_some(placed)
+    }
+}
+
+/// A stretch of a hyperbola branch between two ends a run names that stands
+/// off the chord between them by less than those ends round, placed from that
+/// chord and raised clear of it, towards the branch's centre.
+///
+/// # Why from the chord
+///
+/// [`AnEndlessBend::at`] puts a point at `centre + out·cosh σ + across·sinh σ`
+/// and rounds against the largest of those. The steep cone of
+/// `a_plane_cut_along_a_cones_other_nappe.rs`, whose rim is `6` round at
+/// `z = 3`, less a slab sitting at `−8` and turned `1.301`, has the slab's end
+/// under half an ulp nearer the axis than that rim. The end cuts the wall in a
+/// branch whose `out` is `(0, 0, 3)` up from a centre at `z = 0`, and the
+/// stretch between the two places it crosses the rim, `8.5e−8` apart, bows
+/// `7.5e−17` off its chord, a sixth of an ulp of its `z = 3`. So the vertex at
+/// `centre + out` rounds to `z = 3`, the stretch's one point came out at
+/// `z = 3.0`, on the chord, the lens of wall under the chord enclosed nothing
+/// of the cone's chart, and the cone less the slab and their union were
+/// refused `ACurvedFaceGoesRightRoundWithNoSeam`, at 72 of 481 turns at each
+/// of three heights (Q3297,
+/// `a_hyperbola_that_bows_less_than_its_ends_round_is_walked_clear_of_its_chord`).
+///
+/// Written with `A` and `B` the branch's points at the stretch's two ends, `α`
+/// half the stretch, `σm` its middle, `M = (A + B)/2` and
+/// `N = out·cosh σm + across·sinh σm`, the branch's point at `σm + φ`, with
+/// `φ = α·(2k − 1)`, is
+///
+/// ```text
+/// M + (sinh φ / sinh α)·(B − A)/2 − 2·sinh(α·k)·sinh(α·(1 − k))·N
+/// ```
+///
+/// exactly: `M` is `centre + cosh α·N`, `(B − A)/2` is `sinh α` times
+/// `out·sinh σm + across·cosh σm`, and `cosh φ − cosh α` is
+/// `−2·sinh(α·k)·sinh(α·(1 − k))`, which cancels nothing and is never above
+/// nought, for `α` of either sign. That is [`AnArcTooFlatToPlaceFromItsCentre`]'s
+/// formula with `sinh` for `sin` and the bulge turned round, since a branch
+/// bows towards its centre, and `N` is worked out from the ends as
+/// `(M − centre) / cosh α`, as it is there. **The bulge is taken off the chord
+/// between the ends, and not off `centre + out`**, which in the lens above
+/// rounds by more than the whole bulge.
+///
+/// # When
+///
+/// When the run names both its ends and the stretch is not nothing; and when
+/// its point nearest an end stands off the chord by no more than
+/// `8u·(S + bow)`, with the arc's `u` and `S`, and `bow` the
+/// `2·sinh²(α/2)·|N|` it bows by along `N`. **A stretch that clears its own
+/// rounding stays where [`AnEndlessBend::at`] put it**, as it did before
+/// Q3297, so that this moves only the points rounding could leave on the
+/// chord. When `|N|` is at most twice `|n·N|`, with the arc's `n`, and the
+/// raise is no longer than half the chord: the arc's two gates, for the
+/// arc's reasons, and without them seven frustum and wall tests failed with
+/// hyperbola stretches raised (Q3287). Then every point is raised to stand at
+/// least `8u·(S + bow)` off the chord, along `N`, which lands it on the
+/// branch's own side of the chord by the count
+/// `AnArcTooFlatToPlaceFromItsCentre` makes, since the arithmetic is the same
+/// step for step.
+///
+/// **And when every point so placed is within `D/16` of the point `at` put at
+/// the same step**, which is what the bound below stands on. It stands in for
+/// the arc's check that each end is on the conic too. An end off the branch by
+/// `e` moves the point nearest it by between `e/2` and `e`, half of it through
+/// `M` and up to the other half through the chord's term, while `at` slides
+/// along the branch and takes none of it; so this refuses an end off by more
+/// than about `D/8`, as the arc's check of its ends does, and a second check
+/// of the ends is left out.
+/// `a_hyperbola_whose_end_is_off_the_curve_is_not_walked_from_its_chord`
+/// lifts one end of the lens above `D/2` off the cone, where placed from its
+/// chord its point would stand `1.7e−14` off the cone.
+///
+/// **The arc's gate on ends that differ only where `N` is nought is left
+/// out.** There it keeps a point that rounding cannot carry across the chord
+/// from being raised, but rounding can still leave such a point on the chord,
+/// and on the chord is what this places points off. The lens above does not
+/// meet that gate, as its `N` is `(0, 4.4e−16, 3)` and its ends differ in `y`,
+/// so no test here tells the two apart.
+///
+/// # How far off, derived
+///
+/// With `u = f64::EPSILON / 2`, `L` the branch's size, `D = 128u·L`,
+/// [`POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF`] times `L`, and `E` how far the
+/// point `at` put at a step, `W`, is off the crossing:
+///
+/// - **The check.** `|P − W|` is a subtraction, which rounds each coordinate
+///   by `u`, and [`Vector::length`], within about two ulps, so it is within
+///   about `5u` of itself, and a placed point `P` that passes is within
+///   `(1 + 5u)·D/16` of `W`.
+/// - **So `P` is within `E + (1 + 5u)·D/16` of the crossing**, which is under
+///   `D` wherever `E` is no more than `0.937·D`.
+///
+/// **That is not a chain like the arc's, step by step.** The arc's starts from
+/// [`Conic::at`]'s own proved error at its ends, and a branch's `at` has none
+/// to start from. Checking each point against `W` instead hands the bound to
+/// `at`'s own chain, `D/16` short of it. For a parabola that chain is proved
+/// to `116.05u·L`, and the `8u·L` of `D/16` fits in the `11.95u·L` it leaves
+/// over, where `D/8` would not. For a hyperbola it is not proved at all
+/// (Q2697), and the worst a search finds is `0.075·D`. **So this holds
+/// wherever `at` is within `0.937·D`, which is everywhere a search has looked,
+/// and is no better proved than `at` is.** The lens above is placed
+/// `2.66e−15` from the point `at` put, `8u·3` and six ulps under `z = 3`,
+/// against a `D/16` of `5.33e−15`.
+struct AStretchOfAHyperbolaTooFlatToPlaceFromItsCentre {
+    /// `M`, halfway between the run's two ends.
+    halfway: Point,
+    /// `(B − A)/2`, with `A` and `B` the run's two ends in the order of the
+    /// stretch's two ends.
+    half_the_chord: Vector,
+    /// `α`, half the stretch, which may be below nought.
+    half: f64,
+    /// `N`, from the branch's centre to its point halfway along the stretch.
+    out_to_the_middle: Vector,
+    /// The least share of `N` a point stands in from the chord by,
+    /// `8u·(S + bow) / |n·N|`.
+    least_in: f64,
+}
+
+impl AStretchOfAHyperbolaTooFlatToPlaceFromItsCentre {
+    /// The stretch `(from, to)` of `branch` between `start` and `end`, when it is
+    /// one to place from its chord in `steps`.
+    fn of(
+        branch: &HyperbolaBranch,
+        [start, end]: [Point; 2],
+        (from, to): (f64, f64),
+        steps: usize,
+    ) -> Option<Self> {
+        let half = (to - from) / 2.0;
+        if !(f64::MIN_POSITIVE..).contains(&half.abs()) {
+            return None;
+        }
+        let half_the_chord = (end - start) * 0.5;
+        let halfway = start + half_the_chord;
+        let out_to_the_middle = (halfway - branch.centre) * half.cosh().recip();
+        let bow = 2.0 * (half / 2.0).sinh().powi(2) * out_to_the_middle.length();
+        let along_the_chord = half_the_chord.normalized().ok()?;
+        let across = out_to_the_middle - along_the_chord * out_to_the_middle.dot(along_the_chord);
+        let across_the_chord = across.normalized().ok()?;
+        let what_a_point_rounds_against: f64 = across_the_chord
+            .components()
+            .into_iter()
+            .zip(start.coordinates().into_iter().zip(end.coordinates()))
+            .map(|(towards, (at_the_start, at_the_end))| {
+                towards.abs() * at_the_start.abs().max(at_the_end.abs())
+            })
+            .sum();
+        let nearest_an_end = (steps as f64).recip();
+        let off_the_chord_nearest_an_end = 2.0
+            * (half * nearest_an_end).sinh()
+            * (half * (1.0 - nearest_an_end)).sinh()
+            * across.length();
+        let its_own_rounding = 4.0 * f64::EPSILON * (what_a_point_rounds_against + bow);
+        let least_in = its_own_rounding / across.length();
+        let raised_mostly_across_the_chord = out_to_the_middle.length() <= 2.0 * across.length();
+        let raised_less_than_half_its_chord =
+            least_in * out_to_the_middle.length() <= half_the_chord.length();
+        (off_the_chord_nearest_an_end <= its_own_rounding
+            && raised_mostly_across_the_chord
+            && raised_less_than_half_its_chord)
+            .then_some(Self {
+                halfway,
+                half_the_chord,
+                half,
+                out_to_the_middle,
+                least_in,
+            })
+    }
+
+    /// The points between the ends, at `steps − 1` places evenly spaced along
+    /// the stretch.
+    fn points(&self, steps: usize) -> Vec<Point> {
+        (1..steps)
+            .map(|step| {
+                let k = step as f64 / steps as f64;
+                let along = (self.half * (2.0 * k - 1.0)).sinh() / self.half.sinh();
+                let inwards = 2.0 * (self.half * k).sinh() * (self.half * (1.0 - k)).sinh();
+                self.halfway + self.half_the_chord * along
+                    - self.out_to_the_middle * inwards.max(self.least_in)
+            })
+            .collect()
     }
 }
 
@@ -10233,22 +10466,88 @@ mod tests {
     /// The numbers are those the fuse hands the walk for the steep cone in
     /// `a_plane_cut_along_a_cones_other_nappe.rs` less a slab sitting at `-8`
     /// and turned `1.301`: the slab's end, the plane `6` out from the axis,
-    /// cuts the cone's wall in a hyperbola whose vertex is a third of an ulp
+    /// cuts the cone's wall in a hyperbola whose vertex is under half an ulp
     /// below the cone's top `z = 3`, and the run between the two places that
-    /// end crosses the top's rim, `2.3e−8` apart, bows that little. Its one
-    /// point came out at `z = 3.0`, on the chord, so the lens of wall under
-    /// that chord enclosed nothing, and the cone less the slab was refused
-    /// `ACurvedFaceGoesRightRoundWithNoSeam`.
+    /// end crosses the top's rim, `8.5e−8` apart, bows `7.5e−17` off its
+    /// chord. Its one point came out at `z = 3.0`, on the chord, so the lens
+    /// of wall under that chord enclosed nothing, and the cone less the slab
+    /// was refused `ACurvedFaceGoesRightRoundWithNoSeam`.
     #[test]
     fn a_hyperbola_that_bows_less_than_its_ends_round_is_walked_clear_of_its_chord() {
+        let (end_of_the_slab, walked) =
+            walked_along_the_slabs_end(THE_ENDS_OF_THE_RUN_ALONG_THE_SLABS_END);
+
+        let deviation = walked.deviation().magnitude();
+        assert!(
+            !walked.points().is_empty(),
+            "the run has a point between its ends"
+        );
+        for &point in walked.points() {
+            assert!(
+                point.z() < 3.0,
+                "{point:?} is not on the hyperbola's side of the chord at z = 3"
+            );
+            let (off_the_plane, off_the_cone) =
+                how_far_off_the_slabs_end_and_the_cone(end_of_the_slab, point);
+            assert!(
+                off_the_plane <= deviation && off_the_cone <= deviation,
+                "{point:?} is {off_the_plane} off the slab's end and {off_the_cone} off \
+                 the cone, past {deviation}"
+            );
+        }
+    }
+
+    /// A stretch of a hyperbola whose end is off the curve is walked where
+    /// [`AnEndlessBend::at`] puts it and not from its chord, since placed from
+    /// its chord it would carry that end's offset into its points (Q3297).
+    ///
+    /// The run of
+    /// `a_hyperbola_that_bows_less_than_its_ends_round_is_walked_clear_of_its_chord`
+    /// with one end lifted half the walk's deviation off the cone's rim.
+    /// Placed from its chord, its one point would sit a quarter of that above
+    /// the rim's `z = 3`, `1.7e−14` off the cone; walked as `at` puts it, it is
+    /// on the cone to under an ulp, and so within a sixteenth of the deviation
+    /// of both surfaces.
+    #[test]
+    fn a_hyperbola_whose_end_is_off_the_curve_is_not_walked_from_its_chord() {
+        let [start, [x, y, _]] = THE_ENDS_OF_THE_RUN_ALONG_THE_SLABS_END;
+        let (end_of_the_slab, walked) =
+            walked_along_the_slabs_end([start, [x, y, 3.000_000_000_000_044]]);
+
+        let deviation = walked.deviation().magnitude();
+        assert!(
+            !walked.points().is_empty(),
+            "the run has a point between its ends"
+        );
+        for &point in walked.points() {
+            let (off_the_plane, off_the_cone) =
+                how_far_off_the_slabs_end_and_the_cone(end_of_the_slab, point);
+            assert!(
+                off_the_plane <= deviation / 16.0 && off_the_cone <= deviation / 16.0,
+                "{point:?} is {off_the_plane} off the slab's end and {off_the_cone} off \
+                 the cone, past a sixteenth of {deviation}"
+            );
+        }
+    }
+
+    /// The two places the slab's end in
+    /// `a_hyperbola_that_bows_less_than_its_ends_round_is_walked_clear_of_its_chord`
+    /// crosses the steep cone's rim, as the fuse hands them to the walk.
+    const THE_ENDS_OF_THE_RUN_ALONG_THE_SLABS_END: [[f64; 3]; 2] = [
+        [5.782_951_203_217_395, -1.599_210_862_021_168_5, 3.0],
+        [5.782_951_225_848_787, -1.599_210_780_183_153_4, 3.0],
+    ];
+
+    /// The slab's end, and the run along it between `ends` round the steep
+    /// cone `r = 2z` of `a_plane_cut_along_a_cones_other_nappe.rs`, picked
+    /// above `z = 0` and walked as coarsely as the fuse walked it.
+    fn walked_along_the_slabs_end(ends: [[f64; 3]; 2]) -> (Plane, PointsAlongACrossing) {
         let cone =
             Surface::Cone(crate::Cone::new(crate::Axis::z(), 2.0).expect("a slope with length"));
         let normal = Vector::new(0.963_825_202_422_181_8, -0.266_535_136_850_360_23, 0.0);
-        let end_of_the_slab = Plane::from_point_and_normal_as_written(
-            Point::new(5.782_951_203_217_395, -1.599_210_862_021_168_5, 3.0),
-            normal,
-        )
-        .expect("a unit normal");
+        let [start, _] = THE_ENDS_OF_THE_RUN_ALONG_THE_SLABS_END;
+        let end_of_the_slab = Plane::from_point_and_normal_as_written(Point::from(start), normal)
+            .expect("a unit normal");
         assert_eq!(
             (end_of_the_slab.normal(), end_of_the_slab.offset()),
             (normal, 6.0),
@@ -10261,11 +10560,7 @@ mod tests {
                 and: flat,
                 picked_by: smallvec![Picker::from(up)],
             },
-            [
-                [5.782_951_203_217_395, -1.599_210_862_021_168_5, 3.0],
-                [5.782_951_225_848_787, -1.599_210_780_183_153_4, 3.0],
-            ]
-            .map(PredicatePoint::from),
+            ends.map(PredicatePoint::from),
         )
         .expect("a picked run");
 
@@ -10277,24 +10572,13 @@ mod tests {
             &mut ProvenanceLog::new(),
         )
         .unwrap_or_else(|refused| panic!("the run along the slab's end is {refused:?}"));
+        (end_of_the_slab, walked)
+    }
 
-        let deviation = walked.deviation().magnitude();
-        assert!(
-            !walked.points().is_empty(),
-            "the run has a point between its ends"
-        );
-        for point in walked.points() {
-            assert!(
-                point.z() < 3.0,
-                "{point:?} is not on the hyperbola's side of the chord at z = 3"
-            );
-            let off_the_plane = end_of_the_slab.signed_distance_to(*point).abs();
-            let off_the_cone = (point.x().hypot(point.y()) - 2.0 * point.z()).abs() / 5f64.sqrt();
-            assert!(
-                off_the_plane <= deviation && off_the_cone <= deviation,
-                "{point:?} is {off_the_plane} off the slab's end and {off_the_cone} off \
-                 the cone, past {deviation}"
-            );
-        }
+    /// How far `point` is off the slab's end and off the cone `r = 2z`.
+    fn how_far_off_the_slabs_end_and_the_cone(end_of_the_slab: Plane, point: Point) -> (f64, f64) {
+        let off_the_plane = end_of_the_slab.signed_distance_to(point).abs();
+        let off_the_cone = (point.x().hypot(point.y()) - 2.0 * point.z()).abs() / 5f64.sqrt();
+        (off_the_plane, off_the_cone)
     }
 }
