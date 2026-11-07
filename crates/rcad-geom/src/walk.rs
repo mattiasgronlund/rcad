@@ -3278,9 +3278,27 @@ trait AnEndlessBend {
     /// The largest magnitude anything about it was worked out from, which is
     /// what [`POINT_ALONG_AN_ENDLESS_BEND_ROUNDOFF`] is a multiple of.
     fn the_size_it_was_worked_out_from(&self) -> f64;
+    /// The points between two ends a run names, placed from the chord between
+    /// those ends where the bend stands off it by less than they round, or
+    /// `None` where they stay where [`AnEndlessBend::at`] put them.
+    ///
+    /// `walked` is what `at` put at the steps evenly spaced over `stretch`,
+    /// the ends' own two left out, and `deviation` how far the walk says those
+    /// points are off the bend.
+    fn placed_from_its_chord(
+        &self,
+        ends: [Point; 2],
+        stretch: (f64, f64),
+        walked: &[Point],
+        deviation: f64,
+    ) -> Option<Vec<Point>>;
 }
 
 /// Points along one endless bend, over the stretch [`AnEndlessBend`] argues for.
+///
+/// A stretch between two ends the run names that stands off the chord between
+/// them by less than its ends round is placed from that chord where the bend
+/// can be, as [`AnEndlessBend::placed_from_its_chord`] says.
 ///
 /// # Errors
 ///
@@ -3309,10 +3327,10 @@ fn walk_an_endless_bend(
     };
 
     let out = bend.how_far_out_it_is_walked();
-    let ends = run.ends().map(|end| {
-        (end != nowhere_in_particular())
-            .then(|| bend.along_of(Point::from(end.enclosure().map(middle_of))))
+    let named = run.ends().map(|end| {
+        (end != nowhere_in_particular()).then(|| Point::from(end.enclosure().map(middle_of)))
     });
+    let ends = named.map(|end| end.map(|end| bend.along_of(end)));
     let from = ends[0].unwrap_or(-out);
     let to = ends[1].unwrap_or(out);
     let steps = how_many_pieces_an_endless_bend_takes(
@@ -3325,9 +3343,15 @@ fn walk_an_endless_bend(
     // because nothing else knows where the walk was cut off. See [`walk`].
     let first = usize::from(ends[0].is_some());
     let last = steps - usize::from(ends[1].is_some());
-    let points = (first..=last)
+    let points: Vec<Point> = (first..=last)
         .map(|step| bend.at(from + (to - from) * (step as f64) / (steps as f64)))
         .collect();
+    let points = if let [Some(start), Some(end)] = named {
+        bend.placed_from_its_chord([start, end], (from, to), &points, deviation)
+            .unwrap_or(points)
+    } else {
+        points
+    };
 
     Ok(PointsAlongACrossing {
         points,
