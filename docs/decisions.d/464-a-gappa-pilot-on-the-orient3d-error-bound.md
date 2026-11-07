@@ -2904,7 +2904,16 @@ print(len(proved), "hints proved by field;",
 **5. What was built.** Q2699 built 3 b to d, in two lanes on 2026-11-06 and
 2026-11-07, off `256f2352` and then `a96cd9d8`. It moved in the scripts of
 464.5 to 464.9, which this section held when the row was taken. Those of
-464.11 on are Q2700's (3 f).
+464.11 on are Q2700's (3 f). Q2700's first lane moved in 464.11's, on
+2026-11-07: `make_one_difference_zero.py` as 464.11 gives it, which writes
+`zd_adx.g` to `zd_cdz.g` with block 1's restates lines in front;
+`zerodiffcontrols.py`, which writes each one's controls at `6u` and `5u`, as
+`c_zd_<name>_6u.g` and `c_zd_<name>_5u.g`; and `diffzero.g` and `refl.g`,
+464.11's two steps, with a restates line for `on_floats`, whose subtractions
+they are about. `prove-bounds` proved the 11 and every one of the 18 controls
+failed. `check-proofs` now prints `check-proofs: 42 proofs and 60 controls
+match their stamps`. The scripts of 464.12 on are not moved yet: 464.14 alone
+holds 431 proofs and 433 controls.
 
 - `proofs/bounds.py` holds both recipes. `check` is `check-proofs`, `prove
   [name]` is `prove-bounds`, and `extent PATH ITEM` prints the lines
