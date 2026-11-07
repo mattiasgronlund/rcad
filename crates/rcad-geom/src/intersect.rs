@@ -6843,11 +6843,10 @@ impl TwoFlatCuts {
         } else {
             self.halfway.0.clone()
         };
-        let facing = Exact::cross_of(&apart, up.components())
-            .map(|facing| facing.each_ref().map(as_an_f64_exactly));
-        let Some([Some(x), Some(y), Some(z)]) = facing else {
+        let Some(facing) = Exact::cross_of(&apart, up.components()) else {
             return Err(Error::CannotNameWhichPieceOfACrossingThisIs);
         };
+        let [x, y, z] = facing.each_ref().map(Exact::nearest_f64);
         Ok(TheCutHalfway::AHyperbola {
             near: HalfSpaceThroughAPoint::new(first.apex(), near)?,
             mirror: HalfSpaceThroughAPoint::new(first.apex(), Vector::from([x, y, z]))?,
@@ -6875,12 +6874,6 @@ impl TwoFlatCuts {
         };
         Some([picker(Exact::plus), picker(Exact::minus)])
     }
-}
-
-/// `value` where it is a number `f64` holds exactly, and nothing otherwise.
-fn as_an_f64_exactly(value: &Exact) -> Option<f64> {
-    let near = value.nearest_f64();
-    (near.is_finite() && value.minus(&Exact::of(near)).sign() == Decision::Zero).then_some(near)
 }
 
 /// `‖m × v‖²` of [`how_two_mirror_images_stand`]: nothing exactly where the
