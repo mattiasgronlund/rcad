@@ -2927,8 +2927,17 @@ proofs and 95 controls match their stamps`. Its second lane then moved in
 like the sphere's. Each `flat*.g` names `SideOfAFlatSurfaceThroughAPoint::on_floats`
 at `8c943dfd`, since `plane.rs` holds two `on_floats` (3 b). `prove-bounds`
 proved the 285 and every control failed, and `check-proofs` prints
-`check-proofs: 359 proofs and 382 controls match their stamps`. The scripts of
-464.14 on are not moved yet: 464.14 alone holds 431 proofs and 433 controls.
+`check-proofs: 359 proofs and 382 controls match their stamps`. It then moved
+in 464.14's: `skincases.py` as 464.14 gives it, which writes the 431 proofs and
+the controls of 7, `tinysq.g`, `tinyzero.g`, `tinyzero_nohint.g` and
+`relgap.g`, each with a restates line for `sphere.rs`'s `on_floats` at
+`05d44c66`, and `skinwhy.py`. `skin_noeb.g` is the proof that was 464.14's
+`c_skin_noeb.g`, with `c_skin_noeb_rel.g` and `c_skin_noeb_why.g` written by
+`skinwhy.py` as `flatwhy.py` does. `prove-bounds` proved the 436 and every
+control failed, and `check-proofs` prints `check-proofs: 795 proofs and 816
+controls match their stamps`. What 464.14 holds besides, the tally and
+checking scripts of 9, is not moved: they read run logs, not the tree. The
+scripts of 464.15 on are not moved yet.
 
 - `proofs/bounds.py` holds both recipes. `check` is `check-proofs`, `prove
   [name]` is `prove-bounds`, and `extent PATH ITEM` prints the lines
