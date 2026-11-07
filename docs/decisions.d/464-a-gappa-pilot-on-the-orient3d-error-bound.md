@@ -3024,6 +3024,10 @@ drifts from its files unseen.
   is taken: Q2700.
 - The 35 nonzero facts of 1, proved in Coq from `s1`, so that block 1's proof
   stands on its hypotheses alone: Q2701.
+- Why `field` leaves the hints the table counts as left, in 464.7's six
+  scripts and in `signed.g`, `shiftplane.g` and `shiftball.g`, and those hints
+  proved in Coq, so that no proof stands on a hint Coq has not checked: a row
+  filed from this write-up when it merges.
 
 ### 464.11 One of the nine differences at zero
 
