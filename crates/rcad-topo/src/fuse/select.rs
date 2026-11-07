@@ -2002,30 +2002,33 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
 /// **Why an edge can place a piece.** `P` is the piece, on `G`'s plane, `S` the
 /// solid, and `H` the flat face across `e`. `s` is a side of `P` carried by
 /// `G`'s plane and `H`'s, so it runs along the line `e` runs along, and both
-/// its ends lie on `e` and are not one point. Every point of `s` between its
-/// ends is strictly inside `e`, and [`no_other_face_reaches`] has every face
-/// of `S` but `G` and `H` off all of them but a few single points. Take `m`,
-/// one of the rest: near `m` the skin of `S` is `G` and `H` and nothing else,
-/// `G` a half-plane on one side of `H`'s plane. Near `m` the inside of `P` is
-/// the half-plane of `G`'s plane on its material side of `H`'s plane. `P` was
-/// cut by every surface of `S`, so its inside lies all inside `S`, all outside
-/// it, or all on its skin (§17.4), and it is enough to know where it is near
-/// `m`.
+/// its ends lie on `e` and are not one point. Take `m`, a point of `s` between
+/// its ends: it is strictly inside `e`, so near `m` `G` is a half-plane on one
+/// side of `H`'s plane. Near `m` the inside of `P` is the half-plane of `G`'s
+/// plane on its material side of `H`'s plane. `P` was cut by every surface of
+/// `S`, so its inside lies all inside `S`, all outside it, or all on its skin
+/// (§17.4), and it is enough to know where it is near `m`.
 ///
-/// Being strictly inside `e` is not enough by itself. Two blocks built as one
-/// solid, `[0, 3]²` from `z = −1` to `2` and `[3, 6]²` from `z = 0` to `1`,
-/// have four faces round `x = y = 3`, and a piece on the second block's face
-/// `x = 3` with a side along the first block's edge there was read outside
-/// before that check (Q2921).
-///
-/// - On `G`'s side of `H`'s plane, the inside of `P` near `m` lies on `G`, so
-///   `P` lies on `S`'s skin, on `G`, and faces `G`'s way or the other.
-/// - On the other side, it lies in `G`'s plane beyond `e`, and so in front of
-///   `H`'s outward plane where the solid's corner at `e` is convex and behind
-///   it where it is reflex: across a convex edge the solid is on `G`'s side of
+/// - On `G`'s side of `H`'s plane, the inside of `P` near `m` is `G` near `m`,
+///   so `P` lies on `S`'s skin, on `G`, and faces `G`'s way or the other.
+/// - On the other side, it lies in `G`'s plane beyond `e`. Where the skin of
+///   `S` near `m` is `G` and `H` and nothing else, that is in front of `H`'s
+///   outward plane where the solid's corner at `e` is convex and behind it
+///   where it is reflex: across a convex edge the solid is on `G`'s side of
 ///   `H`'s plane, and across a reflex one `H` faces towards `G`. Behind is
 ///   inside and in front is outside, with no need to ask which kind of edge it
 ///   is.
+///
+/// Being strictly inside `e` does not make the skin near `m` `G` and `H` and
+/// nothing else, since another part of `S` can touch `e` from beyond it. Two
+/// blocks built as one solid, `[0, 3]²` from `z = −1` to `2` and `[3, 6]²`
+/// from `z = 0` to `1`, have four faces round `x = y = 3`, and a piece on the
+/// second block's face `x = 3` with a side along the first block's edge there
+/// was read outside (Q2921). So the second case is read only where
+/// [`no_other_face_reaches`] has every face of `S` but `G` and `H` off `s`, but
+/// for single points of it, and `m` is taken off those. The first needs no
+/// such check: near `m`, `G` is all of `P`'s inside, and no face of a sound
+/// solid reaches inside another.
 ///
 /// **`G`'s side of `H`'s plane is read off the way `G`'s wire walks `e`**, with
 /// the face on its left about `G`'s own normal ([`BakedFace::wires`]). Left of
@@ -2153,10 +2156,6 @@ fn beside_one_edge(
     if !has_length || !is_on_the_edge(from) || !is_on_the_edge(to) {
         return None;
     }
-    let face_across = the_face_across(solid, edge, h)?;
-    if !no_other_face_reaches(solid, [face, face_across], [g, h], &[from, to]) {
-        return None;
-    }
     if side.material_side == towards_g {
         let mine = outward_plane_of(piece)?;
         let theirs = outward_plane_of_face(face)?;
@@ -2171,6 +2170,10 @@ fn beside_one_edge(
             solid: index,
             same_way,
         });
+    }
+    let face_across = the_face_across(solid, edge, h)?;
+    if !no_other_face_reaches(solid, [face, face_across], [g, h], &[from, to]) {
+        return None;
     }
     let behind = the_inner_side_of(face_across, across)?;
     Some(if side.material_side == behind {
@@ -2349,15 +2352,14 @@ fn from_one_edge(
         Decision::Pos | Decision::Neg => (),
         Decision::Zero | Decision::Undecidable { .. } | _ => return None,
     }
+    if runs_to == towards_g {
+        return Some(side.material_side == the_inner_side_of(face, cut_by)?);
+    }
     let face_across = the_face_across(solid, edge, h)?;
     if !no_other_face_reaches(solid, [face, face_across], [g, h], &[at]) {
         return None;
     }
-    if runs_to == towards_g {
-        Some(side.material_side == the_inner_side_of(face, cut_by)?)
-    } else {
-        Some(runs_to == the_inner_side_of(face_across, h)?)
-    }
+    Some(runs_to == the_inner_side_of(face_across, h)?)
 }
 
 /// Whether every face of `solid` but `edge_faces`, the two faces along an edge
