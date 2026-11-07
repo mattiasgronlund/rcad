@@ -2037,12 +2037,13 @@ fn three_planes(surfaces: &[Surface]) -> Option<[Plane; 3]> {
 /// [`FaceMeet::material_side`]. Every question here is
 /// [`which_meet_comes_first_along_a_line`] along that line, each point asked
 /// as the meet of three planes, or two planes compared bit for bit, so every
-/// answer is exact and nothing goes into the log. The one that is not is
-/// whether another face of `S` keeps off `s`, which is as sure as that face's
-/// [`Bounds`](super::bake::Bounds) is where its plane holds the whole line.
-/// An end of `s` or of `e` that is not the meet of `G`'s plane, `H`'s and one
-/// plane more, a question that comes back undecided, a plane that does not
-/// match, or another face of `S` that may reach `s` leaves the side out.
+/// answer is exact and nothing goes into the log. The one that is not, asked
+/// in the second case only, is whether another face of `S` keeps off `s`,
+/// which is as sure as that face's [`Bounds`](super::bake::Bounds) is where
+/// its plane holds the whole line. An end of `s` or of `e` that is not the
+/// meet of `G`'s plane, `H`'s and one plane more, a question that comes back
+/// undecided, a plane that does not match, or, in the second case, another
+/// face of `S` that may reach `s` leaves the side out.
 ///
 /// Inside one solid of the group is inside. Lying on one or more with none
 /// having it inside is read as [`LyingOn`] reads it, and outside every one is
@@ -2193,32 +2194,36 @@ fn beside_one_edge(
 /// that is neither `G`'s nor that of `H`, the flat face across `e`, and `S` is
 /// the solid. `s` is a side of `P` carried by `P`'s plane and `G`'s, and `c`,
 /// one end of it, is where `P`'s plane crosses the line of `e`, strictly
-/// between `e`'s two ends, and [`no_other_face_reaches`] has every face of `S`
-/// but `G` and `H` off it. So near `c` the skin of `S` is `G` and `H` and
-/// nothing else, `G` a half-plane on one side of `H`'s plane. `P` was cut by
-/// every surface of `S`, so its inside lies all inside `S`, all outside it, or
-/// all on its skin (§17.4), and it is enough to know where it is near one
-/// point. Take `m` on `s`, near `c`: it is on `G`'s plane, and off `H`'s,
-/// since the far end of `s` is off it.
+/// between `e`'s two ends, so near `c` `G` is a half-plane on one side of
+/// `H`'s plane. `P` was cut by every surface of `S`, so its inside lies all
+/// inside `S`, all outside it, or all on its skin (§17.4), and it is enough to
+/// know where it is near one point. Take `m` on `s`, near `c`: it is on `G`'s
+/// plane, and off `H`'s, since the far end of `s` is off it.
 ///
-/// Being strictly inside `e` is not enough by itself. Two blocks built as one
-/// solid, `[0, 3]²` from `z = −1` to `2` and `[3, 6]²` from `z = 0` to `1`,
-/// have four faces round `x = y = 3`, and a square on `z = 0.5` inside the
-/// second block, with a side up the first block's face `x = 3` from its edge
-/// there, was read outside before that check (Q2921).
+/// - Where `s` runs to `G`'s side of `H`'s plane, `m` is inside `G`, and no
+///   face of a sound solid reaches inside another, so near `m` the skin is a
+///   disk of `G`'s plane with `S` behind it. The inside of `P` near `m` is a
+///   half-disk off that plane, on its material side of it, and so inside `S`
+///   when that is `G`'s inner side and outside it when it is not.
+/// - Where it runs to the other side, `m` is on `G`'s plane beyond `e`, and
+///   the inside of `P` near `m` is where `m` is. Where the skin of `S` near
+///   `c` is `G` and `H` and nothing else, `m` is off it, in front of `H`'s
+///   outward plane where the solid's corner at `e` is convex and behind it
+///   where it is reflex: across a convex edge the solid is on `G`'s side of
+///   `H`'s plane, and across a reflex one `H` faces towards `G`. So `m` is
+///   inside when it is behind `H`'s outward plane, with no need to ask which
+///   kind of edge it is.
 ///
-/// - Where `s` runs to `G`'s side of `H`'s plane, `m` is on `G` and on no other
-///   face, so near `m` the skin is a disk of `G`'s plane with `S` behind it.
-///   The inside of `P` near `m` is a half-disk off that plane, on its material
-///   side of it, and so inside `S` when that is `G`'s inner side and outside
-///   it when it is not.
-/// - Where it runs to the other side, `m` is on `G`'s plane beyond `e`, off
-///   the skin, and the inside of `P` near `m` is where `m` is. That is in
-///   front of `H`'s outward plane where the solid's corner at `e` is convex
-///   and behind it where it is reflex: across a convex edge the solid is on
-///   `G`'s side of `H`'s plane, and across a reflex one `H` faces towards `G`.
-///   So `m` is inside when it is behind `H`'s outward plane, with no need to
-///   ask which kind of edge it is.
+/// Being strictly inside `e` does not make the skin near `c` `G` and `H` and
+/// nothing else, since another part of `S` can touch `e` from beyond it. Two
+/// blocks built as one solid, `[0, 3]²` from `z = −1` to `2` and `[3, 6]²`
+/// from `z = 0` to `1`, have four faces round `x = y = 3`, and a square on
+/// `z = 0.5` inside the second block, with a side from the first block's edge
+/// there along the plane of its face `x = 3`, past the edge, was read outside
+/// (Q2921). So the second case is read only where [`no_other_face_reaches`]
+/// has every face of `S` but `G` and `H` off `c`. The first needs no such
+/// check, and the second block's own edge up that line reads the square
+/// inside by it.
 ///
 /// `P` is never on the skin of `S`, since near `m` it is off it.
 ///
@@ -2228,11 +2233,11 @@ fn beside_one_edge(
 /// [`side_of_a_plane_where_three_planes_meet`] for the far end of `s`, each
 /// point asked as the meet of three planes, or two planes compared bit for
 /// bit, so every answer is exact and nothing goes into the log. The one that
-/// is not is whether another face of `S` keeps off `c`, as
-/// [`by_an_edge_of_a_face_it_lies_on`] says. An end of `s` or of `e` that is
-/// not such a meet, a question that comes back undecided or as a tie, a plane
-/// that does not match, or another face of `S` that may reach `c` leaves the
-/// side out.
+/// is not, asked in the second case only, is whether another face of `S`
+/// keeps off `c`, as [`by_an_edge_of_a_face_it_lies_on`] says. An end of `s`
+/// or of `e` that is not such a meet, a question that comes back undecided or
+/// as a tie, a plane that does not match, or, in the second case, another face
+/// of `S` that may reach `c` leaves the side out.
 ///
 /// Inside one solid of the group is inside, and outside every one is outside,
 /// as [`by_a_plane`] reads it. A solid no side of the piece starts inside an
@@ -2366,10 +2371,11 @@ fn from_one_edge(
 /// on the line where `g` and `h` meet, keeps off the stretch of that line
 /// between where the planes `ends` cross it, but for single points of it. With
 /// one plane in `ends` the stretch is the one point, and no face may touch it.
-/// Both edge rules read the solid near that stretch as the wedge between the
-/// edge's two faces, which holds only where no other face reaches it. Where
-/// another part of the solid touches this one along the line, four faces stand
-/// round it, and it does not hold (Q2921).
+/// The branch of each edge rule that reads past the edge reads the solid near
+/// that stretch as the wedge between the edge's two faces, which holds only
+/// where no other face reaches it. Where another part of the solid touches
+/// this one along the line, four faces stand round it, and it does not hold
+/// (Q2921).
 ///
 /// A flat face whose plane misses one of the points where `ends` cross the
 /// line meets the line at one point at most, and misses the one point when
@@ -2377,8 +2383,9 @@ fn from_one_edge(
 /// line, or one whose question came back undecided — must have its
 /// [`Bounds`](super::bake::Bounds) clear of the box round the stretch, which
 /// is as sure as that box is. So a block standing past the edge along the
-/// line stops both rules, and the slivers they were built for, in
-/// `tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs`, are placed still.
+/// line stops both rules reading past the edge, and the slivers they were
+/// built for, in `tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs`, are
+/// placed still.
 fn no_other_face_reaches(
     solid: &BakedSolid,
     edge_faces: [&BakedFace; 2],
@@ -8523,7 +8530,9 @@ mod tests {
     /// `x = y = 3` must not read it outside. Its side on `x = 3` starts inside
     /// that edge and runs past it, into the second block and along its face
     /// `x = 3`, not out into the air: four faces stand round the line there, so
-    /// the skin near the edge is not the edge's two faces and nothing else.
+    /// the skin near the edge is not the edge's two faces and nothing else. The
+    /// second block's own edge up the line, which the side runs from onto that
+    /// block's face `x = 3`, reads it inside.
     #[test]
     fn a_square_past_an_edge_another_block_stands_beyond_is_not_read_outside() {
         let (_model, solid) = two_blocks_touching_along_a_line();
@@ -8553,8 +8562,8 @@ mod tests {
         );
         assert_eq!(
             by_a_side_from_an_edge_it_starts_on(&[&solid, &solid], &[0], 1, &square),
-            None,
-            "no edge up x = y = 3 places the square"
+            Some(Placement::Inside),
+            "the second block's edge up x = y = 3 places the square inside"
         );
     }
 
@@ -8562,7 +8571,8 @@ mod tests {
     /// the second block's face `x = 3` of [`two_blocks_touching_along_a_line`],
     /// and the first block's edge up `x = y = 3`, along which its side on
     /// `y = 3` runs, must not read it outside: past that edge the plane `x = 3`
-    /// is the second block's face, not air.
+    /// is the second block's face, not air. The second block's own edge up the
+    /// line reads it on that face, facing the other way.
     #[test]
     fn a_square_on_a_face_past_an_edge_another_block_stands_beyond_is_not_read_outside() {
         let (_model, solid) = two_blocks_touching_along_a_line();
@@ -8592,8 +8602,11 @@ mod tests {
         );
         assert_eq!(
             by_an_edge_of_a_face_it_lies_on(&[&solid, &solid], &[0], 1, &square),
-            None,
-            "no edge up x = y = 3 places the square"
+            Some(Placement::On {
+                solid: 0,
+                same_way: false
+            }),
+            "the second block's edge up x = y = 3 places the square on its face x = 3"
         );
     }
 
