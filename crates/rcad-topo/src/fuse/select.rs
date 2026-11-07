@@ -6393,7 +6393,7 @@ mod tests {
     use smallvec::SmallVec;
 
     use super::{
-        ACornerReadAsOnePoint, ANodeReadRoundACorner, InPlane, Piece, Rule,
+        ACornerReadAsOnePoint, ANodeReadRoundACorner, InPlane, Piece, Placement, Rule,
         a_face_of_the_input_holds, beside_one_edge, by_a_side_from_an_edge_it_starts_on,
         by_an_edge_of_a_face_it_lies_on, by_the_one_face_its_box_meets, candidate_points, choose,
         corners_of, every_picker_keeps, far_from_both_ends_of_the_range, from_one_edge,
@@ -8592,6 +8592,78 @@ mod tests {
             by_an_edge_of_a_face_it_lies_on(&[&solid, &solid], &[0], 1, &square),
             None,
             "no edge up x = y = 3 places the square"
+        );
+    }
+
+    /// A square on `z = 0.5` from `(2, 2)` to `(3, 3)` is inside the first of
+    /// [`two_blocks_touching_along_a_line`], and its side on `x = 3` runs from
+    /// the first block's edge up `x = y = 3` onto that block's own face
+    /// `x = 3`. The second block stands round the line on the far side, and
+    /// near that face it is the face and nothing else, so the edge still reads
+    /// the square inside.
+    #[test]
+    fn a_square_from_an_edge_onto_its_own_face_beside_another_block_is_read_inside() {
+        let (_model, solid) = two_blocks_touching_along_a_line();
+        let flat = Plane::from_coefficients([0.0, 0.0, 1.0, -0.5]).expect("a normal");
+        let square = a_square_of_planes(
+            Surface::Plane(flat),
+            [
+                [2.0, 2.0, 0.5],
+                [3.0, 2.0, 0.5],
+                [3.0, 3.0, 0.5],
+                [2.0, 3.0, 0.5],
+            ],
+            [
+                [0.0, -1.0, 0.0, 2.0],
+                [1.0, 0.0, 0.0, -3.0],
+                [0.0, 1.0, 0.0, -3.0],
+                [-1.0, 0.0, 0.0, 2.0],
+            ],
+        );
+        let (face, edge) =
+            the_first_blocks_edge_up_the_line(&solid, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let along_x_3 = &square.wires[0][1];
+        assert_eq!(
+            from_one_edge(&solid, &solid, flat, face, edge, along_x_3),
+            Some(true),
+            "the side runs onto the face x = 3 with the square behind it"
+        );
+    }
+
+    /// A square on `x = 3` from `y = 2` to `3` and `z = 0.25` to `0.75` lies on
+    /// the first block's face `x = 3` of [`two_blocks_touching_along_a_line`],
+    /// facing out the way it does, and its side on `y = 3` runs along that
+    /// block's edge up `x = y = 3`. The second block stands round the line on
+    /// the far side, and the edge still reads the square on the face.
+    #[test]
+    fn a_square_on_an_edges_own_face_beside_another_block_is_read_on_it() {
+        let (_model, solid) = two_blocks_touching_along_a_line();
+        let flat = Plane::from_coefficients([1.0, 0.0, 0.0, -3.0]).expect("a normal");
+        let square = a_square_of_planes(
+            Surface::Plane(flat),
+            [
+                [3.0, 2.0, 0.25],
+                [3.0, 2.0, 0.75],
+                [3.0, 3.0, 0.75],
+                [3.0, 3.0, 0.25],
+            ],
+            [
+                [0.0, -1.0, 0.0, 2.0],
+                [0.0, 0.0, 1.0, -0.75],
+                [0.0, 1.0, 0.0, -3.0],
+                [0.0, 0.0, -1.0, 0.25],
+            ],
+        );
+        let (face, edge) =
+            the_first_blocks_edge_up_the_line(&solid, [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let along_y_3 = &square.wires[0][2];
+        assert_eq!(
+            beside_one_edge(&solid, 0, &solid, &square, flat, face, edge, along_y_3),
+            Some(Placement::On {
+                solid: 0,
+                same_way: true
+            }),
+            "the square lies on the face x = 3, facing out with it"
         );
     }
 
