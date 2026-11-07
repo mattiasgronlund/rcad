@@ -137,7 +137,10 @@ enum ItShould {
     /// It builds, validates, meshes each face on its own side of the rim's
     /// plane and measures its closed form.
     Build,
-    /// It is refused `AWireWillNotLieFlatOnItsFace`.
+    /// It is refused `AWireWillNotLieFlatOnItsFace`. The builder's sweep raises
+    /// that about a face of the model it swept and dropped, so it comes back
+    /// inside `ADraftEntityWasRefusedByTheSweep`, beside the place that face
+    /// was described at (Q2890).
     BeRefusedAsAWireThatWillNotLieFlat,
     /// It is refused `AClosedEdgeIsWalkedAgainstItsSurface`.
     BeRefusedAsWalkedAgainstItsSurface,
@@ -186,9 +189,13 @@ fn what_each_writing_gets_wrong(
                     ),
                     (
                         ItShould::BeRefusedAsAWireThatWillNotLieFlat,
-                        Err(Error::AWireWillNotLieFlatOnItsFace { .. }),
-                    )
-                    | (
+                        Err(Error::ADraftEntityWasRefusedByTheSweep {
+                            entity: "face",
+                            refused,
+                            ..
+                        }),
+                    ) if matches!(*refused, Error::AWireWillNotLieFlatOnItsFace { .. }) => {}
+                    (
                         ItShould::BeRefusedAsWalkedAgainstItsSurface,
                         Err(Error::Invalid(Invalid::AClosedEdgeIsWalkedAgainstItsSurface)),
                     ) => {}
