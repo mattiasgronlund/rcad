@@ -3071,12 +3071,20 @@ is live a proof and no control, as 464.34's 21; `squarezero.py` writes the 77
 writes `kept_10.g`, the only case that proves, and its controls, which are
 the three that fail, named `c_kept_10_k128.g`, `c_kept_10_k119.g` and
 `c_kept_10_k11.g`, and `c_kept_10_127.g`; its restates lines name
-`held_near_length_one` at `17306d5ee`. Not moved: 464.30 and 464.31's cone
-scripts, which have a row; 464.38 to 464.44 (464.39's `widen.py` and its 88
-`zero/` cases, 464.40's `stage_e0_1_coq`, 464.42's `signedall.py` and 464.43's
+`held_near_length_one` at `17306d5ee`. 464.39: `widen.py`, which runs
+`vectorturn.py` and `vectorsub.py` and then widens their files, writes
+`wide.g`, `wide1.g`, `wide2.g` (control `c_wide_195.g`) and `r_wide_6.g`
+(control `c_r_wide_6_five.g`, the `1 + 2^-5` run that fails), and 77 `vw_`
+cases with 67 controls from the `vm_` files, in `proofs/gappa/` and not in
+`zero/`; the 11 with every component zero have nothing to widen and are not
+written. Its restates lines keep the sibling scripts' shas and add the three
+for the axis at `2b2c90e3`. 464.40: `stagecontrols.py` writes
+`stage_e0_1_coq.g` and its control `c_stage_e0_1_coq_7.g`, the section's
+`coqedge.py` edit. Not moved: 464.30 and 464.31's cone scripts, which have a
+row; 464.38 to 464.44 but for those two (464.42's `signedall.py` and 464.43's
 and 464.44's `dz`, `dm`, `ds` and `dk` generators were not reached; 464.38 and
 464.41 hold Rust probes and run logs); the run, tally and same-file scripts of
-each section. `check-proofs` prints `check-proofs: 3647 proofs and 3536
+each section. `check-proofs` prints `check-proofs: 3729 proofs and 3606
 controls match their stamps`.
 
 Do the cone scripts of 464.30 and 464.31 still restate `HowFarFromTheSkin::
