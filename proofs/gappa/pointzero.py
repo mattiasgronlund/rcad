@@ -39,8 +39,10 @@ zero v1 or v2 has its 1/545 square taken out with those shares, written
 1/545 * |v| * |v|, which Gappa reads as (1/545 * |v|) * |v| and bounds as 0.
 
 Where no term is live, p0 is zero and s0 is 0, out and Ex are both 0, so a
-control at u / 2 holds. Its control asks for (out - Ex) / L in [2^-60, 1]
-instead, which leaves out 0.
+control at u / 2 holds. A control that leaves out 0 instead, (out - Ex) / L
+in [2^-60, 1], ends in Gappa's "no contradiction was found" and not in
+"some properties were not satisfied", the only failure prove-bounds takes
+for a control, so these cases have no control (Q3284).
 
 named_by (isometry.rs) takes a turn with one nonzero part, or two or four of
 one size, as a turn of a cube, which is 464.19's 6 and not this arithmetic. So
@@ -297,7 +299,6 @@ def main():
         open(name + ".g", "w").write(make(zero, state))
         if all(set(t[1]) & zero for t in TERMS) and "p0" in zero and state["out"] == "cancels":
             exact.append(name)
-            open("c_" + name + "_half.g", "w").write(make(zero, state, ZERO))
         else:
             open("c_" + name + "_half.g", "w").write(make(zero, state, HALF))
     open("cases.txt", "w").write("\n".join(seen) + "\n")

@@ -3053,13 +3053,31 @@ is `c_prodzero_half.g`. 464.28: `cylzero.py`'s 82 cases at `cc9adf3f`.
 the 436 `pz_` cases, with point.g's restates lines (`apply_to_point`,
 `turned_by` and `POINT_ROUNDOFF` at `ba0a654e`, `held_near_length_one` at
 `17306d5ee`, `Cargo.lock` `nalgebra`) in place of the section's at `c0859e3f`;
-415 are proved and moved. The 21 where `out` and `Ex` are both zero are not
-moved: each control asks for a ratio in `[2^-60, 1]` and Gappa exits 1 with
+all 436 are proved and moved. In the 21 where `out` and `Ex` are both zero
+the section's control asks for a ratio in `[2^-60, 1]` and Gappa exits 1 with
 "no contradiction was found", where `prove-bounds` waits for "some properties
-were not satisfied" and so refuses to stamp. Not moved: 464.30 and 464.31's
-cone scripts, which have a row; 464.35 to 464.44; the run, tally and
-same-file scripts of each section. `check-proofs` prints `check-proofs: 3369
-proofs and 3295 controls match their stamps`.
+were not satisfied" and so refuses to stamp; those 21 have a proof and no
+control, since a goal of `out - Ex` in `[-1b-54, 1b-54]` holds when both are
+0. 464.35: `pointsub.py` writes the 88 `pm_` cases and their controls, with
+point.g's restates lines, `pmcontrols.py` is the section's `controls.py`
+(renamed so that it does not meet 464.22's) and writes `c_pm_n_l.g` and
+`c_pm_n_34.g`, and `mixedn.g`, `mixeds.g` and `sum.g` are its lemmas, each with
+point.g's restates lines added because a proof must start with them;
+`pmlemmacontrols.py` writes their `_half` controls by the section's rule.
+464.36: `vectorsub.py` writes the 88 `vm_` cases with vector.g's restates lines
+(`held_near_length_one` in place of `named_by`), and for the 21 where nothing
+is live a proof and no control, as 464.34's 21; `squarezero.py` writes the 77
+`sq_` cases, keeping `square.g`'s restates lines. 464.37: `squarekept.py`
+writes `kept_10.g`, the only case that proves, and its controls, which are
+the three that fail, named `c_kept_10_k128.g`, `c_kept_10_k119.g` and
+`c_kept_10_k11.g`, and `c_kept_10_127.g`; its restates lines name
+`held_near_length_one` at `17306d5ee`. Not moved: 464.30 and 464.31's cone
+scripts, which have a row; 464.38 to 464.44 (464.39's `widen.py` and its 88
+`zero/` cases, 464.40's `stage_e0_1_coq`, 464.42's `signedall.py` and 464.43's
+and 464.44's `dz`, `dm`, `ds` and `dk` generators were not reached; 464.38 and
+464.41 hold Rust probes and run logs); the run, tally and same-file scripts of
+each section. `check-proofs` prints `check-proofs: 3647 proofs and 3536
+controls match their stamps`.
 
 Do the cone scripts of 464.30 and 464.31 still restate `HowFarFromTheSkin::
 on_floats`? Not as they were read. 464.30 read `cone.rs` at `c3c03fd8`, and
