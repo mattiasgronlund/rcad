@@ -110,6 +110,11 @@ use crate::{
 /// constant for all three is what lets `rcad-topo`'s floor under a mesh, a
 /// multiple of it, hold whichever way a run was walked.
 ///
+/// **So is an arc of a conic that bows off its chord by less than this, placed
+/// from that chord** and not from the conic's centre. Its chain is derived at
+/// `AnArcTooFlatToPlaceFromItsCentre`, against the conic's size, and comes to
+/// under two thirds of this.
+///
 /// `every_point_along_a_crossing_is_on_both_surfaces.rs` measures the worst a
 /// search can find and prints the figure.
 pub const POINT_ALONG_A_CROSSING_ROUNDOFF: f64 = 256.0 * f64::EPSILON;
@@ -599,8 +604,9 @@ pub fn walk(
 /// The run's points round the conic it lies on, from the stretch its
 /// half-spaces pick.
 ///
-/// An arc that bows off the chord between its ends by less than `deviation`
-/// is placed from that chord instead, as [`AnArcTooFlatToPlaceFromItsCentre`]
+/// An arc that bows off the chord between its ends by less than `deviation`,
+/// but by more than rounding its points can carry them across that chord, is
+/// placed from the chord instead, as [`AnArcTooFlatToPlaceFromItsCentre`]
 /// says, into as many steps as round the conic.
 fn walk_round_the_conic(
     conic: &Conic,
@@ -615,10 +621,11 @@ fn walk_round_the_conic(
     };
 
     let stretch = conic.the_stretch_this_run_covers(run, deviation, policy, log)?;
-    let Some(arc) = AnArcTooFlatToPlaceFromItsCentre::of(conic, run, stretch, deviation) else {
+    let steps = how_many_steps(conic, stretch.1 - stretch.0, room)?;
+    let Some(arc) = AnArcTooFlatToPlaceFromItsCentre::of(conic, run, stretch, deviation, steps)
+    else {
         return points_round_a_conic(conic, stretch, deviation, room);
     };
-    let steps = how_many_steps(conic, stretch.1 - stretch.0, room)?;
     Ok(PointsAlongACrossing {
         points: arc.points(steps),
         deviation: Approximation::new(deviation, Cause::PointAlongACrossing),
@@ -683,11 +690,13 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 /// on the arc's own side of the chord. `cos φ − cos α` is worked out as
 /// `2·sin(α·k)·sin(α·(1 − k))`, with `φ = α·(2k − 1)`, which cancels nothing.
 ///
-/// **`N` is worked out as `(M − centre) / cos α`, not from `θm`.** From `θm`
-/// it tilts by the angle's rounding: the sliver `a_block_edge_grazing_a_ball.rs`
-/// fences off at `h = 0`, whose ends are `z = ±2⁻⁵¹` and whose middle is at
-/// `z = 0`, came out at `z = 6e−48`, under the `2⁻¹⁴²` a triangulation takes,
-/// and that face was refused `CoordinateOutOfRange`. From `M` it is `z = 0`.
+/// **`N` is worked out as `(M − centre) / cos α`, from the ends, and not
+/// from `θm`**, whose rounding tilts it. Worked out from `θm`, the sliver
+/// `a_block_edge_grazing_a_ball.rs` fences off at `h = 0`, whose ends are
+/// `z = ±2⁻⁵¹` and whose middle is at `z = 0`, came out at `z = 6e−48`, under
+/// the `2⁻¹⁴²` a triangulation takes, and that face was refused
+/// `CoordinateOutOfRange`. That arc bows `1e−31`, so it is now placed from its
+/// centre by the last test under `# When`.
 ///
 /// # When
 ///
@@ -698,6 +707,24 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 /// and when each end is within `D/8` of the conic's own point at its angle, as
 /// [`Conic::at`] works it out. An end further off would carry its own offset
 /// into every point, so such an arc is placed from the centre as before.
+///
+/// **And when the point nearest an end stands off the chord by more than its
+/// own rounding can carry it across**, `8u·(S + bow)`, with `u = f64::EPSILON
+/// / 2`, `n` the unit direction across the chord in the arc's plane and `S`
+/// the sum over the three coordinates of `|n_i|` times the larger of `|A_i|`
+/// and `|B_i|`. Coordinate `i` of a point rounds in `B − A`, in `M`, in the
+/// chord's term and the bulge's, and in the two sums, each once and against
+/// no more than that larger end or the bow, `B − A` against twice it: under
+/// `6u·max(|A_i|, |B_i|) + 2u·bow`. Across the chord that is under
+/// `6u·S + 3.5u·bow`. The errors in `sin φ / sin α` slide a point along the
+/// chord, and those in `cos φ − cos α` and `N` scale its bulge, so neither
+/// carries it across. An arc that bows less than that is placed from its centre
+/// as before, since neither way can say which side it lands: the steep cone
+/// less a slab turned `1.5` in `a_plane_cut_along_a_cones_other_nappe.rs`
+/// keeps a lens whose cap's arc, of radius `6`, bows `3.6e−16` between ends
+/// near `(5.98, −0.42, 3)`, where `x` rounds by `4.4e−16`. Placed from its
+/// chord, its one point came out on the chord's rounded middle, and that cone
+/// less the slab was refused `FacesDoNotAgreeWhichWayTheyFace`.
 ///
 /// # How far off, derived
 ///
@@ -739,8 +766,14 @@ struct AnArcTooFlatToPlaceFromItsCentre {
 
 impl AnArcTooFlatToPlaceFromItsCentre {
     /// The arc `run` names over `(from, to)` of `conic`, when it is one to place
-    /// from its chord.
-    fn of(conic: &Conic, run: &NamedRun, (from, to): (f64, f64), deviation: f64) -> Option<Self> {
+    /// from its chord in `steps`.
+    fn of(
+        conic: &Conic,
+        run: &NamedRun,
+        (from, to): (f64, f64),
+        deviation: f64,
+        steps: usize,
+    ) -> Option<Self> {
         let EdgeRun::PartOfWhereItCrosses { .. } = run.run() else {
             return None;
         };
@@ -761,7 +794,25 @@ impl AnArcTooFlatToPlaceFromItsCentre {
         let halfway = start + half_the_chord;
         let out_to_the_middle = (halfway - conic.centre) * half.cos().recip();
         let bow = 2.0 * (half / 2.0).sin().powi(2) * out_to_the_middle.length();
-        (bow <= deviation && on_the_conic).then_some(Self {
+        let along_the_chord = half_the_chord.normalized().ok()?;
+        let across = out_to_the_middle - along_the_chord * out_to_the_middle.dot(along_the_chord);
+        let across_the_chord = across.normalized().ok()?;
+        let what_a_point_rounds_against: f64 = across_the_chord
+            .components()
+            .into_iter()
+            .zip(start.coordinates().into_iter().zip(end.coordinates()))
+            .map(|(towards, (at_the_start, at_the_end))| {
+                towards.abs() * at_the_start.abs().max(at_the_end.abs())
+            })
+            .sum();
+        let nearest_an_end = (steps as f64).recip();
+        let off_the_chord_nearest_an_end = 2.0
+            * (half * nearest_an_end).sin()
+            * (half * (1.0 - nearest_an_end)).sin()
+            * across.length();
+        let clears_its_own_rounding =
+            off_the_chord_nearest_an_end > 4.0 * f64::EPSILON * (what_a_point_rounds_against + bow);
+        (bow <= deviation && on_the_conic && clears_its_own_rounding).then_some(Self {
             halfway,
             half_the_chord,
             half,
@@ -9878,6 +9929,89 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    /// An arc that bows off its chord by less than its ends' own coordinates
+    /// round is not placed from that chord, and the same arc with its ends near
+    /// the origin is, on its own side of it (Q3263).
+    ///
+    /// The ends are where the cap of the steep cone in
+    /// `a_plane_cut_along_a_cones_other_nappe.rs`, a circle of radius `6`,
+    /// crosses the end of a slab turned `1.5`. The arc between them bows
+    /// `3.6e−16`, and `x` near `6` rounds by `4.4e−16`: placed from its chord,
+    /// its one point came out on the chord's rounded middle, and that cone less
+    /// the slab was refused `FacesDoNotAgreeWhichWayTheyFace`.
+    #[test]
+    fn an_arc_that_bows_less_than_its_ends_round_is_not_placed_from_its_chord() {
+        let ends = [
+            [5.984_969_914_960_216, -0.424_423_275_776_785_4],
+            [5.984_969_924_288_435_5, -0.424_423_144_235_651_03],
+        ];
+        let halfway = [5.984_969_919_624_326, -0.424_423_210_006_218_2];
+        let near_the_origin = ends.map(|end| [end[0] - halfway[0], end[1] - halfway[1]]);
+        let places_from_its_chord = |[one, other]: [[f64; 2]; 2], centre: [f64; 2]| {
+            let pipe = Surface::Cylinder(
+                Cylinder::new(
+                    crate::Axis::new(
+                        Point::new(centre[0], centre[1], -3.0),
+                        Vector::new(0.0, 0.0, 1.0),
+                    )
+                    .expect("an axis"),
+                    6.0,
+                )
+                .expect("a pipe"),
+            );
+            let away_from_the_centre = HalfSpace::through_a_point_facing(
+                Point::new(centre[0], centre[1], 3.0),
+                Vector::new(one[0] - centre[0], one[1] - centre[1], 0.0),
+            )
+            .expect("a direction with length");
+            let run = NamedRun::new(
+                EdgeRun::PartOfWhereItCrosses {
+                    and: pipe,
+                    picked_by: smallvec![Picker::from(away_from_the_centre)],
+                },
+                [one, other].map(|[x, y]| PredicatePoint::from([x, y, 3.0])),
+            )
+            .expect("a picked run");
+            let rim = Conic {
+                centre: Point::new(centre[0], centre[1], 3.0),
+                across: Vector::new(6.0, 0.0, 0.0),
+                and: Vector::new(0.0, 6.0, 0.0),
+                size: 6.0,
+            };
+            let deviation = POINT_ALONG_A_CROSSING_ROUNDOFF * rim.size;
+            let stretch = rim
+                .the_stretch_this_run_covers(
+                    &run,
+                    deviation,
+                    &Policy::certified(),
+                    &mut ProvenanceLog::new(),
+                )
+                .expect("one of the two arcs is picked");
+            AnArcTooFlatToPlaceFromItsCentre::of(&rim, &run, stretch, deviation, 2)
+                .map(|arc| arc.points(2))
+        };
+
+        assert!(
+            places_from_its_chord(ends, [0.0, 0.0]).is_none(),
+            "an arc that bows under its ends' rounding is placed from its chord"
+        );
+        let centre = halfway.map(|x| -x);
+        let points = places_from_its_chord(near_the_origin, centre)
+            .expect("an arc whose ends round by far less than it bows is placed from its chord");
+        let [one, other] = near_the_origin;
+        let centres_side = rcad_predicates::orient2d(one, other, centre);
+        for point in points {
+            let side = rcad_predicates::orient2d(one, other, [point.x(), point.y()]);
+            assert!(
+                matches!(
+                    (side, centres_side),
+                    (Decision::Pos, Decision::Neg) | (Decision::Neg, Decision::Pos)
+                ),
+                "{point:?} is {side:?} of the chord, and the centre {centres_side:?}"
+            );
         }
     }
 }
