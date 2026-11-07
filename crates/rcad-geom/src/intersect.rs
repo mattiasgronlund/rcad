@@ -5910,11 +5910,11 @@ pub(crate) enum TheCutHalfway {
     ///
     /// In front of the first picker alone are the two endless pieces, and
     /// `mirror`, the flat surface through the first apex that holds both axes,
-    /// holds them apart, since the near branch is its own mirror image across
-    /// it and crosses it only at its vertex. In front of the second picker
-    /// alone are the arc and the far branch, and `near`, the flat surface
-    /// through the first apex square to its axis, facing the near nappe, holds
-    /// them apart.
+    /// or one a rounding off it, holds them apart, since the near branch is its
+    /// own mirror image across it and crosses it only at its vertex. In front
+    /// of the second picker alone are the arc and the far branch, and `near`,
+    /// the flat surface through the first apex square to its axis, facing the
+    /// near nappe, holds them apart.
     AHyperbola {
         near: HalfSpaceThroughAPoint,
         mirror: HalfSpaceThroughAPoint,
@@ -6029,10 +6029,8 @@ pub(crate) enum TheCutHalfway {
 ///
 /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where two mirror images
 /// touch at two points, or are held apart, and a product on the way to the
-/// flat surfaces that pick the pieces apart cannot be formed exactly, or,
-/// where they touch, the flat surface halfway
-/// cuts a hyperbola and the one that holds both axes does not come out as
-/// numbers `f64` holds exactly: a **gap**, since the pieces are there.
+/// flat surfaces that pick the pieces apart cannot be formed exactly: a
+/// **gap**, since the pieces are there.
 ///
 /// [`Error::ACrossingBetweenAConeAndAnotherCurvedSurface`] where none of the
 /// four proves the crossing either way round otherwise: two cones whose own
@@ -6805,20 +6803,31 @@ impl TwoFlatCuts {
     /// `d` of the nappe `w` points into. So `F = 0` with `N·Q(n)` above zero
     /// is on the nappe the sign of `w·n` names, and the near branch with it.
     ///
-    /// **`mirror` faces along `n × w`**, worked out exactly and kept only
-    /// where every number of it is one `f64` holds. Where `n` lies along an
-    /// axis of the coordinates it is written as one there first, so that the
-    /// product is the axis's own numbers moved about.
+    /// **`mirror` faces along `n × w`**, worked out exactly and each number
+    /// rounded once, as [`TwoFlatCuts::the_two_pickers`] are. Its flat surface
+    /// holds both axes, and the near branch crosses that only at its vertex,
+    /// on the arc between the touches. A facing a rounding off turns the flat
+    /// surface about the apex by about a rounding, so its line in the flat
+    /// surface halfway still runs between the asymptotes, crosses the near
+    /// branch once, near the vertex, and leaves one endless piece on either
+    /// side. That fails only within a rounding or so of a parabola halfway,
+    /// whose asymptotes close up, or of the two touches meeting at the vertex.
+    /// Where `n` lies along an axis of the coordinates it is written as one
+    /// there first, so that the product is the axis's own numbers moved about
+    /// and nothing is rounded.
     ///
     /// # Errors
     ///
     /// [`Error::CannotNameWhichPieceOfACrossingThisIs`] where the sign of
-    /// `w·n` or of a number of `n` is not settled, or where `n × w` has a
-    /// number `f64` does not hold exactly: a **gap**, since the pieces are
-    /// there. Whatever [`HalfSpaceThroughAPoint::new`] refuses, which a
-    /// finite apex and a facing of exact numbers that are not all zero never
-    /// meet: `n × w` is zero only where the axes are mirror images along one
-    /// line, which is one axis and never reaches here.
+    /// `w·n` or of a number of `n` is not settled, or where a product on the
+    /// way to `n × w` cannot be formed exactly: a **gap**, since the pieces
+    /// are there. Whatever [`HalfSpaceThroughAPoint::new`] refuses, which a
+    /// finite apex and this facing never meet. Its numbers are finite: each
+    /// number of `n` is below about `2^512`, since `N` was formed exactly, and
+    /// each of `w` about one at most. And they are not all zero: `n × w` is
+    /// zero only where the axes are mirror images along one line, which is one
+    /// axis and never reaches here, and an [`Exact`] that is not zero rounds
+    /// to a number that is not, its largest entry being itself rounded.
     fn what_holds_the_hyperbolas_pieces_apart(&self, first: &Cone) -> Result<TheCutHalfway> {
         let up = first.axis().direction();
         let near = match self.leaning.sign() {

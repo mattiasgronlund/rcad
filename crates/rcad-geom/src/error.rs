@@ -330,7 +330,9 @@ pub enum Error {
     /// marches each. What is left is the pair whose flat surface halfway cuts a
     /// parabola, whose two endless pieces beyond the touches share one corner
     /// of the pickers; and the pair with each apex on the other cone, which
-    /// touch all along the straight line between the apexes.
+    /// touch all along the straight line between the apexes. The first takes a
+    /// slope other than one: at slope one a parabola halfway puts each apex on
+    /// the other cone, and that pair is the second.
     ///
     /// **A gap** (§16.10, §31.9). [`EdgeRun`](crate::EdgeRun) *can* say this:
     /// the two loops of a pinch are the two sides of one half-space through the
@@ -377,10 +379,13 @@ pub enum Error {
     /// `a_cone_crossed_by_a_cone_or_ball_on_its_axis.rs` pins it.
     ///
     /// So are two cones of one slope that are mirror images and touch at two
-    /// points where the flat surface halfway between the apexes cuts a
-    /// hyperbola and the flat surface through one apex holding both axes, which
-    /// holds two of its pieces apart, does not come out as numbers `f64` holds
-    /// exactly (Q2887), also a **gap**.
+    /// points, or are held apart, where a product on the way to the flat
+    /// surfaces that pick their pieces apart cannot be formed exactly, also a
+    /// **gap**. Where the flat surface halfway between the apexes cuts a
+    /// hyperbola, the flat surface through one apex holding both axes, which
+    /// holds two of its pieces apart, was refused here too where its facing
+    /// did not come out as numbers `f64` holds exactly (Q2887); since Q2905
+    /// that facing is rounded once instead.
     #[error(
         "this crossing comes in two pieces and no half-space square to both surfaces can be \
          written down in f64 to tell them apart"
