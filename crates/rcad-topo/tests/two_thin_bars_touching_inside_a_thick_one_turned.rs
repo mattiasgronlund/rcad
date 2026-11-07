@@ -181,12 +181,35 @@ fn a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_inside_it() {
 }
 
 /// The intersection is the thin bar at `x = 1` between the thick bar's ends,
-/// `4π`. At the turn `4.69` it is refused
-/// `Invalid(FacesDoNotAgreeWhichWayTheyFace)` once the rim's side is read off
-/// the thin circle, so that turn is left out (Q3244).
+/// `4π`, and the lens the two thin bars share past them, which holds no volume
+/// a measure can see.
+///
+/// The lens's cap at `z = 3` is bounded by an arc of each thin circle between
+/// the two places they cross, about `2e−8` apart. Each arc stands about
+/// `5e−17` off the chord between them, under the rounding of a point placed
+/// from its circle's centre `1` away, and at the turn `4.69` the middle point
+/// of each arc was walked onto the chord's same side. So the cap's loop ran
+/// clockwise, the triangulator drew it anticlockwise anyway, each of its four
+/// sides was used the same way as by the pipe wall beside it, and the
+/// intersection was refused `Invalid(FacesDoNotAgreeWhichWayTheyFace)` from
+/// the mesh the fuse sums over (Q3244, Q3249). `rcad_geom::walk` now places a
+/// point of such an arc from the chord (Q3263).
 #[test]
 fn a_thick_bar_and_a_thin_one_inside_it_meet_another_overlapping_it_by_a_rounding() {
-    the_bars_alone_fused_by(Rule::Intersection, 4.0 * PI, &[0.3, 3.0, 4.71]);
+    the_bars_alone_fused_by(Rule::Intersection, 4.0 * PI, &TURNS);
+}
+
+/// Tenths of a turn, `n` for the turn `f64::from(n) * 0.1`, at which the
+/// intersection was refused as at `4.69`: on the cap at `z = 3`, or at `0.8`
+/// on the one at `z = −3` (Q3262).
+const TENTHS_THE_INTERSECTION_WAS_REFUSED_AT: [u8; 4] = [3, 8, 9, 19];
+
+/// The intersection at the tenths of a turn it was refused at.
+#[test]
+fn a_thick_bar_and_a_thin_one_inside_it_meet_another_overlapping_it_by_a_rounding_at_tenths_of_a_turn()
+ {
+    let turns = TENTHS_THE_INTERSECTION_WAS_REFUSED_AT.map(|tenths| f64::from(tenths) * 0.1);
+    the_bars_alone_fused_by(Rule::Intersection, 4.0 * PI, &turns);
 }
 
 /// The difference is the thick bar and the two ends of the bar at `x = −1`,
