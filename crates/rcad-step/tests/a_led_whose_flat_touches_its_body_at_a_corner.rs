@@ -457,6 +457,7 @@ fn a_d5_led_3_up_less_a_box_round_either_corner_or_far_off_and_what_the_two_shar
                 shared: back,
                 walls_inside: 5,
             },
+            THE_FAR_BOX,
         ],
     );
 }
