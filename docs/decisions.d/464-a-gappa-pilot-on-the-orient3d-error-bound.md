@@ -2948,10 +2948,11 @@ asserts that. `cyl.g` has the controls `c_cyl_half.g`, `c_cyl_nonormal.g` and
 `c_cyl_value.g`, which is the section's `cylv.g`: the claim on `value` exits 1
 at the code's `B` (464.15 4), so it is a control and not a proof. Not moved
 from 464.15: `c_cyl_noeb.g`, which exits 124 at 600 s and so cannot be a
-control; `c_cylv_half.g`, which says nothing `c_cyl_value.g` does not;
-`cylv2.g`, `vgen.py` and the probes `m2.g` and `m3.g`; the bisection scripts
-`b_*`; and the run and tally scripts. `prove-bounds` proved the 65 of 464.15
-and every control failed. `cone.g`, `sumexact.g` and `conecases.py` are 464.16's, at
+control; `c_cylv_half.g`, which says nothing `c_cyl_value.g` does not; the
+probes `t_vtriv.g` and `t_v2triv.g`, which prove nothing about a bound; the
+bisection scripts `b_cylv2_<m>` above 82, which prove what 82 does; and the
+run and tally scripts. `prove-bounds` proved the 65 of 464.15 and every
+control failed. `cone.g`, `sumexact.g` and `conecases.py` are 464.16's, at
 `e59fab75`, with `cone.g`'s three controls. Read against `on_floats` as Q2779
 changed it, `cone.g` still restates it: its hypotheses already hold `R2` and
 `A` normal. `conesplit.py` is moved with its loop cut to the axial states `n`,
@@ -2963,8 +2964,7 @@ cases where no cross product component is `n` and `up` cancels, `y` is zero,
 so the half control proves and is no control; those 27 have `c_cone_<case>_usq.g`,
 at `B = u^2`, instead, and the script writes the half control for the other
 164. `check-proofs` prints
-`check-proofs: 1053 proofs and 1076 controls match their stamps`. 464.17 on is
-not moved yet. Q2700's branch was merged by Q3279, which also fixed the
+`check-proofs: 1053 proofs and 1076 controls match their stamps`. Q2700's branch was merged by Q3279, which also fixed the
 selftest: its first-script and first-control pipelines ended in `head -1`, which
 under `pipefail` dies of SIGPIPE (exit 141) once `proofs/gappa/` lists past
 64 KB. The script pipeline is now a loop that takes the first script whose
@@ -2973,6 +2973,43 @@ name, restates an `Owner::name`; the control pipeline ends in `sed -n 1p`, which
 reads to the end. `fails` had the same fault in `printf | grep -q`, which died
 the same way on the 1053 lines the check prints; it reads the output through a
 here-string now.
+
+Q3280, a lane after Q2700's, moved in the rest of 464.15 and 464.17, on
+2026-11-07, each restates line at the commit the section read or at
+`e59fab75`. From 464.15: `cylv2.g` is the doubled form of 4 at `B = 10u +
+82u²`, the smallest `m` that proves, written by `vgen.py` from `cyl.g`, with
+`c_cylv2_half.g` at `u / 2` and `c_cylv2_81.g` at `10u + 81u²`; both fail.
+`m2.g`, `m3.g`, `t_axis.g` and `t_perm2.g` are the small probes of 3 and 4,
+each with a restates line for `on_floats`, since `bounds.py` refuses a proof
+with none; each proves, with no control, since each states no bound that can
+fail. `cylcases.py` now also writes `c_cyl_b69.g`, `cyl.g` at `9u + 69u²`:
+`B` is a bound, so a proof that fails at 69 fails at every smaller `m`, which
+stands for the section's nine `b_cyl_<m>`. From 464.17, `torus.rs`'s `on_floats`
+and its two helpers have the same arithmetic as at `4be293a5` (the commits
+since changed comments only): `tor.g`, `torcases.py`, `torsplit.py` and
+`torshapes.py`, the section's `shapes.py`. `torsplit.py` writes the 179 cases
+other than `nnnnn`, which is `tor.g`, and asserts that. `tor.g` has
+`c_tor_half.g`, `c_tor_nonormal.g`, `c_tor_noeb.g` and `c_tor_b17_231.g`, the
+largest `17u + m u²` that fails, standing for the section's `b17_tor_<m>`
+with `m` to 231. The 179 cases have each a control at `u / 2`. `prove-bounds`
+proved the 180 and every control failed. Not moved: `torcases.py`'s `b_tor_<m>`,
+which prove and are no control; and `tally3.py`, `ku.py`, `same.py` and the run
+scripts, which read run logs, not the tree, like 464.14's. `check-proofs`
+prints `check-proofs: 1238 proofs and 1262 controls match their stamps`.
+464.18 to 464.24 are not moved yet.
+
+Do the cone scripts of 464.30 and 464.31 still restate `HowFarFromTheSkin::
+on_floats`? Not as they were read. 464.30 read `cone.rs` at `c3c03fd8`, and
+neither section's text names `up_reach`: Q2779's `83539cc32`, of 2026-11-06,
+added `product_is_normal(up_reach, up_reach)` and `product_is_normal(slope *
+slope, up_reach * up_reach)` to `stays_accurate` (`cone.rs:464-465`), which
+the sections call `R2` and `A` normal and 464.30 leaves out as a hypothesis
+where `up` cancels. `prove-bounds` refuses to stamp a script whose item
+changed since its restates line. What they prove is still true of the code,
+since the code now refuses a subset of the inputs they cover, so the scripts
+are not wrong; they are not stamped. Moving one means adding those two
+hypotheses to its text, reading it against `cone.rs` from line 424, and
+proving it again. They are not moved here.
 
 - `proofs/bounds.py` holds both recipes. `check` is `check-proofs`, `prove
   [name]` is `prove-bounds`, and `extent PATH ITEM` prints the lines
