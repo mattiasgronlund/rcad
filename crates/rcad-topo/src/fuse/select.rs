@@ -2376,8 +2376,9 @@ fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
 /// that nothing before placed takes the placement of the piece of its own
 /// face across one of its sides, where the start of that side, or the middle
 /// of a straight side, is clear of every face of every solid it is placed
-/// against, when the point search places that piece inside or outside
-/// (`docs/decisions.md` §35.6, Q1537, Q2551).
+/// against, when the point search places that piece inside or outside, or,
+/// finding no point inside it, one of its corners does ([`by_a_corner`])
+/// (`docs/decisions.md` §35.6, Q1537, Q2551, Q3267).
 ///
 /// **Why a neighbour can place a piece here.** `P` and `P′` are pieces of one
 /// face that share a side `s`, and `m` is where `s` starts, or the middle of
@@ -2402,8 +2403,15 @@ fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
 /// on its surface and answers [`OnAFace::NotHeld`] only when no point of it
 /// that is on the surface is on the face. Unlike
 /// [`by_the_piece_across_a_side`], this does not need `S`'s faces flat: it asks
-/// about one point and not about a whole side. What the faces and the search
-/// asked the policy goes into the log only when the piece is placed.
+/// about one point and not about a whole side. What the faces, the search and
+/// the corners asked the policy goes into the log only when the piece is
+/// placed.
+///
+/// **`P′` is placed by any rule that places a piece.** The argument above
+/// needs only that `P′` is inside or outside `S`, so where the point search
+/// finds no point inside `P′`, [`by_a_corner`] is asked of `P′`'s corners, by
+/// its own argument. A search that puts `P′` on the skin, or is refused, still
+/// places nothing.
 ///
 /// The pieces this was built for are the bands of two quarter bends placed
 /// half a turn apart by a float turn: each bend's cap plane cuts the other
@@ -2459,6 +2467,20 @@ fn is_one_plane_either_way(one: Plane, other: Plane) -> bool {
 /// inside, and without the middle the strip was refused `a point inside a
 /// piece of a face` (Q3243,
 /// `tests/two_thin_bars_touching_inside_a_thick_one_turned.rs`).
+///
+/// A corner of the piece across places the same kind of strip once a box
+/// stands on the end of a plate 5 or 50 long out from the thick bar, its floor
+/// at `z = −1` and its top at `z = 1`. The box may meet the plate, so every
+/// face of the solid it is united with is cut by every surface of the box
+/// (§48, §400), the box's floor and top cut the strip in two arcs from one
+/// ruling to the other, and the strip from `z = −1` to 1 has every corner on
+/// them, where [`by_a_corner`] asks none. Each arc starts clear of every face
+/// of the box. The piece across it is the strip from `z = 1` to 2, or
+/// from `z = −2` to `−1`, which holds no point the search can find either, but
+/// its corners at `z = ±2` are off every surface of the box and place it
+/// outside. Asking the search alone, the union with the box was refused `a
+/// point inside a piece of a face` (Q3267,
+/// `tests/a_pin_flush_with_a_round_boss_on_a_long_plate_turned.rs`).
 fn by_the_piece_across_a_side_clear_of_every_face(
     model: &Model,
     scratch: &Scratch,
