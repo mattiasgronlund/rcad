@@ -38,6 +38,9 @@
 //! surfaces meet at 32 of the 63 turns `f64::from(n) * 0.1` up to 6.2, until
 //! `the_place_the_model_points_at` in `fuse/bake.rs` told two places of one
 //! corner apart by the corner's own rounding (Q3255).
+//!
+//! At the turns of `TENTHS_THE_THIN_BARS_STAND_APART_AT`, `|c|² − 1` is above
+//! nought instead, and the thin bars stand apart by a hair.
 
 use core::f64::consts::PI;
 
@@ -89,6 +92,104 @@ fn a_block_on_a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_in
     }
 }
 
+/// The turns at which the four united and validated and `SolidView::measure`
+/// was refused at a deflection of `0.01`, `0.02` and `0.03` (Q3262).
+const TURNS_THE_BLOCK_WAS_NOT_MEASURED_AT: [f64; 4] = [1.3, 2.4000000000000004, 2.5, 3.7];
+
+/// The block 5 long at the turns its union was refused a mesh at.
+///
+/// With the block, the thick bar's rim on each cap is one arc between the two
+/// corners where the block's sides meet it, and walked evenly its middle point
+/// is at `−2c`, where the thin bar at `x = −1` touches it. That thin circle's
+/// walk puts its middle point there too, and the two are two entries of the
+/// point table at the very same coordinates. The cap's triangulator names a
+/// place two loops share by the outline's entry, so the cap's triangles used
+/// the rim's entry there and the thin bar's wall the other, and the measure was
+/// refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 1, used: 1 }`, or, at
+/// `1.3`, the `BoundaryCrossesItself` of the cap pinched before it (Q3266).
+/// The mesh now gives the thin circle the rim's entry for that point
+/// (`name_each_point_a_hole_and_its_outline_were_walked_to_once` in
+/// `mesh.rs`).
+#[test]
+fn a_block_on_a_thick_bar_with_two_thin_bars_measures_where_a_thin_circle_and_the_rim_are_walked_to_one_point()
+ {
+    for turn in TURNS_THE_BLOCK_WAS_NOT_MEASURED_AT {
+        for room in [0.01, 0.02, 0.03] {
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let thick = a_bar(&mut model, 2.0, 4.0, [0.0, 0.0, -2.0], turn);
+            let block = the_block(&mut model, BLOCK, turn);
+            let left = a_bar(&mut model, 1.0, 6.0, [-1.0, 0.0, -3.0], turn);
+            let right = a_bar(&mut model, 1.0, 6.0, [1.0, 0.0, -3.0], turn);
+            let with_the_block = fused(&mut model, &[thick], &[block], Rule::Union, || {
+                format!("turned {turn}, the block")
+            });
+            let with_the_left_bar =
+                fused(&mut model, &with_the_block, &[left], Rule::Union, || {
+                    format!("turned {turn}, the bar at x = −1")
+                });
+            let last = || format!("turned {turn}, the bar at x = 1, measured at {room}");
+            let [whole] = fused(&mut model, &with_the_left_bar, &[right], Rule::Union, last)[..]
+            else {
+                panic!("{}: the four unite into one solid", last());
+            };
+            let deflection = Deflection::of(room).expect("a fine mesh");
+            valid_and_of_volume(&model, whole, the_volume(BLOCK), deflection, last);
+        }
+    }
+}
+
+/// Tenths of a turn, `n` for the turn `f64::from(n) * 0.1`, at which `|c|² − 1`
+/// is above nought, among the turns Q3262 found refused (Q3264, Q3265). With
+/// Q3255 and Q3264 on main both blocks measured at all of them but `4.9`, where
+/// each united and validated and the measure was refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 1, used: 1 }`, as at the turns
+/// above (Q3274, Q3266).
+const TENTHS_THE_THIN_BARS_STAND_APART_AT: [u8; 7] = [2, 4, 31, 49, 54, 61, 62];
+
+/// The block 5 long and the block 50 long where the thin bars stand apart by a
+/// hair, so each pokes out of the thick bar's wall rather than into the other,
+/// as in `a_thin_bar_a_hair_out_of_a_thick_bars_wall_turned.rs` (Q3275).
+#[test]
+fn a_block_on_a_thick_bar_with_two_thin_bars_a_hair_apart_measures() {
+    for length in [BLOCK, 50.0] {
+        for tenths in TENTHS_THE_THIN_BARS_STAND_APART_AT {
+            let turn = f64::from(tenths) * 0.1;
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let thick = a_bar(&mut model, 2.0, 4.0, [0.0, 0.0, -2.0], turn);
+            let block = the_block(&mut model, length, turn);
+            let left = a_bar(&mut model, 1.0, 6.0, [-1.0, 0.0, -3.0], turn);
+            let right = a_bar(&mut model, 1.0, 6.0, [1.0, 0.0, -3.0], turn);
+
+            let c = where_its_axis_crosses_z_nought(&model, right);
+            assert_eq!(
+                where_its_axis_crosses_z_nought(&model, left),
+                c.map(|x| -x),
+                "turned {turn}: the thin bars' axes are at c and −c"
+            );
+            assert_eq!(
+                squared_length_less_one(c),
+                Decision::Pos,
+                "turned {turn}: the thin bars' axes at {c:?} are over 2 apart"
+            );
+
+            let with_the_block = fused(&mut model, &[thick], &[block], Rule::Union, || {
+                format!("turned {turn}, the block {length} long")
+            });
+            let with_the_left_bar =
+                fused(&mut model, &with_the_block, &[left], Rule::Union, || {
+                    format!("turned {turn}, the bar at x = −1 on the block {length} long")
+                });
+            let last = || format!("turned {turn}, the bar at x = 1 on the block {length} long");
+            let [whole] = fused(&mut model, &with_the_left_bar, &[right], Rule::Union, last)[..]
+            else {
+                panic!("{}: the four unite into one solid", last());
+            };
+            let deflection = Deflection::of(0.01).expect("a fine mesh");
+            valid_and_of_volume(&model, whole, the_volume(length), deflection, last);
+        }
+    }
+}
+
 /// Tenths of a turn, `n` for the turn `f64::from(n) * 0.1`, at which the block
 /// 50 long was refused `Undecidable` where three surfaces meet and now unites
 /// (Q3255).
@@ -107,8 +208,8 @@ const TENTHS_THE_LONG_BLOCK_UNITES_AT: [u8; 25] = [
 /// that held both places. The corner was stored inside the box of one of them,
 /// and its own rounding holds that one alone.
 ///
-/// Seven more of the 32 turns it was refused at go on to be refused further
-/// along, as the block 5 long is: `0.2` and the six of Q3265.
+/// The other seven of the 32 turns it was refused at, where the thin bars stand
+/// apart by a hair, are [`TENTHS_THE_THIN_BARS_STAND_APART_AT`].
 #[test]
 fn a_block_fifty_long_on_a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_inside_it()
 {
