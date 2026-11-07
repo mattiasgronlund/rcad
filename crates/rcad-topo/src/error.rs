@@ -1394,6 +1394,34 @@ pub enum Error {
         why: rcad_mesh::CannotTriangulate,
     },
 
+    /// The sweep refused one face or edge of the description for something
+    /// other than the two refusals above.
+    ///
+    /// `refused` is the sweep's own refusal, and the face or edge it names is
+    /// a key into the throwaway model
+    /// [`SolidBuilder::build`](crate::SolidBuilder::build) swept. That model
+    /// is dropped the moment the build refuses, and the caller's model is left
+    /// untouched, so no model the caller holds has that entity in it. The
+    /// address is `entity` and `index` instead, the way
+    /// [`Error::ADraftEntityIsUsedTwice`] gives one: the position the caller
+    /// described it at. A crown of a ring with a slot across its top, its skin
+    /// one face right round the ring, is refused
+    /// [`Error::CurvedFaceWithAHoleGoesTooFarRound`] this way (Q2890).
+    ///
+    /// **The message is the sweep's own and does not name the position**, for
+    /// the reason [`Error::ADraftFaceCouldNotBeMeshed`] gives.
+    #[error("{refused}")]
+    #[non_exhaustive]
+    ADraftEntityWasRefusedByTheSweep {
+        /// `"face"` or `"edge"`.
+        entity: &'static str,
+        /// Which one of the description, counting from zero.
+        index: usize,
+        /// The refusal as the sweep raised it. The key in it names nothing in
+        /// any model the caller holds.
+        refused: Box<Error>,
+    },
+
     /// A second shell was described, and a solid built face by face has one.
     ///
     /// A void inside a solid, and a solid in two separate lumps, are both
@@ -1500,7 +1528,8 @@ impl Error {
     ///
     /// The solid builder's refusals are limits of the draft as it was handed
     /// over: a wire of two steps, or a skin open along an edge, describes no
-    /// solid. An importer whose own reading of a file made the draft has its
+    /// solid. [`Error::ADraftEntityWasRefusedByTheSweep`] is not one of those,
+    /// and says what the sweep's refusal it carries says. An importer whose own reading of a file made the draft has its
     /// own refusal to class, because a file has reached several of them for a
     /// shape that exists (§43.6, §218.4, §250.7).
     ///
@@ -1514,7 +1543,8 @@ impl Error {
             Self::ADraftEdgeHasACrossingThatCannotBeFollowed { why, .. }
             | Self::ACrossingAlongThisEdgeCouldNotBeFollowed { why, .. } => why.limit_or_gap(),
             Self::Invalid(invalid) => invalid.limit_or_gap(),
-            Self::TheFuseWasRefusedInAModelOfItsOwn { refused, .. } => refused.limit_or_gap(),
+            Self::TheFuseWasRefusedInAModelOfItsOwn { refused, .. }
+            | Self::ADraftEntityWasRefusedByTheSweep { refused, .. } => refused.limit_or_gap(),
             Self::KeyFromAnotherModel { .. }
             | Self::TooFewPoints { .. }
             | Self::PointNotFinite { .. }
@@ -1662,6 +1692,7 @@ impl Error {
             | Self::ACrossingThisCannotBeOrderedAlong
             | Self::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed
             | Self::ADraftFaceCouldNotBeMeshed { .. }
+            | Self::ADraftEntityWasRefusedByTheSweep { .. }
             | Self::ASolidBuiltFaceByFaceHasOneShell
             | Self::TwoSolidsShareSpace { .. }
             | Self::CannotTellWhetherTwoSolidsShareSpace { .. }
@@ -1677,6 +1708,8 @@ impl Error {
     ///
     /// [`Error::ADraftEdgeHasACrossingThatCannotBeFollowed`] is not one: it
     /// names an edge of a description by its place in it, which is no key.
+    /// Nor is [`Error::ADraftEntityWasRefusedByTheSweep`], whose `refused`
+    /// holds a key of a model that is gone.
     pub(crate) fn the_edge_it_names(&self) -> Option<EdgeKey> {
         match self {
             Self::CannotYetMeasureHowLongThisCurveIs { edge }
@@ -1747,6 +1780,7 @@ impl Error {
             | Self::ACrossingThisCannotBeOrderedAlong
             | Self::ACurvedEdgeThatIsPartOfACrossingCannotBeNamed
             | Self::ADraftFaceCouldNotBeMeshed { .. }
+            | Self::ADraftEntityWasRefusedByTheSweep { .. }
             | Self::ASolidBuiltFaceByFaceHasOneShell
             | Self::TwoSolidsShareSpace { .. }
             | Self::CannotTellWhetherTwoSolidsShareSpace { .. }
