@@ -2996,7 +2996,39 @@ proved the 180 and every control failed. Not moved: `torcases.py`'s `b_tor_<m>`,
 which prove and are no control; and `tally3.py`, `ku.py`, `same.py` and the run
 scripts, which read run logs, not the tree, like 464.14's. `check-proofs`
 prints `check-proofs: 1238 proofs and 1262 controls match their stamps`.
-464.18 to 464.24 are not moved yet.
+
+A second Q3280 lane moved in 464.18 to 464.24, on 2026-11-07, extracted from
+the sections with literal-number `sed` and each proved by `prove-bounds`.
+464.18: `planeall.py` writes the 172 `plane_<states>[_c<set>].g` and
+`planev_off0.g` with their controls, and `o2zero.py` writes `o2zf`, `o2zb` and
+their `_tiny` forms; `plane_nnn.g` is a separate proof from 464.8's `plane.g`,
+since its names differ. 464.19: `point.g`, `point1.g`, `point2.g`, `doubling.g`
+(which has a `Cargo.lock` restates line, `nalgebra`) with `pointcontrols.py`,
+`pointturn.py` and `pointsos.py`. 464.20: `vector*.g`, `square.g`, `square_14.g`
+and `square_one.g`, the section's `r_square_14` and `r_square_one`, which
+prove; `r_square_15` fails and is `c_square_15.g`. 464.21: `corner_ball`,
+`corner_plane`, `corner_pipe`, `corner_torus` (the section's `ball`, `plane`,
+`pipe`, `torus`) and `point_25`, `point1_25`, `point2_25`; `r_pipe_36` fails
+and is `c_corner_pipe_36.g`. 464.22: `stage*.g`; `stage_e_from_0`,
+`stage_plain` and `stage_e0_whole` fail and are controls `c_stage_*`. 464.23:
+`parabola_s1.g` to `parabola_s5.g` and four controls from `parabolacases.py`.
+464.24: `signedcases.py` and `casecontrols.py` write the twelve `signeds<k>[n]`
+and `shifts<k>[n]` cases. In `casecontrols.py` the `_anyl` files prove, as
+the section says, so they are proofs `<case>_anyl.g`, not controls, and the
+two shift `k = 2` `_sumonly` files prove too (their goal is `16u`), so they
+are proofs; the two signed ones are controls and fail.
+
+Their restates lines are at the commit the section read, except that
+`held_near_length_one` (`point.g`, `vector.g`, `square.g`) is at `17306d5ee`,
+since Q3234 split it into `held_near_length_one` and `sits_near_length_one`
+with the same arithmetic, and `parabola_s*` restate
+`what_a_plane_cuts_out_of_a_cone`, into which `where_a_plane_cuts_a_cone`'s
+arithmetic moved unchanged. Not moved: `o2zfb.g`, which `prove-bounds` refuses
+(`coqc printed no Section Variables`), `stage_e0_1.g`, which `coqc` refuses (a
+number it cannot read as a `positive`), the `p_` probes of 464.23, which prove
+nothing, and `summary.py`, `controls.py`, `same.py`, `ids.py` and the run
+scripts, which read run logs, not the tree. `check-proofs` prints
+`check-proofs: 1471 proofs and 1557 controls match their stamps`.
 
 Do the cone scripts of 464.30 and 464.31 still restate `HowFarFromTheSkin::
 on_floats`? Not as they were read. 464.30 read `cone.rs` at `c3c03fd8`, and

@@ -2,8 +2,8 @@
 changes one thing in a case: a smaller bound, to see whether it proved its
 goal from hypotheses that contradict each other; the weighted sum of k = 2
 bounded only as far as the plain sum bounds it, to see whether the proof needs
-the unit normal; or L allowed below 2^-1022, to see whether the proof needs L
-normal."""
+the unit normal. It also writes each case with L allowed below 2^-1022 as a
+proof named <case>_anyl: it still proves, so L needs no lower bound there."""
 
 import os
 
@@ -35,8 +35,11 @@ for name in ("signeds", "shifts"):
             lhs = GOAL[name].split(" in ")[0]
             b = BELOW[k]
             write(f"c_{case}_below.g", sub(src, GOAL[name], f"{lhs} in [-{b}, {b}]"))
-            write(f"c_{case}_anyl.g", sub(src, "L in [1b-1022, 1b1024]", "L in [1b-1074, 1b1024]"))
+            write(f"{case}_anyl.g", sub(src, "L in [1b-1022, 1b1024]", "L in [1b-1074, 1b1024]"))
             if k == 2:
                 # 9/8 of the plain sum's 1774/1024 is all that bound gives.
-                write(f"c_{case}_sumonly.g",
+                # The shift's goal is 16u, so it proves with the plain sum
+                # and the file is a proof there, not a control.
+                prefix = "c_" if name == "signeds" else ""
+                write(f"{prefix}{case}_sumonly.g",
                       sub(src, WEIGHTED[name], WEIGHTED[name].replace("1708b-10", "15966b-13")))
