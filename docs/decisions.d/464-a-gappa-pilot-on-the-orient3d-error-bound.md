@@ -2957,10 +2957,14 @@ changed it, `cone.g` still restates it: its hypotheses already hold `R2` and
 `A` normal. `conesplit.py` is moved with its loop cut to the axial states `n`,
 `e` and `c`: in `a`, `s` and `t`, `R2` or `A` is below the normals, which
 `on_floats` now refuses, so those 192 scripts no longer restate the code and
-are not written. Its 191 other cases and their controls are written by the
-script and not yet run through `prove-bounds`. `check-proofs` prints
-`check-proofs: 862 proofs and 885 controls match their stamps`. The cases of
-`conesplit.py`, and 464.17 on, are not proved here yet.
+are not written. Its 191 other cases are written by the script and each
+proved by `prove-bounds`. Each has a control at `B = u / 2`, but in the 27
+cases where no cross product component is `n` and `up` cancels, `y` is zero,
+so the half control proves and is no control; those 27 have `c_cone_<case>_usq.g`,
+at `B = u^2`, instead, and the script writes the half control for the other
+164. `check-proofs` prints
+`check-proofs: 1053 proofs and 1076 controls match their stamps`. 464.17 on is
+not moved yet.
 
 - `proofs/bounds.py` holds both recipes. `check` is `check-proofs`, `prove
   [name]` is `prove-bounds`, and `extent PATH ITEM` prints the lines

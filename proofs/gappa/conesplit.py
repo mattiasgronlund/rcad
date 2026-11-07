@@ -34,8 +34,9 @@ byte for byte. Where up cancels, the axial term's error is the whole
 of the true one, sl^2 Dt^2, and it is averaged over XA = ss R2 rather than
 ss G^2, since R2 then need not be near G^2. The names are cone_<case>.g and
 c_cone_<case>_half.g. Where no component is n and up cancels, y is 0 and its
-error is a u^2 of the permanent, which B = u / 2 covers, so those 108 cases
-have a second control, c_cone_<case>_usq.g, at B = u^2.
+error is a u^2 of the permanent, which B = u / 2 covers, so the half control
+proves there and is no control; those 27 cases have c_cone_<case>_usq.g, at
+B = u^2, instead.
 Run as: python3 conesplit.py
 """
 import itertools
@@ -589,6 +590,7 @@ for cross in map("".join, itertools.product("ncsu", repeat=3)):
             assert make(case) == open("cone.g").read()
             continue
         write(f"cone_{case}.g", make(case))
-        write(f"c_cone_{case}_half.g", make(case, B_HALF))
-        if ax not in UPS and "n" not in cross:
+        if ax in UPS or "n" in cross:
+            write(f"c_cone_{case}_half.g", make(case, B_HALF))
+        else:
             write(f"c_cone_{case}_usq.g", make(case, B_USQ))
