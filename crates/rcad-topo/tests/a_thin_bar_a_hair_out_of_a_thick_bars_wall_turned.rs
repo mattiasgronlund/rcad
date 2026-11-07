@@ -31,8 +31,12 @@ use rcad_predicates::expansion::{expansion_sign, expansion_sum, scale_expansion}
 use rcad_predicates::{Decision, Policy, ProvenanceLog};
 use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 
-/// The turns at which Q3241 found the second union refused.
-const TURNS: [f64; 4] = [1.0, 2.0, 5.0, 6.0];
+/// The turns at which Q3241 found the second union refused, and turn 4.9,
+/// which is `49.0 * 0.1`. There the block's second union was refused until
+/// Q3264 (Q3265), and after it all three went through and the measure was
+/// refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 1, used: 1 }` until
+/// Q3266 (Q3274).
+const TURNS: [f64; 5] = [1.0, 2.0, 4.9, 5.0, 6.0];
 
 /// [`TURNS`], turn 0.2, where `|c|² − 1` is `1.8e−18` and the corners are
 /// `3.8e−9` apart, and the turns `n · 0.1` for `n` = 4, 31, 49, 54, 61 and
