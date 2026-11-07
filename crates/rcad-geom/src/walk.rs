@@ -113,7 +113,7 @@ use crate::{
 /// **So is an arc of a conic that bows off its chord by less than this, placed
 /// from that chord** and not from the conic's centre. Its chain is derived at
 /// `AnArcTooFlatToPlaceFromItsCentre`, against the conic's size, and comes to
-/// under two thirds of this.
+/// under seven tenths of this.
 ///
 /// `every_point_along_a_crossing_is_on_both_surfaces.rs` measures the worst a
 /// search can find and prints the figure.
@@ -726,6 +726,22 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 /// chord, its one point came out on the chord's rounded middle, and that cone
 /// less the slab was refused `FacesDoNotAgreeWhichWayTheyFace`.
 ///
+/// **And when it bows by no more than half its chord**, `|B − A|/2`. With `α`
+/// off by `δ`, the bulge's term moves the middle point off the conic by
+/// `|N|·tan α·δ`. An arc that bows less than half its chord has `|N|` under
+/// `|T|/tan(α/2)`, with `T` the `−across·sin θm + and·cos θm` above, which
+/// keeps that under `3|T|·δ`: three times what the same rounding slides a
+/// point placed from the centre along the conic. Every arc of a circle the
+/// first test lets through bows under `tan(π/6)`, `0.58`, of half its chord.
+/// An ellipse drawn long and thin, walked round its tip, bows far more: the
+/// top of the block in `a_bar_lying_along_a_plane_or_a_bar.rs` cuts the pipe
+/// of the bar laid along it turned twice, whose axis drops `2⁻⁵²` a unit, in an
+/// ellipse `2⁵²` long, and the arc round its tip bows `2` between ends
+/// `5.96e−8` apart, with `|N|` at `4.5e15`. Placed from its chord, its one
+/// point came out `1.5e−8` past the tip and past the bar's near end, and that
+/// union was refused `CannotMeshAFace`
+/// (`an_arc_that_bows_more_than_half_its_chord_is_not_placed_from_its_chord`).
+///
 /// # How far off, derived
 ///
 /// With `u = f64::EPSILON / 2`, `L` the conic's size, and
@@ -740,9 +756,11 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 ///   between `−1` and `1`, which is no more than the larger of the two; and
 ///   they move `N`'s term by `(cos φ − cos α) / cos α` of `M`'s share, at most
 ///   one of it: `272u·L` in all.
-/// - **The angle.** `α` rounds by under `10u` radians, which is the formula
-///   for ends that far along the conic from the two used: by the same
-///   argument, under `10u·L` more.
+/// - **The angle.** `α` rounds by under `10u` radians. Off by `δ`, the
+///   formula is exact for the conic through the same ends whose `N` and `T`
+///   are scaled by `cos α / cos(α + δ)` and `sin α / sin(α + δ)`, at the angle
+///   `φ` scaled with `α`, so it moves a point off the true conic by under
+///   `|N|·|tan α|·δ + |T|·δ`, with `|tan α|` at most `√3`: under `28u·L`.
 /// - **`s` and `cos φ − cos α`**, a few `sin`s and a division each, out by
 ///   under `9u` and `6u` of `|B − A|/2` and `|N|`, both under `L`: `15u·L`.
 ///   `N`'s own subtraction and division add under `8u·L`.
@@ -750,7 +768,7 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 ///   two sums per coordinate on terms under `5L`, under `16u·L` a coordinate
 ///   and `28u·L` as a length.
 ///
-/// That is about `333u·L`, under two thirds of `D`. The room is for a libm a
+/// That is about `351u·L`, under seven tenths of `D`. The room is for a libm a
 /// few ulps out, as [`POINT_ALONG_A_CROSSING_ROUNDOFF`] leaves it.
 struct AnArcTooFlatToPlaceFromItsCentre {
     /// `M`, halfway between the run's two ends.
@@ -812,12 +830,17 @@ impl AnArcTooFlatToPlaceFromItsCentre {
             * across.length();
         let clears_its_own_rounding =
             off_the_chord_nearest_an_end > 4.0 * f64::EPSILON * (what_a_point_rounds_against + bow);
-        (bow <= deviation && on_the_conic && clears_its_own_rounding).then_some(Self {
-            halfway,
-            half_the_chord,
-            half,
-            out_to_the_middle,
-        })
+        let bows_less_than_half_its_chord = bow <= half_the_chord.length();
+        (bow <= deviation
+            && bows_less_than_half_its_chord
+            && on_the_conic
+            && clears_its_own_rounding)
+            .then_some(Self {
+                halfway,
+                half_the_chord,
+                half,
+                out_to_the_middle,
+            })
     }
 
     /// The points between the ends, at `steps − 1` angles evenly spaced along
