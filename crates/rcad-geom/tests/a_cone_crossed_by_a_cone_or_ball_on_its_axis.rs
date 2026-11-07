@@ -1185,6 +1185,52 @@ fn two_mirror_cones_leaning_out_of_every_coordinate_plane_touch_at_two_points_to
     );
 }
 
+/// Two mirror cones of slope one that touch, mirrored across a flat surface
+/// that is no coordinate plane: about `(1, 5, 3)` from the origin and about
+/// `(5, 1, 3)` from `(1, −1, 0)`, mirror images across `x − y = 1`, the flat
+/// surface halfway between the apexes. The two forms differ by
+/// `(x − y − 1)·(48(x + y + z) + 38)`, so they cross in the cut by
+/// `x − y = 1`, a hyperbola since `2·(−4)² = 32` is below `35·2 = 70`, and the
+/// ellipse `x + y + z = −19/24` cuts, which meet where
+/// `3456y² + 5280y + 1795 = 0`, twice. The line between the apexes leans
+/// against the first axis, `(1, −1, 0)·(1, 5, 3) = −4`, so the near nappe is
+/// the one behind it.
+///
+/// The flat surface holding both axes faces along `n × w = (−2c, −2c, 2(a + b))`
+/// for the stored first axis `(a, b, c)`, and `a + b` is no `f64`: rounded once,
+/// it still holds the hyperbola's two endless pieces apart. The control beside
+/// it is the same first cone and slope one about `(−1, 5, 3)` from `(1, 0, 0)`,
+/// mirror images across `x = 1/2`, whose forms differ by
+/// `(1 − 2x)·(33 − 20y − 12z)` and whose line between the apexes lies along
+/// `x`, so the flat surface holding both axes faces along numbers that are the
+/// stored axis's own.
+#[test]
+fn two_mirror_cones_across_a_slanted_flat_surface_touch_at_two_points_as_across_an_upright_one() {
+    let [one, other] = [[1.0, 5.0, 3.0], [5.0, 1.0, 3.0]].map(|along| {
+        let direction = Axis::new(Point::from([0.0; 3]), Vector::from(along))
+            .expect("a direction")
+            .direction();
+        [direction.x(), direction.y(), direction.z()]
+    });
+    assert_eq!(
+        [one[1], one[0], one[2]],
+        other,
+        "the two axes are stored alike but for the first two numbers swapped"
+    );
+    assert_named_as_a_hyperbola_and_an_ellipse_that_meet_where_they_touch(
+        &a_cone([0.0; 3], [1.0, 5.0, 3.0], 1.0),
+        &a_cone([1.0, -1.0, 0.0], [5.0, 1.0, 3.0], 1.0),
+        [([1.0, -1.0, 0.0], 1.0), ([1.0, 1.0, 1.0], -19.0 / 24.0)],
+        [[0.0; 3], [-1.0, -5.0, -3.0]],
+    );
+    assert_named_as_a_hyperbola_and_an_ellipse_that_meet_where_they_touch(
+        &a_cone([0.0; 3], [1.0, 5.0, 3.0], 1.0),
+        &a_cone([1.0, 0.0, 0.0], [-1.0, 5.0, 3.0], 1.0),
+        [([1.0, 0.0, 0.0], 0.5), ([0.0, 5.0, 3.0], 8.25)],
+        [[0.0; 3], [1.0, 5.0, 3.0]],
+    );
+}
+
 /// A run stated right round the crossing of the pair of
 /// [`two_cones_of_one_slope_one_turned_about_a_point_of_the_others_axis_touch_at_two_points`],
 /// starting and ending at a vertex of the hyperbola `z = 15` cuts, `(0, 3.75, 15)`
