@@ -1,10 +1,12 @@
 """Write the controls of 464.15 from cyl.g beside it: c_cyl_value.g, the claim
 on value, which does not prove at the code's B (the section's cylv.g);
-c_cyl_half.g at B = u / 2; and c_cyl_nonormal.g without product_is_normal.
-Each change is a text replacement that must match exactly once. Run as:
-python3 cylcases.py. The section's c_cyl_noeb.g, which exited 124 at 600 s,
-c_cylv_half.g and the bisection scripts are not written here: a control must
-exit 1 (464.10 5).
+c_cyl_half.g at B = u / 2; c_cyl_nonormal.g without product_is_normal; and
+c_cyl_b69.g at B = 9u + 69u^2, the largest of the section's bisection
+scripts b_cyl_61 to b_cyl_69, all of which fail: B is a bound, so one that
+fails at 69 fails at every smaller m. Each change is a text replacement that
+must match exactly once. Run as: python3 cylcases.py. The section's
+c_cyl_noeb.g, which exited 124 at 600 s, and c_cylv_half.g are not written
+here: a control must exit 1 (464.10 5).
 """
 import os
 
@@ -80,3 +82,4 @@ CYLV = on_value(CYL)
 write("c_cyl_value.g", CYLV)
 write("c_cyl_half.g", at(CYL, B_HALF))
 write("c_cyl_nonormal.g", without_normal(CYL))
+write("c_cyl_b69.g", at(CYL, "B = 9b-53 + 69b-106;"))
