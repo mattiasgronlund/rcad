@@ -5,6 +5,49 @@ use rcad_predicates::{Policy, ProvenanceLog, side_of_a_plane_where_three_planes_
 use rcad_topo::{DraftStep, Model, ProfileBuilder, Rule, SolidBuilder, SolidKey};
 
 #[test]
+fn probe_q2921_scan() {
+    let mut found = 0;
+    for dx in 1..=7 {
+        for dy in 1..=7 {
+            for k in [0.25, 0.5, 0.75, 1.0, 1.25, 1.5] {
+                let (dx, dy) = (f64::from(dx), -f64::from(dy));
+                let side = 2;
+                let p1 = [3.0 + dx * k, 3.0 + dy * k];
+                let p3 = [3.0 - dx * k, 3.0 - dy * k];
+                let outline = [p3, [p3[0], p1[1]], p1];
+                let mut model = a_model();
+                let tool = a_prism(&mut model, outline.to_vec(), [0.0, 0.0, 0.5], 1.0);
+                let wall = model
+                    .solid(tool)
+                    .expect("made")
+                    .faces()
+                    .map(|face| face.plane().coefficients())
+                    .find(|[a, b, c, _]| *c == 0.0 && *a != 0.0 && *b != 0.0)
+                    .expect("a leaning wall");
+                let c_side = side_of_a_plane_where_three_planes_meet(
+                    [
+                        [1.0, 0.0, 0.0, -3.0],
+                        [0.0, 1.0, 0.0, -3.0],
+                        [0.0, 0.0, 1.0, -0.5],
+                    ],
+                    wall,
+                );
+                if c_side == Ok(rcad_predicates::Decision::Neg) && found < 6 {
+                    found += 1;
+                    eprintln!("PROBE side {side} outline {outline:?}");
+                    let run = std::panic::catch_unwind(|| {
+                        run_with(two_built_blocks, dx, dy, k, false, outline);
+                    });
+                    if run.is_err() {
+                        eprintln!("PROBE panicked");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn probe_q2921_t_junction() {
     two_blocks(&mut a_model());
     let slopes: [(f64, f64); 10] = [

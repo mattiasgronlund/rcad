@@ -2265,8 +2265,9 @@ fn from_an_edge_of(
                     let read = from_one_edge(solid, own, flat, face, edge, side);
                     if read.is_some() {
                         eprintln!(
-                            "PROBE from_one_edge face {:?} {:?} edge {:?} across {:?} side material {:?} carried {:?} -> {read:?}",
-                            face.keys, face.surface, edge.keys, edge.across, side.material_side, side.carried_by
+                            "PROBE from_one_edge face {:?} {:?} edge {:?} across {:?} side material {:?} carried {:?} ends {:?} -> {read:?}",
+                            face.keys, face.surface, edge.keys, edge.across, side.material_side, side.carried_by,
+                            side.ends.each_ref().map(|end| end.point().enclosure().map(|i| [i.lo(), i.hi()]))
                         );
                     }
                     read
