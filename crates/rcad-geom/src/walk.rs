@@ -598,6 +598,10 @@ pub fn walk(
 
 /// The run's points round the conic it lies on, from the stretch its
 /// half-spaces pick.
+///
+/// An arc that bows off the chord between its ends by less than `deviation`
+/// is placed from that chord instead, as [`AnArcTooFlatToPlaceFromItsCentre`]
+/// says, into as many steps as round the conic.
 fn walk_round_the_conic(
     conic: &Conic,
     run: &NamedRun,
@@ -611,7 +615,14 @@ fn walk_round_the_conic(
     };
 
     let stretch = conic.the_stretch_this_run_covers(run, deviation, policy, log)?;
-    points_round_a_conic(conic, stretch, deviation, room)
+    let Some(arc) = AnArcTooFlatToPlaceFromItsCentre::of(conic, run, stretch, deviation) else {
+        return points_round_a_conic(conic, stretch, deviation, room);
+    };
+    let steps = how_many_steps(conic, stretch.1 - stretch.0, room)?;
+    Ok(PointsAlongACrossing {
+        points: arc.points(steps),
+        deviation: Approximation::new(deviation, Cause::PointAlongACrossing),
+    })
 }
 
 /// Points along `stretch` of a conic, `room` apart from the curve at most.
@@ -638,6 +649,137 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
     PointsAlongACrossing {
         points: Vec::new(),
         deviation: Approximation::new(deviation, Cause::PointAlongACrossing),
+    }
+}
+
+/// An arc of a conic that bows off the chord between its two ends by less
+/// than the walk's own rounding, placed from that chord and not from the
+/// conic's centre.
+///
+/// # Why from the chord
+///
+/// [`Conic::at`] puts a point at `centre + across·cos θ + and·sin θ` and rounds
+/// against the largest of those. Two bars of radius one that overlap by a
+/// rounding share a lens whose cap is bounded by an arc of each bar's circle,
+/// between two places `2e−8` apart. Each arc stands `5e−17` off its chord,
+/// and a point placed from a centre one away rounds by about as much: the
+/// middle point of each came out on its centre's side of the chord, so the
+/// cap's loop ran the wrong way round and the intersection of those bars was
+/// refused (Q3263,
+/// `an_arc_of_a_lens_a_rounding_deep_is_walked_on_its_own_side_of_its_chord`).
+///
+/// Written with `A` and `B` the conic's points at the stretch's two ends, `α`
+/// half the angle between them, `θm` the angle halfway, `M = (A + B)/2` and
+/// `N = across·cos θm + and·sin θm`, the conic's point at `θm + φ` is
+///
+/// ```text
+/// M + (sin φ / sin α)·(B − A)/2 + (cos φ − cos α)·N
+/// ```
+///
+/// exactly, for an ellipse as for a circle: `M` is `centre + cos α·N`, and
+/// `(B − A)/2` is `sin α` times `−across·sin θm + and·cos θm`. **Nothing in
+/// it is larger than the ends and the arc's own size**, so in the lens's plane
+/// a point rounds against the ends' `1e−8` and not the centre's one, and lands
+/// on the arc's own side of the chord. `cos φ − cos α` is worked out as
+/// `2·sin(α·k)·sin(α·(1 − k))`, with `φ = α·(2k − 1)`, which cancels nothing.
+///
+/// **`N` is worked out as `(M − centre) / cos α`, not from `θm`.** From `θm`
+/// it tilts by the angle's rounding: the sliver `a_block_edge_grazing_a_ball.rs`
+/// fences off at `h = 0`, whose ends are `z = ±2⁻⁵¹` and whose middle is at
+/// `z = 0`, came out at `z = 6e−48`, under the `2⁻¹⁴²` a triangulation takes,
+/// and that face was refused `CoordinateOutOfRange`. From `M` it is `z = 0`.
+///
+/// # When
+///
+/// When the run names both its ends and is not the whole curve; when the arc
+/// turns over at most two thirds of half a turn, so that `|sin φ / sin α|`
+/// is at most one and `(1 − cos α) / cos α` too, and is not nothing; when it
+/// bows off its chord, `|N|·(1 − cos α)`, by no more than the deviation `D`;
+/// and when each end is within `D/8` of the conic's own point at its angle, as
+/// [`Conic::at`] works it out. An end further off would carry its own offset
+/// into every point, so such an arc is placed from the centre as before.
+///
+/// # How far off, derived
+///
+/// With `u = f64::EPSILON / 2`, `L` the conic's size, and
+/// `D = 512u·L`, [`POINT_ALONG_A_CROSSING_ROUNDOFF`] times `L`:
+///
+/// - **The ends.** [`Conic::at`] is within `68u·L` of the true conic, by that
+///   constant's own chain, and the check's subtraction and length add under
+///   `4u·L`, so each end is within `D/8 + 72u·L = 136u·L` of the true conic's
+///   point at its angle.
+/// - **What the ends' offsets do.** Ends off by `eA` and `eB` move `M` and the
+///   chord's term by `eA·(1 − s)/2 + eB·(1 + s)/2`, with `s = sin φ / sin α`
+///   between `−1` and `1`, which is no more than the larger of the two; and
+///   they move `N`'s term by `(cos φ − cos α) / cos α` of `M`'s share, at most
+///   one of it: `272u·L` in all.
+/// - **The angle.** `α` rounds by under `10u` radians, which is the formula
+///   for ends that far along the conic from the two used: by the same
+///   argument, under `10u·L` more.
+/// - **`s` and `cos φ − cos α`**, a few `sin`s and a division each, out by
+///   under `9u` and `6u` of `|B − A|/2` and `|N|`, both under `L`: `15u·L`.
+///   `N`'s own subtraction and division add under `8u·L`.
+/// - **Putting them together**: `M`'s subtraction and sum, two products and
+///   two sums per coordinate on terms under `5L`, under `16u·L` a coordinate
+///   and `28u·L` as a length.
+///
+/// That is about `333u·L`, under two thirds of `D`. The room is for a libm a
+/// few ulps out, as [`POINT_ALONG_A_CROSSING_ROUNDOFF`] leaves it.
+struct AnArcTooFlatToPlaceFromItsCentre {
+    /// `M`, halfway between the run's two ends.
+    halfway: Point,
+    /// `(B − A)/2`, with `A` and `B` the run's two ends in the order of the
+    /// stretch's two angles.
+    half_the_chord: Vector,
+    /// `α`, half the angle the stretch turns over, which may be below nought.
+    half: f64,
+    /// `N`, from the conic's centre to its point halfway along the stretch.
+    out_to_the_middle: Vector,
+}
+
+impl AnArcTooFlatToPlaceFromItsCentre {
+    /// The arc `run` names over `(from, to)` of `conic`, when it is one to place
+    /// from its chord.
+    fn of(conic: &Conic, run: &NamedRun, (from, to): (f64, f64), deviation: f64) -> Option<Self> {
+        let EdgeRun::PartOfWhereItCrosses { .. } = run.run() else {
+            return None;
+        };
+        if run.is_the_whole_curve() || run.ends().contains(&nowhere_in_particular()) {
+            return None;
+        }
+        let half = (to - from) / 2.0;
+        if !(f64::MIN_POSITIVE..=core::f64::consts::FRAC_PI_3).contains(&half.abs()) {
+            return None;
+        }
+        let [start, end] = run
+            .ends()
+            .map(|end| Point::from(end.enclosure().map(middle_of)));
+        let on_the_conic = [(start, from), (end, to)]
+            .iter()
+            .all(|&(end, at)| (end - conic.at(at)).length() <= deviation / 8.0);
+        let half_the_chord = (end - start) * 0.5;
+        let halfway = start + half_the_chord;
+        let out_to_the_middle = (halfway - conic.centre) * half.cos().recip();
+        let bow = 2.0 * (half / 2.0).sin().powi(2) * out_to_the_middle.length();
+        (bow <= deviation && on_the_conic).then_some(Self {
+            halfway,
+            half_the_chord,
+            half,
+            out_to_the_middle,
+        })
+    }
+
+    /// The points between the ends, at `steps − 1` angles evenly spaced along
+    /// the stretch.
+    fn points(&self, steps: usize) -> Vec<Point> {
+        (1..steps)
+            .map(|step| {
+                let k = step as f64 / steps as f64;
+                let along = (self.half * (2.0 * k - 1.0)).sin() / self.half.sin();
+                let out = 2.0 * (self.half * k).sin() * (self.half * (1.0 - k)).sin();
+                self.halfway + self.half_the_chord * along + self.out_to_the_middle * out
+            })
+            .collect()
     }
 }
 
