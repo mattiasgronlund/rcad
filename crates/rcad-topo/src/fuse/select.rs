@@ -2379,13 +2379,25 @@ fn from_one_edge(
 ///
 /// A flat face whose plane misses one of the points where `ends` cross the
 /// line meets the line at one point at most, and misses the one point when
-/// there is one. Any other face — curved, on a plane that holds the whole
-/// line, or one whose question came back undecided — must have its
-/// [`Bounds`](super::bake::Bounds) clear of the box round the stretch, which
-/// is as sure as that box is. So a block standing past the edge along the
-/// line stops both rules reading past the edge, and the slivers they were
-/// built for, in `tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs`, are
-/// placed still.
+/// there is one. A flat face whose plane holds the whole line keeps off the
+/// stretch where [`its_corners_keep_off`] finds one of `ends` with every
+/// corner of the face strictly on one side and the stretch on the other or on
+/// it. Any other face — curved, or one whose questions came back undecided —
+/// must have its [`Bounds`](super::bake::Bounds) clear of the box round the
+/// stretch, which is as sure as that box is. So a block standing past the
+/// edge along the line stops both rules reading past the edge, and the
+/// slivers they were built for, in
+/// `tests/a_sliver_along_an_edge_of_a_face_it_lies_on.rs`, are placed still.
+///
+/// The corners are asked for the slivers of a triangle prism's leaning wall
+/// that runs a rounding past where the two blocks above touch
+/// (`tests/a_sliver_beside_six_walls_round_one_line.rs`). Two of them lie
+/// along the second block's top edge on `x = 3`, one on its top and one on its
+/// face `x = 3`, and the wall crosses that edge a rounding past `y = 3`. The
+/// first block's face `x = 3` holds that whole line and ends a rounding short
+/// of the crossing, so its box reaches the box round it, and with the box
+/// alone every fuse that test runs at 7 of its 10 slopes was refused
+/// `Undecidable`. Its corners are all on the near side of the wall's plane.
 fn no_other_face_reaches(
     solid: &BakedSolid,
     edge_faces: [&BakedFace; 2],
@@ -2431,8 +2443,64 @@ fn no_other_face_reaches(
                     )
                 })
             });
-            leaves_an_end_off || other.bounds.provably_misses(stretch)
+            leaves_an_end_off
+                || its_corners_keep_off(other, line, ends)
+                || other.bounds.provably_misses(stretch)
         })
+}
+
+/// Whether the flat face `face`, every side of it straight, has every corner
+/// strictly on one side of one of the planes `ends`, and the stretch of `line`
+/// between where the planes `ends` cross it on that plane or past it.
+///
+/// A flat face with straight sides lies in the hull of its corners: each side
+/// is the segment between two of them, and the face is a bounded piece of its
+/// plane, so every point of it is between two points of its sides. So every
+/// point of it is strictly on the corners' side of that plane, every point of
+/// the stretch is on the plane or on the other side, and the two share none.
+///
+/// A corner is the meet of the three planes bake solved it from, as
+/// [`by_a_plane`] reads a corner of a solid. A curved face, a curved side, a
+/// corner read out of the model or solved from a curved surface, and a
+/// question that comes back undecided all leave it unproved.
+fn its_corners_keep_off(face: &BakedFace, line: [[f64; 4]; 2], ends: &[[f64; 4]]) -> bool {
+    if face.surface.as_plane().is_none() {
+        return false;
+    }
+    let corners = face
+        .wires
+        .iter()
+        .flatten()
+        .map(|edge| {
+            let straight =
+                edge.across.as_plane().is_some() && edge.along_a_curved_surface.is_none();
+            if !straight {
+                return None;
+            }
+            three_planes(edge.start.solved_from.as_ref()?)
+                .map(|three| three.map(|plane| plane.coefficients()))
+        })
+        .collect::<Option<Vec<[[f64; 4]; 3]>>>();
+    let Some(corners) = corners else {
+        return false;
+    };
+    ends.iter().any(|&plane| {
+        let side_of = |three| side_of_a_plane_where_three_planes_meet(three, plane).ok();
+        let Some(&first) = corners.first() else {
+            return false;
+        };
+        let away = match side_of(first) {
+            Some(Decision::Pos) => Decision::Pos,
+            Some(Decision::Neg) => Decision::Neg,
+            Some(Decision::Zero | Decision::Undecidable { .. } | _) | None => return false,
+        };
+        corners.iter().all(|&corner| side_of(corner) == Some(away))
+            && ends.iter().all(|&end| {
+                let at = side_of([line[0], line[1], end]);
+                matches!(at, Some(Decision::Pos | Decision::Neg | Decision::Zero))
+                    && at != Some(away)
+            })
+    })
 }
 
 /// The one plane of `three` that is neither `g` nor `h`, either way round, as
