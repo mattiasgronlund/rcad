@@ -2964,7 +2964,15 @@ so the half control proves and is no control; those 27 have `c_cone_<case>_usq.g
 at `B = u^2`, instead, and the script writes the half control for the other
 164. `check-proofs` prints
 `check-proofs: 1053 proofs and 1076 controls match their stamps`. 464.17 on is
-not moved yet.
+not moved yet. Q2700's branch was merged by Q3279, which also fixed the
+selftest: its first-script and first-control pipelines ended in `head -1`, which
+under `pipefail` dies of SIGPIPE (exit 141) once `proofs/gappa/` lists past
+64 KB. The script pipeline is now a loop that takes the first script whose
+first restates line is a bare item in a `.rs` file, since `addzero.g`, first by
+name, restates an `Owner::name`; the control pipeline ends in `sed -n 1p`, which
+reads to the end. `fails` had the same fault in `printf | grep -q`, which died
+the same way on the 1053 lines the check prints; it reads the output through a
+here-string now.
 
 - `proofs/bounds.py` holds both recipes. `check` is `check-proofs`, `prove
   [name]` is `prove-bounds`, and `extent PATH ITEM` prints the lines

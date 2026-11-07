@@ -7582,9 +7582,9 @@ check-proofs-selftest:
         if out=$(check); then
             echo "check-proofs passed $what"; echo "$out"; exit 1
         fi
-        printf '%s\n' "$out" | grep -qF "$script: " \
+        grep -qF "$script: " <<<"$out" \
             || { echo "check-proofs failed $what without naming $script:"; echo "$out"; exit 1; }
-        printf '%s\n' "$out" | grep -qF "just prove-bounds $script" \
+        grep -qF "just prove-bounds $script" <<<"$out" \
             || { echo "check-proofs failed $what without naming just prove-bounds $script:"; echo "$out"; exit 1; }
     }
 
@@ -7593,7 +7593,18 @@ check-proofs-selftest:
 
     # The first restates line of the first script is the item every case
     # below changes. A line put just under its definition is inside it.
-    script=$(grep -l '^# restates: ' proofs/gappa/*.g | grep -v '/c_' | head -1)
+    # No pipeline here ends in head -1: it closes the pipe early and under
+    # pipefail the writer dies of SIGPIPE (141) once the listing passes 64 KB.
+    # The first script whose first restates line is a bare item is taken
+    # because addzero.g, first by name, restates an Owner::name.
+    script=
+    for candidate in $(grep -l '^# restates: ' proofs/gappa/*.g | grep -v '/c_'); do
+        if grep -m1 '^# restates: ' "$candidate" | grep -qE '^# restates: [^ ]+\.rs [A-Za-z_0-9]+ at '; then
+            script=$candidate
+            break
+        fi
+    done
+    [ -n "$script" ] || { echo "no script's first restates line names a bare item in a .rs file"; exit 1; }
     name=$(basename "$script")
     read -r _ _ path item _ _ < <(grep -m1 '^# restates: ' "$script")
     case "$path" in Cargo.lock) echo "$name's first restates line is a dependency; put an item first"; exit 1 ;; esac
@@ -7619,7 +7630,7 @@ check-proofs-selftest:
     fails "a changed script" "$name"
 
     fresh
-    control=$(ls proofs/gappa/c_"${name%.g}"_*.g 2>/dev/null | head -1)
+    control=$(ls proofs/gappa/c_"${name%.g}"_*.g 2>/dev/null | sed -n 1p)
     if [ -n "$control" ]; then
         printf '%s\n' '# a line the selftest adds' >>"$repo/$control"
         fails "a changed control" "$name"
