@@ -97,7 +97,8 @@ use smallvec::SmallVec;
 use crate::holds::{
     WhereTheCurveIsCentred, a_picker_that_tells_the_two_arcs_apart, dot, exactly,
     the_nappe_an_arc_that_does_not_close_is_on, the_nappe_of, the_picker_naming_the_circle_through,
-    the_way_into_an_arc, where_a_closed_crossing_is_centred,
+    the_way_an_arc_a_pipe_picks_leaves_its_start, the_way_into_an_arc,
+    where_a_closed_crossing_is_centred,
 };
 use crate::key::{EdgeSlot, FaceSlot, ShellSlot, SolidSlot, VertexSlot, WireSlot};
 use crate::model::{FaceUse, ShellUse, WireStep};
@@ -114,8 +115,9 @@ use crate::{
 
 use super::arrange::{
     a_plane_cuts_a_cone_in_rulings, a_plane_lies_along_a_pipes_axis, agreement_of_two_planes,
-    name_of_surface_bits, name_of_the_surface_either_way_round, two_cones_cross_in_rulings,
-    two_pipes_run_along_one_line, where_the_crossing_starts, where_two_halves_meet,
+    cross_of, dot_of, gradient_at, name_of_surface_bits, name_of_the_surface_either_way_round,
+    two_cones_cross_in_rulings, two_pipes_run_along_one_line, where_the_crossing_starts,
+    where_two_halves_meet,
 };
 use super::bake::{grown_by, what_writing_the_corner_down_cost};
 use super::select::Chosen;
@@ -7507,10 +7509,16 @@ impl Edge {
         }
     }
 
-    /// `picker` when [`the_way_into_an_arc`] reads it, at the stored `ends`, as
-    /// naming the arc `facing` points into across the chord; otherwise the
-    /// outside or the inside of a pipe that runs along every edge at both
-    /// corners, whichever that reads so; otherwise `picker` as it is.
+    /// `picker` when the next fuse can read it; otherwise the outside or the
+    /// inside of a pipe that runs along every edge at both corners, whichever
+    /// it can read; otherwise `picker` as it is. A picker can be read when,
+    /// over both `ends` grown by [`what_writing_the_corner_down_cost`], two
+    /// things hold: [`the_way_into_an_arc`] reads it as naming the arc `facing`
+    /// points into across the chord, and the tangent this edge leaves either
+    /// corner along gives a sign against the way the picker reads
+    /// ([`Edge::the_tangent_at_either_end_reads_against`]), which is how
+    /// `which_way_an_edge_runs_round` in `fuse/arrange.rs` tells which way the
+    /// edge runs.
     ///
     /// **A flat picker can name neither arc.** The union of a thick bar of
     /// radius 2 and a thin one a hair out of its wall, turned by 1 about `z`,
@@ -7532,6 +7540,33 @@ impl Edge {
     /// front of the picker. [`the_way_into_an_arc`] reads a pipe only when its
     /// axis runs exactly the way the curve's own pipe does, so no other pipe is
     /// ever taken here.
+    ///
+    /// **Read over the grown corners, not the stored ones.** Turned by 0.2, the
+    /// same union stores the corners of its cap at `z = −2` `3.8e−9` apart,
+    /// and the flat picker written for the rim has the normal
+    /// `(3.8e−9, 7.6e−10, 0)`. At the stored corners it read as naming the
+    /// long arc, but the next fuse reads the corners as the boxes it solves
+    /// them into, about `1.1e−15` wide, where it named neither, and that fuse
+    /// refused `AFaceTrimmedByACurveThisCannotFollow` (row Q3264). The room is
+    /// `64 ε` times the corner's largest coordinate, `3e−14` to `4e−14` here,
+    /// so it holds the stored corner, the true one and those boxes, each
+    /// within about `1e−15` of the others. A sign read over a box is that sign
+    /// over every box inside it, so a picker that reads over the grown corners
+    /// reads at each of those too, and reads there what holds at the true
+    /// corners.
+    ///
+    /// **And the tangent, not only which arc.** The thin bar's lid at `z = 3`,
+    /// which the next fuse does not touch and so reads at its stored corners,
+    /// has a short arc of its rim between corners as close. Against a way
+    /// square to the chord, that arc's tangent reads only by how far it leans
+    /// off the chord, about `1.9e−9` rad on a circle of radius 1, while
+    /// rounding the corners turns the chord by up to `2.6e−8`. Read at the
+    /// stored corners it came out `−3.8e−16` where the true sign is positive,
+    /// so the next fuse ran the short arc the wrong way round and refused
+    /// `AnEdgeOfAFaceIsNotDrawnAlongItsOwnCurve`. Over the grown corners that
+    /// sign is not read, so the flat picker is passed over for the outside of
+    /// the thick pipe, against whose way the tangent reads along the chord with
+    /// all of its length.
     fn a_picker_the_way_into_the_arc_reads(
         &self,
         picker: Picker,
@@ -7540,15 +7575,18 @@ impl Edge {
         at_the_ends: [&[Surface]; 2],
     ) -> Picker {
         let stored = ends.map(|end| PredicatePoint::from(end.coordinates()));
+        let with_room =
+            stored.map(|end| grown_by(end, what_writing_the_corner_down_cost(end.enclosure())));
         let into_the_arc = exactly(facing.components());
         let reads = |candidate: Picker| {
             the_way_into_an_arc(
                 &self.carried_by[0],
                 &self.carried_by[1],
-                stored,
+                with_room,
                 &[candidate],
             )
             .is_some_and(|way| dot(way, into_the_arc).sign() == Decision::Pos)
+                && self.the_tangent_at_either_end_reads_against(candidate, with_room)
         };
         if reads(picker) {
             return picker;
@@ -7567,6 +7605,33 @@ impl Edge {
             .flat_map(|pipe| [Picker::OutsideAPipe(pipe), Picker::InsideAPipe(pipe)])
             .find(|&candidate| reads(candidate))
             .unwrap_or(picker)
+    }
+
+    /// Whether `which_way_an_edge_runs_round` in `fuse/arrange.rs` reads a sign
+    /// for the tangent this edge leaves either of `ends` along, against the way
+    /// `candidate` gives, over the whole of both boxes: along the chord for a
+    /// pipe along the curve's own pipe
+    /// ([`the_way_an_arc_a_pipe_picks_leaves_its_start`]), square to it
+    /// otherwise ([`the_way_into_an_arc`]). A sign read over boxes that hold
+    /// the true corners is the sign at them, and at the stored corners.
+    fn the_tangent_at_either_end_reads_against(
+        &self,
+        candidate: Picker,
+        ends: [PredicatePoint; 2],
+    ) -> bool {
+        let [one, other] = &self.carried_by;
+        let picked_by = [candidate];
+        let [first, second] = ends;
+        [[first, second], [second, first]].into_iter().all(|ends| {
+            let against =
+                the_way_an_arc_a_pipe_picks_leaves_its_start(one, other, ends, &picked_by)
+                    .or_else(|| the_way_into_an_arc(one, other, ends, &picked_by));
+            against.is_some_and(|against| {
+                let leaving = cross_of(gradient_at(one, ends[0]), gradient_at(other, ends[0]));
+                let sign = dot_of(leaving, against).sign();
+                sign == Decision::Pos || sign == Decision::Neg
+            })
+        })
     }
 
     /// Whether both surfaces it runs between are flat, which makes it a straight
