@@ -89,6 +89,49 @@ fn a_block_on_a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_in
     }
 }
 
+/// The turns at which the four united and validated and `SolidView::measure`
+/// was refused at a deflection of `0.01`, `0.02` and `0.03` (Q3262).
+const TURNS_THE_BLOCK_WAS_NOT_MEASURED_AT: [f64; 4] = [1.3, 2.4000000000000004, 2.5, 3.7];
+
+/// The block 5 long at the turns its union was refused a mesh at.
+///
+/// With the block, the thick bar's rim on each cap is one arc between the two
+/// corners where the block's sides meet it, and walked evenly its middle point
+/// is at `−2c`, where the thin bar at `x = −1` touches it. That thin circle's
+/// walk puts its middle point there too, and the two are two entries of the
+/// point table at the very same coordinates. The cap's triangulator names a
+/// place two loops share by the outline's entry, so the cap's triangles used
+/// the rim's entry there and the thin bar's wall the other, and the measure was
+/// refused `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 1, used: 1 }`, or, at
+/// `1.3`, the `BoundaryCrossesItself` of the cap pinched before it (Q3266).
+#[test]
+fn a_block_on_a_thick_bar_with_two_thin_bars_measures_where_a_thin_circle_and_the_rim_are_walked_to_one_point()
+ {
+    for turn in TURNS_THE_BLOCK_WAS_NOT_MEASURED_AT {
+        for room in [0.01, 0.02, 0.03] {
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let thick = a_bar(&mut model, 2.0, 4.0, [0.0, 0.0, -2.0], turn);
+            let block = the_block(&mut model, BLOCK, turn);
+            let left = a_bar(&mut model, 1.0, 6.0, [-1.0, 0.0, -3.0], turn);
+            let right = a_bar(&mut model, 1.0, 6.0, [1.0, 0.0, -3.0], turn);
+            let with_the_block = fused(&mut model, &[thick], &[block], Rule::Union, || {
+                format!("turned {turn}, the block")
+            });
+            let with_the_left_bar =
+                fused(&mut model, &with_the_block, &[left], Rule::Union, || {
+                    format!("turned {turn}, the bar at x = −1")
+                });
+            let last = || format!("turned {turn}, the bar at x = 1, measured at {room}");
+            let [whole] = fused(&mut model, &with_the_left_bar, &[right], Rule::Union, last)[..]
+            else {
+                panic!("{}: the four unite into one solid", last());
+            };
+            let deflection = Deflection::of(room).expect("a fine mesh");
+            valid_and_of_volume(&model, whole, the_volume(BLOCK), deflection, last);
+        }
+    }
+}
+
 /// Tenths of a turn, `n` for the turn `f64::from(n) * 0.1`, at which the block
 /// 50 long was refused `Undecidable` where three surfaces meet and now unites
 /// (Q3255).
