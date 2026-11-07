@@ -2904,7 +2904,75 @@ print(len(proved), "hints proved by field;",
 **5. What was built.** Q2699 built 3 b to d, in two lanes on 2026-11-06 and
 2026-11-07, off `256f2352` and then `a96cd9d8`. It moved in the scripts of
 464.5 to 464.9, which this section held when the row was taken. Those of
-464.11 on are Q2700's (3 f).
+464.11 on are Q2700's (3 f). Q2700's first lane moved in 464.11's, on
+2026-11-07 (464.12's follows below): `make_one_difference_zero.py` as 464.11 gives it, which writes
+`zd_adx.g` to `zd_cdz.g` with block 1's restates lines in front;
+`zerodiffcontrols.py`, which writes each one's controls at `6u` and `5u`, as
+`c_zd_<name>_6u.g` and `c_zd_<name>_5u.g`; and `diffzero.g` and `refl.g`,
+464.11's two steps, with a restates line for `on_floats`, whose subtractions
+they are about. `prove-bounds` proved the 11 and every one of the 18 controls
+failed. `check-proofs` now prints `check-proofs: 42 proofs and 60 controls
+match their stamps`. Its second lane moved in 464.12's: `spherecases.py` as
+464.12 gives it, which writes `sphere.g`, `spherev.g`, the 29 zero cases, the
+30 controls at `u / 2` and the three other controls, and `spherewhy.py`, its
+`why.py`. 464.12's `c_sphere_noeb.g` proves, so it is the proof `sphere_noeb.g`
+here, with `c_sphere_noeb_rel.g` and `c_sphere_noeb_why.g` as its controls;
+`c_sphere_noeb_why.g` gains the goal `eb -/ B * P in ?`, as `c_plane_noeb_why.g`
+has, since with only its own goals it proves. `prove-bounds` proved the 32 and
+every one of the 35 controls failed, so `check-proofs` prints `check-proofs: 74
+proofs and 95 controls match their stamps`. Its second lane then moved in
+464.13's: `flatcases.py` and `flatwhy.py` as 464.13 gives them, and
+`addzero.g`. `flat_noeb.g` is the proof that was 464.13's `c_flat_noeb.g`, with
+`c_flat_noeb_rel.g` and `c_flat_noeb_why.g`, which gains `eb -/ B * P in ?`
+like the sphere's. Each `flat*.g` names `SideOfAFlatSurfaceThroughAPoint::on_floats`
+at `8c943dfd`, since `plane.rs` holds two `on_floats` (3 b). `prove-bounds`
+proved the 285 and every control failed, and `check-proofs` prints
+`check-proofs: 359 proofs and 382 controls match their stamps`. It then moved
+in 464.14's: `skincases.py` as 464.14 gives it, which writes the 431 proofs and
+the controls of 7, `tinysq.g`, `tinyzero.g`, `tinyzero_nohint.g` and
+`relgap.g`, each with a restates line for `sphere.rs`'s `on_floats` at
+`05d44c66`, and `skinwhy.py`. `skin_noeb.g` is the proof that was 464.14's
+`c_skin_noeb.g`, with `c_skin_noeb_rel.g` and `c_skin_noeb_why.g` written by
+`skinwhy.py` as `flatwhy.py` does. `prove-bounds` proved the 436 and every
+control failed, and `check-proofs` prints `check-proofs: 795 proofs and 816
+controls match their stamps`. What 464.14 holds besides, the tally and
+checking scripts of 9, is not moved: they read run logs, not the tree.
+
+Q2700's third lane moved in 464.15's and part of 464.16's, on 2026-11-07.
+`cyl.g`, `cylcases.py`, `cylsplit.py` and `dbl.g` are 464.15's, with each
+restates line at `e59fab75`, after a reading of `cylinder.rs`'s `on_floats`
+against the script: its checks are the script's, and the commits since
+`2a7ca9e7` changed comments and the bound's doc, not the arithmetic.
+`cylsplit.py` writes the 63 cases other than `nnn`, which is `cyl.g`, and
+asserts that. `cyl.g` has the controls `c_cyl_half.g`, `c_cyl_nonormal.g` and
+`c_cyl_value.g`, which is the section's `cylv.g`: the claim on `value` exits 1
+at the code's `B` (464.15 4), so it is a control and not a proof. Not moved
+from 464.15: `c_cyl_noeb.g`, which exits 124 at 600 s and so cannot be a
+control; `c_cylv_half.g`, which says nothing `c_cyl_value.g` does not;
+`cylv2.g`, `vgen.py` and the probes `m2.g` and `m3.g`; the bisection scripts
+`b_*`; and the run and tally scripts. `prove-bounds` proved the 65 of 464.15
+and every control failed. `cone.g`, `sumexact.g` and `conecases.py` are 464.16's, at
+`e59fab75`, with `cone.g`'s three controls. Read against `on_floats` as Q2779
+changed it, `cone.g` still restates it: its hypotheses already hold `R2` and
+`A` normal. `conesplit.py` is moved with its loop cut to the axial states `n`,
+`e` and `c`: in `a`, `s` and `t`, `R2` or `A` is below the normals, which
+`on_floats` now refuses, so those 192 scripts no longer restate the code and
+are not written. Its 191 other cases are written by the script and each
+proved by `prove-bounds`. Each has a control at `B = u / 2`, but in the 27
+cases where no cross product component is `n` and `up` cancels, `y` is zero,
+so the half control proves and is no control; those 27 have `c_cone_<case>_usq.g`,
+at `B = u^2`, instead, and the script writes the half control for the other
+164. `check-proofs` prints
+`check-proofs: 1053 proofs and 1076 controls match their stamps`. 464.17 on is
+not moved yet. Q2700's branch was merged by Q3279, which also fixed the
+selftest: its first-script and first-control pipelines ended in `head -1`, which
+under `pipefail` dies of SIGPIPE (exit 141) once `proofs/gappa/` lists past
+64 KB. The script pipeline is now a loop that takes the first script whose
+first restates line is a bare item in a `.rs` file, since `addzero.g`, first by
+name, restates an `Owner::name`; the control pipeline ends in `sed -n 1p`, which
+reads to the end. `fails` had the same fault in `printf | grep -q`, which died
+the same way on the 1053 lines the check prints; it reads the output through a
+here-string now.
 
 - `proofs/bounds.py` holds both recipes. `check` is `check-proofs`, `prove
   [name]` is `prove-bounds`, and `extent PATH ITEM` prints the lines
@@ -2953,7 +3021,9 @@ every other `.g` for a proof, so a name says which a script is.
   `o2planecontrols.py` and `signedcontrols.py`.
 
 The same clash waits in what Q2700 moves: 464.12's `c_sphere_noeb.g` and
-464.13's `c_flat_noeb.g` prove too, as `c_plane_noeb.g` did.
+464.13's `c_flat_noeb.g` prove too, as `c_plane_noeb.g` did. 464.15's
+`c_cyl_noeb.g` is the other kind: it exits 124 at 600 s, so it is neither a
+proof nor a control, and it is dropped.
 
 `o2.g`'s and `plane.g`'s own runs below the code's `B`, which 464.8 1 and 3
 ran by hand, are added as `c_o2_14.g`, `c_o2_3u.g` and `c_plane_14.g`.
