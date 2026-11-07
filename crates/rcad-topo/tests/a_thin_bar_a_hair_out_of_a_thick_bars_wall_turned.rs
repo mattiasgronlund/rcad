@@ -11,8 +11,8 @@
 //! second. The same is done with the block `[0, 5] × [−1.5, 1.5] × [−2, 2]`,
 //! turned with them, united with the thick bar before either thin bar.
 //!
-//! Turned, the thin bars' axes are at `c` and `−c` exactly, and at the four
-//! turns here `|c|² − 1` is above nought (`4.8e−17` at turn 1). So the two
+//! Turned, the thin bars' axes are at `c` and `−c` exactly, and at every
+//! turn here `|c|² − 1` is above nought (`4.8e−17` at turn 1). So the two
 //! thin bars stand apart by a hair, and each pokes out of the thick bar's
 //! wall by about `2.4e−17`: the `x = −1` pipe crosses the thick bar's rims at
 //! two corners about `2e−8` apart. The first union's cap at `z = −2` is the
@@ -34,10 +34,13 @@ use rcad_topo::{Model, ProfileBuilder, Rule, SolidKey};
 /// The turns at which Q3241 found the second union refused.
 const TURNS: [f64; 4] = [1.0, 2.0, 5.0, 6.0];
 
-/// [`TURNS`] and turn 0.2, where `|c|² − 1` is `1.8e−18` and the corners
-/// are `3.8e−9` apart, at which Q3262 found the second union of the bars
-/// alone refused (row Q3264).
-const TURNS_OF_THE_BARS_ALONE: [f64; 5] = [0.2, 1.0, 2.0, 5.0, 6.0];
+/// [`TURNS`], turn 0.2, where `|c|² − 1` is `1.8e−18` and the corners are
+/// `3.8e−9` apart, and the turns `n · 0.1` for `n` = 4, 31, 49, 54, 61 and
+/// 62, at which Q3262 found the second union of the bars alone refused (rows
+/// Q3264 and Q3265). Turn 61 is written as that product, which is
+/// `6.1000000000000005` and not the `f64` nearest 6.1.
+const TURNS_OF_THE_BARS_ALONE: [f64; 11] =
+    [0.2, 0.4, 1.0, 2.0, 3.1, 4.9, 5.0, 5.4, 6.0, 61.0 * 0.1, 6.2];
 
 #[test]
 fn a_thick_bar_unites_with_two_thin_bars_each_a_hair_out_of_its_wall() {
