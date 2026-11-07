@@ -756,6 +756,20 @@ fn nothing_walked(deviation: f64) -> PointsAlongACrossing {
 /// (`a_sliver_meshed_on_one_line_encloses_exactly_nothing_however_it_is_turned`).
 /// An arc that bows that little with `N` further from square to its chord, or
 /// with a chord under twice its raise, is placed from its centre as before.
+/// **So is one whose ends differ only in coordinates `N` holds at nought**,
+/// since rounding cannot carry its point across the chord: in a coordinate
+/// the two ends share, a point is that coordinate plus its share of `N`, with
+/// `cos φ − cos α` never below nought, and rounding that sum never takes it
+/// past the coordinate; the coordinates they do not share only move it along
+/// the chord or out of the arc's plane. The sliver
+/// `a_block_edge_grazing_a_ball_at_cx_0.rs` fences off on the plane `y = 1`
+/// has ends `(±2⁻⁵¹, 1, −2⁻²⁵)`, bows `3.3e−24` and raised would stand
+/// `2.6e−23` off a chord `8.9e−16` long. Raised, its point came out four ulps
+/// of `z` below the chord; placed from its chord as it bows, walked from
+/// `−2⁻⁵¹`, one ulp below. Either way the ball less the block was refused
+/// `CannotMeshAFace` with `ASideCutsOffOneCornerOfACurvedPatch`, the pocket
+/// too thin to put a point in, and placed from its centre the point came out
+/// on the chord and that fuse answers.
 /// The steep cone less a slab turned `1.5` in
 /// `a_plane_cut_along_a_cones_other_nappe.rs` keeps a lens
 /// whose cap's arc, of radius `6`, bows `3.6e−16` between ends near
@@ -866,15 +880,23 @@ impl AnArcTooFlatToPlaceFromItsCentre {
         } else {
             its_own_rounding / across.length()
         };
+        let its_ends_differ_only_where_it_does_not_bow = start
+            .coordinates()
+            .into_iter()
+            .zip(end.coordinates())
+            .zip(out_to_the_middle.components())
+            .all(|((at_the_start, at_the_end), out)| at_the_start == at_the_end || out == 0.0);
         let raised_mostly_across_the_chord = out_to_the_middle.length() <= 2.0 * across.length();
         let raised_less_than_half_its_chord =
             least_out * out_to_the_middle.length() <= half_the_chord.length();
+        let to_be_raised = !its_ends_differ_only_where_it_does_not_bow
+            && raised_mostly_across_the_chord
+            && raised_less_than_half_its_chord;
         let bows_less_than_half_its_chord = bow <= half_the_chord.length();
         (bow <= deviation
             && bows_less_than_half_its_chord
             && on_the_conic
-            && (clears_its_own_rounding
-                || (raised_mostly_across_the_chord && raised_less_than_half_its_chord)))
+            && (clears_its_own_rounding || to_be_raised))
             .then_some(Self {
                 halfway,
                 half_the_chord,
