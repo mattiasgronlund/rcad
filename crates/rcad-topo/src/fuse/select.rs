@@ -2088,7 +2088,14 @@ fn beside_an_edge_of(
         .find_map(|face| {
             face.wires.iter().flatten().find_map(|edge| {
                 piece.wires.iter().flatten().find_map(|side| {
-                    beside_one_edge(solid, index, own, piece, flat, face, edge, side)
+                    let read = beside_one_edge(solid, index, own, piece, flat, face, edge, side);
+                    if read.is_some() {
+                        eprintln!(
+                            "PROBE beside_one_edge face {:?} {:?} edge {:?} across {:?} -> {read:?}",
+                            face.keys, face.surface, edge.keys, edge.across
+                        );
+                    }
+                    read
                 })
             })
         })
@@ -2254,7 +2261,16 @@ fn from_an_edge_of(
                 .wires
                 .iter()
                 .flatten()
-                .find_map(|side| from_one_edge(solid, own, flat, face, edge, side))
+                .find_map(|side| {
+                    let read = from_one_edge(solid, own, flat, face, edge, side);
+                    if read.is_some() {
+                        eprintln!(
+                            "PROBE from_one_edge face {:?} {:?} edge {:?} across {:?} side material {:?} carried {:?} -> {read:?}",
+                            face.keys, face.surface, edge.keys, edge.across, side.material_side, side.carried_by
+                        );
+                    }
+                    read
+                })
         })
     })
 }
@@ -2286,6 +2302,10 @@ fn from_one_edge(
     {
         return None;
     }
+    eprintln!(
+        "PROBE from_one_edge asks face {:?} {:?} edge {:?} across {:?}: start around {:?} end around {:?} side ends {:?}",
+        face.keys, g, edge.keys, h, edge.start.around, edge.end.around, side.ends
+    );
     let holds =
         |three: &[Plane; 3], plane| three.iter().any(|one| is_one_plane_either_way(*one, plane));
     let [first, second] = &side.ends;
