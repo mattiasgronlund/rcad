@@ -38,6 +38,9 @@
 //! surfaces meet at 32 of the 63 turns `f64::from(n) * 0.1` up to 6.2, until
 //! `the_place_the_model_points_at` in `fuse/bake.rs` told two places of one
 //! corner apart by the corner's own rounding (Q3255).
+//!
+//! At the turns of `TENTHS_THE_THIN_BARS_STAND_APART_AT`, `|c|² − 1` is above
+//! nought instead, and the thin bars stand apart by a hair.
 
 use core::f64::consts::PI;
 
@@ -135,6 +138,58 @@ fn a_block_on_a_thick_bar_with_two_thin_bars_measures_where_a_thin_circle_and_th
     }
 }
 
+/// Tenths of a turn, `n` for the turn `f64::from(n) * 0.1`, at which `|c|² − 1`
+/// is above nought, among the turns Q3262 found refused (Q3264, Q3265). With
+/// Q3255 and Q3264 on main both blocks measured at all of them but `4.9`, where
+/// each united and validated and the measure was refused
+/// `TwoPatchesOfTheMeshDrewTheSameSide { drawn: 1, used: 1 }`, as at the turns
+/// above (Q3274, Q3266).
+const TENTHS_THE_THIN_BARS_STAND_APART_AT: [u8; 7] = [2, 4, 31, 49, 54, 61, 62];
+
+/// The block 5 long and the block 50 long where the thin bars stand apart by a
+/// hair, so each pokes out of the thick bar's wall rather than into the other,
+/// as in `a_thin_bar_a_hair_out_of_a_thick_bars_wall_turned.rs` (Q3275).
+#[test]
+fn a_block_on_a_thick_bar_with_two_thin_bars_a_hair_apart_measures() {
+    for length in [BLOCK, 50.0] {
+        for tenths in TENTHS_THE_THIN_BARS_STAND_APART_AT {
+            let turn = f64::from(tenths) * 0.1;
+            let mut model = Model::new(Scale::millimetres(100.0).expect("a working size"));
+            let thick = a_bar(&mut model, 2.0, 4.0, [0.0, 0.0, -2.0], turn);
+            let block = the_block(&mut model, length, turn);
+            let left = a_bar(&mut model, 1.0, 6.0, [-1.0, 0.0, -3.0], turn);
+            let right = a_bar(&mut model, 1.0, 6.0, [1.0, 0.0, -3.0], turn);
+
+            let c = where_its_axis_crosses_z_nought(&model, right);
+            assert_eq!(
+                where_its_axis_crosses_z_nought(&model, left),
+                c.map(|x| -x),
+                "turned {turn}: the thin bars' axes are at c and −c"
+            );
+            assert_eq!(
+                squared_length_less_one(c),
+                Decision::Pos,
+                "turned {turn}: the thin bars' axes at {c:?} are over 2 apart"
+            );
+
+            let with_the_block = fused(&mut model, &[thick], &[block], Rule::Union, || {
+                format!("turned {turn}, the block {length} long")
+            });
+            let with_the_left_bar =
+                fused(&mut model, &with_the_block, &[left], Rule::Union, || {
+                    format!("turned {turn}, the bar at x = −1 on the block {length} long")
+                });
+            let last = || format!("turned {turn}, the bar at x = 1 on the block {length} long");
+            let [whole] = fused(&mut model, &with_the_left_bar, &[right], Rule::Union, last)[..]
+            else {
+                panic!("{}: the four unite into one solid", last());
+            };
+            let deflection = Deflection::of(0.01).expect("a fine mesh");
+            valid_and_of_volume(&model, whole, the_volume(length), deflection, last);
+        }
+    }
+}
+
 /// Tenths of a turn, `n` for the turn `f64::from(n) * 0.1`, at which the block
 /// 50 long was refused `Undecidable` where three surfaces meet and now unites
 /// (Q3255).
@@ -153,8 +208,8 @@ const TENTHS_THE_LONG_BLOCK_UNITES_AT: [u8; 25] = [
 /// that held both places. The corner was stored inside the box of one of them,
 /// and its own rounding holds that one alone.
 ///
-/// Seven more of the 32 turns it was refused at go on to be refused further
-/// along, as the block 5 long is: `0.2` and the six of Q3265.
+/// The other seven of the 32 turns it was refused at, where the thin bars stand
+/// apart by a hair, are [`TENTHS_THE_THIN_BARS_STAND_APART_AT`].
 #[test]
 fn a_block_fifty_long_on_a_thick_bar_unites_with_two_thin_bars_overlapping_by_a_rounding_inside_it()
 {
