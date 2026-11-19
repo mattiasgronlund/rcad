@@ -405,10 +405,143 @@ yet".
   counts say how the kernel does on cases nobody aimed at. On 2026-09-25 it had
   run 4,055 of them, and 133 said anything about rcad (§242.1). What it could
   not ask became seven asks (§242.3), and rcad built four things for it, such
-  as `Model::validate_solid` (`docs/consumers.md`). Its later counts are its
-  own, and none of them is in this repo. Our own corpus was used the other way:
+  as `Model::validate_solid` (`docs/consumers.md`). Its later counts are in
+  the last section below. Our own corpus was used the other way:
   a refused file became a row to fix (§433), so a rising import count mixes
   fixes aimed at those files with how the kernel does in general.
+
+## Measured from outside: `rcad_testing`
+
+`rcad_testing` is a second repository, kept beside this one. It holds no kernel
+code. It holds OpenCASCADE's DRAW commands rebuilt on rcad's public API, inside
+real Tcl 8.6, and a runner that feeds OpenCASCADE's own test cases through them
+unchanged. Whether a case passed is decided by OpenCASCADE's own log rules
+(`tests/parse.rules`), not by anything written for rcad. It ran from 2026-09-25
+to 2026-11-04, and from 2026-10-25 it also ran nightly against this repo's
+`main`. Where this section cites *T§N*, that is section N of
+`rcad_testing/docs/decisions.md`. Its `docs/method.md` sets out the reasoning
+in full.
+
+### How it was set up
+
+Its one rule: **a failing test is evidence, not a ticket.** Nobody debugs a case
+to find the one fix it wants. A failure says which *area* to go and hunt in, and
+the hunt is for bugs that no case there exercises. The rest of the repository is
+machinery to make that rule cheaper to follow than to break:
+
+- **Five verdicts, and only three count.** `Passed`, `Failed` and `Crashed` go
+  into rcad's rate. `Unsupported` means the harness lacks a command, or the
+  case asked the kernel nothing at all, so a command turned into a silent
+  no-op cannot raise the score. `Skipped` means the shape data is missing or
+  the case is held out. A gap in the harness never counts against the kernel.
+- **Reports count areas, not cases.** The default report names no failing
+  case. Naming them takes a flag, so the cheap path is the honest one.
+- **A rotating 15% of the corpus is hidden.** It is run and recorded, but no
+  report shows it. If the reported rate climbs and the hidden one does not, the
+  gap measures fixing aimed at the cases.
+- **Nothing can be edited to move a number.** The corpus is not copied into
+  the repo. Run records are only ever added. A run that stops partway is
+  recorded as stopped, not dropped.
+- **Every refusal has an owner.** `limits.toml` says whose limit stopped each
+  unmeasured case: rcad, rcad-brep (the reader for OpenCASCADE's `.brep`
+  files), the harness, or out of scope.
+- **rcad was never shown a case.** From this side the harness was a consumer with
+  seven asks, each a capability with a case count behind it and no API shape
+  (§242.1). A refusal was an acceptable answer to every one of them.
+
+### Where it ended
+
+Only the `boolean` group was ever run: 4,055 of the corpus's 17,879 cases.
+Running the whole corpus was decided (T§21) and never done. The last run used
+rcad `a8ad8d3` and the tolerant policy:
+
+```
+area                  passed  failed  crashed  unsupported  skipped     rate
+boolean.common           300      56        0          315       93    84.3%
+boolean.cut              517     160        0          524      139    76.4%
+boolean.fuse             297      74        0          254       81    80.1%
+all                     1114     290        0         1409      661    79.3%
+reported 79.3%   held out 79.8%   gap -0.5 points
+```
+
+(`general`, `history` and `section` are left out: none of their cases could be
+measured.) Of the 1,409 unmeasured cases, rcad's own limits stop 1,030 first.
+The largest is shapes that are not solids (664): faces, shells and loose edges
+as operands. rcad-brep stops 348, mostly faces on cylinders and spheres. The
+harness stops only 29. All 1,114 passes left an image check undone, because
+there are no reference images to compare against.
+
+### What we learnt from it
+
+- **The first number was about the harness, not the kernel.** The first run
+  measured 133 of 4,055 cases and scored 13.5%. Harness work alone took that
+  to 1,125 cases at 32.2%, with rcad unchanged. That run's own record calls it
+  "a different measurement rather than a better kernel". A rate means nothing
+  without its denominator and without knowing which side moved, so every run
+  records both. The one rise that was rcad's came next. Over 5,326 rcad
+  commits the rate went from 32.3% to 72.6% on the same 1,388 cases: 650 went
+  from failed to passed and none the other way.
+- **A harness bug looks exactly like a kernel failure.** Reversed arguments to
+  `copy`, and numbers taken as literals where DRAW reads expressions
+  (`box b 0 0 0 r r/2 1`). `atan2(x,y)` missing from the expression grammar
+  failed 51 cases. A negative box size refused where OpenCASCADE moves the
+  corner failed about 70. A default mesh that missed OpenCASCADE's exact areas
+  by 2% failed every curved case. A `REQUIRED` line in a script was read as
+  output and failed its case before anything ran. Each fix moved tens of
+  cases with no change to rcad. They were found by sorting many failures by
+  their message, not by debugging one case (`rcad_testing/docs/method.md` §4).
+  Before blaming the kernel for a drop, check whether the harness broke. That
+  check takes one look at a sample.
+- **Reading the reference is not enough. Run it.** Several claims about what
+  OpenCASCADE does had been worked out from its source. On 2026-10-30 they
+  were run through OpenCASCADE 7.6.3's DRAW, with the same script through the
+  harness, and three were wrong (T§28). That run also found something no test
+  in this repo can see: **OpenCASCADE reads nothing from a STEP file that
+  rcad writes.** The writer puts out a lone `MANIFOLD_SOLID_BREP`, with no
+  product to hang it on, so OpenCASCADE's reader selects 0 entities. Our round
+  trip passes because our own reader reads what our writer wrote. That is the
+  limit of a round trip as a check. It was still open when the work stopped.
+- **The kernel refused. It did not guess.** In the last run 338 measured cases
+  failed, counting the hidden ones. 334 were rcad raising a refusal ("could
+  not settle 15 decisions", "a cone crossing another curved surface is a
+  degree-four space curve", the mesher giving up). 4 were wrong answers: three
+  areas 3% to 5% off, and a sliver of area 1.6e-7 where the case expected
+  none. No run out of 25 crashed. On cases nobody aimed at, that is the same
+  mix as this repo's own queue above (86% refusals, 10% wrong), and it fits
+  the claim at the top: a refusal is the normal way to fail, and a wrong
+  answer is rare. The cases check only what OpenCASCADE's own checks look at:
+  areas, volumes, shape counts and validity.
+- **The holdout found nothing, and that was the wall working.** After the
+  first, 133-case run, the gap between the reported and hidden rates stayed
+  within ±2.5 points over 24 runs and ended at −0.5. The big rise showed
+  in the hidden cases too (31.2% to 70.1%). But this side never saw a case
+  name, so there was little for the holdout to catch. Keeping the cases away
+  from the people fixing the kernel did more against erosion than measuring
+  the erosion did. The holdout is cheap insurance in case that wall fails.
+- **Ask for capabilities, not signatures.** Each of the seven asks said what a
+  caller must be able to ask, how many cases waited on it, and that a refusal
+  would do. rcad built R1, R2, R4 and the area half of R3. It designed R5 but
+  did not build it, put off R6 until R1 and R3 were in, and parked R7, each
+  with its reasons (§242.3). It also corrected two things the harness had got
+  wrong about rcad (§242.4). Neither side had to learn the
+  other's code. And the harness never worked around a gap: when rcad could not
+  give an edge length, it refused rather than add up a polyline. If it had,
+  the score would measure the harness.
+- **An honest denominator puts the roadmap in the same table as the score.**
+  By the end, 1,378 of the 1,409 unmeasured cases were waiting on rcad or
+  rcad-brep and 29 on the harness. The harness had caught up with the kernel.
+  Its last three commits printed `whatis` flags that no case reads, and moved
+  no verdict (T§29 to T§31). What the corpus says to build next is shapes that
+  are not solids, not better booleans on solids.
+- **Goldens measure. They hardly find.** Inside this repo almost every wrong
+  answer was found without a golden (see above). Outside it, 4,055 stored
+  OpenCASCADE answers mostly confirmed what the kernel already said about
+  itself: where it refuses, and that it rarely gets anything wrong. Only one
+  defect came out that the inside methods could not reach: the STEP file
+  OpenCASCADE cannot read. That one came from running the reference, not
+  from the stored answers. Kept apart from the fixing, a corpus of goldens is
+  worth having for its counts. It says how good the kernel is on work nobody
+  aimed at.
 
 ## Licence
 
