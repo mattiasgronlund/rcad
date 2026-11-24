@@ -377,3 +377,43 @@ none of the new arguments.
 - **`tooling/systemd/rcad-clean-targets.service`** says the recipe needs neither
   git nor anything from `~/.cargo`. Both are false now. That is a row too, since
   the unit is outside Q3070's write set.
+
+### 476.7 `target/ci` is linked too, for solidcraft's trees
+
+*A session working in `~/git/tangency-labs`, 2026-11-24. Mattias, in it:
+"Please make sure that target/ci is added to link-targets.sh."*
+
+**Why.** Mattias links his solidcraft checkouts with this script by hand, since
+solidcraft has no hook for it. solidcraft's root `Cargo.toml` has a
+`[profile.ci]`, `cargo xtask fast` builds with `--profile ci`, and its xtask
+runs `cargo run --profile ci -p solidcraft-cli` (`xtask/src/external_corpus.rs`,
+`xtask/src/app_icons.rs`), so cargo copies `solidcraft-cli` into `target/ci`.
+That is read from solidcraft's code at `ad3164473`, not measured: the checkout
+had no `target/ci` to look at.
+
+**In an rcad tree the link points at an empty directory.** rcad has no `ci`
+profile. 476.5 left out `target/wildcards/debug` and `fuzz/target/debug`,
+because cargo copies nothing into them. `target/ci` is linked anyway, as
+`target/release` is (476.5): a build with that profile copies into it, and an
+empty destination costs one directory.
+
+**What changed.** `link-targets.sh` links `ci` beside `debug` and `release`.
+`clean-targets` replaces a real `target/ci` in an idle tree as it does the other
+two, and counts a running nextest's tree's `target/ci` as in use.
+`check-link-targets-to-zram-selftest` checks that the `ci` link is made, and
+that it is not made where cargo fails or build-dir is unset. In
+`check-clean-targets-selftest` the idle tree has a real `target/ci` too, so the
+tally of the ordinary run is now `3 real target directories replaced with links;
+7 kept`. The hook and the boot step need no change: the hook runs the tree's
+own script, and the boot step makes the destination of every link into
+`artifacts`.
+
+**What this leaves.**
+
+- **solidcore's own workspace inside solidcraft** sets `target-dir = "bin"` in
+  `solidcore/.cargo/config.toml`, so its test, goldens and diagnostics
+  binaries are copied into `solidcore/bin/<profile>` on the SSD. The script
+  links only `<tree>/target`.
+- **The hub's checkout is at `7243e8238`**, older than 476.5's fuzz link and
+  this section. A solidcraft tree must be linked with main's copy of the
+  script, not the hub's.

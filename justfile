@@ -15446,15 +15446,16 @@ fmt:
 # queue: a waiting row's tree, an idle session, a dead one and a finished lane
 # are all just idle directories.
 #
-# **With the copies its tree's links hold.** `target/debug` and `target/release`
-# are links to `artifacts/<xx>/<hash>/debug` and `release`, the same key as the
-# build directory, so cargo's copies of its binaries are hard links on the zram
-# disk (476). They are cleared with the build directory and kept with it, and
-# only the directories cargo keeps a `.cargo-lock` in are cleared: inari links
-# its whole `target/` under the same root, with files of its own beside them.
+# **With the copies its tree's links hold.** `target/debug`, `target/release`
+# and `target/ci` are links to `artifacts/<xx>/<hash>/debug`, `release` and
+# `ci`, the same key as the build directory, so cargo's copies of its binaries
+# are hard links on the zram disk (476). They are cleared with the build
+# directory and kept with it, and only the directories cargo keeps a
+# `.cargo-lock` in are cleared: inari links its whole `target/` under the same
+# root, with files of its own beside them.
 #
-# **First, an idle tree's real `target/debug` and `target/release` become their
-# links** (476.6). A tree made before the hook of 476.5, or one a `cargo clean`
+# **First, an idle tree's real `target/debug`, `target/release` and `target/ci`
+# become their links** (476.6, 476.7). A tree made before the hook of 476.5, or one a `cargo clean`
 # took the links from, has real directories there, the old ones holding a whole
 # build from before build-dir was set. Only here does this ask which tree a
 # directory belongs to: `cargo metadata` in the tree names its build directory,
@@ -15485,12 +15486,13 @@ fmt:
 #   tests no program runs from the directory and no lock is held, and nothing
 #   in the nextest process names the directory (§474.12), so it is read off
 #   the process's working directory: the worktree it is in, and that
-#   worktree's real or linked `target/debug`, `target/release` and build
-#   directory. A nextest whose working directory cannot be read, is in no
-#   worktree, or whose worktree has no build directory under `root` keeps every
-#   directory. Over 2026-11-03 and -04 a nextest was up at 58 of the 157 timer
-#   runs (journalctl --user -u rcad-clean-targets), nearly every run from 08:00
-#   to noon, so keeping everything left a working day without a clear (Q3103).
+#   worktree's real or linked `target/debug`, `target/release`, `target/ci`
+#   and build directory. A nextest whose working directory cannot be read, is
+#   in no worktree, or whose worktree has no build directory under `root` keeps
+#   every directory. Over 2026-11-03 and -04 a nextest was up at 58 of the 157
+#   timer runs (journalctl --user -u rcad-clean-targets), nearly every run from
+#   08:00 to noon, so keeping everything left a working day without a clear
+#   (Q3103).
 # - **Only its lock files are left**, which is what a cleared directory is.
 # - **No `.cargo-build-lock` in it**, or for a tree's `target/debug` no
 #   `.cargo-lock`, since then nothing says whether a cargo is building there;
@@ -15507,8 +15509,8 @@ fmt:
 # directories beside a `.cargo-lock` under `artifacts` (also those whose build
 # directory is gone, under the same idle rules, and one with no `.cargo-lock`
 # under it is kept; Q3118), a tree's real
-# `target/debug` and `target/release`, and this recipe's own `.clearing-*` and
-# `.*-replaced-by-a-link` leftovers.
+# `target/debug`, `target/release` and `target/ci`, and this recipe's own
+# `.clearing-*` and `.*-replaced-by-a-link` leftovers.
 #
 # **Deleted in place, but for the lock files.** A cargo waiting on a lock has
 # the file open, and a rename would hand it a lock on a file at another path
@@ -15524,7 +15526,7 @@ fmt:
 #
 # The sizes are `du`'s, which counts a file kache restored by reflink in full,
 # so they overstate what the disk gets back (§474.10).
-[doc("Replace an idle tree's real target/debug and target/release with their links, then clear build directories under /var/cache/zram/targets, with their link destinations, that are idle 30 minutes and unused. Never kache's store.")]
+[doc("Replace an idle tree's real target/debug, target/release and target/ci with their links, then clear build directories under /var/cache/zram/targets, with their link destinations, that are idle 30 minutes and unused. Never kache's store.")]
 clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache" nextest_name="cargo-nextest" artifacts="/var/cache/zram/artifacts" repo=justfile_directory():
     #!/usr/bin/env bash
     set -euo pipefail
@@ -15736,7 +15738,7 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
                 nextest_unknown="a cargo-nextest runs in $best, and $why"
                 return
             fi
-            nextest_uses+=("$best/target/debug" "$best/target/release" "$root/$key" "$artifacts/$key")
+            nextest_uses+=("$best/target/debug" "$best/target/release" "$best/target/ci" "$root/$key" "$artifacts/$key")
         done
     }
     nextest_where
@@ -15749,7 +15751,7 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
             echo "removed what an earlier run left half-replaced: $left"
         done
         real=()
-        for name in debug release; do
+        for name in debug release ci; do
             if [ -d "$tree/target/$name" ] && [ ! -L "$tree/target/$name" ]; then
                 real+=("$name")
             fi
@@ -16028,6 +16030,7 @@ check-clean-targets-selftest:
     }
     real swap debug
     real swap release
+    real swap ci
     printf 'the tooling keeps this\n' >"$trees/swap/target/last-gate.log"
     real fresh-tree debug
     printf 'built a moment ago\n' >"$trees/fresh-tree/target/debug/deps/fresh"
@@ -16306,7 +16309,7 @@ check-clean-targets-selftest:
     grep -qE "^[0-9.]+K cleared from link destinations with no build directory; [0-9]+ kept$" <<<"$got" \
         || fail "the tally of link destinations with no build directory is missing"
 
-    for name in debug release; do
+    for name in debug release ci; do
         [ "$(readlink "$trees/swap/target/$name")" = "$art/17/swap/$name" ] && [ -d "$art/17/swap/$name" ] \
             || fail "an idle tree's real target/$name was not replaced with its link"
         grep -qE "^replaced with a link, freeing [0-9.]+K: $trees/swap/target/$name -> $art/17/swap/$name$" <<<"$got" \
@@ -16333,7 +16336,7 @@ check-clean-targets-selftest:
         || fail "the half-replaced leftover was not reported"
     [ "$(readlink "$trees/linked/target/debug")" = "$art/1d/linked/debug" ] || fail "a tree's link was changed"
     ! grep -qF "$trees/linked/target/debug" <<<"$got" || fail "a tree that has its links already was reported on"
-    grep -qxF "2 real target directories replaced with links; 7 kept" <<<"$got" \
+    grep -qxF "3 real target directories replaced with links; 7 kept" <<<"$got" \
         || fail "the tally of real target directories is wrong"
 
     # Clearing in place touched the directories, so they wait out 30 minutes.
@@ -16356,8 +16359,9 @@ check-clean-targets-selftest:
 # disk, or installs the post-checkout hook that does it on `git worktree add`
 # (docs/decisions.d/476).
 #
-# `links` runs `tooling/zram/link-targets.sh` on `tree`: target/debug and
-# target/release become links to `<artifacts>/<xx>/<hash>/...`, keyed by the
+# `links` runs `tooling/zram/link-targets.sh` on `tree`: target/debug,
+# target/release and target/ci (476.7) become links to
+# `<artifacts>/<xx>/<hash>/...`, keyed by the
 # tree's build directory under `targets`, and a link whose destination is gone
 # gets it made again. So does fuzz/target/x86_64-unknown-linux-gnu/release, keyed
 # by the fuzz workspace's own build directory (476.5). A `cargo clean` deletes
@@ -16369,7 +16373,7 @@ check-clean-targets-selftest:
 # and no gate step needs the hook installed. It refuses a post-checkout hook
 # that is not rcad's, which it would otherwise destroy, and a repository with
 # `core.hooksPath` set, where git would never run the copy.
-[doc("Link target/debug and target/release to the zram disk, or install the post-checkout hook that does it on git worktree add.")]
+[doc("Link target/debug, target/release and target/ci to the zram disk, or install the post-checkout hook that does it on git worktree add.")]
 link-targets-to-zram action="links" tree="." targets="/var/cache/zram/targets" artifacts="/var/cache/zram/artifacts":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -16454,6 +16458,7 @@ check-link-targets-to-zram-selftest:
     linked_all() {
         linked "$1" target/debug ab/0123456789abcd/debug "$2"
         linked "$1" target/release ab/0123456789abcd/release "$2"
+        linked "$1" target/ci ab/0123456789abcd/ci "$2"
         [ -d "$1/target" ] && [ ! -L "$1/target" ] \
             || fail "$2: $1/target is not a real directory, and the tooling keeps what it writes there"
         linked "$1" fuzz/target/x86_64-unknown-linux-gnu/release cd/fedcba98765432/x86_64-unknown-linux-gnu/release "$2"
@@ -16461,7 +16466,7 @@ check-link-targets-to-zram-selftest:
             || fail "$2: $1/fuzz/target is not a real directory"
     }
     unlinked() {
-        for at in target/debug target/release fuzz/target; do
+        for at in target/debug target/release target/ci fuzz/target; do
             [ ! -e "$1/$at" ] && [ ! -L "$1/$at" ] || fail "$2: $1/$at was made"
         done
     }

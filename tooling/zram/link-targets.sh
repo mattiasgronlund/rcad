@@ -7,10 +7,12 @@
 #
 # `target/` itself stays a real directory on disk: the tooling keeps what it
 # writes there, and a reboot empties the zram disk (476.2). Only the root
-# workspace's `target/debug` and `target/release` go, and the fuzz workspace's
-# `fuzz/target/x86_64-unknown-linux-gnu/release`. 476.5 says how that list was
-# read off a build. The fuzz workspace builds on the nightly toolchain, so it
-# is asked with `cargo +nightly metadata`.
+# workspace's `target/debug`, `target/release` and `target/ci` go, and the fuzz
+# workspace's `fuzz/target/x86_64-unknown-linux-gnu/release`. 476.5 says how
+# that list was read off a build. `target/ci` is for solidcraft's `ci` profile,
+# which rcad has none of, so in an rcad tree it links an empty directory
+# (476.7). The fuzz workspace builds on the nightly toolchain, so it is asked
+# with `cargo +nightly metadata`.
 #
 # The links go under `<artifacts>/<xx>/<hash>`, the last two parts of the build
 # directory `cargo metadata` names, so the key pairs with `<targets>/<xx>/<hash>`
@@ -121,6 +123,6 @@ link_one() {
     fi
 }
 
-link_workspace "$tree" debug release
+link_workspace "$tree" debug release ci
 link_workspace "$tree/fuzz" +nightly x86_64-unknown-linux-gnu/release
 exit "$failed"
