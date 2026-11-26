@@ -15450,9 +15450,10 @@ fmt:
     taplo fmt
 
 # Clear every cargo build directory on the zram disk that nothing has changed in
-# for 30 minutes and nothing is using (docs/decisions.md §474.5, §474.11). kache
-# holds the compilation, so a cleared directory refills from it by reflink
-# instead of rebuilding.
+# for 4 hours and nothing is using (docs/decisions.md §474.5, §474.11, §474.13).
+# kache refills a cleared directory with what it stored, but kache 2.x stores
+# nothing of the crates being edited, so those compile again from scratch. The
+# 4 hours keep a tree's build through a pause in its work (§474.13).
 #
 # **A build directory, not a tree's `target/`.** `~/.cargo/config.toml` sets
 # cargo's `build-dir` to `/var/cache/zram/targets/{workspace-path-hash}`
@@ -15486,7 +15487,7 @@ fmt:
 #
 # **Kept, each for its own reason:**
 #
-# - **Anything in it changed in the last 30 minutes.** The newest file or
+# - **Anything in it changed in the last 4 hours.** The newest file or
 #   directory anywhere under it decides, never the directory's own time.
 # - **A cargo is building in it.** Cargo 1.96 holds a `flock` on a
 #   `.cargo-build-lock` beside each profile it builds, a target triple's
@@ -15496,7 +15497,7 @@ fmt:
 #   meanwhile waits, then builds in the same directory.
 # - **A program in it is running.** `cargo test` and nextest run the test
 #   binaries from the build directory after cargo has let go of its lock, and a
-#   long run can pass 30 minutes without writing there. Clearing it then fails
+#   long run can pass 4 hours without writing there. Clearing it then fails
 #   every test not yet started.
 # - **A cargo-nextest is running in the tree that uses it.** Between two of its
 #   tests no program runs from the directory and no lock is held, and nothing
@@ -15542,7 +15543,7 @@ fmt:
 #
 # The sizes are `du`'s, which counts a file kache restored by reflink in full,
 # so they overstate what the disk gets back (§474.10).
-[doc("Replace an idle tree's real target/debug, target/release and target/ci with their links, then clear build directories under /var/cache/zram/targets, with their link destinations, that are idle 30 minutes and unused. Never kache's store.")]
+[doc("Replace an idle tree's real target/debug, target/release and target/ci with their links, then clear build directories under /var/cache/zram/targets, with their link destinations, that are idle 4 hours and unused. Never kache's store.")]
 clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache" nextest_name="cargo-nextest" artifacts="/var/cache/zram/artifacts" repo=justfile_directory():
     #!/usr/bin/env bash
     set -euo pipefail
@@ -15613,12 +15614,12 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
             fi
             shift 2
         done
-        recent=$(find "${dirs[@]}" -mmin -30 -print -quit 2>/dev/null) || {
+        recent=$(find "${dirs[@]}" -mmin -240 -print -quit 2>/dev/null) || {
             busy="find could not read all of it, so how long it has been idle is unknown"
             return
         }
         if [ -n "$recent" ]; then
-            busy="something in it changed in the last 30 minutes"
+            busy="something in it changed in the last 4 hours"
             return
         fi
         if [ -n "$unlocked" ]; then
@@ -15867,7 +15868,7 @@ clean-targets root="/var/cache/zram/targets" kache_store="/var/cache/zram/kache"
 # A sweep that deletes too much is noticed within the minute; a sweep that
 # deletes too little says "nothing to clean" and is believed for a month, which
 # is what happened to the old one. So the fixture is a zram disk in miniature,
-# `targets/` and `kache/` side by side, every build directory in it four hours
+# `targets/` and `kache/` side by side, every build directory in it five hours
 # old, and each one is kept or cleared for a reason of its own. A cargo that is
 # building is stood in for by holding its `.cargo-build-lock` from this shell,
 # the way cargo 1.96 holds it (`flock`, §474.11), and a test that is running by
@@ -15891,7 +15892,7 @@ check-clean-targets-selftest:
     root="$dir/zram/targets"
     store="$dir/zram/kache"
     art="$dir/zram/artifacts"
-    old() { find "$1" -exec touch -d '4 hours ago' {} +; }
+    old() { find "$1" -exec touch -d '5 hours ago' {} +; }
     # A link destination as cargo 1.96 leaves one: a `.cargo-lock` and a
     # `.cargo-artifact-lock` in the profile directory, beside its copies.
     copies() {
@@ -15939,9 +15940,12 @@ check-clean-targets-selftest:
     build 0b/fuzz x86_64-unknown-linux-gnu/release
     build 0c/fresh debug
     # Written a moment ago, three levels down. The build directory's own time
-    # stays four hours old, because a directory's time moves only when its own
+    # stays five hours old, because a directory's time moves only when its own
     # entries do.
     printf 'fingerprint\n' >"$root/0c/fresh/debug/deps/fresh"
+    # Changed an hour ago: idle by 474.5's 30 minutes, kept by 474.13's 4 hours.
+    build 28/hourago debug
+    touch -d '1 hour ago' "$root/28/hourago/debug/deps/artifact"
     build 0d/building debug
     exec {building}<"$root/0d/building/debug/.cargo-build-lock"
     flock -n "$building"
@@ -15968,7 +15972,7 @@ check-clean-targets-selftest:
         echo "clean-targets-selftest: find read a directory with mode 000, so this is running as root and the unreadable case cannot be built"
         exit 1
     fi
-    # A build a nextest run finished more than 30 minutes ago: no lock held, and
+    # A build a nextest run finished more than 4 hours ago: no lock held, and
     # between two tests no program running from it.
     build 12/between debug
     # A cargo that opened the lock file before the run and is waiting for it.
@@ -16245,8 +16249,12 @@ check-clean-targets-selftest:
     [ ! -e "$root/12/between/debug/deps" ] || fail "an idle build directory was kept once the nextest had gone"
     [ -f "$root/0c/fresh/debug/deps/fresh" ] \
         || fail "a build directory was cleared with a file in it written a moment ago (§474.5)"
-    grep -qxF "kept (something in it changed in the last 30 minutes): $root/0c/fresh" <<<"$got" \
+    grep -qxF "kept (something in it changed in the last 4 hours): $root/0c/fresh" <<<"$got" \
         || fail "the build directory with a fresh file was not reported as kept"
+    [ -f "$root/28/hourago/debug/deps/artifact" ] \
+        || fail "a build directory was cleared an hour after its last change, though it waits 4 hours (§474.13)"
+    grep -qxF "kept (something in it changed in the last 4 hours): $root/28/hourago" <<<"$got" \
+        || fail "the build directory changed an hour ago was not reported as kept"
     [ -f "$root/0d/building/debug/deps/artifact" ] \
         || fail "a build directory was cleared while a cargo held its .cargo-build-lock"
     grep -qxF "kept (a cargo is building in it, holding $root/0d/building/debug/.cargo-build-lock): $root/0d/building" <<<"$got" \
@@ -16283,7 +16291,7 @@ check-clean-targets-selftest:
         || fail "the build directory cleared with its link destinations was not reported as cleared"
     [ -f "$art/14/copying/debug/tool" ] && [ -f "$root/14/copying/debug/deps/artifact" ] \
         || fail "a build directory was cleared with a file in its link destination written a moment ago"
-    grep -qxF "kept (something in it changed in the last 30 minutes): $root/14/copying" <<<"$got" \
+    grep -qxF "kept (something in it changed in the last 4 hours): $root/14/copying" <<<"$got" \
         || fail "the build directory with a fresh file in its link destination was not reported as kept"
     [ -f "$art/15/copylock/debug/tool" ] \
         || fail "a link destination was cleared while a cargo held its .cargo-lock"
@@ -16293,7 +16301,7 @@ check-clean-targets-selftest:
         || fail "a link destination was cleared while a program was running from it"
     grep -qxF "kept (process $copy_running is running a program from it): $root/16/running" <<<"$got" \
         || fail "the build directory whose link destination a program runs from was not reported as kept"
-    grep -qE "^[0-9.]+K cleared; 9 build directories kept$" <<<"$got" \
+    grep -qE "^[0-9.]+K cleared; 10 build directories kept$" <<<"$got" \
         || fail "the tally is wrong, so a run that found nothing would read like a tidy machine"
 
     [ ! -e "$art/21/gone/debug/tool" ] && [ ! -e "$art/21/gone/debug/examples" ] \
@@ -16306,7 +16314,7 @@ check-clean-targets-selftest:
         || fail "the link destination with no build directory was not reported as cleared"
     [ -f "$art/22/gonefresh/debug/tool" ] \
         || fail "a link destination with no build directory was cleared with a file in it written a moment ago"
-    grep -qxF "kept (something in it changed in the last 30 minutes): $art/22/gonefresh" <<<"$got" \
+    grep -qxF "kept (something in it changed in the last 4 hours): $art/22/gonefresh" <<<"$got" \
         || fail "the link destination with a fresh file was not reported as kept"
     [ -f "$art/23/gonelock/debug/tool" ] \
         || fail "a link destination with no build directory was cleared while a cargo held its .cargo-lock"
@@ -16340,7 +16348,7 @@ check-clean-targets-selftest:
         grep -qxF "kept ($2): $trees/$1/target/debug" <<<"$got" \
             || fail "the $1 tree's target/debug was not reported as kept for '$2'"
     }
-    expect_real fresh-tree "something in it changed in the last 30 minutes"
+    expect_real fresh-tree "something in it changed in the last 4 hours"
     expect_real cargo-at-work "a cargo is building in it, holding $trees/cargo-at-work/target/debug/.cargo-lock"
     expect_real gating "a gate is running in the tree"
     expect_real testing-tree "process $running is running a program from it"
@@ -16355,7 +16363,7 @@ check-clean-targets-selftest:
     grep -qxF "3 real target directories replaced with links; 7 kept" <<<"$got" \
         || fail "the tally of real target directories is wrong"
 
-    # Clearing in place touched the directories, so they wait out 30 minutes.
+    # Clearing in place touched the directories, so they wait out 4 hours.
     old "$root/0a/idle"
     old "$root/0b/fuzz"
     old "$root/12/between"
@@ -16366,8 +16374,8 @@ check-clean-targets-selftest:
         || fail "a build directory with only its lock files left was not reported as kept"
     grep -qxF "kept (only its lock files are left, so there is nothing to clear): $root/13/linked" <<<"$got" \
         || fail "a build directory with only its lock files left, in it and in its link destinations, was not reported as kept"
-    grep -qE "^0 cleared; 13 build directories kept$" <<<"$got" \
-        || fail "a run over already-cleared directories did not clear nothing and keep thirteen"
+    grep -qE "^0 cleared; 14 build directories kept$" <<<"$got" \
+        || fail "a run over already-cleared directories did not clear nothing and keep fourteen"
     grep -qxF "0 real target directories replaced with links; 7 kept" <<<"$got" \
         || fail "a run over trees already linked did not replace nothing and keep seven"
 

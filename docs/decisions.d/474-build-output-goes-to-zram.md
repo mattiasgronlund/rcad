@@ -143,6 +143,8 @@ file keeps its RAM. Not yet tried here.
 
 ### 474.5 A tree's build output is cleared once it is idle, whatever its row is doing
 
+**474.13 replaces the 30 minutes with 4 hours.**
+
 Mattias asked for the build output of trees waiting on other rows to be cleared.
 Once build output and `target/` are apart, the rule can be wider than that, and
 simpler.
@@ -684,3 +686,43 @@ unchanged by the run. Both fail on the recipe before this change.
 
 **Not tried.** Whether cargo reopens `.cargo-build-lock` if its file is deleted
 under a held lock, since the recipe never does that now.
+
+### 474.13 A build directory waits 4 hours, not 30 minutes
+
+*Mattias, 2026-11-26: "Do we really need the scheduled script which remove the
+target folder content if it has not been updated under the last 30 minutes, I
+think that is managed by kache now". Shown what follows: "Please update the
+timer to 4 hours."*
+
+**474.5's reason for 30 minutes no longer holds.** It said a clear loses
+"nothing but time, and the time is one kache refill", 11 to 16 s with kache
+0.27 (§373.4). kache 2.3.1 compiles the crates being edited without storing
+them: its report for a solidcraft edit on 2026-11-26 showed solidcore, engine,
+cli and io with size 0 in the store. So those crates exist only in the build
+directory. After a clear they compile from scratch, without rustc's incremental
+state, and kache forgets which crates were being edited. In the 24 hours to
+20:10 on 2026-11-26 the timer cleared one solidcraft session's build directory
+four times (21:21, 09:00, 15:40 and 18:40), each time in a pause between two
+edits.
+
+**kache does not take over.** Its daemon does clear target directories on its
+own, at most once an hour while no build runs (`src/target_cleanup.rs` in
+2.3.1, and its configuration docs). With this machine's config it clears only
+those whose workspace was deleted, a day after their last build. Idle ones go
+only with `cache.auto_clean_idle_targets_days` set, which counts whole days
+and is off by default. Below its free-space floor, 10 GiB by default, it evicts
+cache entries, and it removes target directories only with
+`cache.auto_recover_targets = true`, off by default, and then only ones idle
+for a day. Over the same 24 hours the timer cleared 98G as `du` counts it, from
+90 build directories, counting a directory again each time it was cleared. The
+disk had 29G free at the end. A rule counted in days would not fit.
+
+**So the rule is 4 hours.** Nothing else in `clean-targets` changes, and the
+timer still runs every 10 minutes. The selftest's idle fixtures are now five
+hours old, and a build directory changed an hour ago must be kept, which fails
+on the 30-minute recipe.
+
+**Not measured: what it costs in RAM.** The disk now holds every build
+directory written in the last 4 hours instead of the last 30 minutes. 474.6
+says what to read. If `df /var/cache/zram` or `zramctl`'s `TOTAL` comes near
+what the machine can spare, the time goes down again.
