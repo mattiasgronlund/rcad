@@ -95,7 +95,7 @@ gate_steps := "check-plugins \
     check-skills-selftest \
     check-skills \
     check-lanes-workflow \
-    check-kache-off-on-ci \
+    check-kache-is-the-hosts \
     check-gate-runs-every-check \
     check-gate-lane-callers \
     check-gate-summary-selftest \
@@ -293,7 +293,8 @@ gate_metered_steps := "check check-fuzz-builds check-timing-hooked-calls check-w
 # strace of every step settled that (§337.2, §369). `check-corpus` is left out
 # because the corpus is outside the tree, `check-systemd-units` because it
 # reads the installed systemd units, `check-queue-merge-driver` because it
-# reads git's config, and `check-hub` because it reads the worktree list and
+# reads git's config, `check-kache-is-the-hosts` because it reads the machine's
+# mise config (§489), and `check-hub` because it reads the worktree list and
 # the hub's checkout. Each
 # takes under a third of a second (§337.9). Every step that reads `docs/` is
 # left out as well. A step missing from this list runs every time, so a new
@@ -344,7 +345,6 @@ gate_reusable_steps := "check \
     check-wildcards \
     check-ignored \
     check-skills-selftest \
-    check-kache-off-on-ci \
     check-gate-runs-every-check \
     check-gate-summary-selftest \
     check-pre-gate-selftest \
@@ -576,9 +576,10 @@ gate-fresh image="rust:1-bookworm":
     git clone --no-local --quiet --single-branch "$(git rev-parse --show-toplevel)" "$work/rcad"
     echo "gate-fresh: cloned $(git -C "$work/rcad" rev-parse --short HEAD) into a single-worktree tree"
     # `HOME` inside is a scratch directory, so nothing of this machine's
-    # `~/.claude`, `~/.cargo` or `~/.rustup` is visible. `CI=true` is what
-    # `mise.toml` reads to empty `RUSTC_WRAPPER`, so the build cache — which
-    # lives in the `HOME` we just took away — is not asked for.
+    # `~/.claude`, `~/.cargo` or `~/.rustup` is visible, and neither is the
+    # machine's mise config, which is the only thing that sets `RUSTC_WRAPPER`
+    # (docs/decisions.d/489). So the build cache, which lives in the `HOME` we
+    # just took away, is not asked for. `CI=true` makes the run a runner's.
     #
     # **Run, not `exec`ed, because the green is written down after it.** `exec`
     # replaces this shell, so nothing could follow the container — and the
@@ -2647,10 +2648,11 @@ check-gate-verdicts-selftest:
         grep -qx "$step" <<<"$all" || fail "gate_reusable_steps names '$step', which is not a step of the gate"
     done <<<"$reusable"
     # These read prose, or something outside the tree that no fingerprint of
-    # it can see, which is what the traces behind §337.2 and §369 found.
+    # it can see, which is what the traces behind §337.2 and §369 found, and
+    # the machine's mise config, which docs/decisions.d/489 made kache's home.
     for never in check-hub check-corpus check-systemd-units \
                  check-decisions check-plan check-queue check-where-the-work-is \
-                 check-skills check-lanes-workflow \
+                 check-skills check-lanes-workflow check-kache-is-the-hosts \
                  check-queue-merge-driver check-gate-lane-callers; do
         grep -qx "$never" <<<"$reusable" \
             && fail "$never reads prose or something outside the tree, and gate_reusable_steps would serve it"
@@ -6291,39 +6293,53 @@ lines-that-run base branch:
     git diff --no-color --no-ext-diff -M --src-prefix=a/ --dst-prefix=b/ -U1000000 "$1" "$2" \
         | awk 'function show_run(line) { run_shown++; if (run_shown <= 10) run_buf[run_shown] = line } function show_test(line) { test_shown++; if (test_shown <= 10) test_buf[test_shown] = line } function test_path(p) { return p ~ /^crates\/[^\/]+\/tests\// || p ~ /^fuzz\/corpus\// || p ~ /^proofs\// } function whole_test_path(p) { return p ~ /^crates\/[^\/]+\/tests\// || p ~ /^proofs\// } function is_comment(c) { return (slash && c ~ /^[ \t]*(\/\/.*)?$/) || (hash && c ~ /^[ \t]*(#([^!].*)?)?$/) } function rust_test(s, c) { if (in_test[s]) { if (c ~ /^}/) in_test[s] = 0; return 1 } if (c ~ /^([ \t]|$)/) return 0; if (c ~ /^#\[cfg\(test\)\][ \t]*$/) { pending[s] = 1; return 0 } if (c ~ /^(\/\/|#\[)/) return 0; if (pending[s]) { pending[s] = 0; in_test[s] = c ~ /\{[ \t]*$/; return 1 } return 0 } function resolve_defer(s, mnow) { if (!defer_show[s]) return; if (defer_m[s] == mnow) { if (defer_m[s] == "-") show_test(defer_a[s] ": -" defer_c[s]) } else show_run(defer_b[s] ": " defer_m[s] defer_c[s]); defer_show[s] = 0 } function flush_defer(s) { if (defer_show[s]) { show_run(defer_b[s] ": " defer_m[s] defer_c[s]); defer_show[s] = 0 } } function recipe_test(s, c) { if (c ~ /^([ \t]|$)/) return in_check[s]; in_check[s] = c ~ /^@?check-[A-Za-z0-9_-]+[^:]*:([^=]|$)/; return 0 } /^diff --git / { seen = 1; hunk = 0; flush_defer(0); flush_defer(1); a = $3; b = $4; sub(/^a\//, "", a); sub(/^b\//, "", b); skip = (a ~ /\.md$/ && b ~ /\.md$/) || (test_path(a) && test_path(b)); whole = whole_test_path(a) && whole_test_path(b); rust = b ~ /\.rs$/; slash = b ~ /\.(rs|js)$/; just = b ~ /(^|\/)justfile$/; hash = just || b ~ /\.(toml|sh|py|ya?ml|g)$/; for (s = 0; s < 2; s++) { pending[s] = 0; in_test[s] = 0; in_check[s] = 0 } next } skip && !whole { next } /^@@/ { hunk = 1; next } !hunk { if (!skip && $0 ~ /^(rename (from|to)|old mode|new mode|Binary files)/) show_run(b ": " $0); next } /^\\/ { next } { m = substr($0, 1, 1); c = substr($0, 2); if (whole) { if (m == "-" && !is_comment(c)) show_test(a ": -" c); next } for (s = 0; s < 2; s++) { if (m == (s ? "-" : "+")) continue; op = pending[s]; t[s] = rust ? rust_test(s, c) : (just ? recipe_test(s, c) : 0); if (rust && op == 1 && pending[s] == 0 && t[s] == 1) resolve_defer(s, m); else if (rust && m != " " && op == 0 && pending[s] == 1 && t[s] == 0) { defer_c[s] = c; defer_m[s] = m; defer_a[s] = a; defer_b[s] = b; defer_show[s] = 1; next } } if (m == "-" && t[0] && !is_comment(c)) show_test(a ": -" c); if (m == " ") next; if (t[m == "+"]) next; if (is_comment(c)) next; show_run(b ": " m c) } END { if (!seen) { print "git diff printed nothing, so it shows nothing"; exit 1 } flush_defer(0); flush_defer(1); for (i = 1; i <= test_shown && i <= 10; i++) print test_buf[i]; print "test code lines removed: " (test_shown + 0); for (i = 1; i <= run_shown && i <= 10; i++) print run_buf[i]; print "lines that run: " (run_shown + 0) }'
 
-# kache must be the wrapper here and no wrapper on a runner (`mise.toml`).
+# kache is the machine's: this repo pins no kache, and with `CI` set no wrapper
+# runs (`mise.toml`, docs/decisions.d/489).
 #
-# Both halves are asserted, because each one alone passes for the wrong reason.
-# Checking only the CI half passes if somebody deletes the variable outright,
-# which would turn the cache off for every human as well. Checking only the
-# local half passes on the state that kept CI red for ten pushes.
+# **The pin.** kache's wrapper has to be the same release as its daemon, and the
+# daemon is the machine's, one for every repo on it. So a kache that this repo's
+# config pins is a wrapper the daemon was not built for. It asks mise where each
+# kache in use was pinned, under any backend, rather than reading `mise.toml`,
+# because `.mise.toml`, `mise.local.toml` and `mise/config.toml` in the tree are
+# the repo's too, and mise reads them all.
 #
-# It asks mise rather than reading the file, because the file is a template and
-# what breaks CI is the value mise computes, not the text. That also means this
-# fails if the template stops parsing, which the eye does not catch.
+# **CI.** Two things rely on `CI` emptying `RUSTC_WRAPPER`. On a runner, mise
+# applies `[env]` while it installs `[tools]`, so a wrapper there asks cargo for
+# a kache that is not there yet, and every install fails: ten red pushes, until
+# 2026-09-07. And `fuzz-overnight` and `fuzz-target` set `CI=1` to keep kache
+# from running around the rustc stand-in (§292). A runner has no machine config,
+# so there this half asks only that the repo sets no wrapper. Here it asks the
+# machine's config, which is outside the tree, and that is why `gate` never
+# serves this step from an earlier green.
 #
-# **It asks by running a process under mise, not by parsing `mise env`.** Until
-# 2026-09-20 it sed'd `^export RUSTC_WRAPPER=` out of `mise env`; mise 2026.9.11
-# no longer prints that line in that shape, and this machine's 2026.7.5 does. So
-# in a fresh container both halves extracted the empty string: the CI half passed
-# vacuously — the one direction that took CI red for ten pushes — and the local
-# half failed saying `RUSTC_WRAPPER is ''`, which reads as a broken template and
-# was nothing of the sort. `mise exec` is the thing the gate actually relies on,
-# and its answer is a value rather than a format. `docs/decisions.md` §173.8.
-[doc("kache wraps rustc here, and wraps nothing on a runner.")]
-check-kache-off-on-ci:
-    @on=$(CI=true mise exec -- sh -c 'echo "${RUSTC_WRAPPER-}"'); \
-    off=$(env -u CI mise exec -- sh -c 'echo "${RUSTC_WRAPPER-}"'); \
-    if [ -n "$on" ]; then \
-        echo "with CI set, RUSTC_WRAPPER is '$on' and should be empty"; \
-        echo "mise applies [env] while installing [tools], so cargo would be asked"; \
-        echo "to run kache in order to build kache, and every install fails"; \
-        exit 1; \
-    fi; \
-    if [ "$off" != "kache" ]; then \
-        echo "off CI, RUSTC_WRAPPER is '$off' and should be kache"; \
-        echo "the build cache is now off for everyone, which is not what was wanted"; \
-        exit 1; \
+# It runs a process under mise and reads the value, rather than parsing `mise
+# env`, whose format changed under the check this replaces (§173.8).
+#
+# Whether the cache is on is not asserted. A machine without kache builds
+# without it, which is slower and still right.
+[doc("This repo pins no kache, and with CI set no compiler wrapper runs: kache is the machine's.")]
+check-kache-is-the-hosts:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    repo='{{ justfile_directory() }}'
+    pins=$(mise ls --current --json \
+        | jq -r 'to_entries[] | select(.key | test("kache")) | .key as $tool | .value[] | "\($tool) \(.source.path // "")"')
+    while read -r tool from; do
+        [ -n "$tool" ] || continue
+        case "$from" in
+            "$repo"/*)
+                echo "$from pins $tool, and kache is the machine's: its wrapper must be the release its daemon is"
+                echo "pin it in the machine's mise config instead (docs/decisions.d/489)"
+                exit 1
+                ;;
+        esac
+    done <<<"$pins"
+    on=$(CI=true mise exec -- sh -c 'echo "${RUSTC_WRAPPER-}"')
+    if [ -n "$on" ]; then
+        echo "with CI set, RUSTC_WRAPPER is '$on' and should be empty"
+        echo "a runner would ask cargo for kache while mise installs the tools, and"
+        echo "fuzz-overnight would run kache around the rustc stand-in (§292)"
+        exit 1
     fi
 
 # `gate` runs `check`, `lint`, `test`, `test-slow`, `deny` and every `check-*`

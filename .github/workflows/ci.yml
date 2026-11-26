@@ -61,9 +61,10 @@
 #
 # **2. The kache wrapper deadlock, fixed 2026-09-07 in `mise.toml`.** mise
 # applied `RUSTC_WRAPPER = "kache"` while installing the tool `kache`, so every
-# install failed. The variable is now empty when `CI` is set; `just
-# check-kache-off-on-ci` holds it, and holds the other direction too so the
-# cache does not quietly go off for humans.
+# install failed. The variable was made empty when `CI` is set. Since
+# 2026-11-26 the repo pins no kache and sets no wrapper at all, because kache
+# is the machine's (`docs/decisions.md` §489), so a runner has neither; `just
+# check-kache-is-the-hosts` holds that.
 #
 # Neither fix is a guess, and each has been watched separately.
 #

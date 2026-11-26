@@ -75,10 +75,13 @@ of trust.
 (`cargo-nextest`, `cargo-deny`, `taplo`, `just`). Run things through
 `just`. Never install a tool ad hoc.
 
-The compile cache is wired through mise's `[env]`
-as `RUSTC_WRAPPER = "kache"`, which a non-interactive shell does not inherit —
-so every `cargo` and `just` call needs a `mise exec --` prefix, whichever role
-is running it: a lane, its verifier, its merger, or a top-level session.
+The compile cache, kache, is the machine's and not the repo's: the machine's
+mise config (`~/.config/mise/config.toml`) pins it and sets `RUSTC_WRAPPER =
+"kache"`, so that the wrapper is the same release as the one daemon every repo
+shares. **Never pin kache in this repo**; `docs/decisions.md` §489. A
+non-interactive shell does not inherit that `[env]` either, so every `cargo` and
+`just` call needs a `mise exec --` prefix, whichever role is running it: a lane,
+its verifier, its merger, or a top-level session.
 
 **The Bash guard in a worktree-isolated session refuses any command with a
 path or argument it cannot resolve before the run** — no variables, no `$( )`,

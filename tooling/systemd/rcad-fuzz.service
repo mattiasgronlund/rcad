@@ -27,7 +27,7 @@ WorkingDirectory=%h/git/mattiasgronlund/rcad-nightly-fuzz
 Environment=PATH=%h/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin
 
 # mise by absolute path, for the same reason one line up: `just`, `cargo-fuzz`
-# and the RUSTC_WRAPPER=kache that mise.toml sets are all absent from a systemd
+# and the RUSTC_WRAPPER=kache that the machine's mise config sets are all absent from a systemd
 # environment, and cargo fails outright on a wrapper it cannot find.
 #
 # 02:50 and 04:00 are the pause: every target stops at 02:50 and starts again

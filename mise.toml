@@ -15,37 +15,15 @@ lockfile = true
 # pinning it costs a download and not a build — which is the whole reason python
 # is not pinned beside it. `docs/decisions.md` §173.7.
 "aqua:jqlang/jq" = "1.7"
-"cargo:kache" = "0.27"
 "cargo:taplo-cli" = "0.10"
 # `check-lanes-workflow` builds `.claude/workflows/lanes.js` into a function to
 # see that it parses; a file that reads fine as text can still not load (Q3190).
 node = "26.10.0"
 
-# kache is a content-addressed build cache. Cargo picks it up as a compiler
-# wrapper, so a crate whose inputs have been compiled before is fetched instead
-# of built.
-#
-# It is set here and not in `.cargo/config.toml` so that the file which sets the
-# variable is the file which installs the tool. `build.rustc-wrapper` applies to
-# every cargo invocation in the repo, including one made without mise, and cargo
-# fails outright on a wrapper it cannot find; this way the variable exists
-# exactly where `kache` does.
-#
-# **Off on CI, and the sentence above is why.** mise applies this `[env]` while
-# it installs the `[tools]`, so on a runner cargo was asked to run `kache` in
-# order to build `kache` and every tool install failed — ten pushes in a row,
-# none of them reaching a check. A runner is also cold, so the wrapper there
-# costs a download and saves nothing.
-#
-# The test is keyed on `CI` and not on `GITHUB_ACTIONS` because what makes the
-# cache worthless is a machine that is thrown away, which `CI` names and
-# GitHub's runners are only one instance of.
-#
-# The value goes empty rather than away because a template cannot produce an
-# absent key, and cargo reads an empty `RUSTC_WRAPPER` as no wrapper at all —
-# which is the same spelling the line below already told people to use.
-# `just check-kache-off-on-ci` holds both halves.
-#
-# To build without the cache for a run: `RUSTC_WRAPPER= just gate`.
-[env]
-RUSTC_WRAPPER = '{% if get_env(name="CI", default="") == "" %}kache{% endif %}'
+# **No kache here, on purpose.** kache, the build cache, is the machine's and
+# not the repo's. Its compiler wrapper has to be the same release as its daemon,
+# and one daemon serves every repo on the machine, so a repo that pinned its own
+# kache would run its own wrapper against everybody's daemon. The machine pins
+# it once, in its own mise config, beside the `RUSTC_WRAPPER` that turns it on.
+# A machine without that config builds without the cache, and a runner is one.
+# `just check-kache-is-the-hosts` holds it. `docs/decisions.md` §489.
